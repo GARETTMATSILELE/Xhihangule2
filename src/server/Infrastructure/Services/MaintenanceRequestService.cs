@@ -27,12 +27,12 @@ namespace PropertyManagement.Infrastructure.Services
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByTenantAsync(tenantId);
         }
 
-        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByStatusAsync(MaintenanceRequestStatus status)
+        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByStatusAsync(MaintenanceStatus status)
         {
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByStatusAsync(status);
         }
 
-        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByPriorityAsync(MaintenanceRequestPriority priority)
+        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByPriorityAsync(MaintenancePriority priority)
         {
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByPriorityAsync(priority);
         }
@@ -52,12 +52,12 @@ namespace PropertyManagement.Infrastructure.Services
             return await _maintenanceRequestRepository.SearchMaintenanceRequestsAsync(searchTerm);
         }
 
-        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByPropertyAndStatusAsync(Guid propertyId, MaintenanceRequestStatus status)
+        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByPropertyAndStatusAsync(Guid propertyId, MaintenanceStatus status)
         {
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByPropertyAndStatusAsync(propertyId, status);
         }
 
-        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByPropertyAndPriorityAsync(Guid propertyId, MaintenanceRequestPriority priority)
+        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByPropertyAndPriorityAsync(Guid propertyId, MaintenancePriority priority)
         {
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByPropertyAndPriorityAsync(propertyId, priority);
         }
@@ -72,12 +72,12 @@ namespace PropertyManagement.Infrastructure.Services
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByPropertyAndSearchTermAsync(propertyId, searchTerm);
         }
 
-        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByTenantAndStatusAsync(Guid tenantId, MaintenanceRequestStatus status)
+        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByTenantAndStatusAsync(Guid tenantId, MaintenanceStatus status)
         {
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByTenantAndStatusAsync(tenantId, status);
         }
 
-        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByTenantAndPriorityAsync(Guid tenantId, MaintenanceRequestPriority priority)
+        public async Task<IEnumerable<MaintenanceRequest>> GetMaintenanceRequestsByTenantAndPriorityAsync(Guid tenantId, MaintenancePriority priority)
         {
             return await _maintenanceRequestRepository.GetMaintenanceRequestsByTenantAndPriorityAsync(tenantId, priority);
         }

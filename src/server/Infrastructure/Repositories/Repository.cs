@@ -70,7 +70,7 @@ namespace PropertyManagement.Infrastructure.Repositories
             return await _dbSet.AnyAsync(predicate);
         }
 
-        public virtual async Task<int> CountAsync(Expression<Func<T, bool>> predicate = null)
+        public virtual async Task<int> CountAsync(Expression<Func<T, bool>>? predicate = null)
         {
             if (predicate == null)
             {

@@ -12,12 +12,10 @@ namespace PropertyManagement.Infrastructure.Services
     public class LeaseService : Service<Lease>, ILeaseService
     {
         private readonly ILeaseRepository _leaseRepository;
-        private readonly ApplicationDbContext _context;
 
         public LeaseService(ApplicationDbContext context, ILeaseRepository leaseRepository)
             : base(context)
         {
-            _context = context;
             _leaseRepository = leaseRepository;
         }
 
