@@ -1,0 +1,28 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const auth_1 = require("../middleware/auth");
+const roles_1 = require("../middleware/roles");
+const agentController_1 = require("../controllers/agentController");
+const router = express_1.default.Router();
+// Debug middleware
+router.use((req, res, next) => {
+    console.log('Agent routes middleware - Request path:', req.path);
+    next();
+});
+// Apply auth middleware to all routes
+router.use(auth_1.auth);
+router.use(roles_1.isAgent);
+// Agent dashboard routes
+router.get('/properties', (req, res) => {
+    console.log('Agent properties route hit');
+    (0, agentController_1.getAgentProperties)(req, res);
+});
+router.post('/properties', agentController_1.createAgentProperty);
+router.get('/tenants', agentController_1.getAgentTenants);
+router.get('/leases', agentController_1.getAgentLeases);
+router.get('/commission', agentController_1.getAgentCommission);
+exports.default = router;

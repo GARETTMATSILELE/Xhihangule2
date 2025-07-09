@@ -34,37 +34,31 @@ A full-stack property management solution built with React, .NET Core, and Azure
 ## Project Structure
 
 ```
-├── src/
-│   ├── client/                 # React frontend
-│   ├── server/                 # .NET Core backend
-│   │   ├── API/               # Web API project
-│   │   ├── Core/             # Domain models and interfaces
-│   │   ├── Infrastructure/   # Data access and external services
-│   │   └── Application/      # Business logic and DTOs
-│   └── shared/                # Shared types and utilities
-├── tests/                     # Test projects
+├── client/               # React frontend application
+│   ├── public/          # Static files
+│   └── src/            # Source code
+├── server/              # Backend server
+│   ├── src/            # Source code
+│   └── tests/          # Server tests
 ├── docs/                      # Documentation
 └── infrastructure/            # Azure infrastructure as code
 ```
 
-## Local Development Setup
+## Development
 
-1. Clone the repository
-2. Backend setup:
-   ```bash
-   cd src/server
-   dotnet restore
-   dotnet build
-   cd API
-   dotnet run
-   ```
+### Backend Setup
+```bash
+cd server
+npm install
+npm run dev
+```
 
-3. Frontend setup:
-   ```bash
-   cd src/client
-   npm install
-   npm start
-   ```
+### Frontend Setup
+```bash
+cd client
+npm install
+npm start
+```
 
 4. Configure Azure services:
    - Create Azure AD B2C tenant

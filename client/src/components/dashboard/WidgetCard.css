@@ -1,0 +1,53 @@
+.widget-card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border-top: 4px solid;
+  transition: transform 0.2s ease-in-out;
+  height: 100%;
+}
+
+.widget-card:hover {
+  transform: translateY(-5px);
+}
+
+.icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.icon-container svg {
+  color: rgba(0, 0, 0, 0.54);
+}
+
+.widget-content {
+  flex: 1;
+}
+
+.widget-content h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.widget-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0.25rem 0;
+}
+
+.widget-subtext {
+  font-size: 0.75rem;
+  color: #666;
+} 

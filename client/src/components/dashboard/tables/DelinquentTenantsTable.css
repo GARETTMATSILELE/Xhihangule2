@@ -1,0 +1,37 @@
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th, td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+th {
+  background-color: #f8f9fa;
+  font-weight: 600;
+  color: #666;
+}
+
+tr:hover {
+  background-color: #f8f9fa;
+}
+
+.status-overdue {
+  color: #dc3545;
+  font-weight: 500;
+}
+
+.status-pending {
+  color: #ffc107;
+  font-weight: 500;
+} 

@@ -1,0 +1,39 @@
+{
+  "name": "property-management-app",
+  "version": "1.0.0",
+  "description": "Property Management Application",
+  "main": "index.js",
+  "scripts": {
+    "start": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm start",
+    "client": "cd client && npm start",
+    "build": "concurrently \"npm run build:server\" \"npm run build:client\"",
+    "build:server": "cd server && npm run build",
+    "build:client": "cd client && npm run build",
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install",
+    "dev": "concurrently \"npm run server\" \"npm run client\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^7.1.0",
+    "@mui/material": "^7.1.0",
+    "@types/react": "^19.1.4",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^8.2.2",
+    "react": "^19.1.0",
+    "react-big-calendar": "^1.18.0",
+    "uuid": "^11.1.0",
+    "zod": "^3.25.42"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/testing-library__jest-dom": "^5.14.9",
+    "@types/testing-library__react": "^10.0.1",
+    "vitest": "^3.1.4"
+  }
+}

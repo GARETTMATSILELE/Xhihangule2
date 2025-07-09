@@ -1,0 +1,191 @@
+.property-list {
+  padding: 1rem 0;
+}
+
+.property-group {
+  margin-bottom: 2rem;
+}
+
+.property-group h2 {
+  margin-bottom: 1rem;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.property-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.property-card {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.property-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.property-image {
+  position: relative;
+  aspect-ratio: 16/9;
+  background-color: #f8f9fa;
+}
+
+.property-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.no-image {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-style: italic;
+}
+
+.property-status {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: white;
+}
+
+.property-status[data-status="Vacant"] {
+  background-color: #2ecc71;
+}
+
+.property-status[data-status="Occupied"] {
+  background-color: #3498db;
+}
+
+.property-status[data-status="Under Maintenance"] {
+  background-color: #e74c3c;
+}
+
+.property-info {
+  padding: 1rem;
+}
+
+.property-info h3 {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+  font-size: 1.25rem;
+}
+
+.property-type {
+  color: #666;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.property-location {
+  color: #666;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.property-rent {
+  color: #2ecc71;
+  font-weight: 600;
+  font-size: 1.125rem;
+  margin-bottom: 0.5rem;
+}
+
+.property-amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.amenity-tag {
+  background-color: #f8f9fa;
+  color: #666;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.amenity-more {
+  color: #666;
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.property-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #eee;
+}
+
+.action-button {
+  background: none;
+  border: none;
+  color: #666;
+  padding: 0.5rem;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.action-button:hover {
+  color: #333;
+}
+
+.action-button.view:hover {
+  color: #3498db;
+}
+
+.action-button.edit:hover {
+  color: #f1c40f;
+}
+
+.action-button.delete:hover {
+  color: #e74c3c;
+}
+
+.property-details {
+  padding: 1rem;
+  border-top: 1px solid #eee;
+}
+
+.property-description {
+  color: #666;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.property-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.5rem;
+}
+
+.property-images img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .property-grid {
+    grid-template-columns: 1fr;
+  }
+} 
