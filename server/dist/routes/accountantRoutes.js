@@ -18,19 +18,15 @@ router.use((req, res, next) => {
 // Apply authentication middleware to all routes
 router.use(auth_1.auth);
 // Commission routes - require accountant role
-router.use('/agent-commissions', roles_1.isAccountant);
-router.use('/agency-commission', roles_1.isAccountant);
-router.use('/prea-commission', roles_1.isAccountant);
-// Commission routes
-router.get('/agent-commissions', (req, res) => {
+router.get('/agent-commissions', roles_1.isAccountant, (req, res) => {
     console.log('Agent commissions route hit');
     (0, accountantController_1.getAgentCommissions)(req, res);
 });
-router.get('/agency-commission', (req, res) => {
+router.get('/agency-commission', roles_1.isAccountant, (req, res) => {
     console.log('Agency commission route hit');
     (0, accountantController_1.getAgencyCommission)(req, res);
 });
-router.get('/prea-commission', (req, res) => {
+router.get('/prea-commission', roles_1.isAccountant, (req, res) => {
     console.log('PREA commission route hit');
     (0, accountantController_1.getPREACommission)(req, res);
 });

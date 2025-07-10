@@ -27,22 +27,17 @@ router.use((req, res, next) => {
 router.use(auth);
 
 // Commission routes - require accountant role
-router.use('/agent-commissions', isAccountant);
-router.use('/agency-commission', isAccountant);
-router.use('/prea-commission', isAccountant);
-
-// Commission routes
-router.get('/agent-commissions', (req, res) => {
+router.get('/agent-commissions', isAccountant, (req, res) => {
   console.log('Agent commissions route hit');
   getAgentCommissions(req, res);
 });
 
-router.get('/agency-commission', (req, res) => {
+router.get('/agency-commission', isAccountant, (req, res) => {
   console.log('Agency commission route hit');
   getAgencyCommission(req, res);
 });
 
-router.get('/prea-commission', (req, res) => {
+router.get('/prea-commission', isAccountant, (req, res) => {
   console.log('PREA commission route hit');
   getPREACommission(req, res);
 });

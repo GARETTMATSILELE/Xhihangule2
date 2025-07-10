@@ -19,6 +19,7 @@ const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
+const Tenant_1 = require("../models/Tenant");
 const getPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
@@ -191,7 +192,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             });
         }
         // Get tenant details
-        const tenant = yield User_1.User.findById(tenantId);
+        const tenant = yield Tenant_1.Tenant.findById(tenantId);
         if (!tenant) {
             return res.status(404).json({
                 status: 'error',

@@ -47,7 +47,7 @@ const PaymentSchema: Schema = new Schema({
   },
   tenantId: {
     type: Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Tenant',
     required: true,
   },
   agentId: {

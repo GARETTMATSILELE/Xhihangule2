@@ -54,7 +54,7 @@ const PaymentSchema = new mongoose_1.Schema({
     },
     tenantId: {
         type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User',
+        ref: 'Tenant',
         required: true,
     },
     agentId: {

@@ -8,6 +8,7 @@ import { Lease } from '../models/Lease';
 import { Property } from '../models/Property';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
+import { Tenant } from '../models/Tenant';
 
 export const getPayments = async (req: Request, res: Response) => {
   if (!req.user) {
@@ -236,7 +237,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
 
     // Get tenant details
-    const tenant = await User.findById(tenantId);
+    const tenant = await Tenant.findById(tenantId);
     if (!tenant) {
       return res.status(404).json({
         status: 'error',
