@@ -23,6 +23,12 @@ router.get('/properties', (req, res) => {
 });
 router.post('/properties', agentController_1.createAgentProperty);
 router.get('/tenants', agentController_1.getAgentTenants);
+router.post('/tenants', agentController_1.createAgentTenant);
 router.get('/leases', agentController_1.getAgentLeases);
+router.post('/leases', agentController_1.createAgentLease);
+router.get('/files', agentController_1.getAgentFiles);
+router.post('/files', agentController_1.createAgentFile);
+router.post('/payments', agentController_1.createAgentPayment);
+router.put('/payments/:id', agentController_1.updateAgentPayment);
 router.get('/commission', agentController_1.getAgentCommission);
 exports.default = router;

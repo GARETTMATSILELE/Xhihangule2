@@ -13,6 +13,14 @@ export interface IPayment extends Document {
   amount: number;
   depositAmount: number;
   referenceNumber: string;
+  // Add rental period fields
+  rentalPeriodMonth: number; // 1-12
+  rentalPeriodYear: number; // e.g., 2024
+  // Advance payment fields
+  advanceMonthsPaid?: number;
+  advancePeriodStart?: { month: number; year: number };
+  advancePeriodEnd?: { month: number; year: number };
+  rentUsed?: number;
   notes: string;
   processedBy: mongoose.Types.ObjectId;
   commissionDetails: {
@@ -25,6 +33,9 @@ export interface IPayment extends Document {
   status: 'pending' | 'completed' | 'failed';
   currency: 'USD' | 'ZWL';
   leaseId?: mongoose.Types.ObjectId;
+  recipientId?: mongoose.Types.ObjectId | string;
+  recipientType?: string;
+  reason?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,6 +93,36 @@ const PaymentSchema: Schema = new Schema({
     type: String,
     required: true,
   },
+  // Add rental period fields
+  rentalPeriodMonth: {
+    type: Number,
+    required: true,
+    min: 1,
+    max: 12,
+  },
+  rentalPeriodYear: {
+    type: Number,
+    required: true,
+  },
+  // Advance payment fields
+  advanceMonthsPaid: {
+    type: Number,
+    required: false,
+    min: 1,
+    default: 1,
+  },
+  advancePeriodStart: {
+    month: { type: Number, min: 1, max: 12 },
+    year: { type: Number },
+  },
+  advancePeriodEnd: {
+    month: { type: Number, min: 1, max: 12 },
+    year: { type: Number },
+  },
+  rentUsed: {
+    type: Number,
+    required: false,
+  },
   notes: {
     type: String,
   },
@@ -125,6 +166,18 @@ const PaymentSchema: Schema = new Schema({
   leaseId: {
     type: Schema.Types.ObjectId,
     ref: 'Lease',
+  },
+  recipientId: {
+    type: Schema.Types.Mixed, // ObjectId or string
+    required: false,
+  },
+  recipientType: {
+    type: String,
+    required: false,
+  },
+  reason: {
+    type: String,
+    required: false,
   },
 }, {
   timestamps: true

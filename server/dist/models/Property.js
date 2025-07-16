@@ -134,6 +134,18 @@ const PropertySchema = new mongoose_1.Schema({
         type: Number,
         min: [0, 'Number of occupied units cannot be negative'],
         default: 0
+    },
+    // New fields
+    rentalType: {
+        type: String,
+        enum: ['management', 'introduction'],
+        default: 'management',
+    },
+    commission: {
+        type: Number,
+        min: [0, 'Commission cannot be negative'],
+        max: [100, 'Commission cannot exceed 100%'],
+        default: 15
     }
 }, {
     timestamps: true

@@ -57,6 +57,10 @@ const FileSchema = new mongoose_1.Schema({
         ref: 'User',
         required: true
     },
+    ownerId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User'
+    },
     uploadedAt: {
         type: Date,
         default: Date.now
@@ -67,6 +71,7 @@ const FileSchema = new mongoose_1.Schema({
 // Add index for faster queries
 FileSchema.index({ propertyId: 1 });
 FileSchema.index({ uploadedBy: 1 });
+FileSchema.index({ ownerId: 1 });
 FileSchema.index({ fileType: 1 });
 FileSchema.index({ uploadedAt: -1 });
 exports.default = mongoose_1.default.model('File', FileSchema);

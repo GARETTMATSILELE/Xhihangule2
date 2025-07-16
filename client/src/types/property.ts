@@ -31,12 +31,18 @@ export interface Property {
   endDate?: Date;
   paidInAdvance?: boolean;
   advanceMonths?: number;
+  // New fields
+  rentalType?: 'management' | 'introduction';
+  commission?: number;
 }
 
 export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'createdAt' | 'updatedAt' | 'status' | 'occupiedUnits'> {
   _id?: string;
   status?: PropertyStatus;
   occupiedUnits?: number;
+  // New fields
+  rentalType?: 'management' | 'introduction';
+  commission?: number;
 }
 
 export interface PropertyFilter {

@@ -23,9 +23,19 @@ export const Properties: React.FC = () => {
   const isAdminRoute = location.pathname.includes('/admin-dashboard') || 
                       location.pathname.includes('/admin/');
   
-  // Check if we're on an agent route
+  // Check if we're on an agent route - more comprehensive detection
   const isAgentRoute = location.pathname.includes('/agent-dashboard') || 
-                      location.pathname.includes('/agent/');
+                      location.pathname.includes('/agent/') ||
+                      user?.role === 'agent'; // Also check user role
+  
+  // Debug logging
+  console.log('Properties component - Route detection:', {
+    pathname: location.pathname,
+    isAdminRoute,
+    isAgentRoute,
+    userRole: user?.role,
+    user: user
+  });
   
   // State for admin dashboard properties
   const [adminProperties, setAdminProperties] = useState<Property[]>([]);
@@ -88,12 +98,19 @@ export const Properties: React.FC = () => {
 
   // Fetch agent properties when on agent route
   useEffect(() => {
+    console.log('Properties component - Agent properties useEffect triggered:', {
+      isAgentRoute,
+      userRole: user?.role
+    });
+    
     if (isAgentRoute) {
       const fetchAgentProperties = async () => {
         try {
           setAgentLoading(true);
           setAgentError(null);
+          console.log('Properties component - Fetching agent properties...');
           const fetchedProperties = await agentService.getProperties();
+          console.log('Properties component - Agent properties fetched:', fetchedProperties);
           setAgentProperties(fetchedProperties);
         } catch (err) {
           console.error('Error fetching agent properties:', err);

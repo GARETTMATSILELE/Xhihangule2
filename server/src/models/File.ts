@@ -6,6 +6,7 @@ export interface IFile extends Document {
   fileType: string;
   fileUrl: string;  // This will store the base64 string
   uploadedBy: mongoose.Types.ObjectId;
+  ownerId?: mongoose.Types.ObjectId; // Agent who uploaded this file
   uploadedAt: Date;
 }
 
@@ -32,6 +33,10 @@ const FileSchema: Schema = new Schema({
     ref: 'User',
     required: true
   },
+  ownerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
   uploadedAt: {
     type: Date,
     default: Date.now
@@ -43,6 +48,7 @@ const FileSchema: Schema = new Schema({
 // Add index for faster queries
 FileSchema.index({ propertyId: 1 });
 FileSchema.index({ uploadedBy: 1 });
+FileSchema.index({ ownerId: 1 });
 FileSchema.index({ fileType: 1 });
 FileSchema.index({ uploadedAt: -1 });
 

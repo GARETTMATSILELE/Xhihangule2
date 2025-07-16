@@ -89,6 +89,17 @@ const PaymentSchema = new mongoose_1.Schema({
         type: String,
         required: true,
     },
+    // Add rental period fields
+    rentalPeriodMonth: {
+        type: Number,
+        required: true,
+        min: 1,
+        max: 12,
+    },
+    rentalPeriodYear: {
+        type: Number,
+        required: true,
+    },
     notes: {
         type: String,
     },
@@ -132,6 +143,18 @@ const PaymentSchema = new mongoose_1.Schema({
     leaseId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Lease',
+    },
+    recipientId: {
+        type: mongoose_1.Schema.Types.Mixed, // ObjectId or string
+        required: false,
+    },
+    recipientType: {
+        type: String,
+        required: false,
+    },
+    reason: {
+        type: String,
+        required: false,
     },
 }, {
     timestamps: true

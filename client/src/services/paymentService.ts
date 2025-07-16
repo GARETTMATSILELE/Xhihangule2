@@ -156,11 +156,14 @@ class PaymentService {
   }
 
   // Public method for fetching all payments using public API
-  async getAllPublic(companyId?: string): Promise<{ data: Payment[] }> {
+  async getAllPublic(companyId?: string, filters?: any): Promise<{ data: Payment[] }> {
     try {
       const config: any = {};
-      if (companyId) {
-        config.params = { companyId };
+      if (companyId || filters) {
+        config.params = { ...filters };
+        if (companyId) {
+          config.params.companyId = companyId;
+        }
       }
       
       const response = await publicApi.get('/payments/public', config);
@@ -261,6 +264,30 @@ class PaymentService {
       console.error('Error downloading payment receipt (public):', error);
       throw new Error(error.response?.data?.message || 'Failed to download receipt');
     }
+  }
+
+  // Property Account: Get transactions (income/expenditure)
+  async getPropertyTransactions(propertyId: string, type: 'income' | 'expenditure') {
+    const response = await api.get(`/property-accounts/${propertyId}/transactions`, { params: { type } });
+    return response.data;
+  }
+
+  // Property Account: Create payment (expenditure)
+  async createPropertyPayment(propertyId: string, paymentData: any) {
+    const response = await api.post(`/property-accounts/${propertyId}/pay`, paymentData);
+    return response.data;
+  }
+
+  // Property Account: Get payment request document
+  async getPaymentRequestDocument(propertyId: string, paymentId: string) {
+    const response = await api.get(`/property-accounts/${propertyId}/payment-request/${paymentId}`);
+    return response.data;
+  }
+
+  // Property Account: Get acknowledgement document
+  async getAcknowledgementDocument(propertyId: string, paymentId: string) {
+    const response = await api.get(`/property-accounts/${propertyId}/acknowledgement/${paymentId}`);
+    return response.data;
   }
 }
 

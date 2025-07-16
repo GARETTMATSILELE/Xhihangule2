@@ -23,9 +23,11 @@ import AccountantDashboard from './pages/AccountantDashboard';
 import AccountantPaymentsPage from './pages/AccountantDashboard/PaymentsPage';
 import CommissionsPage from './pages/AccountantDashboard/CommissionsPage';
 import SettingsPage from './pages/AccountantDashboard/SettingsPage';
-import ReportsPage from './pages/admin/ReportsPage';
+import ReportsPage from './pages/AccountantDashboard/ReportsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import TestAuth from './pages/TestAuth';
+import PropertyAccountsPage from './pages/AccountantDashboard/PropertyAccountsPage';
+import PropertyAccountDetailPage from './pages/AccountantDashboard/PropertyAccountDetailPage';
 
 // Create a theme instance with proper configuration
 const theme = createTheme({
@@ -112,8 +114,11 @@ const App: React.FC = () => {
             }>
               <Route index element={<AccountantDashboard />} />
               <Route path="payments" element={<AccountantPaymentsPage />} />
+              <Route path="property-accounts" element={<PropertyAccountsPage />} />
+              <Route path="property-accounts/:propertyId" element={<ProtectedRoute requiredRoles={['accountant']}><PropertyAccountDetailPage /></ProtectedRoute>} />
               <Route path="commissions" element={<CommissionsPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="reports" element={<ReportsPage />} />
             </Route>
             <Route path="/admin/users" element={
               <ProtectedRoute requiredRoles={['admin']}>

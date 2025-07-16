@@ -19,7 +19,6 @@ const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
-const Tenant_1 = require("../models/Tenant");
 const getPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
@@ -55,9 +54,8 @@ const getPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.getPayment = getPayment;
 // Helper function to calculate commission
-const calculateCommission = (amount, propertyType) => {
-    const baseCommissionRate = propertyType === 'residential' ? 15 : 10;
-    const totalCommission = (amount * baseCommissionRate) / 100;
+const calculateCommission = (amount, commissionPercentage) => {
+    const totalCommission = (amount * commissionPercentage) / 100;
     const preaFee = totalCommission * 0.03;
     const remainingCommission = totalCommission - preaFee;
     const agentShare = remainingCommission * 0.6;
@@ -76,7 +74,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, } = req.body;
+        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, } = req.body;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
@@ -99,15 +97,9 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 message: 'Property not found',
             });
         }
-        // Get agent details
-        const agent = yield User_1.User.findById(lease.tenantId);
-        if (!agent) {
-            return res.status(404).json({
-                message: 'Tenant not found',
-            });
-        }
-        // Calculate commission based on property type
-        const commissionDetails = calculateCommission(amount, 'residential');
+        const commissionPercentage = property.commission || 0;
+        // Calculate commission based on property commission percentage
+        const paymentCommissionDetails = calculateCommission(amount, commissionPercentage);
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -122,35 +114,34 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             agentId: lease.tenantId, // Use tenant ID as agent ID since lease doesn't have agentId
             processedBy: lease.tenantId, // Use tenant ID as processedBy since no agent ID
             depositAmount: 0, // Default value
-            referenceNumber: `PAY-${Date.now()}`, // Generate reference number
+            rentalPeriodMonth,
+            rentalPeriodYear,
+            referenceNumber: '', // Placeholder, will update after save
             notes: '', // Default empty notes
-            commissionDetails: {
-                agentShare: 0,
-                agencyShare: 0,
-                totalCommission: 0,
-                preaFee: 0,
-                ownerAmount: amount, // Full amount goes to owner initially
-            },
+            commissionDetails: paymentCommissionDetails,
         });
+        yield payment.save();
+        // Generate reference number after save (using payment._id)
+        payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
         // Update company revenue
         yield Company_1.Company.findByIdAndUpdate(companyId || lease.companyId, {
             $inc: {
-                revenue: commissionDetails.agencyShare,
+                revenue: paymentCommissionDetails.agencyShare,
             },
         });
         // Update agent commission
         yield User_1.User.findByIdAndUpdate(lease.tenantId, // Use tenant ID since no agent ID
         {
             $inc: {
-                commission: commissionDetails.agentShare,
+                commission: paymentCommissionDetails.agentShare,
             },
         });
         // If it's a rental payment, update property owner's balance
         if (property.ownerId) {
             yield User_1.User.findByIdAndUpdate(property.ownerId, {
                 $inc: {
-                    balance: commissionDetails.ownerAmount,
+                    balance: paymentCommissionDetails.ownerAmount,
                 },
             });
         }
@@ -175,7 +166,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
     try {
         console.log('Creating accountant payment with data:', req.body);
-        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, companyId, processedBy, } = req.body;
+        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, companyId, processedBy, rentalPeriodMonth, rentalPeriodYear, } = req.body;
         // Validate required fields
         if (!propertyId || !tenantId || !agentId || !amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({
@@ -191,24 +182,9 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 message: 'Property not found',
             });
         }
-        // Get tenant details
-        const tenant = yield Tenant_1.Tenant.findById(tenantId);
-        if (!tenant) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Tenant not found',
-            });
-        }
-        // Get agent details
-        const agent = yield User_1.User.findById(agentId);
-        if (!agent) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Agent not found',
-            });
-        }
-        // Calculate commission based on property type
-        const commissionDetails = calculateCommission(amount, propertyType);
+        const commissionPercentage = property.commission || 0;
+        // Calculate commission based on property commission percentage
+        const accountantCommissionDetails = calculateCommission(amount, commissionPercentage);
         // Create payment record
         const payment = new Payment_1.Payment({
             paymentType,
@@ -221,31 +197,35 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             paymentMethod,
             amount,
             depositAmount: depositAmount || 0,
-            referenceNumber: referenceNumber || `PAY-${Date.now()}`,
+            rentalPeriodMonth,
+            rentalPeriodYear,
+            referenceNumber: '', // Placeholder, will update after save
             notes: notes || '',
             processedBy: processedBy || req.user.userId,
-            commissionDetails,
+            commissionDetails: accountantCommissionDetails,
             status: 'completed',
             currency: currency || 'USD',
         });
         yield payment.save();
+        payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
+        yield payment.save();
         // Update company revenue
         yield Company_1.Company.findByIdAndUpdate(companyId || req.user.companyId, {
             $inc: {
-                revenue: commissionDetails.agencyShare,
+                revenue: accountantCommissionDetails.agencyShare,
             },
         });
         // Update agent commission
         yield User_1.User.findByIdAndUpdate(agentId, {
             $inc: {
-                commission: commissionDetails.agentShare,
+                commission: accountantCommissionDetails.agentShare,
             },
         });
         // If it's a rental payment, update property owner's balance
         if (paymentType === 'rental' && property.ownerId) {
             yield User_1.User.findByIdAndUpdate(property.ownerId, {
                 $inc: {
-                    balance: commissionDetails.ownerAmount,
+                    balance: accountantCommissionDetails.ownerAmount,
                 },
             });
         }
@@ -425,6 +405,19 @@ const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (req.query.paymentMethod) {
             query.paymentMethod = req.query.paymentMethod;
         }
+        if (req.query.propertyId) {
+            query.propertyId = new mongoose_1.default.Types.ObjectId(req.query.propertyId);
+        }
+        // Date filtering
+        if (req.query.startDate || req.query.endDate) {
+            query.paymentDate = {};
+            if (req.query.startDate) {
+                query.paymentDate.$gte = new Date(req.query.startDate);
+            }
+            if (req.query.endDate) {
+                query.paymentDate.$lte = new Date(req.query.endDate);
+            }
+        }
         console.log('Public payments query:', query);
         const payments = yield Payment_1.Payment.find(query)
             .populate('propertyId', 'name address')
@@ -496,12 +489,15 @@ const getPaymentByIdPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getPaymentByIdPublic = getPaymentByIdPublic;
 // Public endpoint for creating payments (for admin dashboard) - no authentication required
 const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
     try {
         console.log('Public payment creation request:', {
             body: req.body,
             headers: req.headers
         });
-        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, } = req.body;
+        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, } = req.body;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
@@ -517,6 +513,14 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
                 message: 'Lease not found',
             });
         }
+        // Remove property ownership check for public endpoint
+        const property = yield Property_1.Property.findById(lease.propertyId);
+        if (!property) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
+        const commissionPercentage = property.commission || 0;
+        // Calculate commission based on property commission percentage
+        const publicCommissionDetails = calculateCommission(amount, commissionPercentage);
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -531,16 +535,14 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             agentId: lease.tenantId, // Use tenant ID as agent ID since lease doesn't have agentId
             processedBy: lease.tenantId, // Use tenant ID as processedBy since no agent ID
             depositAmount: 0, // Default value
-            referenceNumber: `PAY-${Date.now()}`, // Generate reference number
+            rentalPeriodMonth,
+            rentalPeriodYear,
+            referenceNumber: '', // Placeholder, will update after save
             notes: '', // Default empty notes
-            commissionDetails: {
-                agentShare: 0,
-                agencyShare: 0,
-                totalCommission: 0,
-                preaFee: 0,
-                ownerAmount: amount, // Full amount goes to owner initially
-            },
+            commissionDetails: publicCommissionDetails,
         });
+        yield payment.save();
+        payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
         console.log('Payment created successfully:', { id: payment._id, amount: payment.amount });
         res.status(201).json({

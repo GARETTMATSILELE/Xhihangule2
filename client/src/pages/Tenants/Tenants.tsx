@@ -24,6 +24,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import { useNavigate } from 'react-router-dom';
 import { useAdminDashboardService } from '../../services/adminDashboardService';
+import agentService from '../../services/agentService';
 import { Tenant, TenantFormData, TenantStatus } from '../../types/tenant';
 import { TenantForm } from '../../components/tenants/TenantForm';
 import { AuthErrorReport } from '../../components/AuthErrorReport';
@@ -88,6 +89,7 @@ export const Tenants: React.FC = () => {
   };
 
   const handleFormSubmit = async (formData: TenantFormData) => {
+    if (!user) return;
     try {
       console.log('Tenants component: Form submission with data:', formData);
       console.log('Tenants component: User and company context:', { user, company });
@@ -102,7 +104,11 @@ export const Tenants: React.FC = () => {
         await adminDashboardService.updateTenant(selectedTenant._id, tenantData, user);
       } else {
         console.log('Tenants component: Creating new tenant');
-        await adminDashboardService.addTenant(tenantData, user, company);
+        if (user!.role === 'agent') {
+          await agentService.createTenant(tenantData);
+        } else {
+          await adminDashboardService.addTenant(tenantData, user!, company);
+        }
       }
       setIsFormOpen(false);
       setSelectedTenant(null);

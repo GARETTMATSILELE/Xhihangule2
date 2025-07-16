@@ -189,8 +189,8 @@ export const getProperties = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
     };
     
-    // If user is not an admin, only show their properties
-    if (req.user.role !== 'admin') {
+    // If user is not an admin or accountant, only show their properties
+    if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
       query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
     }
     
@@ -279,8 +279,8 @@ export const getProperty = async (req: Request, res: Response) => {
       companyId: req.user.companyId
     };
     
-    // If user is not an admin, only allow access to their properties
-    if (req.user.role !== 'admin') {
+    // If user is not an admin or accountant, only allow access to their properties
+    if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
       query.ownerId = req.user.userId;
     }
 
@@ -318,7 +318,9 @@ export const createProperty = async (req: Request, res: Response) => {
     const propertyData = {
       ...req.body,
       ownerId: req.user.userId,
-      companyId: req.user.companyId
+      companyId: req.user.companyId,
+      rentalType: req.body.rentalType,
+      commission: req.body.commission
     };
     
     console.log('Processed property data:', propertyData);
@@ -607,7 +609,9 @@ export const createPropertyPublic = async (req: Request, res: Response) => {
     const propertyData = {
       ...req.body,
       ownerId: userContext.userId,
-      companyId: userContext.companyId
+      companyId: userContext.companyId,
+      rentalType: req.body.rentalType,
+      commission: req.body.commission
     };
     
     console.log('Processed public property data:', propertyData);

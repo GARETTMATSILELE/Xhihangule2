@@ -9,17 +9,9 @@ import {
   Typography,
   CircularProgress,
   Alert,
-  Drawer,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  ListItemButton,
-  Divider,
-  IconButton,
   useTheme,
   useMediaQuery,
-  Avatar
+  IconButton
 } from '@mui/material';
 import { 
   Receipt as ReceiptIcon,
@@ -37,6 +29,10 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, Responsi
 import { getChartData, initializeChartData } from '../services/chartService';
 import { useCompany } from '../contexts/CompanyContext';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import PropertyAccountsPage from './AccountantDashboard/PropertyAccountsPage';
+import PropertyAccountDetailPage from './AccountantDashboard/PropertyAccountDetailPage';
+import { AccountantSidebar } from '../components/Layout/AccountantSidebar';
+import { useAuth } from '../contexts/AuthContext';
 
 const DRAWER_WIDTH = 240;
 
@@ -51,6 +47,7 @@ const AccountantDashboard: React.FC = () => {
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const { logout, user, company: authCompany } = useAuth();
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -64,64 +61,7 @@ const AccountantDashboard: React.FC = () => {
     { text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' }
   ];
 
-  const drawer = (
-    <Box sx={{ width: DRAWER_WIDTH }}>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'space-between',
-        padding: theme.spacing(1, 2),
-        ...theme.mixins.toolbar
-      }}>
-        <Typography variant="h6" noWrap component="div">
-          {company?.name || 'Dashboard'}
-        </Typography>
-        {isMobile && (
-          <IconButton onClick={handleDrawerToggle}>
-            <ChevronLeftIcon />
-          </IconButton>
-        )}
-      </Box>
-      <Divider />
-      
-      {company && company.logo && (
-        <Box sx={{ px: 2, mb: 2, mt: 2 }}>
-          {/* Company Logo */}
-          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-            <Avatar
-              src={`data:image/png;base64,${company.logo}`}
-              sx={{ 
-                width: 200, 
-                height: 100,
-                border: '0.1px solid rgba(255, 255, 255, 0.2)'
-              }}
-              variant="rounded"
-            />
-          </Box>
-        </Box>
-      )}
-      
-      <List>
-        {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
-            <ListItemButton
-              onClick={() => {
-                navigate(item.path);
-                if (isMobile) {
-                  setMobileOpen(false);
-                }
-              }}
-            >
-              <ListItemIcon>
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText primary={item.text} />
-            </ListItemButton>
-          </ListItem>
-        ))}
-      </List>
-    </Box>
-  );
+  // Remove inline drawer and use AccountantSidebar
 
   useEffect(() => {
     if (!companyLoading && company && location.pathname === '/accountant-dashboard') {
@@ -185,6 +125,11 @@ const AccountantDashboard: React.FC = () => {
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
+  };
+
+  // Adapter for AccountantSidebar (expects (index: number) => void)
+  const handleSidebarTabChange = (index: number) => {
+    handleTabChange({} as React.SyntheticEvent, index);
   };
 
   const renderMainContent = () => {
@@ -302,57 +247,57 @@ const AccountantDashboard: React.FC = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex' }}>
-      {/* Mobile drawer */}
-      <Drawer
-        variant="temporary"
-        open={mobileOpen}
-        onClose={handleDrawerToggle}
-        ModalProps={{
-          keepMounted: true, // Better open performance on mobile
-        }}
-        sx={{
-          display: { xs: 'block', sm: 'none' },
-          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: DRAWER_WIDTH },
-        }}
-      >
-        {drawer}
-      </Drawer>
-
-      {/* Desktop drawer */}
-      <Drawer
-        variant="permanent"
-        sx={{
-          display: { xs: 'none', sm: 'block' },
-          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: DRAWER_WIDTH },
-        }}
-        open
-      >
-        {drawer}
-      </Drawer>
-
-      {/* Main content */}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
-          ml: { sm: `${DRAWER_WIDTH}px` },
-        }}
-      >
-        <Box sx={{ display: { sm: 'none' }, mb: 2 }}>
-          <IconButton
-            color="inherit"
-            aria-label="open drawer"
-            edge="start"
-            onClick={handleDrawerToggle}
-          >
-            <MenuIcon />
-          </IconButton>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      {/* Top Banner */}
+      <Box sx={{
+        width: '100%',
+        height: 64,
+        bgcolor: '#1E1E2F',
+        color: '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        px: 3,
+        boxShadow: 1,
+        position: 'fixed',
+        zIndex: 1201,
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            {company?.name || 'Accountant Dashboard'}
+          </Typography>
         </Box>
-
-        {renderMainContent()}
+        <Button color="inherit" onClick={logout} sx={{ color: '#fff', fontWeight: 600 }}>
+          Logout
+        </Button>
+      </Box>
+      <Box sx={{ display: 'flex', flexGrow: 1, pt: 8 }}>
+        <AccountantSidebar
+          activeTab={activeTab}
+          onTabChange={handleSidebarTabChange}
+        />
+        {/* Main content */}
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            p: 3,
+            width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
+            ml: { sm: `${DRAWER_WIDTH}px` },
+          }}
+        >
+          <Box sx={{ display: { sm: 'none' }, mb: 2 }}>
+            <IconButton
+              color="inherit"
+              aria-label="open drawer"
+              edge="start"
+              onClick={handleDrawerToggle}
+            >
+              <MenuIcon />
+            </IconButton>
+          </Box>
+          {renderMainContent()}
+        </Box>
       </Box>
     </Box>
   );

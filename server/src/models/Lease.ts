@@ -10,6 +10,7 @@ export interface ILease extends Document {
   depositAmount: number;
   status: 'active' | 'expired' | 'terminated';
   companyId: mongoose.Types.ObjectId;
+  ownerId?: mongoose.Types.ObjectId; // Agent who created this lease
   
   // Additional lease details
   monthlyRent: number;
@@ -37,6 +38,7 @@ const LeaseSchema: Schema = new Schema({
   depositAmount: { type: Number, required: true, min: 0 },
   status: { type: String, enum: ['active', 'expired', 'terminated'], default: 'active' },
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
+  ownerId: { type: Schema.Types.ObjectId, ref: 'User' },
   
   // Additional lease details
   monthlyRent: { type: Number, default: 0, min: 0 },
@@ -52,5 +54,8 @@ const LeaseSchema: Schema = new Schema({
 }, {
   timestamps: true
 });
+
+// Add index for ownerId for faster filtering
+LeaseSchema.index({ ownerId: 1 });
 
 export const Lease = mongoose.model<ILease>('Lease', LeaseSchema, COLLECTIONS.LEASES); 

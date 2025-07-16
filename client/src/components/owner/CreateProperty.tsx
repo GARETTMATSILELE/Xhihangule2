@@ -39,6 +39,11 @@ const amenities = [
   'Pet Friendly'
 ];
 
+const rentalTypes = [
+  { value: 'management', label: 'Management' },
+  { value: 'introduction', label: 'Introduction' }
+];
+
 const CreateProperty: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -52,9 +57,25 @@ const CreateProperty: React.FC = () => {
     area: '',
     description: '',
     images: [''],
-    selectedAmenities: [] as string[]
+    selectedAmenities: [] as string[],
+    rentalType: 'management',
+    commission: 15
   });
   const [error, setError] = useState('');
+
+  // Add effect to update commission default when rentalType or type changes
+  React.useEffect(() => {
+    let defaultCommission = 15;
+    if (formData.rentalType === 'management') {
+      if (formData.type === 'commercial') defaultCommission = 10;
+      else defaultCommission = 15;
+    } else if (formData.rentalType === 'introduction') {
+      defaultCommission = 100;
+    }
+    setFormData(prev => ({ ...prev, commission: prev.commission !== undefined && prev.commission !== null && prev.commission !== 0 ? prev.commission : defaultCommission }));
+    // Only set if not already set by user
+    // eslint-disable-next-line
+  }, [formData.rentalType, formData.type]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -128,7 +149,9 @@ const CreateProperty: React.FC = () => {
         images: formData.images.filter(img => img.trim() !== ''),
         amenities: formData.selectedAmenities,
         status: 'available',
-        ownerId: user._id // Ensure ownerId is set from the current user
+        ownerId: user._id, // Ensure ownerId is set from the current user
+        rentalType: formData.rentalType,
+        commission: formData.commission
       };
 
       console.log('Current user:', user);
@@ -213,6 +236,21 @@ const CreateProperty: React.FC = () => {
 
             <Grid item xs={12} sm={6}>
               <TextField
+                select
+                fullWidth
+                label="Rental Type"
+                name="rentalType"
+                value={formData.rentalType}
+                onChange={handleChange}
+              >
+                {rentalTypes.map(rt => (
+                  <MenuItem key={rt.value} value={rt.value}>{rt.label}</MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <TextField
                 fullWidth
                 label="Monthly Rent"
                 name="rent"
@@ -222,6 +260,24 @@ const CreateProperty: React.FC = () => {
                 InputProps={{
                   startAdornment: '$'
                 }}
+              />
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <TextField
+                required
+                fullWidth
+                type="number"
+                name="commission"
+                label="Commission (%)"
+                value={formData.commission ?? ''}
+                onChange={handleChange}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+                helperText={
+                  formData.rentalType === 'management'
+                    ? (formData.type === 'commercial' ? 'Default: 10% for commercial' : 'Default: 15% for residential')
+                    : 'Default: 100% for introduction'
+                }
               />
             </Grid>
 

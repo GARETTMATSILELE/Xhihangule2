@@ -72,6 +72,50 @@ export const initializeChartData = async () => {
   }
 };
 
+// Helper function to create fallback chart data
+const createFallbackChartData = (type: string, properties: any[] = [], maintenanceRequests: any[] = []) => {
+  switch (type) {
+    case 'occupancy':
+      return {
+        type: 'occupancy',
+        data: properties.map(property => ({
+          name: property.name || 'Unnamed Property',
+          occupied: property.occupiedUnits || 0,
+          vacant: Math.max(0, (property.units || 1) - (property.occupiedUnits || 0))
+        }))
+      };
+    case 'payment':
+      return {
+        type: 'payment',
+        data: [],
+        summary: {
+          totalPayments: 0,
+          totalAmount: 0,
+          averageAmount: 0
+        },
+        recentPayments: []
+      };
+    case 'maintenance':
+      const statusCounts = {
+        pending: maintenanceRequests.filter(req => req.status === 'pending').length,
+        in_progress: maintenanceRequests.filter(req => req.status === 'in_progress').length,
+        completed: maintenanceRequests.filter(req => req.status === 'completed').length,
+        cancelled: maintenanceRequests.filter(req => req.status === 'cancelled').length
+      };
+      return {
+        type: 'maintenance',
+        data: [
+          { name: 'Pending', value: statusCounts.pending },
+          { name: 'In Progress', value: statusCounts.in_progress },
+          { name: 'Completed', value: statusCounts.completed },
+          { name: 'Cancelled', value: statusCounts.cancelled }
+        ].filter(item => item.value > 0)
+      };
+    default:
+      return { type, data: [] };
+  }
+};
+
 // Get chart data
 export const getChartData = async (type: string) => {
   try {
@@ -84,16 +128,34 @@ export const getChartData = async (type: string) => {
     if (userRole === 'owner') {
       console.log(`Using owner-specific endpoint for ${type} chart data...`);
       try {
-        const response = await api.get(`/charts/owner/${type}`);
+        // Use the new payments endpoint for payment data
+        const endpoint = type === 'payment' ? 'payments' : type;
+        const response = await api.get(`/charts/owner/${endpoint}`);
         console.log(`${type} chart data response:`, response.data);
-        return response.data;
+        
+        // Ensure the response has the expected structure
+        if (response.data && response.data.data) {
+          return response.data;
+        } else {
+          console.warn(`Invalid response structure for ${type}, using fallback data`);
+          return createFallbackChartData(type);
+        }
       } catch (error: any) {
         console.log(`Owner-specific endpoint failed for ${type}, falling back to regular endpoint:`, error.message);
         console.log(`Owner-specific endpoint error details:`, error.response?.data);
-        // Fall back to regular endpoint if owner-specific fails
-        const response = await api.get(`/charts/${type}`);
-        console.log(`${type} chart data response (fallback):`, response.data);
-        return response.data;
+        
+        // Try to get fallback data from properties and maintenance requests
+        try {
+          const [propertiesRes, maintenanceRes] = await Promise.all([
+            api.get('/owners/properties'),
+            api.get('/owners/maintenance-requests')
+          ]);
+          
+          return createFallbackChartData(type, propertiesRes.data, maintenanceRes.data);
+        } catch (fallbackError) {
+          console.error(`Fallback data fetch failed for ${type}:`, fallbackError);
+          return createFallbackChartData(type);
+        }
       }
     } else {
       console.log(`User role is "${userRole}", using regular endpoint for ${type} chart data...`);
@@ -104,7 +166,8 @@ export const getChartData = async (type: string) => {
     }
   } catch (error) {
     console.error(`Failed to get ${type} chart data:`, error);
-    throw error;
+    // Return fallback data instead of throwing
+    return createFallbackChartData(type);
   }
 };
 

@@ -178,8 +178,8 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const query = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         };
-        // If user is not an admin, only show their properties
-        if (req.user.role !== 'admin') {
+        // If user is not an admin or accountant, only show their properties
+        if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
         console.log('Executing property query:', {
@@ -260,8 +260,8 @@ const getProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             _id: req.params.id,
             companyId: req.user.companyId
         };
-        // If user is not an admin, only allow access to their properties
-        if (req.user.role !== 'admin') {
+        // If user is not an admin or accountant, only allow access to their properties
+        if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
             query.ownerId = req.user.userId;
         }
         const property = yield Property_1.Property.findOne(query)
@@ -293,7 +293,7 @@ const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId });
+        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, rentalType: req.body.rentalType, commission: req.body.commission });
         console.log('Processed property data:', propertyData);
         console.log('User context:', {
             userId: req.user.userId,
@@ -547,7 +547,7 @@ const createPropertyPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 code: 'COMPANY_ID_REQUIRED'
             });
         }
-        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: userContext.userId, companyId: userContext.companyId });
+        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: userContext.userId, companyId: userContext.companyId, rentalType: req.body.rentalType, commission: req.body.commission });
         console.log('Processed public property data:', propertyData);
         // Validate required fields
         if (!propertyData.name || !propertyData.address) {

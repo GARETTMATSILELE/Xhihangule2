@@ -99,8 +99,8 @@ export const TenantForm: React.FC<TenantFormProps> = ({
       return;
     }
 
-    if (!['admin', 'owner'].includes(user?.role || '')) {
-      setError('Access denied. Admin or Owner role required to manage tenants.');
+    if (!['admin', 'owner', 'agent'].includes(user?.role || '')) {
+      setError('Access denied. Admin, Owner, or Agent role required to manage tenants.');
       return;
     }
 
@@ -274,7 +274,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
           onClick={handleSubmit}
           variant="contained"
           color="primary"
-          disabled={!company?._id || !user?._id || !['admin', 'owner'].includes(user?.role || '')}
+          disabled={!company?._id || !user?._id || !['admin', 'owner', 'agent'].includes(user?.role || '')}
         >
           {initialData ? 'Update Tenant' : 'Add Tenant'}
         </Button>

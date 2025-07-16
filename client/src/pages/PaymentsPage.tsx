@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePropertyService } from '../services/propertyService';
 import { useTenantService } from '../services/tenantService';
 import paymentService from '../services/paymentService';
+import { agentService } from '../services/agentService';
 import { Payment, PaymentStatus, PaymentFormData, PaymentFilter } from '../types/payment';
 import { Property } from '../types/property';
 import { Tenant } from '../types/tenant';
@@ -95,21 +96,45 @@ const PaymentsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         
-        const [propertiesData, tenantsData, paymentsData] = await Promise.all([
-          propertyService.getPublicProperties(),
-          tenantService.getAllPublic(),
-          paymentService.getAllPublic()
-        ]);
+        let propertiesData, tenantsData, paymentsData;
+        
+        // Use agent service if user is an agent, otherwise use regular services
+        if (user?.role === 'agent') {
+          [propertiesData, tenantsData, paymentsData] = await Promise.all([
+            agentService.getProperties(),
+            agentService.getTenants(),
+            paymentService.getAllPublic() // Keep using public endpoint for payments list
+          ]);
+        } else {
+          [propertiesData, tenantsData, paymentsData] = await Promise.all([
+            propertyService.getPublicProperties(),
+            tenantService.getAllPublic(),
+            paymentService.getAllPublic()
+          ]);
+        }
 
         if (!isMounted) return;
 
-        if (!Array.isArray(propertiesData) || !Array.isArray(tenantsData.tenants) || !Array.isArray(paymentsData.data)) {
+        // Handle different response formats
+        const properties = Array.isArray(propertiesData) ? propertiesData : [];
+        const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
+        const payments = Array.isArray(paymentsData) ? paymentsData : (paymentsData.data || []);
+
+        if (!Array.isArray(properties) || !Array.isArray(tenants) || !Array.isArray(payments)) {
           throw new Error('Invalid data format received from server');
         }
 
-        setProperties(propertiesData);
-        setTenants(tenantsData.tenants);
-        setPayments(paymentsData.data);
+        setProperties(properties);
+        setTenants(tenants);
+        setPayments(payments);
+        
+        // Debug logging
+        console.log('Loaded properties:', properties);
+        console.log('Loaded payments:', payments);
+        if (payments && payments.length > 0) {
+          console.log('First payment propertyId:', payments[0].propertyId);
+          console.log('First payment propertyId type:', typeof payments[0].propertyId);
+        }
       } catch (err: any) {
         if (!isMounted) return;
         
@@ -135,7 +160,7 @@ const PaymentsPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [authLoading]);
+  }, [authLoading, user?.role]);
 
   // Debounce filter changes
   useEffect(() => {
@@ -154,7 +179,39 @@ const PaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await paymentService.getAllPublic();
+        
+        // Prepare filter parameters
+        const filterParams: any = {};
+        if (debouncedFilters.startDate) {
+          filterParams.startDate = debouncedFilters.startDate.toISOString();
+        }
+        if (debouncedFilters.endDate) {
+          filterParams.endDate = debouncedFilters.endDate.toISOString();
+        }
+        if (debouncedFilters.status) {
+          filterParams.status = debouncedFilters.status;
+        }
+        if (debouncedFilters.paymentMethod) {
+          filterParams.paymentMethod = debouncedFilters.paymentMethod;
+        }
+        if (debouncedFilters.propertyId) {
+          filterParams.propertyId = debouncedFilters.propertyId;
+        }
+        
+        // Use agent service if user is an agent, otherwise use regular payment service
+        let response;
+        if (user?.role === 'agent') {
+          response = await paymentService.getAllPublic(user?.companyId, filterParams);
+        } else {
+          response = await paymentService.getAllPublic(user?.companyId, filterParams);
+        }
+        
+        console.log('Payments response:', response);
+        console.log('Payments data:', response.data);
+        if (response.data && response.data.length > 0) {
+          console.log('First payment propertyId:', response.data[0].propertyId);
+          console.log('First payment propertyId type:', typeof response.data[0].propertyId);
+        }
         setPayments(response.data);
       } catch (err: any) {
         console.error('Error loading payments:', err);
@@ -170,15 +227,22 @@ const PaymentsPage: React.FC = () => {
     };
 
     loadPayments();
-  }, [debouncedFilters]);
+  }, [debouncedFilters, user?.companyId, user?.role]);
 
   // Handle payment creation
   const handleCreatePayment = async (data: PaymentFormData) => {
     try {
       setLoading(true);
       setError(null);
-      const response = await paymentService.createPayment(data);
-      setPayments(prev => [...prev, response]);
+      
+      let response;
+      if (user?.role === 'agent') {
+        response = await agentService.createPayment(data);
+      } else {
+        response = await paymentService.createPayment(data);
+      }
+      
+      setPayments(prev => [...prev, response.data || response]);
       setShowCreateDialog(false);
       setSuccessMessage('Payment created successfully');
     } catch (err: any) {
@@ -199,8 +263,15 @@ const PaymentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await paymentService.updatePayment(id, data);
-      setPayments(prev => prev.map(p => p._id === id ? response : p));
+      
+      let response;
+      if (user?.role === 'agent') {
+        response = await agentService.updatePayment(id, data);
+      } else {
+        response = await paymentService.updatePayment(id, data);
+      }
+      
+      setPayments(prev => prev.map(p => p._id === id ? (response.data || response) : p));
       setShowEditDialog(false);
       setSuccessMessage('Payment updated successfully');
     } catch (err: any) {
@@ -247,18 +318,30 @@ const PaymentsPage: React.FC = () => {
     try {
       const paymentData = {
         ...formData,
-        status: 'pending' as PaymentStatus,
+        status: 'completed' as PaymentStatus, // Always set to completed for agent
         companyId: user.companyId
       };
 
       if (selectedPayment) {
-        const response = await paymentService.updatePayment(selectedPayment._id, paymentData);
-        setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response : p));
+        // Use agent service if user is an agent, otherwise use regular payment service
+        if (user.role === 'agent') {
+          const response = await agentService.updatePayment(selectedPayment._id, paymentData);
+          setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response.data : p));
+        } else {
+          const response = await paymentService.updatePayment(selectedPayment._id, paymentData);
+          setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response : p));
+        }
       } else {
-        // Use accountant endpoint for admin dashboard payments
-        const response = await paymentService.createPaymentAccountant(paymentData);
-        // The accountant endpoint returns { status, data, message }
-        setPayments(prev => [...prev, response.data]);
+        // Use agent service if user is an agent, otherwise use accountant endpoint
+        if (user.role === 'agent') {
+          const response = await agentService.createPayment(paymentData);
+          setPayments(prev => [...prev, response.data]);
+        } else {
+          // Use accountant endpoint for admin dashboard payments
+          const response = await paymentService.createPaymentAccountant(paymentData);
+          // The accountant endpoint returns { status, data, message }
+          setPayments(prev => [...prev, response.data]);
+        }
       }
       
       setShowForm(false);
@@ -273,7 +356,7 @@ const PaymentsPage: React.FC = () => {
         setError(err.response?.data?.message || 'Failed to save payment. Please try again.');
       }
     }
-  }, [selectedPayment, user?.companyId]);
+  }, [selectedPayment, user?.companyId, user?.role]);
 
   const handlePaymentClick = useCallback((payment: Payment) => {
     if (!user?.companyId) {

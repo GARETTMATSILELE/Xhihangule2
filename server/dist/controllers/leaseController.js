@@ -126,6 +126,7 @@ class LeaseController {
                     depositAmount: Number(finalDepositAmount),
                     status: req.body.status || 'active',
                     companyId: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) ? new mongoose_1.default.Types.ObjectId(req.user.companyId) : (req.body.companyId ? new mongoose_1.default.Types.ObjectId(req.body.companyId) : undefined),
+                    ownerId: req.body.ownerId, // <-- Add this line to save ownerId
                     // Additional fields with defaults
                     monthlyRent: Number(req.body.monthlyRent || finalRentAmount),
                     securityDeposit: Number(req.body.securityDeposit || finalDepositAmount),

@@ -28,6 +28,10 @@ interface PropertyFormProps {
 
 const propertyTypes: PropertyType[] = ['apartment', 'house', 'commercial'];
 const commonAmenities = ['Parking', 'Pool', 'Gym', 'Security', 'Balcony', 'Garden', 'Air Conditioning'];
+const rentalTypes = [
+  { value: 'management', label: 'Management' },
+  { value: 'introduction', label: 'Introduction' }
+];
 
 const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onClose }) => {
   const { user, company } = useAuth();
@@ -57,7 +61,9 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
       currentArrears: 0,
       nextLeaseExpiry: new Date(),
       status: 'available',
-      occupiedUnits: 0
+      occupiedUnits: 0,
+      rentalType: 'management',
+      commission: 15
     };
 
     if (initialData) {
@@ -73,6 +79,20 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
   });
 
   const [customAmenity, setCustomAmenity] = useState('');
+
+  // Add effect to update commission default when rentalType or property.type changes
+  React.useEffect(() => {
+    let defaultCommission = 15;
+    if (property.rentalType === 'management') {
+      if (property.type === 'commercial') defaultCommission = 10;
+      else defaultCommission = 15;
+    } else if (property.rentalType === 'introduction') {
+      defaultCommission = 100;
+    }
+    setProperty(prev => ({ ...prev, commission: prev.commission !== undefined && prev.commission !== null && prev.commission !== 0 ? prev.commission : defaultCommission }));
+    // Only set if not already set by user
+    // eslint-disable-next-line
+  }, [property.rentalType, property.type]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -372,6 +392,42 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
               onChange={handleImageUpload}
             />
           </Button>
+        </Grid>
+
+        <Grid item xs={12} sm={6}>
+          <FormControl fullWidth required>
+            <InputLabel>Rental Type</InputLabel>
+            <Select
+              name="rentalType"
+              value={property.rentalType || 'management'}
+              label="Rental Type"
+              onChange={e => {
+                const value = e.target.value as 'management' | 'introduction';
+                setProperty(prev => ({ ...prev, rentalType: value, commission: undefined })); // Reset commission to trigger default
+              }}
+            >
+              {rentalTypes.map(rt => (
+                <MenuItem key={rt.value} value={rt.value}>{rt.label}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            required
+            fullWidth
+            type="number"
+            name="commission"
+            label="Commission (%)"
+            value={property.commission ?? ''}
+            onChange={e => setProperty(prev => ({ ...prev, commission: Number(e.target.value) }))}
+            inputProps={{ min: 0, max: 100, step: 0.1 }}
+            helperText={
+              property.rentalType === 'management'
+                ? (property.type === 'commercial' ? 'Default: 10% for commercial' : 'Default: 15% for residential')
+                : 'Default: 100% for introduction'
+            }
+          />
         </Grid>
 
         <Grid item xs={12}>

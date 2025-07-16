@@ -68,6 +68,9 @@ export interface PaymentFormData {
   currency: Currency;
   leaseId: string;
   companyId: string;
+  rentalPeriodMonth: number;
+  rentalPeriodYear: number;
+  rentUsed?: number;
 }
 
 export interface Payment {
@@ -98,6 +101,16 @@ export interface Payment {
   currency: Currency;
   leaseId: string;
   receiptUrl?: string;
+  rentalPeriodMonth: number;
+  rentalPeriodYear: number;
+  rentUsed?: number;
+}
+
+// Extended Payment interface for populated data from backend
+export interface PopulatedPayment extends Omit<Payment, 'propertyId' | 'tenantId' | 'agentId'> {
+  propertyId: string | { _id: string; name: string; address: string };
+  tenantId: string | { _id: string; firstName: string; lastName: string };
+  agentId: string | { _id: string; firstName: string; lastName: string };
 }
 
 export interface PaymentFilter {

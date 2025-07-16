@@ -62,6 +62,10 @@ const tenantSchema = new mongoose_1.Schema({
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Property'
     },
+    ownerId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User'
+    },
     status: {
         type: String,
         enum: ['Active', 'Inactive', 'Pending'],
@@ -78,4 +82,6 @@ const tenantSchema = new mongoose_1.Schema({
 });
 // Create compound index for email uniqueness per company
 tenantSchema.index({ email: 1, companyId: 1 }, { unique: true });
+// Add index for ownerId for faster filtering
+tenantSchema.index({ ownerId: 1 });
 exports.Tenant = mongoose_1.default.model('Tenant', tenantSchema, collections_1.COLLECTIONS.TENANTS);

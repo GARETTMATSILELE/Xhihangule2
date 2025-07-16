@@ -79,6 +79,8 @@ const PaymentsPage: React.FC = () => {
     currency: 'USD',
     leaseId: '',
     companyId: company?._id || '',
+    rentalPeriodMonth: new Date().getMonth() + 1,
+    rentalPeriodYear: new Date().getFullYear(),
   });
 
   useEffect(() => {
@@ -199,6 +201,8 @@ const PaymentsPage: React.FC = () => {
         currency: 'USD',
         leaseId: '',
         companyId: company._id,
+        rentalPeriodMonth: new Date().getMonth() + 1,
+        rentalPeriodYear: new Date().getFullYear(),
       });
 
       // Refresh data without reloading

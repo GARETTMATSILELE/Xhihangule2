@@ -17,6 +17,8 @@ import {
   SelectChangeEvent,
   Paper,
   Snackbar,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import paymentService from '../../services/paymentService';
 import { usePropertyService } from '../../services/propertyService';
@@ -53,9 +55,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [formData, setFormData] = useState<PaymentFormData>({
     paymentType: initialData?.paymentType || 'rental',
     propertyType: initialData?.propertyType || 'residential',
-    propertyId: initialData?.propertyId || '',
-    tenantId: initialData?.tenantId || '',
-    agentId: initialData?.agentId || '',
+    propertyId: initialData?.propertyId ? String(initialData.propertyId) : '',
+    tenantId: initialData?.tenantId ? String(initialData.tenantId) : '',
+    agentId: initialData?.agentId ? String(initialData.agentId) : '',
     paymentDate: initialData?.paymentDate ? new Date(initialData.paymentDate) : new Date(),
     paymentMethod: initialData?.paymentMethod || 'cash',
     amount: initialData?.amount || 0,
@@ -63,9 +65,93 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     referenceNumber: initialData?.referenceNumber || '',
     notes: initialData?.notes || '',
     currency: initialData?.currency || 'USD',
-    leaseId: initialData?.leaseId || '',
+    leaseId: initialData?.leaseId ? String(initialData.leaseId) : '',
     companyId: '',
+    rentalPeriodMonth: initialData?.rentalPeriodMonth || (new Date().getMonth() + 1),
+    rentalPeriodYear: initialData?.rentalPeriodYear || (new Date().getFullYear()),
   });
+  const [isAdvance, setIsAdvance] = useState(false);
+  const [advanceMonths, setAdvanceMonths] = useState(1);
+  const [advanceStartMonth, setAdvanceStartMonth] = useState(formData.rentalPeriodMonth);
+  const [advanceStartYear, setAdvanceStartYear] = useState(formData.rentalPeriodYear);
+  const [propertyRent, setPropertyRent] = useState<number | null>(null);
+
+  // Calculate total amount for advance payment
+  const monthlyAmount = formData.amount || 0;
+  const totalAdvanceAmount = isAdvance ? monthlyAmount * advanceMonths : monthlyAmount;
+
+  // Update formData when advance payment changes
+  useEffect(() => {
+    if (isAdvance) {
+      setFormData(prev => ({
+        ...prev,
+        rentalPeriodMonth: advanceStartMonth,
+        rentalPeriodYear: advanceStartYear,
+        advanceMonthsPaid: advanceMonths,
+        advancePeriodStart: { month: advanceStartMonth, year: advanceStartYear },
+        advancePeriodEnd: calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths),
+        amount: totalAdvanceAmount,
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        advanceMonthsPaid: 1,
+        advancePeriodStart: undefined,
+        advancePeriodEnd: undefined,
+        amount: monthlyAmount,
+      }));
+    }
+    // eslint-disable-next-line
+  }, [isAdvance, advanceMonths, advanceStartMonth, advanceStartYear, monthlyAmount]);
+
+  // When propertyId changes, fetch rent
+  useEffect(() => {
+    const fetchRent = async () => {
+      if (!formData.propertyId) {
+        setPropertyRent(null);
+        return;
+      }
+      try {
+        // Find property in props first
+        const property = properties.find(p => String(p._id) === String(formData.propertyId));
+        if (property && property.rent) {
+          setPropertyRent(property.rent);
+        } else {
+          // Optionally, fetch from backend if not found
+          const res = await publicApi.get(`/properties/${formData.propertyId}`);
+          setPropertyRent(res.data.rent || null);
+        }
+      } catch (err) {
+        setPropertyRent(null);
+      }
+    };
+    fetchRent();
+  }, [formData.propertyId, properties]);
+
+  // When rent or advance months change, update amount
+  useEffect(() => {
+    if (propertyRent) {
+      if (isAdvance) {
+        setFormData(prev => ({
+          ...prev,
+          amount: propertyRent * advanceMonths,
+          rentUsed: propertyRent,
+        }));
+      } else {
+        setFormData(prev => ({
+          ...prev,
+          amount: propertyRent,
+          rentUsed: propertyRent,
+        }));
+      }
+    }
+  }, [propertyRent, isAdvance, advanceMonths]);
+
+  function calculateAdvanceEnd(startMonth: number, startYear: number, months: number) {
+    const endMonth = ((startMonth - 1 + months - 1) % 12) + 1;
+    const yearsToAdd = Math.floor((startMonth - 1 + months - 1) / 12);
+    return { month: endMonth, year: startYear + yearsToAdd };
+  }
 
   useEffect(() => {
     const fetchData = async () => {
@@ -108,7 +194,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     if (name === 'amount' || name === 'depositAmount') {
       processedValue = value === '' ? 0 : Number(value);
     }
-    
+    // Ensure rentalPeriodMonth is always a number (value is string from Select)
+    if (name === 'rentalPeriodMonth') {
+      processedValue = Number(value);
+    }
     setFormData(prev => ({
       ...prev,
       [name as string]: processedValue,
@@ -265,12 +354,23 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           <Grid item xs={12}>
             <TextField
               fullWidth
-              label="Amount"
+              label="Monthly Rent"
+              value={propertyRent !== null ? propertyRent : ''}
+              InputProps={{ readOnly: true }}
+              helperText="This is the rent for the selected property."
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Amount Paid"
               type="number"
               name="amount"
               value={formData.amount || ''}
               onChange={handleInputChange}
               required
+              helperText={isAdvance ? `Total for ${advanceMonths} months` : 'Enter the amount the client is actually paying'}
             />
           </Grid>
 
@@ -287,16 +387,97 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             />
           </Grid>
 
-          <Grid item xs={12}>
+          {/* Rental Period Selection */}
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth>
+              <InputLabel>Rental Month</InputLabel>
+              <Select
+                name="rentalPeriodMonth"
+                value={formData.rentalPeriodMonth.toString()}
+                onChange={handleInputChange}
+                label="Rental Month"
+                required
+              >
+                {[...Array(12)].map((_, i) => (
+                  <MenuItem key={i + 1} value={(i + 1).toString()}>
+                    {new Date(0, i).toLocaleString('default', { month: 'long' })}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
-              label="Reference Number"
-              name="referenceNumber"
-              value={formData.referenceNumber}
+              label="Rental Year"
+              name="rentalPeriodYear"
+              type="number"
+              value={formData.rentalPeriodYear}
               onChange={handleInputChange}
               required
+              inputProps={{ min: 2000, max: 2100 }}
             />
           </Grid>
+
+          {/* Advance Payment Section */}
+          <Grid item xs={12}>
+            <FormControlLabel
+              control={<Checkbox checked={isAdvance} onChange={e => setIsAdvance(e.target.checked)} />}
+              label="Paying in advance?"
+            />
+          </Grid>
+          {isAdvance && (
+            <>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Number of Months"
+                  type="number"
+                  value={advanceMonths}
+                  onChange={e => setAdvanceMonths(Math.max(1, Number(e.target.value)))}
+                  required
+                  inputProps={{ min: 1, max: 36 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth>
+                  <InputLabel>Start Month</InputLabel>
+                  <Select
+                    name="advanceStartMonth"
+                    value={advanceStartMonth.toString()}
+                    onChange={e => setAdvanceStartMonth(Number(e.target.value))}
+                    label="Start Month"
+                    required
+                  >
+                    {[...Array(12)].map((_, i) => (
+                      <MenuItem key={i + 1} value={(i + 1).toString()}>
+                        {new Date(0, i).toLocaleString('default', { month: 'long' })}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Start Year"
+                  type="number"
+                  value={advanceStartYear}
+                  onChange={e => setAdvanceStartYear(Number(e.target.value))}
+                  required
+                  inputProps={{ min: 2000, max: 2100 }}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="body2">
+                  This payment covers: {new Date(0, advanceStartMonth - 1).toLocaleString('default', { month: 'long' })} {advanceStartYear} to {new Date(0, calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths).month - 1).toLocaleString('default', { month: 'long' })} {calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths).year}
+                </Typography>
+                <Typography variant="body2" color="primary">
+                  Total Amount: {totalAdvanceAmount}
+                </Typography>
+              </Grid>
+            </>
+          )}
 
           <Grid item xs={12}>
             <TextField
@@ -327,6 +508,17 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                 ))}
               </Select>
             </FormControl>
+          </Grid>
+
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Reference Number"
+              name="referenceNumber"
+              value={formData.referenceNumber}
+              InputProps={{ readOnly: true }}
+              helperText="Will be auto-generated after saving."
+            />
           </Grid>
 
           <Grid item xs={12}>

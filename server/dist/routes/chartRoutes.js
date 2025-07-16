@@ -20,6 +20,7 @@ const Property_1 = require("../models/Property");
 const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const User_1 = require("../models/User");
+const Payment_1 = require("../models/Payment");
 const router = express_1.default.Router();
 // Debug middleware to log all requests
 router.use((req, res, next) => {
@@ -234,6 +235,99 @@ router.get('/owner/revenue', auth_1.propertyOwnerAuth, (req, res) => __awaiter(v
     catch (error) {
         console.error('Error fetching owner revenue data:', error);
         res.status(500).json({ message: 'Error fetching revenue data' });
+    }
+}));
+// New endpoint for owner payment data with actual payment records
+router.get('/owner/payments', auth_1.propertyOwnerAuth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'User ID not found' });
+        }
+        if (req.user.role !== 'owner') {
+            return res.status(403).json({ message: 'Owner access required' });
+        }
+        const ownerId = req.user.userId;
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        let propertyIds = [];
+        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+            propertyIds = propertyOwnerContext.properties;
+        }
+        else {
+            // Fallback: get properties where ownerId matches - filter by companyId if available
+            const query = { ownerId: ownerId };
+            if (propertyOwnerContext.companyId) {
+                query.companyId = propertyOwnerContext.companyId;
+            }
+            const properties = yield Property_1.Property.find(query);
+            propertyIds = properties.map(p => p._id);
+        }
+        if (propertyIds.length === 0) {
+            return res.json({
+                type: 'payments',
+                data: []
+            });
+        }
+        // Get payments for these properties - filter by companyId if available
+        const paymentQuery = {
+            propertyId: { $in: propertyIds },
+            paymentType: 'rental' // Only rental payments
+        };
+        if (propertyOwnerContext.companyId) {
+            paymentQuery.companyId = propertyOwnerContext.companyId;
+        }
+        const payments = yield Payment_1.Payment.find(paymentQuery)
+            .populate('propertyId', 'name')
+            .populate('tenantId', 'firstName lastName')
+            .sort({ paymentDate: -1 })
+            .limit(50); // Limit to recent payments
+        // Group payments by month for chart data
+        const monthlyData = {};
+        const currentYear = new Date().getFullYear();
+        payments.forEach((payment) => {
+            const paymentDate = new Date(payment.paymentDate);
+            const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
+            if (!monthlyData[monthKey]) {
+                monthlyData[monthKey] = 0;
+            }
+            monthlyData[monthKey] += payment.amount || 0;
+        });
+        // Convert to chart format
+        const chartData = Object.entries(monthlyData)
+            .map(([month, amount]) => ({
+            month,
+            amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+        }))
+            .sort((a, b) => a.month.localeCompare(b.month))
+            .slice(-12); // Last 12 months
+        // Also provide summary statistics
+        const totalPayments = payments.length;
+        const totalAmount = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+        const averageAmount = totalPayments > 0 ? totalAmount / totalPayments : 0;
+        res.json({
+            type: 'payments',
+            data: chartData,
+            summary: {
+                totalPayments,
+                totalAmount: Math.round(totalAmount * 100) / 100,
+                averageAmount: Math.round(averageAmount * 100) / 100
+            },
+            recentPayments: payments.slice(0, 10).map(payment => {
+                var _a, _b, _c;
+                return ({
+                    id: payment._id,
+                    amount: payment.amount,
+                    paymentDate: payment.paymentDate,
+                    propertyName: ((_a = payment.propertyId) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Property',
+                    tenantName: `${((_b = payment.tenantId) === null || _b === void 0 ? void 0 : _b.firstName) || ''} ${((_c = payment.tenantId) === null || _c === void 0 ? void 0 : _c.lastName) || ''}`.trim() || 'Unknown Tenant',
+                    status: payment.status
+                });
+            })
+        });
+    }
+    catch (error) {
+        console.error('Error fetching owner payment data:', error);
+        res.status(500).json({ message: 'Error fetching payment data' });
     }
 }));
 router.get('/owner/maintenance', auth_1.propertyOwnerAuth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {

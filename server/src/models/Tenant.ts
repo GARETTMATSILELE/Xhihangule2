@@ -8,6 +8,7 @@ export interface ITenant extends Document {
   phone: string;
   companyId: mongoose.Types.ObjectId;
   propertyId?: mongoose.Types.ObjectId;
+  ownerId?: mongoose.Types.ObjectId; // Agent who created this tenant
   status: string;
   idNumber?: string;
   emergencyContact?: string;
@@ -41,6 +42,10 @@ const tenantSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: 'Property'
   },
+  ownerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
   status: {
     type: String,
     enum: ['Active', 'Inactive', 'Pending'],
@@ -58,5 +63,7 @@ const tenantSchema = new Schema({
 
 // Create compound index for email uniqueness per company
 tenantSchema.index({ email: 1, companyId: 1 }, { unique: true });
+// Add index for ownerId for faster filtering
+tenantSchema.index({ ownerId: 1 });
 
 export const Tenant = mongoose.model<ITenant>('Tenant', tenantSchema, COLLECTIONS.TENANTS); 

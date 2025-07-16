@@ -114,6 +114,10 @@ export const createTenant = async (req: Request, res: Response) => {
     if (!req.user?.companyId) {
       throw new AppError('Company ID not found', 401);
     }
+    // Allow only admin, owner, or agent to create tenants
+    if (!['admin', 'owner', 'agent'].includes(req.user.role)) {
+      throw new AppError('Access denied. Admin, Owner, or Agent role required to create tenants.', 403);
+    }
 
     const { firstName, lastName, email, phone, propertyId, status, idNumber, emergencyContact } = req.body;
 

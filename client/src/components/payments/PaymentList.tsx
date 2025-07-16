@@ -32,7 +32,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Download as DownloadIcon, Edit as EditIcon, Print as PrintIcon } from '@mui/icons-material';
-import { Payment, PaymentFilter, PAYMENT_METHODS, SUPPORTED_CURRENCIES } from '../../types/payment';
+import { Payment, PaymentFilter, PAYMENT_METHODS, SUPPORTED_CURRENCIES, PopulatedPayment } from '../../types/payment';
 import { Lease } from '../../types/lease';
 import { Tenant } from '../../types/tenant';
 import { Property } from '../../types/property';
@@ -150,6 +150,23 @@ const PaymentList: React.FC<PaymentListProps> = ({
     setSelectedReceipt(null);
   };
 
+  // Helper function to get property name
+  const getPropertyName = useCallback((propertyId: string | { _id: string; name: string; address: string } | null | undefined) => {
+    if (!propertyId) return 'Unknown Property';
+    // If propertyId is already populated (an object with name)
+    if (typeof propertyId === 'object' && propertyId.name) {
+      return propertyId.name;
+    }
+    // If propertyId is a string, look it up in the properties array
+    if (typeof propertyId === 'string') {
+      const property = properties.find(p => p._id === propertyId);
+      if (property) {
+        return property.name;
+      }
+    }
+    return 'Unknown Property';
+  }, [properties]);
+
   const renderMobilePaymentCard = (payment: Payment) => (
     <Card key={payment._id} sx={{ mb: 2 }}>
       <CardContent>
@@ -165,6 +182,9 @@ const PaymentList: React.FC<PaymentListProps> = ({
         </Box>
         <Typography color="textSecondary" gutterBottom>
           {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'No date'}
+        </Typography>
+        <Typography variant="body2" gutterBottom>
+          Property: {getPropertyName(payment.propertyId)}
         </Typography>
         <Typography variant="body2" gutterBottom>
           Method: {(payment.paymentMethod || 'unknown').replace('_', ' ').toUpperCase()}
@@ -300,6 +320,27 @@ const PaymentList: React.FC<PaymentListProps> = ({
             </Select>
           </FormControl>
         </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <FormControl fullWidth size="small">
+            <InputLabel>Property</InputLabel>
+            <Select
+              value={filters.propertyId || ''}
+              onChange={(e) => {
+                if (e.target.value !== filters.propertyId) {
+                  handleFilterChange('propertyId', e.target.value);
+                }
+              }}
+              label="Property"
+            >
+              <MenuItem value="">All Properties</MenuItem>
+              {properties.map(property => (
+                <MenuItem key={property._id} value={property._id}>
+                  {property.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
       </Grid>
 
       {loading ? (
@@ -316,6 +357,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
             <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
+                <TableCell>Property</TableCell>
                 <TableCell>Amount</TableCell>
                 <TableCell>Method</TableCell>
                 <TableCell>Status</TableCell>
@@ -328,6 +370,9 @@ const PaymentList: React.FC<PaymentListProps> = ({
                 <TableRow key={payment._id}>
                   <TableCell>
                     {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'No date'}
+                  </TableCell>
+                  <TableCell>
+                    {getPropertyName(payment.propertyId)}
                   </TableCell>
                   <TableCell>
                     {payment.currency} {(payment.amount || 0).toFixed(2)}

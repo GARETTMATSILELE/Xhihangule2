@@ -47,16 +47,13 @@ export const getPayment = async (req: Request, res: Response) => {
 // Helper function to calculate commission
 const calculateCommission = (
   amount: number,
-  propertyType: 'residential' | 'commercial'
+  commissionPercentage: number
 ) => {
-  const baseCommissionRate = propertyType === 'residential' ? 15 : 10;
-
-  const totalCommission = (amount * baseCommissionRate) / 100;
+  const totalCommission = (amount * commissionPercentage) / 100;
   const preaFee = totalCommission * 0.03;
   const remainingCommission = totalCommission - preaFee;
   const agentShare = remainingCommission * 0.6;
   const agencyShare = remainingCommission * 0.4;
-
   return {
     totalCommission,
     preaFee,
@@ -80,6 +77,11 @@ export const createPayment = async (req: Request, res: Response) => {
       paymentMethod,
       status,
       companyId,
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
     } = req.body;
 
     // Validate required fields
@@ -88,6 +90,39 @@ export const createPayment = async (req: Request, res: Response) => {
         status: 'error',
         message: 'Missing required fields: leaseId, amount, paymentDate, paymentMethod, status',
       });
+    }
+    // Validate advance payment fields
+    if (advanceMonthsPaid && advancePeriodStart && advancePeriodEnd) {
+      // Check for overlapping advance payments for this lease
+      const overlap = await Payment.findOne({
+        leaseId,
+        $or: [
+          {
+            'advancePeriodStart.year': { $lte: advancePeriodEnd.year },
+            'advancePeriodEnd.year': { $gte: advancePeriodStart.year },
+            'advancePeriodStart.month': { $lte: advancePeriodEnd.month },
+            'advancePeriodEnd.month': { $gte: advancePeriodStart.month },
+          },
+          {
+            rentalPeriodYear: { $gte: advancePeriodStart.year, $lte: advancePeriodEnd.year },
+            rentalPeriodMonth: { $gte: advancePeriodStart.month, $lte: advancePeriodEnd.month },
+          }
+        ]
+      });
+      if (overlap) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Overlapping advance payment already exists for this period.'
+        });
+      }
+      // Validate amount
+      const lease = await Lease.findById(leaseId);
+      if (lease && amount !== lease.rentAmount * advanceMonthsPaid) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Amount must equal rent (${lease.rentAmount}) x months (${advanceMonthsPaid}) = ${lease.rentAmount * advanceMonthsPaid}`
+        });
+      }
     }
 
     // Get lease details to extract property and tenant information
@@ -106,19 +141,30 @@ export const createPayment = async (req: Request, res: Response) => {
         message: 'Property not found',
       });
     }
-
-    // Get agent details
-    const agent = await User.findById(lease.tenantId);
-    if (!agent) {
-      return res.status(404).json({
-        message: 'Tenant not found',
-      });
+    const rent = property.rent || lease.rentAmount;
+    // For advance payments, validate amount
+    if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+      const expectedAmount = rent * advanceMonthsPaid;
+      if (amount !== expectedAmount) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+        });
+      }
+    } else {
+      // For single month, validate amount
+      if (amount !== rent) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Amount must equal rent (${rent}) for the selected month.`
+        });
+      }
     }
 
-    // Calculate commission based on property type
-    const commissionDetails = calculateCommission(
+    // Calculate commission based on property commission percentage
+    const paymentCommissionDetails = calculateCommission(
       amount,
-      'residential'
+      property.commission || 0
     );
 
     // Create payment record
@@ -135,25 +181,42 @@ export const createPayment = async (req: Request, res: Response) => {
       agentId: lease.tenantId, // Use tenant ID as agent ID since lease doesn't have agentId
       processedBy: lease.tenantId, // Use tenant ID as processedBy since no agent ID
       depositAmount: 0, // Default value
-      referenceNumber: `PAY-${Date.now()}`, // Generate reference number
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
+      referenceNumber: '', // Placeholder, will update after save
       notes: '', // Default empty notes
-      commissionDetails: {
-        agentShare: 0,
-        agencyShare: 0,
-        totalCommission: 0,
-        preaFee: 0,
-        ownerAmount: amount, // Full amount goes to owner initially
-      },
+      commissionDetails: paymentCommissionDetails,
+      rentUsed: rent, // Store the rent used for this payment
     });
 
     await payment.save();
+    // Generate reference number after save (using payment._id)
+    payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
+    await payment.save();
+
+    // If depositAmount > 0, record in rentaldeposits
+    if (payment.depositAmount && payment.depositAmount > 0) {
+      const { RentalDeposit } = require('../models/rentalDeposit');
+      await RentalDeposit.create({
+        propertyId: payment.propertyId,
+        agentId: payment.agentId,
+        companyId: payment.companyId,
+        tenantId: payment.tenantId,
+        depositAmount: payment.depositAmount,
+        depositDate: payment.paymentDate,
+        paymentId: payment._id,
+      });
+    }
 
     // Update company revenue
     await Company.findByIdAndUpdate(
       companyId || lease.companyId,
       {
         $inc: {
-          revenue: commissionDetails.agencyShare,
+          revenue: paymentCommissionDetails.agencyShare,
         },
       }
     );
@@ -163,7 +226,7 @@ export const createPayment = async (req: Request, res: Response) => {
       lease.tenantId, // Use tenant ID since no agent ID
       {
         $inc: {
-          commission: commissionDetails.agentShare,
+          commission: paymentCommissionDetails.agentShare,
         },
       }
     );
@@ -174,10 +237,16 @@ export const createPayment = async (req: Request, res: Response) => {
         property.ownerId,
         {
           $inc: {
-            balance: commissionDetails.ownerAmount,
+            balance: paymentCommissionDetails.ownerAmount,
           },
         }
       );
+    }
+
+    // Update property arrears after payment
+    if (property.currentArrears !== undefined) {
+      const arrears = property.currentArrears - amount;
+      await Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
     }
 
     res.status(201).json({
@@ -217,6 +286,11 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       currency,
       companyId,
       processedBy,
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
     } = req.body;
 
     // Validate required fields
@@ -235,27 +309,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         message: 'Property not found',
       });
     }
-
-    // Get tenant details
-    const tenant = await Tenant.findById(tenantId);
-    if (!tenant) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Tenant not found',
-      });
-    }
-
-    // Get agent details
-    const agent = await User.findById(agentId);
-    if (!agent) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Agent not found',
-      });
-    }
-
-    // Calculate commission based on property type
-    const commissionDetails = calculateCommission(amount, propertyType);
+    const commissionPercentage = property.commission || 0;
+    // Calculate commission based on property commission percentage
+    const accountantCommissionDetails = calculateCommission(amount, commissionPercentage);
 
     // Create payment record
     const payment = new Payment({
@@ -269,22 +325,43 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       paymentMethod,
       amount,
       depositAmount: depositAmount || 0,
-      referenceNumber: referenceNumber || `PAY-${Date.now()}`,
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
+      referenceNumber: '', // Placeholder, will update after save
       notes: notes || '',
       processedBy: processedBy || req.user.userId,
-      commissionDetails,
+      commissionDetails: accountantCommissionDetails,
       status: 'completed',
       currency: currency || 'USD',
     });
 
     await payment.save();
+    payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
+    await payment.save();
+
+    // If depositAmount > 0, record in rentaldeposits
+    if (payment.depositAmount && payment.depositAmount > 0) {
+      const { RentalDeposit } = require('../models/rentalDeposit');
+      await RentalDeposit.create({
+        propertyId: payment.propertyId,
+        agentId: payment.agentId,
+        companyId: payment.companyId,
+        tenantId: payment.tenantId,
+        depositAmount: payment.depositAmount,
+        depositDate: payment.paymentDate,
+        paymentId: payment._id,
+      });
+    }
 
     // Update company revenue
     await Company.findByIdAndUpdate(
       companyId || req.user.companyId,
       {
         $inc: {
-          revenue: commissionDetails.agencyShare,
+          revenue: accountantCommissionDetails.agencyShare,
         },
       }
     );
@@ -294,7 +371,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       agentId,
       {
         $inc: {
-          commission: commissionDetails.agentShare,
+          commission: accountantCommissionDetails.agentShare,
         },
       }
     );
@@ -305,10 +382,16 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         property.ownerId,
         {
           $inc: {
-            balance: commissionDetails.ownerAmount,
+            balance: accountantCommissionDetails.ownerAmount,
           },
         }
       );
+    }
+
+    // Update property arrears after payment
+    if (property.currentArrears !== undefined) {
+      const arrears = property.currentArrears - amount;
+      await Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
     }
 
     console.log('Accountant payment created successfully:', { id: payment._id, amount: payment.amount });
@@ -508,6 +591,21 @@ export const getPaymentsPublic = async (req: Request, res: Response) => {
       query.paymentMethod = req.query.paymentMethod;
     }
 
+    if (req.query.propertyId) {
+      query.propertyId = new mongoose.Types.ObjectId(req.query.propertyId as string);
+    }
+
+    // Date filtering
+    if (req.query.startDate || req.query.endDate) {
+      query.paymentDate = {};
+      if (req.query.startDate) {
+        query.paymentDate.$gte = new Date(req.query.startDate as string);
+      }
+      if (req.query.endDate) {
+        query.paymentDate.$lte = new Date(req.query.endDate as string);
+      }
+    }
+
     console.log('Public payments query:', query);
 
     const payments = await Payment.find(query)
@@ -588,6 +686,10 @@ export const getPaymentByIdPublic = async (req: Request, res: Response) => {
 
 // Public endpoint for creating payments (for admin dashboard) - no authentication required
 export const createPaymentPublic = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
   try {
     console.log('Public payment creation request:', {
       body: req.body,
@@ -601,6 +703,11 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       paymentMethod,
       status,
       companyId,
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
     } = req.body;
 
     // Validate required fields
@@ -620,6 +727,33 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       });
     }
 
+    // Get property details
+    const property = await Property.findById(lease.propertyId);
+    if (!property) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
+    const rent = property.rent || lease.rentAmount;
+    // For advance payments, validate amount
+    if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+      const expectedAmount = rent * advanceMonthsPaid;
+      if (amount !== expectedAmount) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+        });
+      }
+    } else {
+      // For single month, validate amount
+      if (amount !== rent) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Amount must equal rent (${rent}) for the selected month.`
+        });
+      }
+    }
+    // Calculate commission based on property commission percentage
+    const publicCommissionDetails = calculateCommission(amount, property.commission || 0);
+
     // Create payment record
     const payment = new Payment({
       amount,
@@ -634,18 +768,34 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       agentId: lease.tenantId, // Use tenant ID as agent ID since lease doesn't have agentId
       processedBy: lease.tenantId, // Use tenant ID as processedBy since no agent ID
       depositAmount: 0, // Default value
-      referenceNumber: `PAY-${Date.now()}`, // Generate reference number
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
+      referenceNumber: '', // Placeholder, will update after save
       notes: '', // Default empty notes
-      commissionDetails: {
-        agentShare: 0,
-        agencyShare: 0,
-        totalCommission: 0,
-        preaFee: 0,
-        ownerAmount: amount, // Full amount goes to owner initially
-      },
+      commissionDetails: publicCommissionDetails,
+      rentUsed: rent, // Store the rent used for this payment
     });
 
     await payment.save();
+    payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
+    await payment.save();
+
+    // If depositAmount > 0, record in rentaldeposits
+    if (payment.depositAmount && payment.depositAmount > 0) {
+      const { RentalDeposit } = require('../models/rentalDeposit');
+      await RentalDeposit.create({
+        propertyId: payment.propertyId,
+        agentId: payment.agentId,
+        companyId: payment.companyId,
+        tenantId: payment.tenantId,
+        depositAmount: payment.depositAmount,
+        depositDate: payment.paymentDate,
+        paymentId: payment._id,
+      });
+    }
 
     console.log('Payment created successfully:', { id: payment._id, amount: payment.amount });
 

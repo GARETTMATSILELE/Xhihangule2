@@ -19,7 +19,13 @@ import {
   Alert,
   Divider,
   Chip,
-  Skeleton
+  Skeleton,
+  TableContainer,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody
 } from '@mui/material';
 import {
   BarChart,
@@ -70,9 +76,9 @@ interface Property {
 
 interface MaintenanceRequest {
   _id: string;
-  propertyId: string; // Changed from object to string to match backend
-  propertyName?: string; // Optional field for populated property name
-  propertyAddress?: string; // Optional field for populated property address
+  propertyId: string;
+  propertyName?: string;
+  propertyAddress?: string;
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high';
@@ -83,7 +89,15 @@ interface MaintenanceRequest {
 
 interface ChartData {
   occupancy?: any[];
-  payment?: any[];
+  payment?: {
+    data: any[];
+    summary?: {
+      totalPayments: number;
+      totalAmount: number;
+      averageAmount: number;
+    };
+    recentPayments?: any[];
+  };
   maintenance?: any[];
 }
 
@@ -119,6 +133,36 @@ const OwnerDashboard: React.FC = () => {
     setChartData({});
     setError('');
     setChartErrors({});
+  }, []);
+
+  // Helper function to transform property data for charts
+  const transformPropertyDataForCharts = useCallback((properties: Property[]) => {
+    return properties.map(property => ({
+      name: property.name || 'Unnamed Property',
+      occupancyRate: property.occupancyRate || 0,
+      totalRentCollected: property.totalRentCollected || 0,
+      currentArrears: property.currentArrears || 0,
+      units: property.units || 1,
+      occupiedUnits: property.occupiedUnits || 0,
+      vacantUnits: Math.max(0, (property.units || 1) - (property.occupiedUnits || 0))
+    }));
+  }, []);
+
+  // Helper function to transform maintenance data for charts
+  const transformMaintenanceDataForCharts = useCallback((requests: MaintenanceRequest[]) => {
+    const statusCounts = {
+      pending: requests.filter(req => req.status === 'pending').length,
+      in_progress: requests.filter(req => req.status === 'in_progress').length,
+      completed: requests.filter(req => req.status === 'completed').length,
+      cancelled: requests.filter(req => req.status === 'cancelled').length
+    };
+
+    return [
+      { name: 'Pending', value: statusCounts.pending },
+      { name: 'In Progress', value: statusCounts.in_progress },
+      { name: 'Completed', value: statusCounts.completed },
+      { name: 'Cancelled', value: statusCounts.cancelled }
+    ].filter(item => item.value > 0); // Only show categories with data
   }, []);
 
   useEffect(() => {
@@ -158,26 +202,58 @@ const OwnerDashboard: React.FC = () => {
         }
 
         // Fetch chart data individually with error handling
-        const chartTypes = ['occupancy', 'revenue', 'maintenance'];
+        const chartTypes = ['occupancy', 'payment', 'maintenance'];
         const newChartData: ChartData = {};
         const newChartErrors: {[key: string]: string} = {};
 
         for (const type of chartTypes) {
           try {
             const chartResponse = await getChartData(type);
+            console.log(`OwnerDashboard: ${type} chart response:`, chartResponse);
             if (isMounted) {
               if (type === 'occupancy') {
+                // Transform the occupancy data to match chart expectations
+                if (chartResponse.data && Array.isArray(chartResponse.data)) {
                 newChartData.occupancy = chartResponse.data;
-              } else if (type === 'revenue') {
-                newChartData.payment = chartResponse.data;
+                } else {
+                  // Fallback: create occupancy data from properties
+                  const transformedData = transformPropertyDataForCharts(propertiesRes.data);
+                  newChartData.occupancy = transformedData.map(prop => ({
+                    name: prop.name,
+                    occupied: prop.occupiedUnits,
+                    vacant: prop.vacantUnits
+                  }));
+                }
+              } else if (type === 'payment') {
+                // The payment endpoint returns the entire object with data, summary, and recentPayments
+                newChartData.payment = chartResponse;
+                console.log(`OwnerDashboard: Payment data set:`, newChartData.payment);
               } else if (type === 'maintenance') {
+                // Transform the maintenance data to match chart expectations
+                if (chartResponse.data && Array.isArray(chartResponse.data)) {
                 newChartData.maintenance = chartResponse.data;
+                } else {
+                  // Fallback: create maintenance data from maintenance requests
+                  newChartData.maintenance = transformMaintenanceDataForCharts(maintenanceRes.data);
+                }
               }
             }
           } catch (err: any) {
             console.error(`Error fetching ${type} chart data:`, err);
             if (isMounted) {
               newChartErrors[type] = err.response?.data?.message || `Failed to load ${type} data`;
+              
+              // Provide fallback data for charts
+              if (type === 'occupancy') {
+                const transformedData = transformPropertyDataForCharts(propertiesRes.data);
+                newChartData.occupancy = transformedData.map(prop => ({
+                  name: prop.name,
+                  occupied: prop.occupiedUnits,
+                  vacant: prop.vacantUnits
+                }));
+              } else if (type === 'maintenance') {
+                newChartData.maintenance = transformMaintenanceDataForCharts(maintenanceRes.data);
+              }
             }
           }
         }
@@ -209,7 +285,7 @@ const OwnerDashboard: React.FC = () => {
       }
       cleanup();
     };
-  }, [isAuthenticated, cleanup]);
+  }, [isAuthenticated, cleanup, transformPropertyDataForCharts, transformMaintenanceDataForCharts]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
@@ -234,7 +310,14 @@ const OwnerDashboard: React.FC = () => {
   const occupiedUnits = properties.reduce((sum, property) => sum + (property.occupiedUnits || 0), 0);
   const totalUnits = properties.reduce((sum, property) => sum + (property.units || 1), 0);
   const vacantUnits = Math.max(0, totalUnits - occupiedUnits);
-  const totalRentCollected = properties.reduce((sum, property) => sum + (property.totalRentCollected || 0), 0);
+  
+  // Get total rent collected from payment data (same source as chart) for consistency
+  const totalRentCollected = chartData?.payment?.summary?.totalAmount || 0;
+  
+  // Fallback to property data if payment data is not available
+  const totalRentCollectedFromProperties = properties.reduce((sum, property) => sum + (property.totalRentCollected || 0), 0);
+  const finalTotalRentCollected = totalRentCollected > 0 ? totalRentCollected : totalRentCollectedFromProperties;
+  
   const totalArrears = properties.reduce((sum, property) => sum + (property.currentArrears || 0), 0);
   const pendingMaintenance = maintenanceRequests.filter(req => req.status === 'pending').length;
   const completedMaintenance = maintenanceRequests.filter(req => req.status === 'completed').length;
@@ -351,26 +434,29 @@ const OwnerDashboard: React.FC = () => {
                             <Typography color="textSecondary" gutterBottom>
                               {property.address || 'No address provided'}
                             </Typography>
-                            <Typography variant="body2">
-                              Status: <Chip 
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                              <Typography variant="body2" component="span">
+                                Status:
+                              </Typography>
+                              <Chip 
                                 label={property.status || 'unknown'} 
                                 size="small" 
                                 color={property.status === 'available' ? 'success' : property.status === 'rented' ? 'primary' : 'warning'} 
                               />
-                            </Typography>
-                            <Typography variant="body2">
+                            </Box>
+                            <Typography variant="body2" sx={{ mb: 1 }}>
                               Type: {property.type || 'N/A'}
                             </Typography>
-                            <Typography variant="body2">
+                            <Typography variant="body2" sx={{ mb: 1 }}>
                               Rent: ${property.rent ? property.rent.toLocaleString() : '0'}/month
                             </Typography>
-                            <Typography variant="body2">
+                            <Typography variant="body2" sx={{ mb: 1 }}>
                               Occupancy Rate: {property.occupancyRate || 0}%
                             </Typography>
-                            <Typography variant="body2">
+                            <Typography variant="body2" sx={{ mb: 1 }}>
                               Total Rent Collected: ${(property.totalRentCollected || 0).toLocaleString()}
                             </Typography>
-                            <Typography variant="body2">
+                            <Typography variant="body2" sx={{ mb: 1 }}>
                               Current Arrears: ${(property.currentArrears || 0).toLocaleString()}
                             </Typography>
                           </CardContent>
@@ -388,12 +474,13 @@ const OwnerDashboard: React.FC = () => {
                   </Grid>
 
                   {/* Property Performance Chart */}
-                  <Box sx={{ height: 400 }}>
+                  {properties.length > 0 && (
+                    <Box sx={{ height: 400, mb: 4 }}>
                     <Typography variant="h6" gutterBottom>
                       Property Performance Overview
                     </Typography>
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={properties}>
+                        <BarChart data={transformPropertyDataForCharts(properties)}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" />
                         <YAxis />
@@ -404,9 +491,10 @@ const OwnerDashboard: React.FC = () => {
                       </BarChart>
                     </ResponsiveContainer>
                   </Box>
+                  )}
 
                   {/* Occupancy Trend Chart */}
-                  {chartData?.occupancy && !chartErrors.occupancy && (
+                  {chartData?.occupancy && chartData.occupancy.length > 0 && !chartErrors.occupancy && (
                     <Box sx={{ height: 400, mt: 4 }}>
                       <Typography variant="h6" gutterBottom>
                         Occupancy Trend
@@ -445,7 +533,12 @@ const OwnerDashboard: React.FC = () => {
                     <Grid item xs={12} md={6} lg={4}>
                       <Paper sx={{ p: 2 }}>
                         <Typography variant="subtitle1">Total Rent Collected</Typography>
-                        <Typography variant="h4">${totalRentCollected.toLocaleString()}</Typography>
+                        <Typography variant="h4">${finalTotalRentCollected.toLocaleString()}</Typography>
+                        {totalRentCollected > 0 && (
+                          <Typography variant="caption" color="textSecondary">
+                            From payment records
+                          </Typography>
+                        )}
                       </Paper>
                     </Grid>
                     <Grid item xs={12} md={6} lg={4}>
@@ -457,35 +550,95 @@ const OwnerDashboard: React.FC = () => {
                     <Grid item xs={12} md={6} lg={4}>
                       <Paper sx={{ p: 2 }}>
                         <Typography variant="subtitle1">Net Income</Typography>
-                        <Typography variant="h4" color={totalRentCollected - totalArrears >= 0 ? 'success' : 'error'}>
-                          ${(totalRentCollected - totalArrears).toLocaleString()}
+                        <Typography variant="h4" color={finalTotalRentCollected - totalArrears >= 0 ? 'success' : 'error'}>
+                          ${(finalTotalRentCollected - totalArrears).toLocaleString()}
                         </Typography>
                       </Paper>
                     </Grid>
                   </Grid>
 
-                  {/* Income vs Expenses Chart */}
-                  {chartData?.payment && !chartErrors.payment && (
-                    <Box sx={{ height: 400 }}>
-                      <Typography variant="h6" gutterBottom>Income vs Expenses</Typography>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData.payment}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Bar dataKey="income" fill="#8884d8" name="Income" />
-                          <Bar dataKey="expenses" fill="#82ca9d" name="Expenses" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </Box>
-                  )}
+                  {/* Monthly Payment Trends Chart */}
+                  {chartData?.payment?.data && chartData.payment.data.length > 0 && !chartErrors.payment ? (
+                      <Box sx={{ height: 400, mb: 4 }}>
+                        <Typography variant="h6" gutterBottom>Monthly Payment Trends</Typography>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData.payment.data}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="month" />
+                            <YAxis />
+                            <Tooltip formatter={(value) => [`$${value}`, 'Amount']} />
+                            <Legend />
+                            <Line type="monotone" dataKey="amount" stroke="#8884d8" name="Payment Amount" />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </Box>
+                  ) : null}
                   {chartErrors.payment && (
                     <Box sx={{ mt: 4 }}>
                       <Alert severity="warning">
                         Unable to load payment data: {chartErrors.payment}
                       </Alert>
+                    </Box>
+                  )}
+
+                  {/* Debug: Show when no payment data */}
+                  {!chartData?.payment?.data && !chartErrors.payment && (
+                    <Box sx={{ mt: 4 }}>
+                      <Alert severity="info">
+                        No payment data available. This might be because there are no rental payments for your properties yet.
+                        Total rent collected is calculated from property records as a fallback.
+                      </Alert>
+                    </Box>
+                  )}
+
+                  {/* Data source indicator */}
+                  {totalRentCollected > 0 && totalRentCollectedFromProperties > 0 && Math.abs(totalRentCollected - totalRentCollectedFromProperties) > 1 && (
+                    <Box sx={{ mt: 2 }}>
+                      <Alert severity="info">
+                        <Typography variant="body2">
+                          <strong>Data Source Note:</strong> Total rent collected is calculated from actual payment records ({totalRentCollected.toLocaleString()}) 
+                          rather than property summary data ({totalRentCollectedFromProperties.toLocaleString()}) for accuracy.
+                        </Typography>
+                      </Alert>
+                    </Box>
+                  )}
+
+                  {/* Recent Payments Table */}
+                  {chartData?.payment?.recentPayments && chartData.payment.recentPayments.length > 0 && (
+                    <Box sx={{ mt: 4 }}>
+                      <Typography variant="h6" gutterBottom>Recent Payments</Typography>
+                      <TableContainer component={Paper}>
+                        <Table>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Date</TableCell>
+                              <TableCell>Property</TableCell>
+                              <TableCell>Tenant</TableCell>
+                              <TableCell>Amount</TableCell>
+                              <TableCell>Status</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {chartData.payment.recentPayments.map((payment: any) => (
+                              <TableRow key={payment.id}>
+                                <TableCell>
+                                  {new Date(payment.paymentDate).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell>{payment.propertyName}</TableCell>
+                                <TableCell>{payment.tenantName}</TableCell>
+                                <TableCell>${(payment.amount || 0).toFixed(2)}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={payment.status || 'unknown'}
+                                    color={payment.status === 'completed' ? 'success' : 'warning'}
+                                    size="small"
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
                     </Box>
                   )}
                 </Box>
@@ -531,20 +684,26 @@ const OwnerDashboard: React.FC = () => {
                             <Typography color="textSecondary" gutterBottom>
                               Property: {request.propertyName || 'Unknown Property'}
                             </Typography>
-                            <Typography variant="body2">
-                              Priority: <Chip 
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                              <Typography variant="body2" component="span">
+                                Priority:
+                              </Typography>
+                              <Chip 
                                 label={request.priority} 
                                 size="small" 
                                 color={request.priority === 'high' ? 'error' : request.priority === 'medium' ? 'warning' : 'success'} 
                               />
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                              <Typography variant="body2" component="span">
+                                Status:
                             </Typography>
-                            <Typography variant="body2">
-                              Status: <Chip 
+                              <Chip 
                                 label={request.status} 
                                 size="small" 
                                 color={request.status === 'completed' ? 'success' : request.status === 'in_progress' ? 'primary' : 'default'} 
                               />
-                            </Typography>
+                            </Box>
                             <Typography variant="body2">
                               Estimated Cost: ${(request.estimatedCost || 0).toLocaleString()}
                             </Typography>
@@ -566,7 +725,7 @@ const OwnerDashboard: React.FC = () => {
                   </Grid>
 
                   {/* Maintenance by Category Chart */}
-                  {chartData?.maintenance && !chartErrors.maintenance && (
+                  {chartData?.maintenance && chartData.maintenance.length > 0 && !chartErrors.maintenance && (
                     <Box sx={{ height: 400 }}>
                       <Typography variant="h6" gutterBottom>Maintenance by Category</Typography>
                       <ResponsiveContainer width="100%" height="100%">

@@ -6,6 +6,7 @@ import { Property } from '../models/Property';
 import { MaintenanceRequest } from '../models/MaintenanceRequest';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
+import { Payment } from '../models/Payment';
 import mongoose from 'mongoose';
 
 const router = express.Router();
@@ -245,6 +246,106 @@ router.get('/owner/revenue', propertyOwnerAuth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching owner revenue data:', error);
     res.status(500).json({ message: 'Error fetching revenue data' });
+  }
+});
+
+// New endpoint for owner payment data with actual payment records
+router.get('/owner/payments', propertyOwnerAuth, async (req, res) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User ID not found' });
+    }
+
+    if (req.user.role !== 'owner') {
+      return res.status(403).json({ message: 'Owner access required' });
+    }
+
+    const ownerId = req.user.userId;
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+
+    let propertyIds = [];
+    if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+      propertyIds = propertyOwnerContext.properties;
+    } else {
+      // Fallback: get properties where ownerId matches - filter by companyId if available
+      const query: any = { ownerId: ownerId };
+      if (propertyOwnerContext.companyId) {
+        query.companyId = propertyOwnerContext.companyId;
+      }
+      const properties = await Property.find(query);
+      propertyIds = properties.map(p => p._id);
+    }
+
+    if (propertyIds.length === 0) {
+      return res.json({
+        type: 'payments',
+        data: []
+      });
+    }
+
+    // Get payments for these properties - filter by companyId if available
+    const paymentQuery: any = { 
+      propertyId: { $in: propertyIds },
+      paymentType: 'rental' // Only rental payments
+    };
+    if (propertyOwnerContext.companyId) {
+      paymentQuery.companyId = propertyOwnerContext.companyId;
+    }
+
+    const payments = await Payment.find(paymentQuery)
+      .populate('propertyId', 'name')
+      .populate('tenantId', 'firstName lastName')
+      .sort({ paymentDate: -1 })
+      .limit(50); // Limit to recent payments
+
+    // Group payments by month for chart data
+    const monthlyData: { [key: string]: number } = {};
+    const currentYear = new Date().getFullYear();
+    
+    payments.forEach((payment: any) => {
+      const paymentDate = new Date(payment.paymentDate);
+      const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = 0;
+      }
+      monthlyData[monthKey] += payment.amount || 0;
+    });
+
+    // Convert to chart format
+    const chartData = Object.entries(monthlyData)
+      .map(([month, amount]) => ({
+        month,
+        amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-12); // Last 12 months
+
+    // Also provide summary statistics
+    const totalPayments = payments.length;
+    const totalAmount = payments.reduce((sum: number, payment: any) => sum + (payment.amount || 0), 0);
+    const averageAmount = totalPayments > 0 ? totalAmount / totalPayments : 0;
+
+    res.json({
+      type: 'payments',
+      data: chartData,
+      summary: {
+        totalPayments,
+        totalAmount: Math.round(totalAmount * 100) / 100,
+        averageAmount: Math.round(averageAmount * 100) / 100
+      },
+      recentPayments: payments.slice(0, 10).map(payment => ({
+        id: payment._id,
+        amount: payment.amount,
+        paymentDate: payment.paymentDate,
+        propertyName: (payment.propertyId as any)?.name || 'Unknown Property',
+        tenantName: `${(payment.tenantId as any)?.firstName || ''} ${(payment.tenantId as any)?.lastName || ''}`.trim() || 'Unknown Tenant',
+        status: payment.status
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching owner payment data:', error);
+    res.status(500).json({ message: 'Error fetching payment data' });
   }
 });
 

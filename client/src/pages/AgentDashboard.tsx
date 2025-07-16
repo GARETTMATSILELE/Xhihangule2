@@ -22,7 +22,7 @@ import { AgentSidebar } from '../components/Layout/AgentSidebar';
 import { Header } from '../components/Layout/Header';
 import { Properties } from './Properties/Properties';
 import { Tenants } from './Tenants/Tenants';
-import { LeaseList } from './leases/LeaseList';
+import AgentLeasesPage from './agent/AgentLeasesPage';
 import PaymentsPageWrapper from '../components/payments/PaymentsPageWrapper';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -208,7 +208,7 @@ const AgentDashboard: React.FC = () => {
             } />
             <Route path="properties" element={<Properties />} />
             <Route path="tenants" element={<Tenants />} />
-            <Route path="leases" element={<LeaseList />} />
+            <Route path="leases" element={<AgentLeasesPage />} />
             <Route path="payments" element={<PaymentsPageWrapper userRole="agent" />} />
             <Route path="files" element={<Files />} />
             <Route path="maintenance" element={<MaintenancePageWrapper userRole="agent" />} />

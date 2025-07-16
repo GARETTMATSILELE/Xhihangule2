@@ -126,6 +126,10 @@ const createTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found', 401);
         }
+        // Allow only admin, owner, or agent to create tenants
+        if (!['admin', 'owner', 'agent'].includes(req.user.role)) {
+            throw new errorHandler_1.AppError('Access denied. Admin, Owner, or Agent role required to create tenants.', 403);
+        }
         const { firstName, lastName, email, phone, propertyId, status, idNumber, emergencyContact } = req.body;
         // Validate required fields
         if (!firstName || !lastName || !email || !phone) {

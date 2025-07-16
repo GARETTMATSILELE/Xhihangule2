@@ -5,8 +5,14 @@ import {
   getAgentProperties,
   getAgentTenants,
   getAgentLeases,
+  getAgentFiles,
   getAgentCommission,
-  createAgentProperty
+  createAgentProperty,
+  createAgentTenant,
+  createAgentLease,
+  createAgentPayment,
+  updateAgentPayment,
+  createAgentFile
 } from '../controllers/agentController';
 
 const router = express.Router();
@@ -28,7 +34,13 @@ router.get('/properties', (req, res) => {
 });
 router.post('/properties', createAgentProperty);
 router.get('/tenants', getAgentTenants);
+router.post('/tenants', createAgentTenant);
 router.get('/leases', getAgentLeases);
+router.post('/leases', createAgentLease);
+router.get('/files', getAgentFiles);
+router.post('/files', createAgentFile);
+router.post('/payments', createAgentPayment);
+router.put('/payments/:id', updateAgentPayment);
 router.get('/commission', getAgentCommission);
 
 export default router; 
