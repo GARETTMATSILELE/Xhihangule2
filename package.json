@@ -24,8 +24,10 @@
     "@types/react": "^19.1.4",
     "@types/uuid": "^10.0.0",
     "concurrently": "^8.2.2",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.2.0",
     "react": "^19.1.0",
-    "react-big-calendar": "^1.18.0",
+    "react-big-calendar": "^1.19.4",
     "uuid": "^11.1.0",
     "zod": "^3.25.42"
   },

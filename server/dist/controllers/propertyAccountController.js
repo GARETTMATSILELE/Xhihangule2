@@ -8,10 +8,16 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.createPropertyPayment = exports.getPropertyTransactions = void 0;
+exports.getPropertyAccount = getPropertyAccount;
+exports.addExpense = addExpense;
 const Property_1 = require("../models/Property");
 const Payment_1 = require("../models/Payment");
+const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { propertyId } = req.params;
@@ -143,3 +149,35 @@ const getAcknowledgementDocument = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.getAcknowledgementDocument = getAcknowledgementDocument;
+function getPropertyAccount(req, res) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const { propertyId } = req.params;
+        const account = yield PropertyAccount_1.default.findOne({ propertyId });
+        if (!account)
+            return res.status(404).json({ error: 'Not found' });
+        res.json(account);
+    });
+}
+function addExpense(req, res) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const { propertyId } = req.params;
+        const { amount, date, description } = req.body;
+        let account = yield PropertyAccount_1.default.findOne({ propertyId });
+        if (!account) {
+            account = new PropertyAccount_1.default({ propertyId, transactions: [], runningBalance: 0 });
+        }
+        account.transactions.push({
+            type: 'expense',
+            amount,
+            date: date ? new Date(date) : new Date(),
+            description
+        });
+        account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        account.runningBalance = account.transactions.reduce((sum, t) => {
+            return t.type === 'income' ? sum + t.amount : sum - t.amount;
+        }, 0);
+        account.lastUpdated = new Date();
+        yield account.save();
+        res.json(account);
+    });
+}

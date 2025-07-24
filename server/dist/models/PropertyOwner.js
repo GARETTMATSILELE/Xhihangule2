@@ -76,9 +76,10 @@ const propertyOwnerSchema = new mongoose_1.Schema({
         required: true
     },
     companyId: {
-        type: mongoose_1.Schema.Types.ObjectId,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
-        required: true
+        required: true,
+        immutable: true
     },
     properties: [{
             type: mongoose_1.Schema.Types.ObjectId,

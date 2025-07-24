@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDatabaseHealth } from '../config/database';
+import { getDatabaseHealth, getAccountingDatabaseHealth } from '../config/database';
 
 const router = express.Router();
 
@@ -18,26 +18,23 @@ router.use((req, res, next) => {
 router.get('/', (req, res) => {
   try {
     const dbHealth = getDatabaseHealth();
+    const accountingDbHealth = getAccountingDatabaseHealth();
     const uptime = process.uptime();
 
     console.log('Health check response:', {
       status: 'ok',
       database: dbHealth,
+      accountingDatabase: accountingDbHealth,
       uptime
     });
 
-    // If database is not connected, return 503 Service Unavailable
-    if (!dbHealth.isConnected) {
+    // If either database is not connected, return 503 Service Unavailable
+    if (!dbHealth.isConnected || !accountingDbHealth.isConnected) {
       return res.status(503).json({
         status: 'error',
-        message: 'Database not connected',
-        database: {
-          isConnected: false,
-          isHealthy: false,
-          lastCheck: dbHealth.lastCheck,
-          circuitBreakerOpen: dbHealth.circuitBreakerOpen,
-          failureCount: dbHealth.failureCount
-        },
+        message: 'One or more databases not connected',
+        database: dbHealth,
+        accountingDatabase: accountingDbHealth,
         uptime
       });
     }
@@ -45,13 +42,8 @@ router.get('/', (req, res) => {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
-      database: {
-        isConnected: dbHealth.isConnected,
-        isHealthy: dbHealth.isHealthy,
-        lastCheck: dbHealth.lastCheck,
-        circuitBreakerOpen: dbHealth.circuitBreakerOpen,
-        failureCount: dbHealth.failureCount
-      },
+      database: dbHealth,
+      accountingDatabase: accountingDbHealth,
       uptime
     });
   } catch (error: any) {

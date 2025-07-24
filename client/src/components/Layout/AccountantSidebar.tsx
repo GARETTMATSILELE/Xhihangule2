@@ -38,6 +38,8 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/accountant-dashboard' },
     { text: 'Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
+    { text: 'Levies', icon: <ReceiptIcon />, path: '/accountant-dashboard/levies' },
+    { text: 'Invoices', icon: <ReceiptIcon />, path: '/accountant-dashboard/written-invoices' },
     { text: 'Property Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/property-accounts' },
     { text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
     { text: 'Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },

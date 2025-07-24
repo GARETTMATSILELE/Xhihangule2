@@ -289,6 +289,34 @@ class PaymentService {
     const response = await api.get(`/property-accounts/${propertyId}/acknowledgement/${paymentId}`);
     return response.data;
   }
+
+  async createLevyPayment(paymentData: any): Promise<any> {
+    try {
+      const response = await api.post('/levy-payments', paymentData);
+      return response.data;
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
+  async createMunicipalPayment(paymentData: any): Promise<any> {
+    try {
+      const response = await api.post('/municipal-payments', paymentData);
+      return response.data;
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
+  async getLevyPayments(): Promise<any[]> {
+    try {
+      // Use publicApi instead of api to avoid sending credentials
+      const response = await publicApi.get('/levy-payments');
+      return response.data;
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
 }
 
 export default PaymentService.getInstance(); 

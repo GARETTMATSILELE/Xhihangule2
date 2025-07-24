@@ -234,14 +234,21 @@ const PaymentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      
+      // Ensure ownerId is set
+      const property = properties.find(p => String(p._id) === String(data.propertyId));
+      if (property && property.ownerId) {
+        data.ownerId = property.ownerId;
+      }
       let response;
-      if (user?.role === 'agent') {
-        response = await agentService.createPayment(data);
+      if (data.paymentType === 'levy') {
+        response = await paymentService.createLevyPayment(data);
+      } else if (data.paymentType === 'municipal') {
+        response = await paymentService.createMunicipalPayment(data);
+      } else if (user?.role === 'agent') {
+        response = await agentService.createPayment(data, properties, user?._id);
       } else {
         response = await paymentService.createPayment(data);
       }
-      
       setPayments(prev => [...prev, response.data || response]);
       setShowCreateDialog(false);
       setSuccessMessage('Payment created successfully');
@@ -266,7 +273,7 @@ const PaymentsPage: React.FC = () => {
       
       let response;
       if (user?.role === 'agent') {
-        response = await agentService.updatePayment(id, data);
+        response = await agentService.updatePayment(id, data, properties, user?._id);
       } else {
         response = await paymentService.updatePayment(id, data);
       }
@@ -314,36 +321,42 @@ const PaymentsPage: React.FC = () => {
       setShowAuthError(true);
       return;
     }
-
     try {
       const paymentData = {
         ...formData,
         status: 'completed' as PaymentStatus, // Always set to completed for agent
         companyId: user.companyId
       };
-
+      // Ensure ownerId is set
+      const property = properties.find(p => String(p._id) === String(paymentData.propertyId));
+      if (property && property.ownerId) {
+        paymentData.ownerId = property.ownerId;
+      }
       if (selectedPayment) {
         // Use agent service if user is an agent, otherwise use regular payment service
         if (user.role === 'agent') {
-          const response = await agentService.updatePayment(selectedPayment._id, paymentData);
+          const response = await agentService.updatePayment(selectedPayment._id, paymentData, properties, user?._id);
           setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response.data : p));
         } else {
           const response = await paymentService.updatePayment(selectedPayment._id, paymentData);
           setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response : p));
         }
       } else {
-        // Use agent service if user is an agent, otherwise use accountant endpoint
-        if (user.role === 'agent') {
-          const response = await agentService.createPayment(paymentData);
+        if (paymentData.paymentType === 'levy') {
+          const response = await paymentService.createLevyPayment(paymentData);
+          setPayments(prev => [...prev, response.data || response]);
+        } else if (paymentData.paymentType === 'municipal') {
+          const response = await paymentService.createMunicipalPayment(paymentData);
+          setPayments(prev => [...prev, response.data || response]);
+        } else if (user.role === 'agent') {
+          const response = await agentService.createPayment(paymentData, properties, user?._id);
           setPayments(prev => [...prev, response.data]);
         } else {
           // Use accountant endpoint for admin dashboard payments
           const response = await paymentService.createPaymentAccountant(paymentData);
-          // The accountant endpoint returns { status, data, message }
           setPayments(prev => [...prev, response.data]);
         }
       }
-      
       setShowForm(false);
       setSelectedPayment(undefined);
       setSuccessMessage(selectedPayment ? 'Payment updated successfully' : 'Payment created successfully');
@@ -356,7 +369,7 @@ const PaymentsPage: React.FC = () => {
         setError(err.response?.data?.message || 'Failed to save payment. Please try again.');
       }
     }
-  }, [selectedPayment, user?.companyId, user?.role]);
+  }, [selectedPayment, user?.companyId, user?.role, properties]);
 
   const handlePaymentClick = useCallback((payment: Payment) => {
     if (!user?.companyId) {

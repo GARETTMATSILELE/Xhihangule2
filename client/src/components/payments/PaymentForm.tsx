@@ -30,6 +30,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import publicApi from '../../api/publicApi';
+import { useAuth } from '../../contexts/AuthContext';
 
 export interface PaymentFormProps {
   onSubmit: (data: PaymentFormData) => Promise<void>;
@@ -40,6 +41,11 @@ export interface PaymentFormProps {
   loading?: boolean;
 }
 
+// Helper to generate a reference number
+function generateReferenceNumber() {
+  return `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
 const PaymentForm: React.FC<PaymentFormProps> = ({
   onSubmit,
   onCancel,
@@ -48,11 +54,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   tenants,
   loading = false,
 }) => {
+  const { user } = useAuth();
   const propertyService = usePropertyService();
   const [error, setError] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
-  const [formData, setFormData] = useState<PaymentFormData>({
+  const [formData, setFormData] = useState<PaymentFormData>(() => ({
     paymentType: initialData?.paymentType || 'rental',
     propertyType: initialData?.propertyType || 'residential',
     propertyId: initialData?.propertyId ? String(initialData.propertyId) : '',
@@ -69,16 +76,26 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     companyId: '',
     rentalPeriodMonth: initialData?.rentalPeriodMonth || (new Date().getMonth() + 1),
     rentalPeriodYear: initialData?.rentalPeriodYear || (new Date().getFullYear()),
-  });
+  }));
   const [isAdvance, setIsAdvance] = useState(false);
   const [advanceMonths, setAdvanceMonths] = useState(1);
   const [advanceStartMonth, setAdvanceStartMonth] = useState(formData.rentalPeriodMonth);
   const [advanceStartYear, setAdvanceStartYear] = useState(formData.rentalPeriodYear);
   const [propertyRent, setPropertyRent] = useState<number | null>(null);
 
+  // Regenerate reference number every time the form is opened for a new payment
+  useEffect(() => {
+    if (!initialData) {
+      setFormData(prev => ({
+        ...prev,
+        referenceNumber: generateReferenceNumber(),
+      }));
+    }
+    // Only run when initialData changes (i.e., new payment or edit)
+  }, [initialData]);
+
   // Calculate total amount for advance payment
-  const monthlyAmount = formData.amount || 0;
-  const totalAdvanceAmount = isAdvance ? monthlyAmount * advanceMonths : monthlyAmount;
+  const totalAdvanceAmount = isAdvance && propertyRent ? propertyRent * advanceMonths : (propertyRent || 0);
 
   // Update formData when advance payment changes
   useEffect(() => {
@@ -90,7 +107,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         advanceMonthsPaid: advanceMonths,
         advancePeriodStart: { month: advanceStartMonth, year: advanceStartYear },
         advancePeriodEnd: calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths),
-        amount: totalAdvanceAmount,
+        amount: propertyRent ? propertyRent * advanceMonths : 0,
       }));
     } else {
       setFormData(prev => ({
@@ -98,35 +115,36 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         advanceMonthsPaid: 1,
         advancePeriodStart: undefined,
         advancePeriodEnd: undefined,
-        amount: monthlyAmount,
+        amount: propertyRent || 0,
       }));
     }
     // eslint-disable-next-line
-  }, [isAdvance, advanceMonths, advanceStartMonth, advanceStartYear, monthlyAmount]);
+  }, [isAdvance, advanceMonths, advanceStartMonth, advanceStartYear, propertyRent]);
 
-  // When propertyId changes, fetch rent
+  // When propertyId or paymentType changes, fetch rent or levy
   useEffect(() => {
-    const fetchRent = async () => {
-      if (!formData.propertyId) {
-        setPropertyRent(null);
-        return;
-      }
-      try {
-        // Find property in props first
-        const property = properties.find(p => String(p._id) === String(formData.propertyId));
-        if (property && property.rent) {
-          setPropertyRent(property.rent);
-        } else {
-          // Optionally, fetch from backend if not found
-          const res = await publicApi.get(`/properties/${formData.propertyId}`);
-          setPropertyRent(res.data.rent || null);
-        }
-      } catch (err) {
+    if (!formData.propertyId) {
+      setPropertyRent(null);
+      return;
+    }
+    // For levy payments, show the levy amount from the property
+    if (formData.paymentType === 'levy') {
+      const property = properties.find(p => String(p._id) === String(formData.propertyId));
+      if (property && property.levyOrMunicipalType === 'levy' && property.levyOrMunicipalAmount) {
+        setPropertyRent(property.levyOrMunicipalAmount);
+      } else {
         setPropertyRent(null);
       }
-    };
-    fetchRent();
-  }, [formData.propertyId, properties]);
+      return;
+    }
+    // For other payment types, show rent
+    const property = properties.find(p => String(p._id) === String(formData.propertyId));
+    if (property && property.rent) {
+      setPropertyRent(property.rent);
+    } else {
+      setPropertyRent(null);
+    }
+  }, [formData.propertyId, formData.paymentType, properties]);
 
   // When rent or advance months change, update amount
   useEffect(() => {
@@ -177,12 +195,48 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     e.preventDefault();
     try {
       setError(null);
-      await onSubmit(formData);
+
+      let dataToSubmit = { ...formData };
+      // Get commission percentage from selected property
+      const commissionPercent = getCommissionForProperty(formData.propertyId, properties);
+      const totalCommission = formData.amount * (commissionPercent / 100);
+      const preaFee = totalCommission * 0.03;
+      const commissionAfterPrea = totalCommission - preaFee;
+      const agentShare = commissionAfterPrea * 0.6;
+      const agencyShare = commissionAfterPrea * 0.4;
+      const ownerAmount = formData.amount - totalCommission;
+
+      dataToSubmit.commissionDetails = {
+        totalCommission,
+        preaFee,
+        agentShare,
+        agencyShare,
+        ownerAmount
+      };
+
+      // Set processedBy to current user
+      if (user?._id) {
+        dataToSubmit.processedBy = user._id;
+      }
+
+      // Ensure ownerId is included
+      const property = properties.find(p => String(p._id) === String(formData.propertyId));
+      if (property && property.ownerId) {
+        dataToSubmit.ownerId = property.ownerId;
+      }
+
+      await onSubmit(dataToSubmit);
     } catch (error) {
       setError('Failed to save payment. Please try again later.');
       console.error('Error saving payment:', error);
     }
   };
+
+  // Helper to get commission percentage from selected property
+  function getCommissionForProperty(propertyId: string, properties: Property[]): number {
+    const property = properties.find(p => String(p._id) === String(propertyId));
+    return property?.commission ?? 0;
+  }
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent
@@ -234,6 +288,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               >
                 <MenuItem value="rental">Rental</MenuItem>
                 <MenuItem value="introduction">Introduction</MenuItem>
+                <MenuItem value="levy">Levies</MenuItem>
+                <MenuItem value="municipal">Municipal Payments</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -354,10 +410,24 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           <Grid item xs={12}>
             <TextField
               fullWidth
-              label="Monthly Rent"
-              value={propertyRent !== null ? propertyRent : ''}
-              InputProps={{ readOnly: true }}
-              helperText="This is the rent for the selected property."
+              label={formData.paymentType === 'levy' ? 'Monthly Levies' : formData.paymentType === 'municipal' ? 'Municipal Fees (for this month)' : 'Monthly Rent'}
+              value={
+                formData.paymentType === 'levy'
+                  ? propertyRent !== null ? propertyRent : ''
+                  : formData.paymentType === 'municipal'
+                    ? formData.amount || ''
+                    : propertyRent !== null ? propertyRent : ''
+              }
+              onChange={formData.paymentType === 'municipal' ? handleInputChange : undefined}
+              name={formData.paymentType === 'municipal' ? 'amount' : undefined}
+              InputProps={{ readOnly: formData.paymentType !== 'municipal' }}
+              helperText={
+                formData.paymentType === 'levy'
+                  ? 'This is the levies for the selected property.'
+                  : formData.paymentType === 'municipal'
+                    ? 'Enter the municipal fee for this month.'
+                    : 'This is the rent for the selected property.'
+              }
             />
           </Grid>
 
@@ -370,22 +440,25 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               value={formData.amount || ''}
               onChange={handleInputChange}
               required
+              InputProps={{ readOnly: isAdvance }}
               helperText={isAdvance ? `Total for ${advanceMonths} months` : 'Enter the amount the client is actually paying'}
             />
           </Grid>
 
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Deposit Amount (Optional - First Month Only)"
-              type="number"
-              name="depositAmount"
-              value={formData.depositAmount || ''}
-              onChange={handleInputChange}
-              helperText="Deposit is typically only paid on the first month"
-              inputProps={{ min: 0 }}
-            />
-          </Grid>
+          {formData.paymentType !== 'levy' && formData.paymentType !== 'municipal' && (
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Deposit Amount (Optional - First Month Only)"
+                type="number"
+                name="depositAmount"
+                value={formData.depositAmount || ''}
+                onChange={handleInputChange}
+                helperText="Deposit is typically only paid on the first month"
+                inputProps={{ min: 0 }}
+              />
+            </Grid>
+          )}
 
           {/* Rental Period Selection */}
           <Grid item xs={12} sm={6}>
@@ -473,7 +546,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                   This payment covers: {new Date(0, advanceStartMonth - 1).toLocaleString('default', { month: 'long' })} {advanceStartYear} to {new Date(0, calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths).month - 1).toLocaleString('default', { month: 'long' })} {calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths).year}
                 </Typography>
                 <Typography variant="body2" color="primary">
-                  Total Amount: {totalAdvanceAmount}
+                  Total Amount: {propertyRent ? propertyRent * advanceMonths : 0} ({propertyRent} × {advanceMonths} months)
                 </Typography>
               </Grid>
             </>
@@ -516,8 +589,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               label="Reference Number"
               name="referenceNumber"
               value={formData.referenceNumber}
-              InputProps={{ readOnly: true }}
-              helperText="Will be auto-generated after saving."
+              onChange={handleInputChange}
+              required
+              helperText="Enter the payment reference number manually."
             />
           </Grid>
 

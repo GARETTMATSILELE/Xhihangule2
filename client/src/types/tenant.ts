@@ -12,6 +12,7 @@ export interface Tenant {
   companyId: string;
   status: TenantStatus;
   propertyId?: string;
+  ownerId?: string; // Agent who created this tenant
   idNumber?: string;
   emergencyContact?: string;
   createdAt: string;
@@ -33,6 +34,7 @@ export interface TenantFormData {
   phone: string;
   status?: TenantStatus;
   propertyId?: string;
+  ownerId?: string; // Agent who created this tenant
   idNumber?: string;
   emergencyContact?: string;
   companyId: string;

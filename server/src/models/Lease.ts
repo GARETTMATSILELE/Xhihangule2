@@ -37,8 +37,18 @@ const LeaseSchema: Schema = new Schema({
   rentAmount: { type: Number, required: true, min: 0 },
   depositAmount: { type: Number, required: true, min: 0 },
   status: { type: String, enum: ['active', 'expired', 'terminated'], default: 'active' },
-  companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
-  ownerId: { type: Schema.Types.ObjectId, ref: 'User' },
+  companyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Company',
+    required: true,
+    immutable: true
+  },
+  ownerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    immutable: true
+  },
   
   // Additional lease details
   monthlyRent: { type: Number, default: 0, min: 0 },

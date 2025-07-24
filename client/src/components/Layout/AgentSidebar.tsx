@@ -23,6 +23,7 @@ import {
   Assignment as AssignmentIcon,
   CalendarToday as CalendarIcon,
   Folder as FolderIcon,
+  Receipt as ReceiptIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -62,6 +63,11 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
       text: 'Payments', 
       icon: <PaymentIcon />, 
       path: '/agent-dashboard/payments' 
+    },
+    {
+      text: 'Levies',
+      icon: <ReceiptIcon />,
+      path: '/agent-dashboard/levies'
     },
     { 
       text: 'Files', 

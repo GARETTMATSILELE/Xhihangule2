@@ -11,6 +11,7 @@ import { Lease, LeaseStatus, LeaseFormData } from '../../types/lease';
 import { Property } from '../../types/property';
 import { Tenant } from '../../types/tenant';
 import LeaseForm from '../leases/components/LeaseForm';
+import { useNotification } from '../../components/Layout/Header';
 
 // Helper to extract string id from propertyId (handles { $oid: string } or string)
 function getId(id: any): string {
@@ -25,6 +26,7 @@ const AgentLeasesPage: React.FC = () => {
   const leaseService = useLeaseService();
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
+  const { addNotification } = useNotification();
 
   const [leases, setLeases] = useState<Lease[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -66,6 +68,50 @@ const AgentLeasesPage: React.FC = () => {
       loadData();
     }
   }, [authLoading, loadData]);
+
+  // Lease expiry notification effect
+  useEffect(() => {
+    if (!leases.length) return;
+    const now = new Date();
+    const notified = JSON.parse(localStorage.getItem('lease-expiry-notified') || '{}');
+    let updated = false;
+    leases.forEach(lease => {
+      if (!lease.endDate) return;
+      const end = new Date(lease.endDate);
+      const diffMonths = (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth());
+      const diffDays = Math.floor((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      const propertyName = properties.find(p => p._id === lease.propertyId)?.name || 'Property';
+      // 2 months
+      if (diffMonths === 2 && !notified[lease._id + '-2mo']) {
+        addNotification({
+          id: `lease-${lease._id}-2mo`,
+          title: 'Lease Expiry Notice',
+          message: `Lease for ${propertyName} is expiring in 2 months (${end.toLocaleDateString()})`,
+          link: '/agent-dashboard/leases',
+          read: false,
+          createdAt: new Date(),
+        });
+        notified[lease._id + '-2mo'] = true;
+        updated = true;
+      }
+      // 1 month
+      if (diffMonths === 1 && !notified[lease._id + '-1mo']) {
+        addNotification({
+          id: `lease-${lease._id}-1mo`,
+          title: 'Lease Expiry Notice',
+          message: `Lease for ${propertyName} is expiring in 1 month (${end.toLocaleDateString()})`,
+          link: '/agent-dashboard/leases',
+          read: false,
+          createdAt: new Date(),
+        });
+        notified[lease._id + '-1mo'] = true;
+        updated = true;
+      }
+    });
+    if (updated) {
+      localStorage.setItem('lease-expiry-notified', JSON.stringify(notified));
+    }
+  }, [leases, properties, addNotification]);
 
   const handleFormSubmit = async (formData: LeaseFormData) => {
     if (!user?.companyId) {

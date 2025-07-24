@@ -63,9 +63,16 @@ const PaymentSchema = new mongoose_1.Schema({
         required: true,
     },
     companyId: {
-        type: mongoose_1.Schema.Types.ObjectId,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
         required: true,
+        immutable: true
+    },
+    ownerId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+        immutable: true
     },
     paymentDate: {
         type: Date,
@@ -87,7 +94,8 @@ const PaymentSchema = new mongoose_1.Schema({
     },
     referenceNumber: {
         type: String,
-        required: true,
+        required: false,
+        default: '',
     },
     // Add rental period fields
     rentalPeriodMonth: {
@@ -99,6 +107,25 @@ const PaymentSchema = new mongoose_1.Schema({
     rentalPeriodYear: {
         type: Number,
         required: true,
+    },
+    // Advance payment fields
+    advanceMonthsPaid: {
+        type: Number,
+        required: false,
+        min: 1,
+        default: 1,
+    },
+    advancePeriodStart: {
+        month: { type: Number, min: 1, max: 12 },
+        year: { type: Number },
+    },
+    advancePeriodEnd: {
+        month: { type: Number, min: 1, max: 12 },
+        year: { type: Number },
+    },
+    rentUsed: {
+        type: Number,
+        required: false,
     },
     notes: {
         type: String,

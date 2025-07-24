@@ -39,7 +39,7 @@
  * - PaymentSummary: Dashboard statistics
  */
 
-export type PaymentType = 'introduction' | 'rental';
+export type PaymentType = 'rental' | 'introduction' | 'levy' | 'municipal';
 export type PropertyType = 'residential' | 'commercial';
 export type PaymentMethod = 'cash' | 'bank_transfer';
 export type PaymentStatus = 'pending' | 'completed' | 'failed';
@@ -71,6 +71,15 @@ export interface PaymentFormData {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   rentUsed?: number;
+  commissionDetails?: {
+    totalCommission: number;
+    preaFee: number;
+    agentShare: number;
+    agencyShare: number;
+    ownerAmount: number;
+  };
+  processedBy?: string;
+  ownerId?: string;
 }
 
 export interface Payment {

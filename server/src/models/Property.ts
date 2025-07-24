@@ -26,6 +26,9 @@ export interface IProperty extends Document {
   // New fields
   rentalType?: 'management' | 'introduction';
   commission?: number;
+  // New fields for levy/municipal fees
+  levyOrMunicipalType?: 'levy' | 'municipal';
+  levyOrMunicipalAmount?: number;
 }
 
 const PropertySchema: Schema = new Schema({
@@ -91,12 +94,14 @@ const PropertySchema: Schema = new Schema({
   companyId: { 
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Company',
-    required: true
+    required: true,
+    immutable: true
   },
   ownerId: { 
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: [true, 'Owner ID is required']
+    required: [true, 'Owner ID is required'],
+    immutable: true
   },
   occupancyRate: { 
     type: Number, 
@@ -138,6 +143,16 @@ const PropertySchema: Schema = new Schema({
     min: [0, 'Commission cannot be negative'],
     max: [100, 'Commission cannot exceed 100%'],
     default: 15
+  },
+  // New fields for levy/municipal fees
+  levyOrMunicipalType: {
+    type: String,
+    enum: ['levy', 'municipal'],
+    required: false,
+  },
+  levyOrMunicipalAmount: {
+    type: Number,
+    required: false,
   }
 }, {
   timestamps: true

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { Property } from '../types/property';
 import { usePropertyService } from '../services/propertyService';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,7 +34,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Skip PropertyContext for admin routes and admin users
   const shouldSkipPropertyContext = isAdminRoute || isAdminUser;
 
-  const refreshProperties = async () => {
+  const refreshProperties = useCallback(async () => {
     // Skip if we're on admin routes or user is admin
     if (shouldSkipPropertyContext) {
       console.log('PropertyContext: Skipping refreshProperties - admin route or admin user');
@@ -105,7 +105,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } finally {
       setLoading(false);
     }
-  };
+  }, [shouldSkipPropertyContext, authLoading, user, propertyService]);
 
   const addProperty = async (property: Property) => {
     // Skip if we're on admin routes or user is admin
@@ -167,6 +167,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 3. User has a companyId
   // 4. NOT on admin routes
   // 5. NOT an admin user
+  const hasFetchedForPaymentsPage = React.useRef(false);
   useEffect(() => {
     console.log('PropertyContext: useEffect triggered', {
       authLoading,
@@ -187,6 +188,35 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
+    // Allow public fetch for accountant dashboard payments page, but only once per mount
+    if (location.pathname === '/accountant-dashboard/payments') {
+      if (!hasFetchedForPaymentsPage.current) {
+        hasFetchedForPaymentsPage.current = true;
+        // Direct fetch for payments page without calling refreshProperties
+        const fetchPaymentsProperties = async () => {
+          try {
+            setLoading(true);
+            setError(null);
+            const fetchedProperties = await propertyService.getPublicProperties();
+            if (Array.isArray(fetchedProperties)) {
+              setProperties(fetchedProperties);
+            } else {
+              setError('Invalid response format from server');
+              setProperties([]);
+            }
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to fetch properties');
+            setProperties([]);
+          } finally {
+            setLoading(false);
+          }
+        };
+        fetchPaymentsProperties();
+      }
+      return;
+    }
+
+    // Only fetch when auth is ready and user/companyId are available
     if (!authLoading && user && user.companyId) {
       console.log('PropertyContext: All conditions met, calling refreshProperties');
       refreshProperties();
@@ -201,18 +231,20 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setError('User is not associated with any company');
       setLoading(false);
     }
-  }, [user, authLoading, shouldSkipPropertyContext]); // Removed isAuthenticated dependency
+  }, [authLoading, user, user?.companyId, shouldSkipPropertyContext, location.pathname]);
+
+  const contextValue = useMemo(() => ({
+    properties,
+    loading: loading || authLoading,
+    error,
+    refreshProperties,
+    addProperty,
+    updateProperty,
+    deleteProperty
+  }), [properties, loading, authLoading, error, refreshProperties, addProperty, updateProperty, deleteProperty]);
 
   return (
-    <PropertyContext.Provider value={{
-      properties,
-      loading: loading || authLoading,
-      error,
-      refreshProperties,
-      addProperty,
-      updateProperty,
-      deleteProperty
-    }}>
+    <PropertyContext.Provider value={contextValue}>
       {children}
     </PropertyContext.Provider>
   );

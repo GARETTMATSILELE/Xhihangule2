@@ -74,13 +74,46 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, } = req.body;
+        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Missing required fields: leaseId, amount, paymentDate, paymentMethod, status',
             });
+        }
+        // Validate advance payment fields
+        if (advanceMonthsPaid && advancePeriodStart && advancePeriodEnd) {
+            // Check for overlapping advance payments for this lease
+            const overlap = yield Payment_1.Payment.findOne({
+                leaseId,
+                $or: [
+                    {
+                        'advancePeriodStart.year': { $lte: advancePeriodEnd.year },
+                        'advancePeriodEnd.year': { $gte: advancePeriodStart.year },
+                        'advancePeriodStart.month': { $lte: advancePeriodEnd.month },
+                        'advancePeriodEnd.month': { $gte: advancePeriodStart.month },
+                    },
+                    {
+                        rentalPeriodYear: { $gte: advancePeriodStart.year, $lte: advancePeriodEnd.year },
+                        rentalPeriodMonth: { $gte: advancePeriodStart.month, $lte: advancePeriodEnd.month },
+                    }
+                ]
+            });
+            if (overlap) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Overlapping advance payment already exists for this period.'
+                });
+            }
+            // Validate amount
+            const lease = yield Lease_1.Lease.findById(leaseId);
+            if (lease && amount !== lease.rentAmount * advanceMonthsPaid) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: `Amount must equal rent (${lease.rentAmount}) x months (${advanceMonthsPaid}) = ${lease.rentAmount * advanceMonthsPaid}`
+                });
+            }
         }
         // Get lease details to extract property and tenant information
         const lease = yield Lease_1.Lease.findById(leaseId);
@@ -97,9 +130,28 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 message: 'Property not found',
             });
         }
-        const commissionPercentage = property.commission || 0;
+        const rent = property.rent || lease.rentAmount;
+        // For advance payments, validate amount
+        if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+            const expectedAmount = rent * advanceMonthsPaid;
+            if (amount !== expectedAmount) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+                });
+            }
+        }
+        else {
+            // For single month, validate amount
+            if (amount !== rent) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: `Amount must equal rent (${rent}) for the selected month.`
+                });
+            }
+        }
         // Calculate commission based on property commission percentage
-        const paymentCommissionDetails = calculateCommission(amount, commissionPercentage);
+        const paymentCommissionDetails = calculateCommission(amount, property.commission || 0);
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -116,14 +168,31 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             depositAmount: 0, // Default value
             rentalPeriodMonth,
             rentalPeriodYear,
+            advanceMonthsPaid,
+            advancePeriodStart,
+            advancePeriodEnd,
             referenceNumber: '', // Placeholder, will update after save
             notes: '', // Default empty notes
             commissionDetails: paymentCommissionDetails,
+            rentUsed: rent, // Store the rent used for this payment
         });
         yield payment.save();
         // Generate reference number after save (using payment._id)
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
+        // If depositAmount > 0, record in rentaldeposits
+        if (payment.depositAmount && payment.depositAmount > 0) {
+            const { RentalDeposit } = require('../models/rentalDeposit');
+            yield RentalDeposit.create({
+                propertyId: payment.propertyId,
+                agentId: payment.agentId,
+                companyId: payment.companyId,
+                tenantId: payment.tenantId,
+                depositAmount: payment.depositAmount,
+                depositDate: payment.paymentDate,
+                paymentId: payment._id,
+            });
+        }
         // Update company revenue
         yield Company_1.Company.findByIdAndUpdate(companyId || lease.companyId, {
             $inc: {
@@ -144,6 +213,11 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     balance: paymentCommissionDetails.ownerAmount,
                 },
             });
+        }
+        // Update property arrears after payment
+        if (property.currentArrears !== undefined) {
+            const arrears = property.currentArrears - amount;
+            yield Property_1.Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
         }
         res.status(201).json({
             message: 'Payment processed successfully',
@@ -166,7 +240,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
     try {
         console.log('Creating accountant payment with data:', req.body);
-        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, companyId, processedBy, rentalPeriodMonth, rentalPeriodYear, } = req.body;
+        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, companyId, processedBy, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Validate required fields
         if (!propertyId || !tenantId || !agentId || !amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({
@@ -199,6 +273,9 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             depositAmount: depositAmount || 0,
             rentalPeriodMonth,
             rentalPeriodYear,
+            advanceMonthsPaid,
+            advancePeriodStart,
+            advancePeriodEnd,
             referenceNumber: '', // Placeholder, will update after save
             notes: notes || '',
             processedBy: processedBy || req.user.userId,
@@ -209,6 +286,19 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
+        // If depositAmount > 0, record in rentaldeposits
+        if (payment.depositAmount && payment.depositAmount > 0) {
+            const { RentalDeposit } = require('../models/rentalDeposit');
+            yield RentalDeposit.create({
+                propertyId: payment.propertyId,
+                agentId: payment.agentId,
+                companyId: payment.companyId,
+                tenantId: payment.tenantId,
+                depositAmount: payment.depositAmount,
+                depositDate: payment.paymentDate,
+                paymentId: payment._id,
+            });
+        }
         // Update company revenue
         yield Company_1.Company.findByIdAndUpdate(companyId || req.user.companyId, {
             $inc: {
@@ -228,6 +318,11 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                     balance: accountantCommissionDetails.ownerAmount,
                 },
             });
+        }
+        // Update property arrears after payment
+        if (property.currentArrears !== undefined) {
+            const arrears = property.currentArrears - amount;
+            yield Property_1.Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
         }
         console.log('Accountant payment created successfully:', { id: payment._id, amount: payment.amount });
         res.status(201).json({
@@ -497,7 +592,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             body: req.body,
             headers: req.headers
         });
-        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, } = req.body;
+        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
@@ -513,14 +608,33 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
                 message: 'Lease not found',
             });
         }
-        // Remove property ownership check for public endpoint
+        // Get property details
         const property = yield Property_1.Property.findById(lease.propertyId);
         if (!property) {
             return res.status(404).json({ message: 'Property not found' });
         }
-        const commissionPercentage = property.commission || 0;
+        const rent = property.rent || lease.rentAmount;
+        // For advance payments, validate amount
+        if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+            const expectedAmount = rent * advanceMonthsPaid;
+            if (amount !== expectedAmount) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+                });
+            }
+        }
+        else {
+            // For single month, validate amount
+            if (amount !== rent) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: `Amount must equal rent (${rent}) for the selected month.`
+                });
+            }
+        }
         // Calculate commission based on property commission percentage
-        const publicCommissionDetails = calculateCommission(amount, commissionPercentage);
+        const publicCommissionDetails = calculateCommission(amount, property.commission || 0);
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -537,13 +651,30 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             depositAmount: 0, // Default value
             rentalPeriodMonth,
             rentalPeriodYear,
+            advanceMonthsPaid,
+            advancePeriodStart,
+            advancePeriodEnd,
             referenceNumber: '', // Placeholder, will update after save
             notes: '', // Default empty notes
             commissionDetails: publicCommissionDetails,
+            rentUsed: rent, // Store the rent used for this payment
         });
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
+        // If depositAmount > 0, record in rentaldeposits
+        if (payment.depositAmount && payment.depositAmount > 0) {
+            const { RentalDeposit } = require('../models/rentalDeposit');
+            yield RentalDeposit.create({
+                propertyId: payment.propertyId,
+                agentId: payment.agentId,
+                companyId: payment.companyId,
+                tenantId: payment.tenantId,
+                depositAmount: payment.depositAmount,
+                depositDate: payment.paymentDate,
+                paymentId: payment._id,
+            });
+        }
         console.log('Payment created successfully:', { id: payment._id, amount: payment.amount });
         res.status(201).json({
             status: 'success',

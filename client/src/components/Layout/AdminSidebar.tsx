@@ -25,6 +25,7 @@ import {
   Assessment as AssessmentIcon,
   AccountBalance as AccountBalanceIcon,
   Folder as FolderIcon,
+  Receipt as ReceiptIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -69,6 +70,11 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
       text: 'Payments', 
       icon: <PaymentIcon />, 
       path: '/admin-dashboard/payments' 
+    },
+    {
+      text: 'Levies',
+      icon: <ReceiptIcon />,
+      path: '/admin-dashboard/levies'
     },
     { 
       text: 'Files', 

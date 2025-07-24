@@ -4,6 +4,7 @@ import { Payment } from '../models/Payment';
 import { Lease } from '../models/Lease';
 import { Tenant } from '../models/Tenant';
 import { User } from '../models/User';
+import PropertyAccount from '../models/PropertyAccount';
 
 export const getPropertyTransactions = async (req: Request, res: Response) => {
   try {
@@ -125,4 +126,37 @@ export const getAcknowledgementDocument = async (req: Request, res: Response) =>
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err });
   }
-}; 
+};
+
+export async function getPropertyAccount(req: Request, res: Response) {
+  const { propertyId } = req.params;
+  const account = await PropertyAccount.findOne({ propertyId });
+  if (!account) return res.status(404).json({ error: 'Not found' });
+  res.json(account);
+}
+
+export async function addExpense(req: Request, res: Response) {
+  const { propertyId } = req.params;
+  const { amount, date, description } = req.body;
+
+  let account = await PropertyAccount.findOne({ propertyId });
+  if (!account) {
+    account = new PropertyAccount({ propertyId, transactions: [], runningBalance: 0 });
+  }
+
+  account.transactions.push({
+    type: 'expense',
+    amount,
+    date: date ? new Date(date) : new Date(),
+    description
+  });
+
+  account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  account.runningBalance = account.transactions.reduce((sum, t) => {
+    return t.type === 'income' ? sum + t.amount : sum - t.amount;
+  }, 0);
+  account.lastUpdated = new Date();
+
+  await account.save();
+  res.json(account);
+} 

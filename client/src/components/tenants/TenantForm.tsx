@@ -126,7 +126,12 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     });
 
     // Pass form data to parent component - don't make API call here
-    onSubmit(formData);
+    // Include the user's ID as ownerId for agents
+    const tenantDataWithOwnerId = {
+      ...formData,
+      ownerId: user._id // Add the logged-in user's ID as ownerId
+    };
+    onSubmit(tenantDataWithOwnerId);
     onClose();
   };
 

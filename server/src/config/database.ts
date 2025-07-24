@@ -2,6 +2,11 @@ import mongoose from 'mongoose';
 import { createIndexes } from '../models/indexes';
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/property-management';
+const ACCOUNTING_DB_URI = process.env.ACCOUNTING_DB_URI || 'mongodb://localhost:27017/accounting';
+
+export const mainConnection = mongoose.createConnection(MONGODB_URI);
+
+export const accountingConnection = mongoose.createConnection(ACCOUNTING_DB_URI);
 
 // Connection options
 const connectionOptions = {
@@ -173,4 +178,13 @@ export const isDatabaseAvailable = (): boolean => {
   return mongoose.connection.readyState === 1 && 
          healthCheckState.isHealthy && 
          !circuitBreakerState.isOpen;
+}; 
+
+export const getAccountingDatabaseHealth = () => {
+  return {
+    isConnected: accountingConnection.readyState === 1,
+    dbName: accountingConnection.name,
+    host: accountingConnection.host,
+    port: accountingConnection.port
+  };
 }; 

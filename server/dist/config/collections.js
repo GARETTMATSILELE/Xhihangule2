@@ -10,5 +10,7 @@ exports.COLLECTIONS = {
     PAYMENTS: 'payments',
     MAINTENANCE_REQUESTS: 'maintenancerequests',
     CHART_DATA: 'chartdatas',
-    PROPERTY_OWNERS: 'propertyowners'
+    PROPERTY_OWNERS: 'propertyowners',
+    LEVY_PAYMENTS: 'levypayments',
+    MUNICIPAL_PAYMENTS: 'municipalpayments'
 };

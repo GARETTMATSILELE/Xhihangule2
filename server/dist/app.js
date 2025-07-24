@@ -27,6 +27,10 @@ const companyRoutes_1 = __importDefault(require("./routes/companyRoutes"));
 const healthRoutes_1 = __importDefault(require("./routes/healthRoutes"));
 const maintenanceRequestRoutes_1 = __importDefault(require("./routes/maintenanceRequestRoutes"));
 const fileRoutes_1 = __importDefault(require("./routes/fileRoutes"));
+const invoiceRoutes_1 = __importDefault(require("./routes/invoiceRoutes"));
+const propertyAccountRoutes_1 = __importDefault(require("./routes/propertyAccountRoutes"));
+const levyPaymentRoutes_1 = __importDefault(require("./routes/levyPaymentRoutes"));
+const municipalPaymentRoutes_1 = __importDefault(require("./routes/municipalPaymentRoutes"));
 // Load environment variables
 (0, dotenv_1.config)();
 const app = (0, express_1.default)();
@@ -104,6 +108,10 @@ console.log('App: Owner routes registered successfully');
 app.use('/api/companies', companyRoutes_1.default);
 app.use('/api/maintenance', maintenanceRequestRoutes_1.default);
 app.use('/api/files', fileRoutes_1.default);
+app.use('/api/invoices', invoiceRoutes_1.default);
+app.use('/api/property-accounts', propertyAccountRoutes_1.default);
+app.use('/api/levy-payments', levyPaymentRoutes_1.default);
+app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 // Error handling
 app.use(errorHandler_1.errorHandler);
 exports.default = app;

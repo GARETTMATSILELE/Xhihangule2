@@ -81,6 +81,7 @@ import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWra
 import { AdminSettings } from './Settings/AdminSettings';
 import ReportsPage from './admin/ReportsPage';
 import AdminLeasesPage from './AdminLeasesPage';
+import LevyPaymentsPage from './admin/LevyPaymentsPage';
 
 // Theme colors
 const lightTheme = {
@@ -473,6 +474,7 @@ const AdminDashboard: React.FC = () => {
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/leases" element={<AdminLeasesPage />} />
             <Route path="/payments" element={<PaymentsPageWrapper userRole="admin" />} />
+            <Route path="/levies" element={<LevyPaymentsPage />} />
             <Route path="/communications" element={<CommunicationsPage />} />
             <Route path="/files" element={<Files />} />
             <Route path="/reports" element={<ReportsPage />} />

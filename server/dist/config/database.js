@@ -12,10 +12,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isDatabaseAvailable = exports.getDatabaseHealth = exports.closeDatabase = exports.connectDatabase = void 0;
+exports.getAccountingDatabaseHealth = exports.isDatabaseAvailable = exports.getDatabaseHealth = exports.closeDatabase = exports.connectDatabase = exports.accountingConnection = exports.mainConnection = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const indexes_1 = require("../models/indexes");
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/property-management';
+const ACCOUNTING_DB_URI = process.env.ACCOUNTING_DB_URI || 'mongodb://localhost:27017/accounting';
+exports.mainConnection = mongoose_1.default.createConnection(MONGODB_URI);
+exports.accountingConnection = mongoose_1.default.createConnection(ACCOUNTING_DB_URI);
 // Connection options
 const connectionOptions = {
     useNewUrlParser: true,
@@ -172,3 +175,12 @@ const isDatabaseAvailable = () => {
         !circuitBreakerState.isOpen;
 };
 exports.isDatabaseAvailable = isDatabaseAvailable;
+const getAccountingDatabaseHealth = () => {
+    return {
+        isConnected: exports.accountingConnection.readyState === 1,
+        dbName: exports.accountingConnection.name,
+        host: exports.accountingConnection.host,
+        port: exports.accountingConnection.port
+    };
+};
+exports.getAccountingDatabaseHealth = getAccountingDatabaseHealth;

@@ -25,8 +25,8 @@ export const getAgentProperties = async (req: Request, res: Response) => {
 
     // Get only properties where the agent is the owner (ownerId matches the agent's userId)
     const query = { 
-      companyId: req.user.companyId,
-      ownerId: req.user.userId // Only properties owned by this agent
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Only properties owned by this agent
     };
     
     console.log('Agent properties query:', query);
@@ -86,8 +86,8 @@ export const getAgentTenants = async (req: Request, res: Response) => {
 
     // Get tenants created by this agent (using ownerId)
     const tenants = await Tenant.find({ 
-      companyId: req.user.companyId,
-      ownerId: req.user.userId // Filter by agent who created the tenant
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Filter by agent who created the tenant
     })
     .populate('propertyId', 'name address')
     .sort({ createdAt: -1 });
@@ -114,8 +114,8 @@ export const getAgentLeases = async (req: Request, res: Response) => {
 
     // Get leases created by this agent (using ownerId)
     const leases = await Lease.find({ 
-      companyId: req.user.companyId,
-      ownerId: req.user.userId // Filter by agent who created the lease
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Filter by agent who created the lease
     })
     .populate('propertyId', 'name address')
     .populate('tenantId', 'firstName lastName email')
@@ -143,7 +143,7 @@ export const getAgentFiles = async (req: Request, res: Response) => {
 
     // Get files uploaded by this agent (using ownerId)
     const files = await File.find({ 
-      ownerId: req.user.userId // Filter by agent who uploaded the file
+      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Filter by agent who uploaded the file
     })
     .populate('propertyId', 'name address')
     .populate('uploadedBy', 'firstName lastName email')
@@ -169,29 +169,29 @@ export const getAgentCommission = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 400);
     }
 
-    // First, get the properties owned by this agent
-    const agentProperties = await Property.find({
-      companyId: req.user.companyId,
-      ownerId: req.user.userId
-    }).select('_id');
+    // Get current month and year
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0-indexed
+    const currentYear = now.getFullYear();
 
-    const agentPropertyIds = agentProperties.map(p => p._id);
+    // Find all payments for this agent in this company, for the current month and year
+    const payments = await Payment.find({
+      agentId: new mongoose.Types.ObjectId(req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      status: 'completed',
+      paymentDate: {
+        $gte: new Date(currentYear, currentMonth, 1),
+        $lt: new Date(currentYear, currentMonth + 1, 1)
+      }
+    });
 
-    // Calculate commission based on active leases for agent's properties only
-    const leases = await Lease.find({ 
-      companyId: req.user.companyId,
-      propertyId: { $in: agentPropertyIds }, // Only leases for agent's properties
-      status: 'active'
-    })
-    .populate<{ propertyId: IProperty }>('propertyId', 'rent');
-
-    const totalCommission = leases.reduce((sum, lease) => {
-      const rent = lease.propertyId?.rent || 0;
-      const commission = rent * 0.1; // 10% commission
-      return sum + commission;
+    // Sum agentShare from commissionDetails
+    const monthlyCommission = payments.reduce((sum, payment) => {
+      const agentShare = payment.commissionDetails?.agentShare || 0;
+      return sum + agentShare;
     }, 0);
 
-    res.json({ totalCommission });
+    res.json({ monthlyCommission });
   } catch (error) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ message: error.message });
@@ -230,8 +230,8 @@ export const createAgentProperty = async (req: Request, res: Response) => {
 
     const propertyData = {
       ...req.body,
-      ownerId: req.user.userId, // Agent becomes the owner
-      companyId: req.user.companyId,
+      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Agent becomes the owner
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
       status: req.body.status || 'available',
       type: req.body.type || 'apartment',
       description: req.body.description || '',
@@ -300,13 +300,13 @@ export const createAgentTenant = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!property) {
       return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
     }
 
     // Check for existing tenant with same email in this company
-    const existingTenant = await Tenant.findOne({ email, companyId: req.user.companyId });
+    const existingTenant = await Tenant.findOne({ email, companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (existingTenant) {
       return res.status(400).json({ message: 'Tenant with this email already exists' });
     }
@@ -316,10 +316,10 @@ export const createAgentTenant = async (req: Request, res: Response) => {
       lastName,
       email,
       phone,
-      companyId: req.user.companyId,
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
       status: status || 'Active',
-      propertyId,
-      ownerId: req.user.userId, // Set the agent as the owner
+      propertyId: new mongoose.Types.ObjectId(propertyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Set the agent as the owner
       idNumber,
       emergencyContact
     };
@@ -328,7 +328,7 @@ export const createAgentTenant = async (req: Request, res: Response) => {
     await newTenant.save();
 
     // Mark property as rented
-    await Property.findByIdAndUpdate(propertyId, { status: 'rented' });
+    await Property.findByIdAndUpdate(new mongoose.Types.ObjectId(propertyId), { status: 'rented' });
 
     res.status(201).json(newTenant);
   } catch (error) {
@@ -375,13 +375,13 @@ export const createAgentLease = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!property) {
       return res.status(403).json({ message: 'You can only create leases for your own properties.' });
     }
 
     // Ensure the tenant exists and belongs to the same company
-    const tenant = await Tenant.findOne({ _id: tenantId, companyId: req.user.companyId });
+    const tenant = await Tenant.findOne({ _id: new mongoose.Types.ObjectId(tenantId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!tenant) {
       return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
     }
@@ -399,15 +399,15 @@ export const createAgentLease = async (req: Request, res: Response) => {
     }
 
     const leaseData = {
-      propertyId,
-      tenantId,
+      propertyId: new mongoose.Types.ObjectId(propertyId),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
       startDate: startDateObj,
       endDate: endDateObj,
       rentAmount: Number(finalRentAmount),
       depositAmount: Number(finalDepositAmount),
       status: status || 'active',
-      companyId: req.user.companyId,
-      ownerId: req.user.userId, // Set the agent as the owner
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Set the agent as the owner
       
       // Additional fields with defaults
       monthlyRent: Number(monthlyRent || finalRentAmount),
@@ -426,7 +426,7 @@ export const createAgentLease = async (req: Request, res: Response) => {
     await lease.save();
 
     // Mark property as rented
-    await Property.findByIdAndUpdate(propertyId, { status: 'rented' });
+    await Property.findByIdAndUpdate(new mongoose.Types.ObjectId(propertyId), { status: 'rented' });
 
     res.status(201).json(lease);
   } catch (error) {
@@ -476,13 +476,13 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!property) {
       return res.status(403).json({ message: 'You can only create payments for your own properties.' });
     }
 
     // Ensure the tenant exists and belongs to the same company
-    const tenant = await Tenant.findOne({ _id: tenantId, companyId: req.user.companyId });
+    const tenant = await Tenant.findOne({ _id: new mongoose.Types.ObjectId(tenantId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!tenant) {
       return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
     }
@@ -507,10 +507,10 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     const payment = new Payment({
       paymentType: paymentType || 'rental',
       propertyType: propertyType || 'residential',
-      propertyId,
-      tenantId,
-      agentId: req.user.userId, // Set the agent as the agent
-      companyId: req.user.companyId,
+      propertyId: new mongoose.Types.ObjectId(propertyId),
+      tenantId: new mongoose.Types.ObjectId(tenantId),
+      agentId: new mongoose.Types.ObjectId(req.user.userId), // Set the agent as the agent
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
       paymentDate,
       paymentMethod,
       amount,
@@ -519,7 +519,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       rentalPeriodYear,
       referenceNumber: '', // Placeholder, will update after save
       notes: notes || '',
-      processedBy: req.user.userId,
+      processedBy: new mongoose.Types.ObjectId(req.user.userId),
       commissionDetails,
       status: status || 'completed',
       currency: currency || 'USD',
@@ -531,7 +531,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     // Update company revenue
     await mongoose.model('Company').findByIdAndUpdate(
-      req.user.companyId,
+      new mongoose.Types.ObjectId(req.user.companyId),
       {
         $inc: {
           revenue: commissionDetails.agencyShare,
@@ -541,7 +541,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     // Update agent commission
     await mongoose.model('User').findByIdAndUpdate(
-      req.user.userId,
+      new mongoose.Types.ObjectId(req.user.userId),
       {
         $inc: {
           commission: commissionDetails.agentShare,
@@ -616,9 +616,9 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
 
     // Find the payment and ensure it belongs to this agent
     const payment = await Payment.findOne({ 
-      _id: paymentId, 
-      agentId: req.user.userId, 
-      companyId: req.user.companyId 
+      _id: new mongoose.Types.ObjectId(paymentId), 
+      agentId: new mongoose.Types.ObjectId(req.user.userId), 
+      companyId: new mongoose.Types.ObjectId(req.user.companyId) 
     });
 
     console.log('Payment found:', payment ? 'Yes' : 'No');
@@ -658,7 +658,7 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
 
     // Update the payment
     const updatedPayment = await Payment.findByIdAndUpdate(
-      paymentId,
+      new mongoose.Types.ObjectId(paymentId),
       updateData,
       { new: true }
     );
@@ -708,19 +708,19 @@ export const createAgentFile = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!property) {
       return res.status(403).json({ message: 'You can only upload files for your own properties.' });
     }
 
     // Create file record
     const file = new File({
-      propertyId,
+      propertyId: new mongoose.Types.ObjectId(propertyId),
       fileName: req.file.originalname,
       fileType,
       fileUrl: req.file.buffer.toString('base64'),
-      uploadedBy: req.user.userId,
-      ownerId: req.user.userId // Set the agent as the owner
+      uploadedBy: new mongoose.Types.ObjectId(req.user.userId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Set the agent as the owner
     });
 
     await file.save();

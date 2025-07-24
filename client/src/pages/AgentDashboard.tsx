@@ -32,6 +32,8 @@ import { Communications } from './Communications/Communications';
 import { Settings } from './Settings/Settings';
 import { AgentSettings } from './Settings/AgentSettings';
 import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWrapper';
+import LevyPaymentsPage from './agent/LevyPaymentsPage';
+import { SchedulePage } from './agent';
 
 const StatCard = ({ title, value, icon, color, loading }: { title: string; value: string; icon: React.ReactNode; color: string; loading?: boolean }) => (
   <Card>
@@ -111,7 +113,7 @@ const AgentDashboard: React.FC = () => {
 
         setDashboardData({
           totalProperties: properties.length,
-          activeTenants: tenants.filter((t: any) => t.status === 'active').length,
+          activeTenants: tenants.filter((t: any) => t.status === 'Active').length,
           activeLeases: leases.filter((l: any) => l.status === 'active').length,
           monthlyCommission: commission.monthlyCommission || 0,
         });
@@ -210,6 +212,7 @@ const AgentDashboard: React.FC = () => {
             <Route path="tenants" element={<Tenants />} />
             <Route path="leases" element={<AgentLeasesPage />} />
             <Route path="payments" element={<PaymentsPageWrapper userRole="agent" />} />
+            <Route path="levies" element={<LevyPaymentsPage />} />
             <Route path="files" element={<Files />} />
             <Route path="maintenance" element={<MaintenancePageWrapper userRole="agent" />} />
             <Route path="communications" element={<Communications />} />
@@ -230,23 +233,7 @@ const AgentDashboard: React.FC = () => {
                 </Card>
               </Box>
             } />
-            <Route path="schedule" element={
-              <Box>
-                <Typography variant="h4" sx={{ mb: 4, fontWeight: 600 }}>
-                  Schedule
-                </Typography>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" sx={{ mb: 2 }}>
-                      My Schedule
-                    </Typography>
-                    <Typography color="text.secondary">
-                      Schedule management functionality coming soon...
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Box>
-            } />
+            <Route path="schedule" element={<SchedulePage />} />
             <Route path="settings" element={<AgentSettings />} />
           </Routes>
         </Box>

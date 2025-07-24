@@ -45,8 +45,10 @@ const userSchema = new Schema<IUser>({
     default: 'agent' as UserRole
   },
   companyId: {
-    type: Schema.Types.ObjectId,
-    ref: 'Company'
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Company',
+    required: true,
+    immutable: true
   },
   isActive: {
     type: Boolean,

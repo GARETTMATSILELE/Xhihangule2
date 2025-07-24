@@ -37,8 +37,8 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
         });
         // Get only properties where the agent is the owner (ownerId matches the agent's userId)
         const query = {
-            companyId: req.user.companyId,
-            ownerId: req.user.userId // Only properties owned by this agent
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) // Only properties owned by this agent
         };
         console.log('Agent properties query:', query);
         // First, let's see all properties in the company to understand the data
@@ -100,8 +100,8 @@ const getAgentTenants = (req, res) => __awaiter(void 0, void 0, void 0, function
         }
         // Get tenants created by this agent (using ownerId)
         const tenants = yield Tenant_1.Tenant.find({
-            companyId: req.user.companyId,
-            ownerId: req.user.userId // Filter by agent who created the tenant
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) // Filter by agent who created the tenant
         })
             .populate('propertyId', 'name address')
             .sort({ createdAt: -1 });
@@ -128,8 +128,8 @@ const getAgentLeases = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         // Get leases created by this agent (using ownerId)
         const leases = yield Lease_1.Lease.find({
-            companyId: req.user.companyId,
-            ownerId: req.user.userId // Filter by agent who created the lease
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) // Filter by agent who created the lease
         })
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
@@ -157,7 +157,7 @@ const getAgentFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         // Get files uploaded by this agent (using ownerId)
         const files = yield File_1.default.find({
-            ownerId: req.user.userId // Filter by agent who uploaded the file
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) // Filter by agent who uploaded the file
         })
             .populate('propertyId', 'name address')
             .populate('uploadedBy', 'firstName lastName email')
@@ -183,26 +183,27 @@ const getAgentCommission = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found', 400);
         }
-        // First, get the properties owned by this agent
-        const agentProperties = yield Property_1.Property.find({
-            companyId: req.user.companyId,
-            ownerId: req.user.userId
-        }).select('_id');
-        const agentPropertyIds = agentProperties.map(p => p._id);
-        // Calculate commission based on active leases for agent's properties only
-        const leases = yield Lease_1.Lease.find({
-            companyId: req.user.companyId,
-            propertyId: { $in: agentPropertyIds }, // Only leases for agent's properties
-            status: 'active'
-        })
-            .populate('propertyId', 'rent');
-        const totalCommission = leases.reduce((sum, lease) => {
+        // Get current month and year
+        const now = new Date();
+        const currentMonth = now.getMonth(); // 0-indexed
+        const currentYear = now.getFullYear();
+        // Find all payments for this agent in this company, for the current month and year
+        const payments = yield Payment_1.Payment.find({
+            agentId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            status: 'completed',
+            paymentDate: {
+                $gte: new Date(currentYear, currentMonth, 1),
+                $lt: new Date(currentYear, currentMonth + 1, 1)
+            }
+        });
+        // Sum agentShare from commissionDetails
+        const monthlyCommission = payments.reduce((sum, payment) => {
             var _a;
-            const rent = ((_a = lease.propertyId) === null || _a === void 0 ? void 0 : _a.rent) || 0;
-            const commission = rent * 0.1; // 10% commission
-            return sum + commission;
+            const agentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
+            return sum + agentShare;
         }, 0);
-        res.json({ totalCommission });
+        res.json({ monthlyCommission });
     }
     catch (error) {
         if (error instanceof errorHandler_1.AppError) {
@@ -237,7 +238,7 @@ const createAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (req.body.type && !['apartment', 'house', 'commercial'].includes(req.body.type)) {
             throw new errorHandler_1.AppError('Invalid property type: Must be one of: apartment, house, commercial', 400);
         }
-        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, status: req.body.status || 'available', type: req.body.type || 'apartment', description: req.body.description || '', rent: req.body.rent || 0, bedrooms: req.body.bedrooms || 0, bathrooms: req.body.bathrooms || 0, area: req.body.area || 0, images: req.body.images || [], amenities: req.body.amenities || [], createdAt: new Date(), updatedAt: new Date(), rentalType: req.body.rentalType, commission: req.body.commission });
+        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), status: req.body.status || 'available', type: req.body.type || 'apartment', description: req.body.description || '', rent: req.body.rent || 0, bedrooms: req.body.bedrooms || 0, bathrooms: req.body.bathrooms || 0, area: req.body.area || 0, images: req.body.images || [], amenities: req.body.amenities || [], createdAt: new Date(), updatedAt: new Date(), rentalType: req.body.rentalType, commission: req.body.commission });
         console.log('Creating property with data:', propertyData);
         const property = new Property_1.Property(propertyData);
         const savedProperty = yield property.save();
@@ -285,12 +286,12 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
             return res.status(400).json({ message: 'Invalid email format' });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!property) {
             return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
         }
         // Check for existing tenant with same email in this company
-        const existingTenant = yield Tenant_1.Tenant.findOne({ email, companyId: req.user.companyId });
+        const existingTenant = yield Tenant_1.Tenant.findOne({ email, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (existingTenant) {
             return res.status(400).json({ message: 'Tenant with this email already exists' });
         }
@@ -299,17 +300,17 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
             lastName,
             email,
             phone,
-            companyId: req.user.companyId,
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             status: status || 'Active',
-            propertyId,
-            ownerId: req.user.userId, // Set the agent as the owner
+            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Set the agent as the owner
             idNumber,
             emergencyContact
         };
         const newTenant = new Tenant_1.Tenant(tenantData);
         yield newTenant.save();
         // Mark property as rented
-        yield Property_1.Property.findByIdAndUpdate(propertyId, { status: 'rented' });
+        yield Property_1.Property.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(propertyId), { status: 'rented' });
         res.status(201).json(newTenant);
     }
     catch (error) {
@@ -351,12 +352,12 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
             });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!property) {
             return res.status(403).json({ message: 'You can only create leases for your own properties.' });
         }
         // Ensure the tenant exists and belongs to the same company
-        const tenant = yield Tenant_1.Tenant.findOne({ _id: tenantId, companyId: req.user.companyId });
+        const tenant = yield Tenant_1.Tenant.findOne({ _id: new mongoose_1.default.Types.ObjectId(tenantId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!tenant) {
             return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
         }
@@ -371,15 +372,15 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
             return res.status(400).json({ error: 'Rent amount and deposit amount must be non-negative' });
         }
         const leaseData = {
-            propertyId,
-            tenantId,
+            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+            tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
             startDate: startDateObj,
             endDate: endDateObj,
             rentAmount: Number(finalRentAmount),
             depositAmount: Number(finalDepositAmount),
             status: status || 'active',
-            companyId: req.user.companyId,
-            ownerId: req.user.userId, // Set the agent as the owner
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Set the agent as the owner
             // Additional fields with defaults
             monthlyRent: Number(monthlyRent || finalRentAmount),
             securityDeposit: Number(securityDeposit || finalDepositAmount),
@@ -395,7 +396,7 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
         const lease = new Lease_1.Lease(leaseData);
         yield lease.save();
         // Mark property as rented
-        yield Property_1.Property.findByIdAndUpdate(propertyId, { status: 'rented' });
+        yield Property_1.Property.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(propertyId), { status: 'rented' });
         res.status(201).json(lease);
     }
     catch (error) {
@@ -427,12 +428,12 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!property) {
             return res.status(403).json({ message: 'You can only create payments for your own properties.' });
         }
         // Ensure the tenant exists and belongs to the same company
-        const tenant = yield Tenant_1.Tenant.findOne({ _id: tenantId, companyId: req.user.companyId });
+        const tenant = yield Tenant_1.Tenant.findOne({ _id: new mongoose_1.default.Types.ObjectId(tenantId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!tenant) {
             return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
         }
@@ -454,10 +455,10 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const payment = new Payment_1.Payment({
             paymentType: paymentType || 'rental',
             propertyType: propertyType || 'residential',
-            propertyId,
-            tenantId,
-            agentId: req.user.userId, // Set the agent as the agent
-            companyId: req.user.companyId,
+            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+            tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
+            agentId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Set the agent as the agent
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             paymentDate,
             paymentMethod,
             amount,
@@ -466,7 +467,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             rentalPeriodYear,
             referenceNumber: '', // Placeholder, will update after save
             notes: notes || '',
-            processedBy: req.user.userId,
+            processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
             commissionDetails,
             status: status || 'completed',
             currency: currency || 'USD',
@@ -475,13 +476,13 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
         // Update company revenue
-        yield mongoose_1.default.model('Company').findByIdAndUpdate(req.user.companyId, {
+        yield mongoose_1.default.model('Company').findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), {
             $inc: {
                 revenue: commissionDetails.agencyShare,
             },
         });
         // Update agent commission
-        yield mongoose_1.default.model('User').findByIdAndUpdate(req.user.userId, {
+        yield mongoose_1.default.model('User').findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.userId), {
             $inc: {
                 commission: commissionDetails.agentShare,
             },
@@ -545,9 +546,9 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         });
         // Find the payment and ensure it belongs to this agent
         const payment = yield Payment_1.Payment.findOne({
-            _id: paymentId,
-            agentId: req.user.userId,
-            companyId: req.user.companyId
+            _id: new mongoose_1.default.Types.ObjectId(paymentId),
+            agentId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         });
         console.log('Payment found:', payment ? 'Yes' : 'No');
         if (!payment) {
@@ -578,7 +579,7 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         console.log('Updating payment with data:', updateData);
         // Update the payment
-        const updatedPayment = yield Payment_1.Payment.findByIdAndUpdate(paymentId, updateData, { new: true });
+        const updatedPayment = yield Payment_1.Payment.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(paymentId), updateData, { new: true });
         console.log('Payment updated successfully:', updatedPayment ? 'Yes' : 'No');
         res.json({
             status: 'success',
@@ -620,18 +621,18 @@ const createAgentFile = (req, res) => __awaiter(void 0, void 0, void 0, function
             });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: propertyId, ownerId: req.user.userId, companyId: req.user.companyId });
+        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!property) {
             return res.status(403).json({ message: 'You can only upload files for your own properties.' });
         }
         // Create file record
         const file = new File_1.default({
-            propertyId,
+            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
             fileName: req.file.originalname,
             fileType,
             fileUrl: req.file.buffer.toString('base64'),
-            uploadedBy: req.user.userId,
-            ownerId: req.user.userId // Set the agent as the owner
+            uploadedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) // Set the agent as the owner
         });
         yield file.save();
         res.status(201).json({

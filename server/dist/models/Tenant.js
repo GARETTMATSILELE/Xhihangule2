@@ -54,17 +54,20 @@ const tenantSchema = new mongoose_1.Schema({
         required: true
     },
     companyId: {
-        type: mongoose_1.Schema.Types.ObjectId,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
-        required: true
+        required: true,
+        immutable: true
     },
     propertyId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Property'
     },
     ownerId: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User'
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        immutable: true
     },
     status: {
         type: String,

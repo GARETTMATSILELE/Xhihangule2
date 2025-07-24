@@ -67,9 +67,16 @@ const PaymentSchema: Schema = new Schema({
     required: true,
   },
   companyId: {
-    type: Schema.Types.ObjectId,
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'Company',
     required: true,
+    immutable: true
+  },
+  ownerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    immutable: true
   },
   paymentDate: {
     type: Date,
@@ -91,7 +98,8 @@ const PaymentSchema: Schema = new Schema({
   },
   referenceNumber: {
     type: String,
-    required: true,
+    required: false,
+    default: '',
   },
   // Add rental period fields
   rentalPeriodMonth: {

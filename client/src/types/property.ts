@@ -34,6 +34,9 @@ export interface Property {
   // New fields
   rentalType?: 'management' | 'introduction';
   commission?: number;
+  // New fields for levy/municipal fees
+  levyOrMunicipalType?: 'levy' | 'municipal';
+  levyOrMunicipalAmount?: number;
 }
 
 export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'createdAt' | 'updatedAt' | 'status' | 'occupiedUnits'> {
@@ -43,6 +46,9 @@ export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'created
   // New fields
   rentalType?: 'management' | 'introduction';
   commission?: number;
+  // New fields for levy/municipal fees
+  levyOrMunicipalType?: 'levy' | 'municipal';
+  levyOrMunicipalAmount?: number;
 }
 
 export interface PropertyFilter {

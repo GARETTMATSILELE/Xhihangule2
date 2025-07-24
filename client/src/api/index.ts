@@ -1,5 +1,6 @@
 import api from './axios';
 import publicApi from './publicApi';
+import axios from 'axios';
 
 // API configuration
 const API_BASE_URL = 'http://localhost:5000/api';
@@ -195,6 +196,16 @@ export const apiService = {
         'Content-Type': 'multipart/form-data'
       }
     });
+  },
+
+  // Invoices
+  createInvoice: async (invoice: any) => {
+    const res = await apiInstance.post('/invoices', invoice);
+    return res.data;
+  },
+  getInvoices: async () => {
+    const res = await apiInstance.get('/invoices');
+    return res.data;
   }
 };
 

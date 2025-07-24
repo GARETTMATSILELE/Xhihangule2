@@ -29,7 +29,12 @@ export const agentService = {
 
   // Create a new tenant (for agents)
   createTenant: async (tenantData: TenantFormData) => {
-    const response = await api.post('/agents/tenants', tenantData);
+    // Ensure ownerId is included for agent-created tenants
+    const tenantDataWithOwnerId = {
+      ...tenantData,
+      ownerId: tenantData.ownerId // This should already be set by TenantForm
+    };
+    const response = await api.post('/agents/tenants', tenantDataWithOwnerId);
     return response.data;
   },
 
@@ -52,13 +57,35 @@ export const agentService = {
   },
 
   // Create a new payment (for agents)
-  createPayment: async (paymentData: PaymentFormData) => {
+  createPayment: async (paymentData: PaymentFormData, properties?: Property[], userId?: string) => {
+    // Ensure ownerId is set
+    if (!paymentData.ownerId && paymentData.propertyId && properties) {
+      const property = properties.find(p => String(p._id) === String(paymentData.propertyId));
+      if (property && property.ownerId) {
+        paymentData.ownerId = property.ownerId;
+      }
+    }
+    // Fallback: set ownerId to agent's user id if still not set
+    if (!paymentData.ownerId && userId) {
+      paymentData.ownerId = userId;
+    }
     const response = await api.post('/agents/payments', paymentData);
     return response.data;
   },
 
   // Update a payment (for agents)
-  updatePayment: async (id: string, paymentData: PaymentFormData) => {
+  updatePayment: async (id: string, paymentData: PaymentFormData, properties?: Property[], userId?: string) => {
+    // Ensure ownerId is set
+    if (!paymentData.ownerId && paymentData.propertyId && properties) {
+      const property = properties.find(p => String(p._id) === String(paymentData.propertyId));
+      if (property && property.ownerId) {
+        paymentData.ownerId = property.ownerId;
+      }
+    }
+    // Fallback: set ownerId to agent's user id if still not set
+    if (!paymentData.ownerId && userId) {
+      paymentData.ownerId = userId;
+    }
     const response = await api.put(`/agents/payments/${id}`, paymentData);
     return response.data;
   },

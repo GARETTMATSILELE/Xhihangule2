@@ -311,6 +311,34 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
             onChange={handleNumberChange}
           />
         </Grid>
+        <Grid item xs={12} sm={6}>
+          <FormControl component="fieldset" fullWidth>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Levy/Municipal Fees</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Button
+                variant={property.levyOrMunicipalType === 'levy' ? 'contained' : 'outlined'}
+                onClick={() => setProperty(prev => ({ ...prev, levyOrMunicipalType: 'levy' }))}
+              >
+                Levy
+              </Button>
+              <Button
+                variant={property.levyOrMunicipalType === 'municipal' ? 'contained' : 'outlined'}
+                onClick={() => setProperty(prev => ({ ...prev, levyOrMunicipalType: 'municipal' }))}
+              >
+                Municipal Fees
+              </Button>
+              <TextField
+                type="number"
+                label={property.levyOrMunicipalType === 'levy' ? 'Levy Amount' : 'Municipal Fees Amount'}
+                value={property.levyOrMunicipalAmount || ''}
+                onChange={e => setProperty(prev => ({ ...prev, levyOrMunicipalAmount: Number(e.target.value) }))}
+                fullWidth
+                disabled={!property.levyOrMunicipalType}
+                sx={{ ml: 2, minWidth: 120 }}
+              />
+            </Box>
+          </FormControl>
+        </Grid>
         <Grid item xs={12}>
           <TextField
             fullWidth
@@ -431,14 +459,24 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
         </Grid>
 
         <Grid item xs={12}>
-          <Button
-            type="submit"
-            variant="contained"
-            color="primary"
-            fullWidth
-          >
-            {initialData ? 'Update Property' : 'Add Property'}
-          </Button>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={onClose}
+              sx={{ flex: 1 }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              sx={{ flex: 1 }}
+            >
+              {initialData ? 'Update Property' : 'Add Property'}
+            </Button>
+          </Box>
         </Grid>
       </Grid>
     </Box>

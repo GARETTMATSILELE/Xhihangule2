@@ -67,7 +67,8 @@ export const useTenantService = () => {
       }
     const response = await api.post('/tenants', {
       ...tenant,
-      companyId: user.companyId
+      companyId: user.companyId,
+      ownerId: user._id // Include the current user's ID as ownerId
     });
       return response.data;
   };

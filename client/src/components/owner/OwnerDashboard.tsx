@@ -72,6 +72,7 @@ interface Property {
   nextLeaseExpiry: string;
   units: number;
   occupiedUnits: number;
+  commission?: number; // Added for new net income calculation
 }
 
 interface MaintenanceRequest {
@@ -322,6 +323,39 @@ const OwnerDashboard: React.FC = () => {
   const pendingMaintenance = maintenanceRequests.filter(req => req.status === 'pending').length;
   const completedMaintenance = maintenanceRequests.filter(req => req.status === 'completed').length;
 
+  // --- NEW NET INCOME CALCULATION ---
+  // Calculate net income as sum of (amount - commission) for each property, using payment records
+  let netIncome = 0;
+  if (chartData?.payment?.data && Array.isArray(chartData.payment.data) && chartData.payment.data.length > 0) {
+    // Group payments by property
+    const paymentsByProperty: { [propertyId: string]: any[] } = {};
+    chartData.payment.data.forEach((payment: any) => {
+      if (!payment.propertyId) return;
+      if (!paymentsByProperty[payment.propertyId]) paymentsByProperty[payment.propertyId] = [];
+      paymentsByProperty[payment.propertyId].push(payment);
+    });
+    // For each property, sum (amount - commission) for all its payments
+    netIncome = Object.entries(paymentsByProperty).reduce((sum, [propertyId, payments]) => {
+      // Find the property to get commission percent if needed
+      const property = properties.find(p => String(p._id) === String(propertyId));
+      const commissionPercent = property?.commission ?? 0;
+      const propertyNet = (payments as any[]).reduce((acc, payment) => {
+        const amount = payment.amount || 0;
+        let commission = 0;
+        if (payment.commissionDetails && typeof payment.commissionDetails.totalCommission === 'number') {
+          commission = payment.commissionDetails.totalCommission;
+        } else {
+          commission = amount * (commissionPercent / 100);
+        }
+        return acc + (amount - commission);
+      }, 0);
+      return sum + propertyNet;
+    }, 0);
+  } else {
+    // Fallback: use old calculation
+    netIncome = finalTotalRentCollected - totalArrears;
+  }
+
   // Check if any data is still loading
   const isAnyLoading = Object.values(loading).some(Boolean);
 
@@ -550,8 +584,8 @@ const OwnerDashboard: React.FC = () => {
                     <Grid item xs={12} md={6} lg={4}>
                       <Paper sx={{ p: 2 }}>
                         <Typography variant="subtitle1">Net Income</Typography>
-                        <Typography variant="h4" color={finalTotalRentCollected - totalArrears >= 0 ? 'success' : 'error'}>
-                          ${(finalTotalRentCollected - totalArrears).toLocaleString()}
+                        <Typography variant="h4" color={netIncome >= 0 ? 'success' : 'error'}>
+                          ${netIncome.toLocaleString()}
                         </Typography>
                       </Paper>
                     </Grid>

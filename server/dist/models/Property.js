@@ -99,12 +99,14 @@ const PropertySchema = new mongoose_1.Schema({
     companyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
-        required: true
+        required: true,
+        immutable: true
     },
     ownerId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'User',
-        required: [true, 'Owner ID is required']
+        required: [true, 'Owner ID is required'],
+        immutable: true
     },
     occupancyRate: {
         type: Number,
@@ -146,6 +148,16 @@ const PropertySchema = new mongoose_1.Schema({
         min: [0, 'Commission cannot be negative'],
         max: [100, 'Commission cannot exceed 100%'],
         default: 15
+    },
+    // New fields for levy/municipal fees
+    levyOrMunicipalType: {
+        type: String,
+        enum: ['levy', 'municipal'],
+        required: false,
+    },
+    levyOrMunicipalAmount: {
+        type: Number,
+        required: false,
     }
 }, {
     timestamps: true
