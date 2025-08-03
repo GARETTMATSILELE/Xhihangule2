@@ -251,48 +251,50 @@ const CommissionsPage: React.FC = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4 }}>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          Commission Reports
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-          <Button 
-            variant="contained" 
-            onClick={downloadPDF}
-            disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
-          >
-            Download PDF
-          </Button>
-          <Button 
-            variant="contained" 
-            onClick={downloadExcel}
-            disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
-          >
-            Download Excel
-          </Button>
-          <Button 
-            variant="contained" 
-            onClick={printReport}
-            disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
-          >
-            Print Report
-          </Button>
+    <Box sx={{ width: '100%' }}>
+      <Box sx={{ mt: 4 }}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" gutterBottom>
+            Commission Reports
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Button 
+              variant="contained" 
+              onClick={downloadPDF}
+              disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
+            >
+              Download PDF
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={downloadExcel}
+              disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
+            >
+              Download Excel
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={printReport}
+              disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
+            >
+              Print Report
+            </Button>
+          </Box>
         </Box>
+
+        <Paper sx={{ width: '100%', mb: 2 }}>
+          <Tabs value={activeTab} onChange={handleTabChange}>
+            <Tab label="Agent Commissions" />
+            <Tab label="Agency Commission" />
+            <Tab label="PREA Commission" />
+          </Tabs>
+
+          <Box sx={{ p: 3 }}>
+            {renderTable()}
+          </Box>
+        </Paper>
       </Box>
-
-      <Paper sx={{ width: '100%', mb: 2 }}>
-        <Tabs value={activeTab} onChange={handleTabChange}>
-          <Tab label="Agent Commissions" />
-          <Tab label="Agency Commission" />
-          <Tab label="PREA Commission" />
-        </Tabs>
-
-        <Box sx={{ p: 3 }}>
-          {renderTable()}
-        </Box>
-      </Paper>
-    </Container>
+    </Box>
   );
 };
 

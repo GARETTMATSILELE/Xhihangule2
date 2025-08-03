@@ -136,7 +136,7 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Settings
       </Typography>
@@ -548,7 +548,7 @@ const SettingsPage: React.FC = () => {
           Save Changes
         </Button>
       </Box>
-    </Container>
+    </Box>
   );
 };
 

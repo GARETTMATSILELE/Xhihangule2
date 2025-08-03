@@ -98,7 +98,7 @@ const PropertyAccountsPage: React.FC = () => {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>Property Accounts</Typography>
       <Grid container spacing={3}>
         {properties.map((property) => (

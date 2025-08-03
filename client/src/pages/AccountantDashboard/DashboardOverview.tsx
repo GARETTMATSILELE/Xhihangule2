@@ -102,7 +102,7 @@ const DashboardOverview: React.FC = () => {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 600 }}>
         Welcome back, {user?.firstName}!
       </Typography>

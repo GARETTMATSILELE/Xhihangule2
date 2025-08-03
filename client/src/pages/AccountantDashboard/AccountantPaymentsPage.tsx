@@ -164,7 +164,7 @@ const AccountantPaymentsPage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" component="h1" sx={{ fontWeight: 600, mb: 3 }}>
         Accountant Payments
       </Typography>

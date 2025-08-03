@@ -245,16 +245,16 @@ const TasksPage: React.FC<TasksPageProps> = () => {
 
   if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Box sx={{ width: '100%' }}>
         <Box display="flex" justifyContent="center" alignItems="center" p={4}>
           <CircularProgress />
         </Box>
-      </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Tasks Dashboard
       </Typography>
@@ -403,7 +403,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
           </Typography>
         </Box>
       )}
-    </Container>
+    </Box>
   );
 };
 

@@ -117,7 +117,7 @@ const LevyPaymentsPage: React.FC = () => {
   }, [user?.companyId]);
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>Levy Payments</Typography>
       {loading && <CircularProgress />}
       {error && <Alert severity="error">{error}</Alert>}

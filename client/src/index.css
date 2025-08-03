@@ -19,3 +19,25 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Accountant Dashboard White Space Fixes */
+.accountant-dashboard-no-sidebar {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+.accountant-dashboard-no-sidebar * {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+/* Override any potential global margins */
+body.accountant-dashboard-active {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+html.accountant-dashboard-active {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Box,
-  Container,
   Typography,
   Paper,
   Grid,
@@ -49,7 +48,7 @@ const ReportsPage: React.FC = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Reports
       </Typography>
@@ -138,7 +137,7 @@ const ReportsPage: React.FC = () => {
           </Card>
         </Grid>
       </Grid>
-    </Container>
+    </Box>
   );
 };
 
