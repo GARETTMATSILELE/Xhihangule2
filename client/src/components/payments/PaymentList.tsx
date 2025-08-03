@@ -226,7 +226,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
   );
 
   return (
-    <Box sx={{ mt: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -343,18 +343,19 @@ const PaymentList: React.FC<PaymentListProps> = ({
         </Grid>
       </Grid>
 
-      {loading ? (
-        <Box display="flex" justifyContent="center" p={3}>
-          <CircularProgress />
-        </Box>
-      ) : isMobile ? (
-        <Box>
-          {paginatedPayments.map(renderMobilePaymentCard)}
-        </Box>
-      ) : (
-        <TableContainer component={Paper} elevation={0}>
-          <Table>
-            <TableHead>
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {loading ? (
+          <Box display="flex" justifyContent="center" alignItems="center" flex={1}>
+            <CircularProgress />
+          </Box>
+        ) : isMobile ? (
+          <Box sx={{ flex: 1, overflow: 'auto' }}>
+            {paginatedPayments.map(renderMobilePaymentCard)}
+          </Box>
+        ) : (
+                    <TableContainer component={Paper} elevation={0} sx={{ flex: 1, overflow: 'auto' }}>
+            <Table stickyHeader>
+              <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
                 <TableCell>Property</TableCell>
@@ -428,7 +429,8 @@ const PaymentList: React.FC<PaymentListProps> = ({
             onRowsPerPageChange={handleChangeRowsPerPage}
           />
         </TableContainer>
-      )}
+        )}
+      </Box>
 
       {selectedReceipt && (
         <Dialog 

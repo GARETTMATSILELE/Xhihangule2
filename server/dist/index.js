@@ -22,6 +22,10 @@ const propertyOwnerRoutes_1 = __importDefault(require("./routes/propertyOwnerRou
 const ownerRoutes_1 = __importDefault(require("./routes/ownerRoutes"));
 const healthRoutes_1 = __importDefault(require("./routes/healthRoutes"));
 const maintenanceRequestRoutes_1 = __importDefault(require("./routes/maintenanceRequestRoutes"));
+const levyPaymentRoutes_1 = __importDefault(require("./routes/levyPaymentRoutes"));
+const municipalPaymentRoutes_1 = __importDefault(require("./routes/municipalPaymentRoutes"));
+const paymentRequestRoutes_1 = __importDefault(require("./routes/paymentRequestRoutes"));
+const invoiceRoutes_1 = __importDefault(require("./routes/invoiceRoutes"));
 const database_1 = require("./config/database");
 const http_1 = require("http");
 const socket_1 = require("./config/socket");
@@ -82,6 +86,15 @@ app.use('/api/property-owners', propertyOwnerRoutes_1.default);
 app.use('/api/owners', ownerRoutes_1.default);
 app.use('/api/health', healthRoutes_1.default);
 app.use('/api/maintenance', maintenanceRequestRoutes_1.default);
+app.use('/api/levy-payments', levyPaymentRoutes_1.default);
+app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
+app.use('/api/payment-requests', paymentRequestRoutes_1.default);
+app.use('/api/invoices', invoiceRoutes_1.default);
+// Debug route to catch unmatched requests - temporarily disabled
+// app.use('/api/*', (req, res, next) => {
+//   console.log('DEBUG: Unmatched API route:', req.method, req.originalUrl);
+//   next();
+// });
 // Test route
 app.get('/api/test', (req, res) => {
     res.json({ message: 'API is working' });

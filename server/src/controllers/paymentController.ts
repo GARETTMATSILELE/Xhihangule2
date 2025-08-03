@@ -9,6 +9,7 @@ import { Property } from '../models/Property';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
 import { Tenant } from '../models/Tenant';
+import propertyAccountService from '../services/propertyAccountService';
 
 export const getPayments = async (req: Request, res: Response) => {
   if (!req.user) {
@@ -265,12 +266,13 @@ export const createPayment = async (req: Request, res: Response) => {
 // Create a new payment (for accountant dashboard - handles PaymentFormData structure)
 export const createPaymentAccountant = async (req: Request, res: Response) => {
   if (!req.user) {
-    return res.status(401).json({ message: 'Unauthorized' });
+    return res.status(401).json({ message: 'Authentication required' });
   }
 
-  try {
-    console.log('Creating accountant payment with data:', req.body);
+  const session = await mongoose.startSession();
+  session.startTransaction();
     
+  try {
     const {
       paymentType,
       propertyType,
@@ -284,130 +286,148 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       referenceNumber,
       notes,
       currency,
-      companyId,
-      processedBy,
+      leaseId,
       rentalPeriodMonth,
       rentalPeriodYear,
-      advanceMonthsPaid,
-      advancePeriodStart,
-      advancePeriodEnd,
+      rentUsed,
+      commissionDetails,
+      processedBy,
+      ownerId,
+      manualPropertyAddress,
+      manualTenantName
     } = req.body;
 
     // Validate required fields
-    if (!propertyId || !tenantId || !agentId || !amount || !paymentDate || !paymentMethod) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Missing required fields: propertyId, tenantId, agentId, amount, paymentDate, paymentMethod',
-      });
+    if (!amount || !paymentDate) {
+      return res.status(400).json({ message: 'Missing required fields: amount and paymentDate' });
+    }
+    
+    // Check if using manual entries
+    const isManualProperty = propertyId && propertyId.startsWith('manual_');
+    const isManualTenant = tenantId && tenantId.startsWith('manual_');
+    
+    // Validate manual entries
+    if (isManualProperty && !manualPropertyAddress) {
+      return res.status(400).json({ message: 'Manual property address is required when using manual property entry' });
+    }
+    if (isManualTenant && !manualTenantName) {
+      return res.status(400).json({ message: 'Manual tenant name is required when using manual tenant entry' });
+    }
+    
+    // Validate that either propertyId/tenantId are provided or manual entries are used
+    if (!propertyId && !manualPropertyAddress) {
+      return res.status(400).json({ message: 'Either propertyId or manual property address is required' });
+    }
+    if (!tenantId && !manualTenantName) {
+      return res.status(400).json({ message: 'Either tenantId or manual tenant name is required' });
     }
 
-    // Get property details
-    const property = await Property.findById(propertyId);
-    if (!property) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Property not found',
-      });
+    // Calculate commission if not provided
+    let finalCommissionDetails = commissionDetails;
+    if (!finalCommissionDetails) {
+      const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
+      const totalCommission = (amount * baseCommissionRate) / 100;
+      const preaFee = totalCommission * 0.03;
+      const remainingCommission = totalCommission - preaFee;
+      const agentShare = remainingCommission * 0.6;
+      const agencyShare = remainingCommission * 0.4;
+
+      finalCommissionDetails = {
+        totalCommission,
+        preaFee,
+        agentShare,
+        agencyShare,
+        ownerAmount: amount - totalCommission,
+      };
     }
-    const commissionPercentage = property.commission || 0;
-    // Calculate commission based on property commission percentage
-    const accountantCommissionDetails = calculateCommission(amount, commissionPercentage);
 
     // Create payment record
     const payment = new Payment({
-      paymentType,
-      propertyType,
-      propertyId,
-      tenantId,
-      agentId,
-      companyId: companyId || req.user.companyId,
-      paymentDate,
+      paymentType: paymentType || 'rental',
+      propertyType: propertyType || 'residential',
+      propertyId: isManualProperty ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(propertyId), // Generate new ID for manual entries
+      tenantId: isManualTenant ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(tenantId), // Generate new ID for manual entries
+      agentId: new mongoose.Types.ObjectId(agentId || req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      paymentDate: new Date(paymentDate),
       paymentMethod,
       amount,
       depositAmount: depositAmount || 0,
       rentalPeriodMonth,
       rentalPeriodYear,
-      advanceMonthsPaid,
-      advancePeriodStart,
-      advancePeriodEnd,
-      referenceNumber: '', // Placeholder, will update after save
+      referenceNumber: referenceNumber || `RCPT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       notes: notes || '',
-      processedBy: processedBy || req.user.userId,
-      commissionDetails: accountantCommissionDetails,
+      processedBy: new mongoose.Types.ObjectId(processedBy || req.user.userId),
+      commissionDetails: finalCommissionDetails,
       status: 'completed',
       currency: currency || 'USD',
+      leaseId: leaseId ? new mongoose.Types.ObjectId(leaseId) : undefined,
+      rentUsed,
+      // Add manual entry fields
+      manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
+      manualTenantName: isManualTenant ? manualTenantName : undefined,
     });
 
-    await payment.save();
-    payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
-    await payment.save();
-
-    // If depositAmount > 0, record in rentaldeposits
-    if (payment.depositAmount && payment.depositAmount > 0) {
-      const { RentalDeposit } = require('../models/rentalDeposit');
-      await RentalDeposit.create({
-        propertyId: payment.propertyId,
-        agentId: payment.agentId,
-        companyId: payment.companyId,
-        tenantId: payment.tenantId,
-        depositAmount: payment.depositAmount,
-        depositDate: payment.paymentDate,
-        paymentId: payment._id,
-      });
-    }
+    await payment.save({ session });
 
     // Update company revenue
     await Company.findByIdAndUpdate(
-      companyId || req.user.companyId,
+      new mongoose.Types.ObjectId(req.user.companyId),
       {
         $inc: {
-          revenue: accountantCommissionDetails.agencyShare,
+          revenue: finalCommissionDetails.agencyShare,
         },
-      }
+      },
+      { session }
     );
 
     // Update agent commission
     await User.findByIdAndUpdate(
-      agentId,
+      new mongoose.Types.ObjectId(agentId || req.user.userId),
       {
         $inc: {
-          commission: accountantCommissionDetails.agentShare,
+          commission: finalCommissionDetails.agentShare,
         },
-      }
+      },
+      { session }
     );
 
     // If it's a rental payment, update property owner's balance
-    if (paymentType === 'rental' && property.ownerId) {
+    if (paymentType === 'rental' && ownerId) {
       await User.findByIdAndUpdate(
-        property.ownerId,
+        new mongoose.Types.ObjectId(ownerId),
         {
           $inc: {
-            balance: accountantCommissionDetails.ownerAmount,
+            balance: finalCommissionDetails.ownerAmount,
           },
-        }
+        },
+        { session }
       );
     }
 
-    // Update property arrears after payment
-    if (property.currentArrears !== undefined) {
-      const arrears = property.currentArrears - amount;
-      await Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
+    // Record income in property account
+    try {
+      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+    } catch (error) {
+      console.error('Failed to record income in property account:', error);
+      // Don't fail the entire transaction if property account recording fails
     }
 
-    console.log('Accountant payment created successfully:', { id: payment._id, amount: payment.amount });
+    await session.commitTransaction();
 
     res.status(201).json({
-      status: 'success',
-      data: payment,
-      message: 'Payment processed successfully'
+      message: 'Payment processed successfully',
+      payment,
     });
   } catch (error) {
-    console.error('Error creating accountant payment:', error);
+    await session.abortTransaction();
+    console.error('Error processing payment:', error);
     res.status(500).json({
-      status: 'error',
       message: 'Failed to process payment',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -1021,7 +1041,10 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       company: company,
       commissionDetails: payment.commissionDetails,
       notes: payment.notes,
-      createdAt: payment.createdAt
+      createdAt: payment.createdAt,
+      // Include manual entry fields
+      manualPropertyAddress: payment.manualPropertyAddress,
+      manualTenantName: payment.manualTenantName
     };
 
     console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });

@@ -64,7 +64,7 @@ class PaymentService {
   async createPaymentAccountant(paymentData: PaymentFormData): Promise<{ status: string; data: Payment; message: string }> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.post('/accountants/payments', paymentData);
+        const response = await api.post('/api/accountants/payments', paymentData);
         return response.data;
       });
     } catch (error: any) {
@@ -76,7 +76,7 @@ class PaymentService {
   async getPaymentsAccountant(): Promise<Payment[]> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.get('/accountants/payments');
+        const response = await api.get('/api/accountants/payments');
         return response.data;
       });
     } catch (error: any) {
@@ -268,25 +268,25 @@ class PaymentService {
 
   // Property Account: Get transactions (income/expenditure)
   async getPropertyTransactions(propertyId: string, type: 'income' | 'expenditure') {
-    const response = await api.get(`/property-accounts/${propertyId}/transactions`, { params: { type } });
+    const response = await api.get(`/api/property-accounts/${propertyId}/transactions`, { params: { type } });
     return response.data;
   }
 
   // Property Account: Create payment (expenditure)
   async createPropertyPayment(propertyId: string, paymentData: any) {
-    const response = await api.post(`/property-accounts/${propertyId}/pay`, paymentData);
+    const response = await api.post(`/api/property-accounts/${propertyId}/pay`, paymentData);
     return response.data;
   }
 
   // Property Account: Get payment request document
   async getPaymentRequestDocument(propertyId: string, paymentId: string) {
-    const response = await api.get(`/property-accounts/${propertyId}/payment-request/${paymentId}`);
+    const response = await api.get(`/api/property-accounts/${propertyId}/payment-request/${paymentId}`);
     return response.data;
   }
 
   // Property Account: Get acknowledgement document
   async getAcknowledgementDocument(propertyId: string, paymentId: string) {
-    const response = await api.get(`/property-accounts/${propertyId}/acknowledgement/${paymentId}`);
+    const response = await api.get(`/api/property-accounts/${propertyId}/acknowledgement/${paymentId}`);
     return response.data;
   }
 
@@ -308,10 +308,14 @@ class PaymentService {
     }
   }
 
-  async getLevyPayments(): Promise<any[]> {
+  async getLevyPayments(companyId?: string): Promise<any[]> {
     try {
       // Use publicApi instead of api to avoid sending credentials
-      const response = await publicApi.get('/levy-payments');
+      const config: any = {};
+      if (companyId) {
+        config.params = { companyId };
+      }
+      const response = await publicApi.get('/levy-payments', config);
       return response.data;
     } catch (error: any) {
       return this.handleAuthError(error);

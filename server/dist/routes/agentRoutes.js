@@ -31,4 +31,9 @@ router.post('/files', agentController_1.createAgentFile);
 router.post('/payments', agentController_1.createAgentPayment);
 router.put('/payments/:id', agentController_1.updateAgentPayment);
 router.get('/commission', agentController_1.getAgentCommission);
+// Property owner routes
+router.get('/property-owners', agentController_1.getAgentPropertyOwners);
+router.post('/property-owners', agentController_1.createAgentPropertyOwner);
+router.put('/property-owners/:id', agentController_1.updateAgentPropertyOwner);
+router.delete('/property-owners/:id', agentController_1.deleteAgentPropertyOwner);
 exports.default = router;

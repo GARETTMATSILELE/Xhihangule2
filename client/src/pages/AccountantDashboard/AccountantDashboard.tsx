@@ -1,85 +1,52 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Drawer,
-  AppBar,
-  Toolbar,
-  List,
-  Typography,
-  Divider,
-  IconButton,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  useTheme,
-  useMediaQuery,
-  Avatar,
-  Menu,
-  MenuItem,
-  Tooltip
-} from '@mui/material';
-import {
-  Menu as MenuIcon,
-  ChevronLeft as ChevronLeftIcon,
-  Payment as PaymentIcon,
-  Assessment as AssessmentIcon,
-  AccountCircle as AccountCircleIcon,
-  Logout as LogoutIcon,
-  Person as PersonIcon,
-  Dashboard as DashboardIcon,
-  Receipt as ReceiptIcon,
-  AttachMoney as DollarSignIcon,
-  Settings as SettingsIcon
-} from '@mui/icons-material';
-import { useNavigate, useLocation, Outlet, Routes, Route } from 'react-router-dom';
+import { Box, Toolbar } from '@mui/material';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { AccountantSidebar } from '../../components/Layout/AccountantSidebar';
 import LevyPaymentsPage from './LevyPaymentsPage';
-
-const drawerWidth = 240;
+import TasksPage from './TasksPage';
+import DashboardOverview from './DashboardOverview';
+import AccountantPaymentsPage from './AccountantPaymentsPage';
+import PropertyAccountsPage from './PropertyAccountsPage';
+import PropertyAccountDetailPage from './PropertyAccountDetailPage';
+import CommissionsPage from './CommissionsPage';
+import WrittenInvoicesPage from './WrittenInvoicesPage';
+import SettingsPage from './SettingsPage';
+import ReportsPage from './ReportsPage';
+import { Routes, Route } from 'react-router-dom';
 
 const AccountantDashboard: React.FC = () => {
-  const [open, setOpen] = useState(true);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, logout, company } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const location = useLocation();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [activeTab, setActiveTab] = useState(0);
 
-  const handleDrawerToggle = () => {
-    setOpen(!open);
-  };
+  console.log('AccountantDashboard rendering - pathname:', location.pathname, 'user:', user);
 
-  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleProfileClick = () => {
-    handleMenuClose();
-    navigate('/accountant-dashboard/profile');
-  };
-
-  const handleLogout = async () => {
-    handleMenuClose();
-    await logout();
-    navigate('/login');
-  };
-
-  const menuItems = [
-    { text: 'Dashboard', icon: <DashboardIcon />, path: '/accountant-dashboard' },
-    { text: 'Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
-    { text: 'Written Invoices', icon: <ReceiptIcon />, path: '/accountant-dashboard/written-invoices' },
-    { text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
-    { text: 'Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },
-    { text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' }
-  ];
+  // Update activeTab based on current location
+  useEffect(() => {
+    const path = location.pathname;
+    console.log('AccountantDashboard useEffect - path:', path);
+    if (path === '/accountant-dashboard') {
+      setActiveTab(0); // Dashboard
+    } else if (path === '/accountant-dashboard/payments') {
+      setActiveTab(1); // Payments
+    } else if (path === '/accountant-dashboard/levies') {
+      setActiveTab(2); // Levies
+    } else if (path === '/accountant-dashboard/written-invoices') {
+      setActiveTab(3); // Invoices
+    } else if (path === '/accountant-dashboard/property-accounts') {
+      setActiveTab(4); // Property Accounts
+    } else if (path === '/accountant-dashboard/commissions') {
+      setActiveTab(5); // Commissions
+    } else if (path === '/accountant-dashboard/reports') {
+      setActiveTab(6); // Reports
+    } else if (path === '/accountant-dashboard/tasks') {
+      setActiveTab(7); // Tasks
+    } else if (path === '/accountant-dashboard/settings') {
+      setActiveTab(8); // Settings
+    }
+    console.log('AccountantDashboard activeTab set to:', activeTab);
+  }, [location.pathname]);
 
   return (
     <Box sx={{ display: 'flex' }}>
@@ -95,11 +62,17 @@ const AccountantDashboard: React.FC = () => {
       >
         <Toolbar />
         <Routes>
-          <Route path="" element={<Outlet />} />
-          <Route path="payments" element={<Outlet />} />
+          <Route path="" element={<DashboardOverview />} />
+          <Route path="payments" element={<AccountantPaymentsPage />} />
           <Route path="levies" element={<LevyPaymentsPage />} />
+          <Route path="tasks" element={<TasksPage />} />
+          <Route path="property-accounts" element={<PropertyAccountsPage />} />
+          <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
+          <Route path="commissions" element={<CommissionsPage />} />
+          <Route path="written-invoices" element={<WrittenInvoicesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="reports" element={<ReportsPage />} />
         </Routes>
-        <Outlet />
       </Box>
     </Box>
   );

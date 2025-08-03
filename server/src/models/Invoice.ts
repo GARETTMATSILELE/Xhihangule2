@@ -1,12 +1,33 @@
-import { Schema, Document } from 'mongoose';
+import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
 
+interface InvoiceItem {
+  code: string;
+  description: string;
+  taxPercentage: number;
+  netPrice: number;
+}
+
+interface ClientDetails {
+  name: string;
+  address: string;
+  tinNumber: string;
+  bpNumber: string;
+  vatNumber: string;
+}
+
 export interface IInvoice extends Document {
+  companyId: Types.ObjectId;
   property: string;
-  client: string;
-  amount: number;
+  client: ClientDetails;
+  subtotal: number;
+  discount: number;
+  amountExcludingTax: number;
+  taxPercentage: number;
+  taxAmount: number;
+  totalAmount: number;
   dueDate: Date;
-  description?: string;
+  items: InvoiceItem[];
   type: 'rental' | 'sale';
   saleDetails?: string;
   status: 'paid' | 'unpaid' | 'overdue';
@@ -14,12 +35,33 @@ export interface IInvoice extends Document {
   updatedAt: Date;
 }
 
+const InvoiceItemSchema = new Schema<InvoiceItem>({
+  code: { type: String, required: true },
+  description: { type: String, required: true },
+  taxPercentage: { type: Number, required: true, default: 15 },
+  netPrice: { type: Number, required: true }
+});
+
+const ClientDetailsSchema = new Schema<ClientDetails>({
+  name: { type: String, required: true },
+  address: { type: String, required: true },
+  tinNumber: { type: String, required: true },
+  bpNumber: { type: String, required: true },
+  vatNumber: { type: String, required: true }
+});
+
 const InvoiceSchema: Schema = new Schema({
+  companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
   property: { type: String, required: true },
-  client: { type: String, required: true },
-  amount: { type: Number, required: true },
+  client: { type: ClientDetailsSchema, required: true },
+  subtotal: { type: Number, required: true, default: 0 },
+  discount: { type: Number, required: true, default: 0 },
+  amountExcludingTax: { type: Number, required: true, default: 0 },
+  taxPercentage: { type: Number, required: true, default: 15 },
+  taxAmount: { type: Number, required: true, default: 0 },
+  totalAmount: { type: Number, required: true, default: 0 },
   dueDate: { type: Date, required: true },
-  description: { type: String },
+  items: [InvoiceItemSchema],
   type: { type: String, enum: ['rental', 'sale'], required: true },
   saleDetails: { type: String },
   status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },

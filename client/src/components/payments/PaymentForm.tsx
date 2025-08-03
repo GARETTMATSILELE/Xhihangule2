@@ -19,6 +19,8 @@ import {
   Snackbar,
   Checkbox,
   FormControlLabel,
+  Switch,
+  Divider,
 } from '@mui/material';
 import paymentService from '../../services/paymentService';
 import { usePropertyService } from '../../services/propertyService';
@@ -59,6 +61,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
+  
+  // New state for manual entry
+  const [useManualProperty, setUseManualProperty] = useState(false);
+  const [useManualTenant, setUseManualTenant] = useState(false);
+  const [manualPropertyAddress, setManualPropertyAddress] = useState('');
+  const [manualTenantName, setManualTenantName] = useState('');
+  
   const [formData, setFormData] = useState<PaymentFormData>(() => ({
     paymentType: initialData?.paymentType || 'rental',
     propertyType: initialData?.propertyType || 'residential',
@@ -196,9 +205,37 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     try {
       setError(null);
 
+      // Validate manual entries
+      if (useManualProperty && !manualPropertyAddress.trim()) {
+        setError('Please enter a property address');
+        return;
+      }
+      if (useManualTenant && !manualTenantName.trim()) {
+        setError('Please enter a tenant name');
+        return;
+      }
+
       let dataToSubmit = { ...formData };
-      // Get commission percentage from selected property
-      const commissionPercent = getCommissionForProperty(formData.propertyId, properties);
+      
+      // Handle manual property entry
+      if (useManualProperty) {
+        dataToSubmit.propertyId = `manual_${Date.now()}`; // Generate a temporary ID
+        dataToSubmit.manualPropertyAddress = manualPropertyAddress;
+        dataToSubmit.notes = `${dataToSubmit.notes ? dataToSubmit.notes + '\n' : ''}Manual Property: ${manualPropertyAddress}`;
+      }
+      
+      // Handle manual tenant entry
+      if (useManualTenant) {
+        dataToSubmit.tenantId = `manual_${Date.now()}`; // Generate a temporary ID
+        dataToSubmit.manualTenantName = manualTenantName;
+        dataToSubmit.notes = `${dataToSubmit.notes ? dataToSubmit.notes + '\n' : ''}Manual Tenant: ${manualTenantName}`;
+      }
+
+      // Get commission percentage from selected property (only if not manual)
+      let commissionPercent = 0;
+      if (!useManualProperty && formData.propertyId) {
+        commissionPercent = getCommissionForProperty(formData.propertyId, properties);
+      }
       const totalCommission = formData.amount * (commissionPercent / 100);
       const preaFee = totalCommission * 0.03;
       const commissionAfterPrea = totalCommission - preaFee;
@@ -219,10 +256,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         dataToSubmit.processedBy = user._id;
       }
 
-      // Ensure ownerId is included
-      const property = properties.find(p => String(p._id) === String(formData.propertyId));
-      if (property && property.ownerId) {
-        dataToSubmit.ownerId = property.ownerId;
+      // Ensure ownerId is included (only if not manual property)
+      if (!useManualProperty && formData.propertyId) {
+        const property = properties.find(p => String(p._id) === String(formData.propertyId));
+        if (property && property.ownerId) {
+          dataToSubmit.ownerId = property.ownerId;
+        }
       }
 
       await onSubmit(dataToSubmit);
@@ -311,44 +350,96 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           </Grid>
 
           <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>Property</InputLabel>
-              <Select
-                name="propertyId"
-                value={formData.propertyId}
-                onChange={handleInputChange}
-                label="Property"
-                required
-                disabled={loadingData}
-              >
-                {properties.map((property) => (
-                  <MenuItem key={property._id} value={property._id}>
-                    {property.name} - {property.address}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={useManualProperty}
+                  onChange={(e) => setUseManualProperty(e.target.checked)}
+                />
+              }
+              label="Manual Property Entry"
+            />
           </Grid>
 
-          <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>Tenant</InputLabel>
-              <Select
-                name="tenantId"
-                value={formData.tenantId}
-                onChange={handleInputChange}
-                label="Tenant"
+          {useManualProperty ? (
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Property Address"
+                value={manualPropertyAddress}
+                onChange={(e) => setManualPropertyAddress(e.target.value)}
                 required
-                disabled={loadingData}
-              >
-                {tenants.map((tenant) => (
-                  <MenuItem key={tenant._id} value={tenant._id}>
-                    {tenant.firstName} {tenant.lastName} - {tenant.email}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                placeholder="Enter property address manually"
+                helperText="Enter the property address for receipting purposes"
+              />
+            </Grid>
+          ) : (
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Property</InputLabel>
+                <Select
+                  name="propertyId"
+                  value={formData.propertyId}
+                  onChange={handleInputChange}
+                  label="Property"
+                  required
+                  disabled={loadingData}
+                >
+                  {properties.map((property) => (
+                    <MenuItem key={property._id} value={property._id}>
+                      {property.name} - {property.address}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
+
+          <Grid item xs={12}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={useManualTenant}
+                  onChange={(e) => setUseManualTenant(e.target.checked)}
+                />
+              }
+              label="Manual Tenant Entry"
+            />
           </Grid>
+
+          {useManualTenant ? (
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Tenant Name"
+                value={manualTenantName}
+                onChange={(e) => setManualTenantName(e.target.value)}
+                required
+                placeholder="Enter tenant name manually"
+                helperText="Enter the tenant name for receipting purposes"
+              />
+            </Grid>
+          ) : (
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Tenant</InputLabel>
+                <Select
+                  name="tenantId"
+                  value={formData.tenantId}
+                  onChange={handleInputChange}
+                  label="Tenant"
+                  required
+                  disabled={loadingData}
+                >
+                  {tenants.map((tenant) => (
+                    <MenuItem key={tenant._id} value={tenant._id}>
+                      {tenant.firstName} {tenant.lastName} - {tenant.email}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
 
           <Grid item xs={12}>
             <FormControl fullWidth>

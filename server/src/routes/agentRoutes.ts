@@ -12,7 +12,11 @@ import {
   createAgentLease,
   createAgentPayment,
   updateAgentPayment,
-  createAgentFile
+  createAgentFile,
+  getAgentPropertyOwners,
+  createAgentPropertyOwner,
+  updateAgentPropertyOwner,
+  deleteAgentPropertyOwner
 } from '../controllers/agentController';
 
 const router = express.Router();
@@ -42,5 +46,11 @@ router.post('/files', createAgentFile);
 router.post('/payments', createAgentPayment);
 router.put('/payments/:id', updateAgentPayment);
 router.get('/commission', getAgentCommission);
+
+// Property owner routes
+router.get('/property-owners', getAgentPropertyOwners);
+router.post('/property-owners', createAgentPropertyOwner);
+router.put('/property-owners/:id', updateAgentPropertyOwner);
+router.delete('/property-owners/:id', deleteAgentPropertyOwner);
 
 export default router; 

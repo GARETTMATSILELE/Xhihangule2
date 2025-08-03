@@ -29,6 +29,8 @@ import TestAuth from './pages/TestAuth';
 import PropertyAccountsPage from './pages/AccountantDashboard/PropertyAccountsPage';
 import PropertyAccountDetailPage from './pages/AccountantDashboard/PropertyAccountDetailPage';
 import WrittenInvoicesPage from './pages/AccountantDashboard/WrittenInvoicesPage';
+import LevyPaymentsPage from './pages/AccountantDashboard/LevyPaymentsPage';
+import TasksPage from './pages/AccountantDashboard/TasksPage';
 import { NotificationProvider } from './components/Layout/Header';
 
 // Create a theme instance with proper configuration
@@ -121,7 +123,9 @@ const App: React.FC = () => {
                 <Route path="commissions" element={<CommissionsPage />} />
                 <Route path="written-invoices" element={<WrittenInvoicesPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="levies" element={<LevyPaymentsPage />} />
                 <Route path="reports" element={<ReportsPage />} />
+                <Route path="tasks" element={<TasksPage />} />
               </Route>
               <Route path="/admin/users" element={
                 <ProtectedRoute requiredRoles={['admin']}>

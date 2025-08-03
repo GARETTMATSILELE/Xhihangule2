@@ -102,9 +102,9 @@ const CommissionsPage: React.FC = () => {
         };
 
         const [agentData, agencyData, preaData] = await Promise.all([
-          fetchWithErrorHandling('/api/accountant/agent-commissions'),
-          fetchWithErrorHandling('/api/accountant/agency-commission'),
-          fetchWithErrorHandling('/api/accountant/prea-commission')
+          fetchWithErrorHandling('/api/accountants/agent-commissions'),
+          fetchWithErrorHandling('/api/accountants/agency-commission'),
+          fetchWithErrorHandling('/api/accountants/prea-commission')
         ]);
 
         setAgentCommissions(agentData);

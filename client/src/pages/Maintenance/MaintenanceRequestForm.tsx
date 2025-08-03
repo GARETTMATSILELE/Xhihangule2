@@ -43,11 +43,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
   const { createRequest } = useMaintenance();
   const propertyService = usePropertyService();
   const [formData, setFormData] = useState<Partial<MaintenanceRequest>>({
-    propertyId: {
-      _id: '',
-      name: '',
-      address: ''
-    },
+    propertyId: '',
     category: MaintenanceCategory.GENERAL,
     description: '',
     priority: MaintenancePriority.MEDIUM,
@@ -95,17 +91,10 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
   };
 
   const handlePropertyChange = (propertyId: string) => {
-    const selectedProperty = properties.find(p => p._id === propertyId);
-    if (selectedProperty) {
-      setFormData(prev => ({
-        ...prev,
-        propertyId: {
-          _id: selectedProperty._id,
-          name: selectedProperty.name,
-          address: selectedProperty.address
-        }
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      propertyId
+    }));
   };
 
   const handleAccessWindowChange = (field: 'start' | 'end', value: Date) => {
@@ -154,8 +143,18 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.propertyId || !formData.title) {
+      console.error('Property and title are required');
+      return;
+    }
     try {
-      await createRequest(formData);
+      await createRequest({
+        propertyId: formData.propertyId,
+        title: formData.title,
+        description: formData.description,
+        priority: formData.priority,
+        estimatedCost: formData.estimatedCost,
+      });
       onClose();
     } catch (err) {
       console.error('Error creating maintenance request:', err);
@@ -185,7 +184,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
                 <FormControl fullWidth>
                   <InputLabel>Property</InputLabel>
                   <Select
-                    value={formData.propertyId?._id || ''}
+                    value={formData.propertyId || ''}
                     label="Property"
                     onChange={(e) => handlePropertyChange(e.target.value)}
                     required
@@ -226,16 +225,16 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
                 <FormControl fullWidth>
                   <InputLabel>Priority</InputLabel>
                   <Select
-                    value={formData.priority}
+                    value={formData.priority || ''}
                     label="Priority"
                     onChange={(e) =>
-                      setFormData({ ...formData, priority: e.target.value as MaintenancePriority })
+                      setFormData({ ...formData, priority: e.target.value as "low" | "medium" | "high" | "urgent" })
                     }
                   >
-                    <MenuItem value={MaintenancePriority.LOW}>Low</MenuItem>
-                    <MenuItem value={MaintenancePriority.MEDIUM}>Medium</MenuItem>
-                    <MenuItem value={MaintenancePriority.HIGH}>High</MenuItem>
-                    <MenuItem value={MaintenancePriority.URGENT}>Urgent</MenuItem>
+                    <MenuItem value="low">Low</MenuItem>
+                    <MenuItem value="medium">Medium</MenuItem>
+                    <MenuItem value="high">High</MenuItem>
+                    <MenuItem value="urgent">Urgent</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>

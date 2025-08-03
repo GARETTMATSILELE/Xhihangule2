@@ -17,6 +17,10 @@ import propertyOwnerRoutes from './routes/propertyOwnerRoutes';
 import ownerRoutes from './routes/ownerRoutes';
 import healthRoutes from './routes/healthRoutes';
 import maintenanceRequestRoutes from './routes/maintenanceRequestRoutes';
+import levyPaymentRoutes from './routes/levyPaymentRoutes';
+import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
+import paymentRequestRoutes from './routes/paymentRequestRoutes';
+import invoiceRoutes from './routes/invoiceRoutes';
 import { connectDatabase, closeDatabase } from './config/database';
 import { createServer } from 'http';
 import { initializeSocket } from './config/socket';
@@ -85,6 +89,16 @@ app.use('/api/property-owners', propertyOwnerRoutes);
 app.use('/api/owners', ownerRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/maintenance', maintenanceRequestRoutes);
+app.use('/api/levy-payments', levyPaymentRoutes);
+app.use('/api/municipal-payments', municipalPaymentRoutes);
+app.use('/api/payment-requests', paymentRequestRoutes);
+app.use('/api/invoices', invoiceRoutes);
+
+// Debug route to catch unmatched requests - temporarily disabled
+// app.use('/api/*', (req, res, next) => {
+//   console.log('DEBUG: Unmatched API route:', req.method, req.originalUrl);
+//   next();
+// });
 
 // Test route
 app.get('/api/test', (req, res) => {

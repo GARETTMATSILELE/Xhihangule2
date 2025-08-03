@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addOwnerMaintenanceMessage = exports.updateOwnerMaintenanceRequest = exports.getOwnerMaintenanceRequestById = exports.getOwnerMaintenanceRequests = exports.getOwnerPropertyById = exports.getOwnerProperties = void 0;
+exports.getOwnerNetIncome = exports.addOwnerMaintenanceMessage = exports.approveOwnerMaintenanceRequest = exports.updateOwnerMaintenanceRequest = exports.getOwnerMaintenanceRequestById = exports.getOwnerMaintenanceRequests = exports.getOwnerPropertyById = exports.getOwnerProperties = void 0;
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const Property_1 = require("../models/Property");
 const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
@@ -197,118 +197,217 @@ const getOwnerPropertyById = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getOwnerPropertyById = getOwnerPropertyById;
 // Get maintenance requests for the authenticated owner's properties
 const getOwnerMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
-        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
-            throw new errorHandler_1.AppError('Authentication required', 401);
-        }
-        const ownerId = req.user.userId;
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
-        let propertyIds = [];
-        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
-            propertyIds = propertyOwnerContext.properties;
+        console.log('getOwnerMaintenanceRequests: Starting request processing');
+        // Get user context from query parameters (for public API) or from authentication middleware
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            // Authenticated request
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
+            console.log('getOwnerMaintenanceRequests: Using authenticated user context', { ownerId, companyId });
         }
         else {
-            // Fallback: get properties where ownerId matches - filter by companyId from PropertyOwner context
+            // Public request - get from query parameters
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                console.log('getOwnerMaintenanceRequests: Missing userId in query parameters');
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+            console.log('getOwnerMaintenanceRequests: Using public API context', { ownerId, companyId });
+        }
+        // Get property owner context
+        console.log('getOwnerMaintenanceRequests: Getting property owner context for', ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        console.log('getOwnerMaintenanceRequests: Property owner context retrieved', {
+            hasProperties: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) > 0,
+            companyId: propertyOwnerContext.companyId
+        });
+        // Get property IDs for this owner
+        let propertyIds = [];
+        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+            // Use properties from PropertyOwner context
+            propertyIds = propertyOwnerContext.properties;
+            console.log('getOwnerMaintenanceRequests: Using properties from PropertyOwner context', propertyIds.length);
+        }
+        else {
+            // Fallback: get properties where ownerId matches
+            console.log('getOwnerMaintenanceRequests: No properties in context, fetching from Property collection');
             const query = { ownerId: ownerId };
             if (propertyOwnerContext.companyId) {
                 query.companyId = propertyOwnerContext.companyId;
             }
             const properties = yield Property_1.Property.find(query);
             propertyIds = properties.map(p => p._id);
+            console.log('getOwnerMaintenanceRequests: Found properties from Property collection', propertyIds.length);
         }
         if (propertyIds.length === 0) {
+            console.log('getOwnerMaintenanceRequests: No properties found, returning empty array');
             return res.json([]);
         }
         // Get maintenance requests for these properties
+        console.log('getOwnerMaintenanceRequests: Fetching maintenance requests for properties', propertyIds);
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find({
             propertyId: { $in: propertyIds }
         })
             .populate('propertyId', 'name address')
-            .populate('tenantId', 'firstName lastName email')
+            .populate('requestedBy', 'firstName lastName email')
             .populate('ownerId', 'firstName lastName email')
             .sort({ createdAt: -1 });
+        console.log('getOwnerMaintenanceRequests: Found maintenance requests', maintenanceRequests.length);
         // Transform the data to match frontend interface
         const transformedRequests = maintenanceRequests.map(request => {
-            const populatedRequest = request;
-            return {
-                _id: request._id.toString(),
-                propertyId: populatedRequest.propertyId._id,
-                propertyName: populatedRequest.propertyId.name,
-                propertyAddress: populatedRequest.propertyId.address,
-                title: request.title,
-                description: request.description,
-                priority: request.priority,
-                status: request.status,
-                estimatedCost: request.estimatedCost || 0,
-                createdAt: request.createdAt
-            };
+            var _a;
+            try {
+                // Handle property data safely
+                let propertyName = 'Unknown Property';
+                let propertyAddress = 'Unknown Address';
+                let propertyId = '';
+                if (request.propertyId) {
+                    if (typeof request.propertyId === 'object' && request.propertyId !== null) {
+                        // Populated property object
+                        propertyName = request.propertyId.name || 'Unknown Property';
+                        propertyAddress = request.propertyId.address || 'Unknown Address';
+                        propertyId = ((_a = request.propertyId._id) === null || _a === void 0 ? void 0 : _a.toString()) || '';
+                    }
+                    else {
+                        // Property ID string
+                        propertyId = String(request.propertyId);
+                    }
+                }
+                return {
+                    _id: request._id.toString(),
+                    propertyId: propertyId,
+                    propertyName: propertyName,
+                    propertyAddress: propertyAddress,
+                    title: request.title || 'Untitled Request',
+                    description: request.description || 'No description provided',
+                    priority: request.priority || 'medium',
+                    status: request.status || 'pending',
+                    estimatedCost: request.estimatedCost || 0,
+                    createdAt: request.createdAt
+                };
+            }
+            catch (transformError) {
+                console.error('getOwnerMaintenanceRequests: Error transforming request', request._id, transformError);
+                // Return a safe fallback object
+                return {
+                    _id: request._id.toString(),
+                    propertyId: '',
+                    propertyName: 'Unknown Property',
+                    propertyAddress: 'Unknown Address',
+                    title: 'Error Loading Request',
+                    description: 'This request could not be loaded properly',
+                    priority: 'medium',
+                    status: 'pending',
+                    estimatedCost: 0,
+                    createdAt: request.createdAt
+                };
+            }
         });
+        console.log('getOwnerMaintenanceRequests: Successfully transformed requests', transformedRequests.length);
         res.json(transformedRequests);
     }
     catch (error) {
+        console.error('getOwnerMaintenanceRequests: Unexpected error:', error);
         if (error instanceof errorHandler_1.AppError) {
             throw error;
         }
-        throw new errorHandler_1.AppError('Error fetching maintenance requests', 500);
+        // Return a more specific error message
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        console.error('getOwnerMaintenanceRequests: Throwing AppError with message:', errorMessage);
+        throw new errorHandler_1.AppError(`Error fetching maintenance requests: ${errorMessage}`, 500);
     }
 });
 exports.getOwnerMaintenanceRequests = getOwnerMaintenanceRequests;
 // Get a specific maintenance request for the authenticated owner
 const getOwnerMaintenanceRequestById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
-        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
-            throw new errorHandler_1.AppError('Authentication required', 401);
-        }
-        const ownerId = req.user.userId;
-        const requestId = req.params.id;
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
-        let propertyIds = [];
-        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
-            propertyIds = propertyOwnerContext.properties;
+        console.log('getOwnerMaintenanceRequestById: Starting request processing');
+        // Get user context from query parameters (for public API) or from authentication middleware
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            // Authenticated request
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
+            console.log('getOwnerMaintenanceRequestById: Using authenticated user context', { ownerId, companyId });
         }
         else {
-            // Fallback: get properties where ownerId matches - filter by companyId from PropertyOwner context
+            // Public request - get from query parameters
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                console.log('getOwnerMaintenanceRequestById: Missing userId in query parameters');
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+            console.log('getOwnerMaintenanceRequestById: Using public API context', { ownerId, companyId });
+        }
+        const requestId = req.params.id;
+        console.log('getOwnerMaintenanceRequestById: Request ID', requestId);
+        if (!requestId) {
+            console.log('getOwnerMaintenanceRequestById: Missing request ID in params');
+            return res.status(400).json({ message: 'Request ID is required' });
+        }
+        // Get property owner context
+        console.log('getOwnerMaintenanceRequestById: Getting property owner context for', ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        console.log('getOwnerMaintenanceRequestById: Property owner context retrieved', {
+            hasProperties: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) > 0,
+            companyId: propertyOwnerContext.companyId
+        });
+        // Get property IDs for this owner
+        let propertyIds = [];
+        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+            // Use properties from PropertyOwner context
+            propertyIds = propertyOwnerContext.properties;
+            console.log('getOwnerMaintenanceRequestById: Using properties from PropertyOwner context', propertyIds.length);
+        }
+        else {
+            // Fallback: get properties where ownerId matches
+            console.log('getOwnerMaintenanceRequestById: No properties in context, fetching from Property collection');
             const query = { ownerId: ownerId };
             if (propertyOwnerContext.companyId) {
                 query.companyId = propertyOwnerContext.companyId;
             }
             const properties = yield Property_1.Property.find(query);
             propertyIds = properties.map(p => p._id);
+            console.log('getOwnerMaintenanceRequestById: Found properties from Property collection', propertyIds.length);
+        }
+        if (propertyIds.length === 0) {
+            console.log('getOwnerMaintenanceRequestById: No properties found for owner');
+            throw new errorHandler_1.AppError('No properties found for this owner', 404);
         }
         // Get the maintenance request and verify it belongs to one of the owner's properties
+        console.log('getOwnerMaintenanceRequestById: Fetching maintenance request', requestId, 'for properties', propertyIds);
         const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({
             _id: requestId,
             propertyId: { $in: propertyIds }
         })
             .populate('propertyId', 'name address')
-            .populate('tenantId', 'firstName lastName email')
-            .populate('ownerId', 'firstName lastName email');
+            .populate('requestedBy', 'firstName lastName email')
+            .populate('ownerId', 'firstName lastName email')
+            .populate('messages.sender', 'firstName lastName email');
         if (!maintenanceRequest) {
+            console.log('getOwnerMaintenanceRequestById: Maintenance request not found or access denied', requestId);
             throw new errorHandler_1.AppError('Maintenance request not found or access denied', 404);
         }
-        // Transform the data to match frontend interface
-        const populatedRequest = maintenanceRequest;
-        const transformedRequest = {
-            _id: maintenanceRequest._id.toString(),
-            propertyId: populatedRequest.propertyId._id,
-            propertyName: populatedRequest.propertyId.name,
-            propertyAddress: populatedRequest.propertyId.address,
-            title: maintenanceRequest.title,
-            description: maintenanceRequest.description,
-            priority: maintenanceRequest.priority,
-            status: maintenanceRequest.status,
-            estimatedCost: maintenanceRequest.estimatedCost || 0,
-            createdAt: maintenanceRequest.createdAt
-        };
-        res.json(transformedRequest);
+        console.log('getOwnerMaintenanceRequestById: Successfully retrieved maintenance request', requestId);
+        res.json(maintenanceRequest);
     }
     catch (error) {
+        console.error('getOwnerMaintenanceRequestById: Unexpected error:', error);
         if (error instanceof errorHandler_1.AppError) {
             throw error;
         }
-        throw new errorHandler_1.AppError('Error fetching maintenance request', 500);
+        // Return a more specific error message
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        console.error('getOwnerMaintenanceRequestById: Throwing AppError with message:', errorMessage);
+        throw new errorHandler_1.AppError(`Error fetching maintenance request: ${errorMessage}`, 500);
     }
 });
 exports.getOwnerMaintenanceRequestById = getOwnerMaintenanceRequestById;
@@ -316,10 +415,22 @@ exports.getOwnerMaintenanceRequestById = getOwnerMaintenanceRequestById;
 const updateOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
-            throw new errorHandler_1.AppError('Authentication required', 401);
+        // Get user context from query parameters (for public API) or from authentication middleware
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            // Authenticated request
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
         }
-        const ownerId = req.user.userId;
+        else {
+            // Public request - get from query parameters
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+        }
         const requestId = req.params.id;
         const updates = req.body;
         const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
@@ -357,14 +468,111 @@ const updateOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
     }
 });
 exports.updateOwnerMaintenanceRequest = updateOwnerMaintenanceRequest;
+// Approve a maintenance request (owner action)
+const approveOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        // Get user context from query parameters (for public API) or from authentication middleware
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            // Authenticated request
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
+        }
+        else {
+            // Public request - get from query parameters
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+        }
+        const requestId = req.params.id;
+        if (!requestId) {
+            throw new errorHandler_1.AppError('Maintenance request ID is required', 400);
+        }
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        let propertyIds = [];
+        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+            propertyIds = propertyOwnerContext.properties;
+        }
+        else {
+            const query = { ownerId: ownerId };
+            if (propertyOwnerContext.companyId) {
+                query.companyId = propertyOwnerContext.companyId;
+            }
+            const properties = yield Property_1.Property.find(query);
+            propertyIds = properties.map(p => p._id);
+        }
+        if (propertyIds.length === 0) {
+            throw new errorHandler_1.AppError('No properties found for this owner', 404);
+        }
+        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({
+            _id: requestId,
+            propertyId: { $in: propertyIds }
+        });
+        if (!maintenanceRequest) {
+            throw new errorHandler_1.AppError('Maintenance request not found or access denied', 404);
+        }
+        // Check if request is in the correct status for approval
+        if (maintenanceRequest.status !== 'pending_approval') {
+            throw new errorHandler_1.AppError('Only requests with pending approval status can be approved', 400);
+        }
+        // Update status to approved
+        maintenanceRequest.status = 'approved';
+        yield maintenanceRequest.save();
+        // After a short delay, change to pending_completion
+        setTimeout(() => __awaiter(void 0, void 0, void 0, function* () {
+            try {
+                const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId);
+                if (updatedRequest && updatedRequest.status === 'approved') {
+                    updatedRequest.status = 'pending_completion';
+                    yield updatedRequest.save();
+                }
+            }
+            catch (error) {
+                console.error('Error updating status to pending_completion:', error);
+            }
+        }), 1000);
+        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId)
+            .populate('propertyId', 'name address')
+            .populate('requestedBy', 'firstName lastName email')
+            .populate('ownerId', 'firstName lastName email');
+        if (!updatedRequest) {
+            throw new errorHandler_1.AppError('Error retrieving updated maintenance request', 500);
+        }
+        res.json(updatedRequest);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            throw error;
+        }
+        console.error('Error approving maintenance request:', error);
+        throw new errorHandler_1.AppError('Error approving maintenance request', 500);
+    }
+});
+exports.approveOwnerMaintenanceRequest = approveOwnerMaintenanceRequest;
 // Add a message to a maintenance request
 const addOwnerMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
-            throw new errorHandler_1.AppError('Authentication required', 401);
+        // Get user context from query parameters (for public API) or from authentication middleware
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            // Authenticated request
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
         }
-        const ownerId = req.user.userId;
+        else {
+            // Public request - get from query parameters
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+        }
         const requestId = req.params.id;
         const { content } = req.body;
         const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
@@ -402,7 +610,8 @@ const addOwnerMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId)
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
-            .populate('ownerId', 'firstName lastName email');
+            .populate('ownerId', 'firstName lastName email')
+            .populate('messages.sender', 'firstName lastName email');
         res.json(updatedRequest);
     }
     catch (error) {
@@ -413,3 +622,86 @@ const addOwnerMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.addOwnerMaintenanceMessage = addOwnerMaintenanceMessage;
+// Get owner's net income from payments
+const getOwnerNetIncome = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        console.log('getOwnerNetIncome: Starting request processing');
+        // Get user context from query parameters (for public API) or from authentication middleware
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            // Authenticated request
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
+            console.log('getOwnerNetIncome: Using authenticated user context', { ownerId, companyId });
+        }
+        else {
+            // Public request - get from query parameters
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                console.log('getOwnerNetIncome: Missing userId in query parameters');
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+            console.log('getOwnerNetIncome: Using public API context', { ownerId, companyId });
+        }
+        // Get property owner context
+        console.log('getOwnerNetIncome: Getting property owner context for', ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        console.log('getOwnerNetIncome: Property owner context retrieved', {
+            hasProperties: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) > 0,
+            companyId: propertyOwnerContext.companyId
+        });
+        // Get property IDs for this owner
+        let propertyIds = [];
+        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+            // Use properties from PropertyOwner context
+            propertyIds = propertyOwnerContext.properties;
+            console.log('getOwnerNetIncome: Using properties from PropertyOwner context', propertyIds.length);
+        }
+        else {
+            // Fallback: get properties where ownerId matches
+            console.log('getOwnerNetIncome: No properties in context, fetching from Property collection');
+            const query = { ownerId: ownerId };
+            if (propertyOwnerContext.companyId) {
+                query.companyId = propertyOwnerContext.companyId;
+            }
+            const properties = yield Property_1.Property.find(query);
+            propertyIds = properties.map(p => p._id);
+            console.log('getOwnerNetIncome: Found properties from Property collection', propertyIds.length);
+        }
+        if (propertyIds.length === 0) {
+            console.log('getOwnerNetIncome: No properties found, returning zero net income');
+            return res.json({ netIncome: 0 });
+        }
+        // Import Payment model
+        const { Payment } = require('../models/Payment');
+        // Get all payments for these properties and sum up the ownerAmount
+        console.log('getOwnerNetIncome: Fetching payments for properties', propertyIds);
+        const payments = yield Payment.find({
+            propertyId: { $in: propertyIds },
+            status: 'completed' // Only count completed payments
+        }).select('commissionDetails.ownerAmount');
+        console.log('getOwnerNetIncome: Found payments', payments.length);
+        // Calculate total net income by summing ownerAmount
+        const netIncome = payments.reduce((total, payment) => {
+            var _a;
+            const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
+            return total + ownerAmount;
+        }, 0);
+        console.log('getOwnerNetIncome: Calculated net income', netIncome);
+        res.json({ netIncome });
+    }
+    catch (error) {
+        console.error('getOwnerNetIncome: Unexpected error:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            throw error;
+        }
+        // Return a more specific error message
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        console.error('getOwnerNetIncome: Throwing AppError with message:', errorMessage);
+        throw new errorHandler_1.AppError(`Error calculating net income: ${errorMessage}`, 500);
+    }
+});
+exports.getOwnerNetIncome = getOwnerNetIncome;

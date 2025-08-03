@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { MaintenanceRequest, IMaintenanceRequest } from '../models/MaintenanceRequest';
+import { MaintenanceRequest, IMaintenanceRequest, IMaintenanceAttachment } from '../models/MaintenanceRequest';
 import { Property, IProperty } from '../models/Property';
 import { AppError } from '../middleware/errorHandler';
 import { JwtPayload } from '../types/auth';
@@ -9,19 +9,36 @@ import mongoose from 'mongoose';
 export const createMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
-    const { propertyId, description, priority, estimatedCost } = req.body;
+    if (!userId) {
+      throw new AppError('User authentication required', 401);
+    }
 
-    const property = await Property.findOne({ _id: propertyId, ownerId: userId });
+    const { propertyId, title, description, priority, estimatedCost } = req.body;
+
+    // Validate required fields
+    if (!propertyId || !title || !description) {
+      throw new AppError('Property ID, title, and description are required', 400);
+    }
+
+    // Fetch the property to get ownerId and companyId
+    const property = await Property.findOne({ _id: propertyId });
     if (!property) {
       throw new AppError('Property not found', 404);
     }
 
+    if (!property.ownerId) {
+      throw new AppError('Property owner not found', 404);
+    }
+
     const maintenanceRequest = new MaintenanceRequest({
       propertyId,
-      tenantId: userId,
+      requestedBy: userId,
+      ownerId: property.ownerId,
+      companyId: property.companyId,
+      title,
       description,
-      priority,
-      estimatedCost,
+      priority: priority || 'medium',
+      estimatedCost: estimatedCost || 0,
       status: 'pending'
     });
 
@@ -31,6 +48,7 @@ export const createMaintenanceRequest = async (req: Request, res: Response) => {
     if (error instanceof AppError) {
       throw error;
     }
+    console.error('Error creating maintenance request:', error);
     throw new AppError('Error creating maintenance request', 500);
   }
 };
@@ -93,29 +111,176 @@ export const addMaintenanceMessage = async (req: Request, res: Response) => {
 export const updateMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
+    if (!userId) {
+      throw new AppError('User authentication required', 401);
+    }
+
     const { id } = req.params;
-    const { status, estimatedCost } = req.body;
+    if (!id) {
+      throw new AppError('Maintenance request ID is required', 400);
+    }
+
+    const { status, estimatedCost, attachments } = req.body;
 
     const maintenanceRequest = await MaintenanceRequest.findById(id);
     if (!maintenanceRequest) {
       throw new AppError('Maintenance request not found', 404);
     }
 
-    const property = await Property.findOne({ _id: maintenanceRequest.propertyId, ownerId: userId });
+    // Check if user has permission to update this request
+    const property = await Property.findOne({ _id: maintenanceRequest.propertyId });
     if (!property) {
-      throw new AppError('Unauthorized', 403);
+      throw new AppError('Property not found', 404);
     }
 
-    maintenanceRequest.status = status;
-    if (estimatedCost) maintenanceRequest.estimatedCost = estimatedCost;
+    // Allow updates if user is the requester, owner, or has admin access
+    const isRequester = maintenanceRequest.requestedBy.toString() === userId;
+    const isOwner = property.ownerId && property.ownerId.toString() === userId;
+    
+    if (!isRequester && !isOwner) {
+      throw new AppError('Unauthorized - You can only update your own requests or requests for your properties', 403);
+    }
+
+    // Update fields with validation
+    if (status && ['pending', 'pending_approval', 'approved', 'pending_completion', 'in_progress', 'completed', 'cancelled'].includes(status)) {
+      maintenanceRequest.status = status;
+    }
+    
+    if (estimatedCost !== undefined && estimatedCost >= 0) {
+      maintenanceRequest.estimatedCost = estimatedCost;
+    }
+    
+    if (attachments && Array.isArray(attachments)) {
+      maintenanceRequest.attachments = attachments;
+    }
 
     await maintenanceRequest.save();
-    res.json(maintenanceRequest);
+    
+    // Populate related data before sending response
+    const updatedRequest = await MaintenanceRequest.findById(id)
+      .populate('propertyId', 'name address')
+      .populate('requestedBy', 'firstName lastName')
+      .populate('ownerId', 'firstName lastName');
+
+    res.json(updatedRequest);
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
     }
+    console.error('Error updating maintenance request:', error);
     throw new AppError('Error updating maintenance request', 500);
+  }
+};
+
+// Approve maintenance request (owner action)
+export const approveMaintenanceRequest = async (req: Request, res: Response) => {
+  try {
+    const userId = (req.user as JwtPayload)?.userId;
+    if (!userId) {
+      throw new AppError('User authentication required', 401);
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      throw new AppError('Maintenance request ID is required', 400);
+    }
+
+    const maintenanceRequest = await MaintenanceRequest.findById(id);
+    if (!maintenanceRequest) {
+      throw new AppError('Maintenance request not found', 404);
+    }
+
+    // Check if request is in the correct status for approval
+    if (maintenanceRequest.status !== 'pending_approval') {
+      throw new AppError('Only requests with pending approval status can be approved', 400);
+    }
+
+    // Check if user is the owner of the property
+    const property = await Property.findOne({ _id: maintenanceRequest.propertyId });
+    if (!property) {
+      throw new AppError('Property not found', 404);
+    }
+    
+    if (!property.ownerId || property.ownerId.toString() !== userId) {
+      throw new AppError('Unauthorized - Only property owner can approve requests', 403);
+    }
+
+    // Update status to approved
+    maintenanceRequest.status = 'approved';
+    await maintenanceRequest.save();
+
+    // After a short delay, change to pending_completion
+    setTimeout(async () => {
+      try {
+        const updatedRequest = await MaintenanceRequest.findById(id);
+        if (updatedRequest && updatedRequest.status === 'approved') {
+          updatedRequest.status = 'pending_completion';
+          await updatedRequest.save();
+        }
+      } catch (error) {
+        console.error('Error updating status to pending_completion:', error);
+      }
+    }, 1000);
+
+    const updatedRequest = await MaintenanceRequest.findById(id)
+      .populate('propertyId', 'name address')
+      .populate('requestedBy', 'firstName lastName')
+      .populate('ownerId', 'firstName lastName');
+
+    res.json(updatedRequest);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    console.error('Error approving maintenance request:', error);
+    throw new AppError('Error approving maintenance request', 500);
+  }
+};
+
+// Complete maintenance request (agent action)
+export const completeMaintenanceRequest = async (req: Request, res: Response) => {
+  try {
+    const userId = (req.user as JwtPayload)?.userId;
+    if (!userId) {
+      throw new AppError('User authentication required', 401);
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      throw new AppError('Maintenance request ID is required', 400);
+    }
+
+    const maintenanceRequest = await MaintenanceRequest.findById(id);
+    if (!maintenanceRequest) {
+      throw new AppError('Maintenance request not found', 404);
+    }
+
+    // Check if request is in the correct status for completion
+    if (maintenanceRequest.status !== 'pending_completion') {
+      throw new AppError('Only requests with pending completion status can be marked as completed', 400);
+    }
+
+    // Check if user is the requester (agent)
+    if (maintenanceRequest.requestedBy.toString() !== userId) {
+      throw new AppError('Unauthorized - Only the requesting agent can complete the request', 403);
+    }
+
+    // Update status to completed
+    maintenanceRequest.status = 'completed';
+    await maintenanceRequest.save();
+
+    const updatedRequest = await MaintenanceRequest.findById(id)
+      .populate('propertyId', 'name address')
+      .populate('requestedBy', 'firstName lastName')
+      .populate('ownerId', 'firstName lastName');
+
+    res.json(updatedRequest);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    console.error('Error completing maintenance request:', error);
+    throw new AppError('Error completing maintenance request', 500);
   }
 };
 
@@ -176,11 +341,17 @@ export const getMaintenanceRequestsPublic = async (req: Request, res: Response) 
     
     // If propertyId is specified, filter by that property
     if (propertyId) {
+      if (typeof propertyId !== 'string') {
+        throw new AppError('Invalid property ID format', 400);
+      }
       query.propertyId = propertyId;
     }
 
     // If companyId is specified (for public requests), filter by company
     if (companyId) {
+      if (typeof companyId !== 'string') {
+        throw new AppError('Invalid company ID format', 400);
+      }
       query.companyId = companyId;
     }
 
@@ -193,6 +364,11 @@ export const getMaintenanceRequestsPublic = async (req: Request, res: Response) 
       .sort({ createdAt: -1 });
 
     console.log('Found maintenance requests:', maintenanceRequests.length);
+
+    // Return empty array if no requests found instead of error
+    if (!maintenanceRequests || maintenanceRequests.length === 0) {
+      return res.json([]);
+    }
 
     res.json(maintenanceRequests);
   } catch (error) {

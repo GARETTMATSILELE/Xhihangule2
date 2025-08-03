@@ -36,6 +36,9 @@ export interface IPayment extends Document {
   recipientId?: mongoose.Types.ObjectId | string;
   recipientType?: string;
   reason?: string;
+  // Manual entry fields for properties/tenants not in database
+  manualPropertyAddress?: string;
+  manualTenantName?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -184,6 +187,15 @@ const PaymentSchema: Schema = new Schema({
     required: false,
   },
   reason: {
+    type: String,
+    required: false,
+  },
+  // Manual entry fields for properties/tenants not in database
+  manualPropertyAddress: {
+    type: String,
+    required: false,
+  },
+  manualTenantName: {
     type: String,
     required: false,
   },

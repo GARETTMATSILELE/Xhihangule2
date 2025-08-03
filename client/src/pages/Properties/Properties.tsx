@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faFilter, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faFilter, faSearch, faMapMarkerAlt, faUser } from '@fortawesome/free-solid-svg-icons';
 import PropertyForm from '../../components/properties/PropertyForm';
 import PropertyList from '../../components/properties/PropertyList';
 import { PropertyFilter } from '../../components/properties/PropertyFilter';
 import { Property, PropertyFilter as PropertyFilterType, PropertyFormData } from '../../types/property';
 import './Properties.css';
-import { Typography, Box, Alert, CircularProgress } from '@mui/material';
+import { Typography, Box, Alert, CircularProgress, TextField, InputAdornment, Paper } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProperties } from '../../contexts/PropertyContext';
 import { useAdminDashboardService } from '../../services/adminDashboardService';
@@ -74,6 +74,8 @@ export const Properties: React.FC = () => {
     rentRange: { min: 0, max: 10000 }
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [propertyAddressSearch, setPropertyAddressSearch] = useState('');
+  const [tenantNameSearch, setTenantNameSearch] = useState('');
 
   // Fetch admin properties when on admin route
   useEffect(() => {

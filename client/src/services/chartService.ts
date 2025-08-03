@@ -1,4 +1,5 @@
 import api from '../api/axios';
+import { apiService } from '../api';
 
 export interface ChartData {
   type: string;
@@ -146,9 +147,14 @@ export const getChartData = async (type: string) => {
         
         // Try to get fallback data from properties and maintenance requests
         try {
+          const user = JSON.parse(localStorage.getItem('user') || '{}');
+          if (!user._id) {
+            console.warn('User ID not found, using empty fallback data');
+            return createFallbackChartData(type);
+          }
           const [propertiesRes, maintenanceRes] = await Promise.all([
             api.get('/owners/properties'),
-            api.get('/owners/maintenance-requests')
+            apiService.getOwnerMaintenanceRequestsPublic(user._id as string, user.companyId)
           ]);
           
           return createFallbackChartData(type, propertiesRes.data, maintenanceRes.data);

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import api from '../../api/axios';
+import { apiService } from '../../api';
 import {
   Box,
   Container,
@@ -25,7 +26,11 @@ import {
   TableHead,
   TableRow,
   TableCell,
-  TableBody
+  TableBody,
+  Select,
+  MenuItem,
+  InputLabel,
+  FormControl
 } from '@mui/material';
 import {
   BarChart,
@@ -126,6 +131,10 @@ const OwnerDashboard: React.FC = () => {
   const [error, setError] = useState('');
   const [showAuthError, setShowAuthError] = useState(false);
   const [chartErrors, setChartErrors] = useState<{[key: string]: string}>({});
+  const [netIncome, setNetIncome] = useState(0);
+  const [ownerPayments, setOwnerPayments] = useState<any[]>([]);
+  const [totalCommission, setTotalCommission] = useState(0);
+  const [totalExpenses, setTotalExpenses] = useState(0);
 
   // Cleanup function to prevent memory leaks
   const cleanup = useCallback(() => {
@@ -134,6 +143,7 @@ const OwnerDashboard: React.FC = () => {
     setChartData({});
     setError('');
     setChartErrors({});
+    setNetIncome(0);
   }, []);
 
   // Helper function to transform property data for charts
@@ -166,6 +176,23 @@ const OwnerDashboard: React.FC = () => {
     ].filter(item => item.value > 0); // Only show categories with data
   }, []);
 
+
+
+  // Show all payment data using commissionDetails.ownerAmount
+  const filteredPayments = ownerPayments;
+  const filteredRecentPayments = ownerPayments.slice(0, 10);
+  const filteredNetIncome = ownerPayments.reduce((sum: number, payment: any) => {
+    // Use the amount field which now contains ownerAmount from the API
+    if (typeof payment.amount === 'number') {
+      return sum + payment.amount;
+    }
+    // Fallback to commissionDetails.ownerAmount if available
+    if (payment.commissionDetails && typeof payment.commissionDetails.ownerAmount === 'number') {
+      return sum + payment.commissionDetails.ownerAmount;
+    }
+    return sum;
+  }, 0);
+
   useEffect(() => {
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
@@ -190,15 +217,28 @@ const OwnerDashboard: React.FC = () => {
         const user = JSON.parse(userStr);
         console.log('OwnerDashboard: User data available:', user);
         
-        // Fetch properties and maintenance requests
-        const [propertiesRes, maintenanceRes] = await Promise.all([
+        // Check if user has required fields
+        if (!user._id) {
+          console.error('OwnerDashboard: User ID not found in user data');
+          setError('User ID not found');
+          return;
+        }
+        
+        // Fetch properties, maintenance requests, net income, and owner payments
+        const [propertiesRes, maintenanceRes, netIncomeRes, ownerPaymentsRes] = await Promise.all([
           api.get('/owners/properties'),
-          api.get('/owners/maintenance-requests')
+          apiService.getOwnerMaintenanceRequestsPublic(user._id as string, user.companyId),
+          apiService.getOwnerNetIncomePublic(user._id as string, user.companyId),
+          apiService.getOwnerPayments()
         ]);
         
         if (isMounted) {
           setProperties(propertiesRes.data);
           setMaintenanceRequests(maintenanceRes.data);
+          setNetIncome(netIncomeRes.data.netIncome || 0);
+          setOwnerPayments(ownerPaymentsRes.data.recentPayments || []);
+          setTotalCommission(ownerPaymentsRes.data.summary?.totalCommission || 0);
+          setTotalExpenses(ownerPaymentsRes.data.summary?.totalExpenses || 0);
           setLoading(prev => ({ ...prev, properties: false, maintenance: false }));
         }
 
@@ -323,38 +363,8 @@ const OwnerDashboard: React.FC = () => {
   const pendingMaintenance = maintenanceRequests.filter(req => req.status === 'pending').length;
   const completedMaintenance = maintenanceRequests.filter(req => req.status === 'completed').length;
 
-  // --- NEW NET INCOME CALCULATION ---
-  // Calculate net income as sum of (amount - commission) for each property, using payment records
-  let netIncome = 0;
-  if (chartData?.payment?.data && Array.isArray(chartData.payment.data) && chartData.payment.data.length > 0) {
-    // Group payments by property
-    const paymentsByProperty: { [propertyId: string]: any[] } = {};
-    chartData.payment.data.forEach((payment: any) => {
-      if (!payment.propertyId) return;
-      if (!paymentsByProperty[payment.propertyId]) paymentsByProperty[payment.propertyId] = [];
-      paymentsByProperty[payment.propertyId].push(payment);
-    });
-    // For each property, sum (amount - commission) for all its payments
-    netIncome = Object.entries(paymentsByProperty).reduce((sum, [propertyId, payments]) => {
-      // Find the property to get commission percent if needed
-      const property = properties.find(p => String(p._id) === String(propertyId));
-      const commissionPercent = property?.commission ?? 0;
-      const propertyNet = (payments as any[]).reduce((acc, payment) => {
-        const amount = payment.amount || 0;
-        let commission = 0;
-        if (payment.commissionDetails && typeof payment.commissionDetails.totalCommission === 'number') {
-          commission = payment.commissionDetails.totalCommission;
-        } else {
-          commission = amount * (commissionPercent / 100);
-        }
-        return acc + (amount - commission);
-      }, 0);
-      return sum + propertyNet;
-    }, 0);
-  } else {
-    // Fallback: use old calculation
-    netIncome = finalTotalRentCollected - totalArrears;
-  }
+  // Net income is now fetched directly from the API (sum of commissionDetails.ownerAmount from payments)
+  // No need for complex calculation here anymore
 
   // Check if any data is still loading
   const isAnyLoading = Object.values(loading).some(Boolean);
@@ -562,84 +572,47 @@ const OwnerDashboard: React.FC = () => {
                   <Typography variant="h6" gutterBottom>Payment Overview</Typography>
                   <Divider sx={{ mb: 3 }} />
                   
-                  {/* Payment Summary Cards */}
+
+
+                  {/* Summary Cards */}
                   <Grid container spacing={3} sx={{ mb: 4 }}>
-                    <Grid item xs={12} md={6} lg={4}>
+                    <Grid item xs={12} md={6} lg={3}>
                       <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Total Rent Collected</Typography>
-                        <Typography variant="h4">${finalTotalRentCollected.toLocaleString()}</Typography>
-                        {totalRentCollected > 0 && (
-                          <Typography variant="caption" color="textSecondary">
-                            From payment records
-                          </Typography>
-                        )}
+                        <Typography variant="subtitle1">Rental Income</Typography>
+                        <Typography variant="h4" color="success.main">
+                          ${filteredNetIncome.toLocaleString()}
+                        </Typography>
                       </Paper>
                     </Grid>
-                    <Grid item xs={12} md={6} lg={4}>
+                    <Grid item xs={12} md={6} lg={3}>
                       <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Current Arrears</Typography>
-                        <Typography variant="h4" color="error">${totalArrears.toLocaleString()}</Typography>
+                        <Typography variant="subtitle1">Expenses</Typography>
+                        <Typography variant="h4" color="error.main">
+                          ${totalExpenses.toLocaleString()}
+                        </Typography>
                       </Paper>
                     </Grid>
-                    <Grid item xs={12} md={6} lg={4}>
+                    <Grid item xs={12} md={6} lg={3}>
+                      <Paper sx={{ p: 2 }}>
+                        <Typography variant="subtitle1">Commission</Typography>
+                        <Typography variant="h4" color="warning.main">
+                          ${totalCommission.toLocaleString()}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid item xs={12} md={6} lg={3}>
                       <Paper sx={{ p: 2 }}>
                         <Typography variant="subtitle1">Net Income</Typography>
-                        <Typography variant="h4" color={netIncome >= 0 ? 'success' : 'error'}>
-                          ${netIncome.toLocaleString()}
+                        <Typography variant="h4" color="primary.main">
+                          ${filteredNetIncome.toLocaleString()}
                         </Typography>
                       </Paper>
                     </Grid>
                   </Grid>
 
-                  {/* Monthly Payment Trends Chart */}
-                  {chartData?.payment?.data && chartData.payment.data.length > 0 && !chartErrors.payment ? (
-                      <Box sx={{ height: 400, mb: 4 }}>
-                        <Typography variant="h6" gutterBottom>Monthly Payment Trends</Typography>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={chartData.payment.data}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="month" />
-                            <YAxis />
-                            <Tooltip formatter={(value) => [`$${value}`, 'Amount']} />
-                            <Legend />
-                            <Line type="monotone" dataKey="amount" stroke="#8884d8" name="Payment Amount" />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </Box>
-                  ) : null}
-                  {chartErrors.payment && (
-                    <Box sx={{ mt: 4 }}>
-                      <Alert severity="warning">
-                        Unable to load payment data: {chartErrors.payment}
-                      </Alert>
-                    </Box>
-                  )}
-
-                  {/* Debug: Show when no payment data */}
-                  {!chartData?.payment?.data && !chartErrors.payment && (
-                    <Box sx={{ mt: 4 }}>
-                      <Alert severity="info">
-                        No payment data available. This might be because there are no rental payments for your properties yet.
-                        Total rent collected is calculated from property records as a fallback.
-                      </Alert>
-                    </Box>
-                  )}
-
-                  {/* Data source indicator */}
-                  {totalRentCollected > 0 && totalRentCollectedFromProperties > 0 && Math.abs(totalRentCollected - totalRentCollectedFromProperties) > 1 && (
-                    <Box sx={{ mt: 2 }}>
-                      <Alert severity="info">
-                        <Typography variant="body2">
-                          <strong>Data Source Note:</strong> Total rent collected is calculated from actual payment records ({totalRentCollected.toLocaleString()}) 
-                          rather than property summary data ({totalRentCollectedFromProperties.toLocaleString()}) for accuracy.
-                        </Typography>
-                      </Alert>
-                    </Box>
-                  )}
-
                   {/* Recent Payments Table */}
-                  {chartData?.payment?.recentPayments && chartData.payment.recentPayments.length > 0 && (
-                    <Box sx={{ mt: 4 }}>
+                  {filteredRecentPayments.length > 0 && (
+                    <Box sx={{ mt: 4, mb: 4 }}>
                       <Typography variant="h6" gutterBottom>Recent Payments</Typography>
                       <TableContainer component={Paper}>
                         <Table>
@@ -653,7 +626,7 @@ const OwnerDashboard: React.FC = () => {
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {chartData.payment.recentPayments.map((payment: any) => (
+                            {filteredRecentPayments.map((payment: any) => (
                               <TableRow key={payment.id}>
                                 <TableCell>
                                   {new Date(payment.paymentDate).toLocaleDateString()}
@@ -673,6 +646,70 @@ const OwnerDashboard: React.FC = () => {
                           </TableBody>
                         </Table>
                       </TableContainer>
+                    </Box>
+                  )}
+
+                  {/* Bar Chart: Monthly Income vs Expenses */}
+                  {filteredPayments.length > 0 && (
+                    <Box sx={{ bgcolor: 'background.paper', p: 3, borderRadius: 2, boxShadow: 1, mb: 4 }}>
+                      <Typography variant="h6" gutterBottom>Monthly Income vs Expenses</Typography>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={filteredPayments}>
+                          <XAxis dataKey="month" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="amount" fill="#4ade80" name="Owner Income" />
+                          <Bar dataKey="expenses" fill="#f87171" name="Expenses" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  )}
+
+                  {/* Pie Chart: Income vs Expenses */}
+                  <Box sx={{ bgcolor: 'background.paper', p: 3, borderRadius: 2, boxShadow: 1, mb: 4 }}>
+                    <Typography variant="h6" gutterBottom>Income vs Expenses</Typography>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          dataKey="value"
+                          data={[
+                            { name: "Expenses", value: totalExpenses },
+                            { name: "Net Income", value: filteredNetIncome },
+                          ]}
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          fill="#8884d8"
+                          label
+                        >
+                          {[
+                            { name: "Expenses", value: totalExpenses },
+                            { name: "Net Income", value: filteredNetIncome },
+                          ].map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={index === 0 ? "#f87171" : "#00C49F"} />
+                          ))}
+                        </Pie>
+                        <Legend />
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Box>
+
+                  {chartErrors.payment && (
+                    <Box sx={{ mt: 4 }}>
+                      <Alert severity="warning">
+                        Unable to load payment data: {chartErrors.payment}
+                      </Alert>
+                    </Box>
+                  )}
+
+                  {/* Debug: Show when no payment data */}
+                  {!filteredPayments && !chartErrors.payment && (
+                    <Box sx={{ mt: 4 }}>
+                      <Alert severity="info">
+                        No payment data available for the selected period. This might be because there are no rental payments for your properties yet.
+                        Total rent collected is calculated from property records as a fallback.
+                      </Alert>
                     </Box>
                   )}
                 </Box>

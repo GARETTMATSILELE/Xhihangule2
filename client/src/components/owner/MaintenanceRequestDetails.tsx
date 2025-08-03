@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
+import { apiService } from '../../api';
 import {
   Box,
   Container,
@@ -35,7 +36,7 @@ interface MaintenanceRequest {
   title: string;
   description: string;
   priority: string;
-  status: string;
+  status: string; // now supports: pending_approval, approved, pending_completion, completed
   estimatedCost: number;
   createdAt: string;
   messages: {
@@ -47,6 +48,11 @@ interface MaintenanceRequest {
     content: string;
     timestamp: string;
   }[];
+  attachment?: {
+    url: string;
+    filename: string;
+    mimetype: string;
+  };
 }
 
 const MaintenanceRequestDetails: React.FC = () => {
@@ -65,7 +71,17 @@ const MaintenanceRequestDetails: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await api.get(`/owners/maintenance-requests/${requestId}`);
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        if (!user._id || !user.companyId) {
+          setError('User ID or Company ID not found');
+          return;
+        }
+        if (!requestId) {
+          setError('Request ID not found');
+          setLoading(false);
+          return;
+        }
+        const response = await apiService.getOwnerMaintenanceRequestPublic(requestId, user._id as string, user.companyId as string);
         setRequest(response.data);
       } catch (err: any) {
         setError(err.response?.data?.error || 'Error fetching maintenance request details');
@@ -81,10 +97,21 @@ const MaintenanceRequestDetails: React.FC = () => {
     if (!newMessage.trim()) return;
 
     try {
-      const response = await api.post(`/owners/maintenance-requests/${requestId}/messages`, {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (!user._id || !user.companyId) {
+        setError('User ID or Company ID not found');
+        return;
+      }
+      if (!requestId) {
+        setError('Request ID not found');
+        return;
+      }
+      const response = await apiService.getOwnerMaintenanceRequestPublic(requestId, user._id as string, user.companyId as string);
+      // For now, we'll use the authenticated API for posting messages since it requires more complex logic
+      const messageResponse = await api.post(`/owners/maintenance-requests/${requestId}/messages`, {
         content: newMessage
       });
-      setRequest(response.data);
+      setRequest(messageResponse.data);
       setNewMessage('');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error sending message');
@@ -93,6 +120,12 @@ const MaintenanceRequestDetails: React.FC = () => {
 
   const handleStatusUpdate = async () => {
     try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (!user._id) {
+        setError('User ID not found');
+        return;
+      }
+      // For now, we'll use the authenticated API for status updates since it requires more complex logic
       const response = await api.patch(`/owners/maintenance-requests/${requestId}`, {
         status: statusUpdate.status,
         message: statusUpdate.message
@@ -102,6 +135,24 @@ const MaintenanceRequestDetails: React.FC = () => {
       setStatusUpdate({ status: '', message: '' });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error updating status');
+    }
+  };
+
+  const handleApprove = async () => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (!user._id || !user.companyId) {
+        setError('User ID or Company ID not found');
+        return;
+      }
+      if (!requestId) {
+        setError('Request ID not found');
+        return;
+      }
+      const response = await apiService.approveOwnerMaintenanceRequest(requestId, user._id as string, user.companyId as string);
+      setRequest(response.data);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Error approving request');
     }
   };
 
@@ -187,6 +238,22 @@ const MaintenanceRequestDetails: React.FC = () => {
                 <Typography variant="body1">${request.estimatedCost}</Typography>
               </Grid>
               <Grid item xs={12}>
+                {request.attachment && (
+                  <Box sx={{ my: 2 }}>
+                    <Typography variant="subtitle1">Quotation Attachment</Typography>
+                    <Button
+                      variant="outlined"
+                      href={request.attachment.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      sx={{ mr: 2 }}
+                    >
+                      View/Download {request.attachment.filename}
+                    </Button>
+                  </Box>
+                )}
+              </Grid>
+              <Grid item xs={12}>
                 <Button
                   variant="contained"
                   onClick={() => setOpenStatusDialog(true)}
@@ -194,6 +261,30 @@ const MaintenanceRequestDetails: React.FC = () => {
                 >
                   Update Status
                 </Button>
+              </Grid>
+              <Grid item xs={12}>
+                {request.status === 'pending_approval' && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleApprove}
+                    sx={{ mt: 2 }}
+                  >
+                    Approve
+                  </Button>
+                )}
+                {request.status === 'approved' && (
+                  <Chip label="Approved" color="success" sx={{ mt: 2 }} />
+                )}
+                {request.status === 'pending_approval' && (
+                  <Chip label="Pending Approval" color="warning" sx={{ mt: 2, ml: 2 }} />
+                )}
+                {request.status === 'pending_completion' && (
+                  <Chip label="Pending Completion" color="primary" sx={{ mt: 2, ml: 2 }} />
+                )}
+                {request.status === 'completed' && (
+                  <Chip label="Completed" color="success" sx={{ mt: 2, ml: 2 }} />
+                )}
               </Grid>
             </Grid>
           </Paper>

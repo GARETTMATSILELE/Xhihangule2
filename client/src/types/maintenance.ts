@@ -56,29 +56,17 @@ export interface Comment {
 }
 
 export interface MaintenanceRequest {
-  _id: string;
+  _id?: string;
+  propertyId: string;
   title: string;
   description: string;
-  propertyId: {
-    _id: string;
-    name: string;
-    address: string;
-  };
-  requestedBy: {
-    _id: string;
-    firstName: string;
-    lastName: string;
-  };
-  ownerId: {
-    _id: string;
-    firstName: string;
-    lastName: string;
-  };
-  priority: MaintenancePriority;
-  status: MaintenanceStatus;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status?: string;
+  estimatedCost?: number;
+  attachments?: string[];
+  messages?: any[];
   ownerApprovalStatus: 'pending' | 'approved' | 'rejected';
   category: MaintenanceCategory;
-  estimatedCost: number;
   accessWindow: {
     start: Date;
     end: Date;
@@ -90,17 +78,6 @@ export interface MaintenanceRequest {
     timestamp: Date;
     user: string;
     details?: string;
-  }[];
-  attachments: {
-    name: string;
-    url: string;
-    type: string;
-    size: number;
-  }[];
-  messages: {
-    sender: string;
-    content: string;
-    timestamp: Date;
   }[];
   companyId: string;
   createdAt: Date;

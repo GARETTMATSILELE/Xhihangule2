@@ -1,6 +1,13 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
+export interface IMaintenanceAttachment {
+  name: string;
+  url: string;
+  size: number;
+  type: string;
+}
+
 export interface IMaintenanceRequest extends Document {
   propertyId: mongoose.Types.ObjectId;
   requestedBy: mongoose.Types.ObjectId;
@@ -8,9 +15,9 @@ export interface IMaintenanceRequest extends Document {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'pending_approval' | 'approved' | 'pending_completion' | 'in_progress' | 'completed' | 'cancelled';
   estimatedCost?: number;
-  attachments?: string[];
+  attachments?: IMaintenanceAttachment[];
   messages: {
     sender: mongoose.Types.ObjectId;
     content: string;
@@ -20,6 +27,25 @@ export interface IMaintenanceRequest extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const MaintenanceAttachmentSchema: Schema = new Schema({
+  name: {
+    type: String,
+    required: true
+  },
+  url: {
+    type: String,
+    required: true
+  },
+  size: {
+    type: Number,
+    required: true
+  },
+  type: {
+    type: String,
+    required: true
+  }
+}, { _id: false });
 
 const MaintenanceRequestSchema: Schema = new Schema({
   propertyId: {
@@ -52,16 +78,14 @@ const MaintenanceRequestSchema: Schema = new Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'in_progress', 'completed', 'cancelled'],
+    enum: ['pending', 'pending_approval', 'approved', 'pending_completion', 'in_progress', 'completed', 'cancelled'],
     default: 'pending'
   },
   estimatedCost: {
     type: Number,
     min: 0
   },
-  attachments: [{
-    type: String
-  }],
+  attachments: [MaintenanceAttachmentSchema],
   messages: [{
     sender: {
       type: Schema.Types.ObjectId,

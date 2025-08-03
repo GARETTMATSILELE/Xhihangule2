@@ -20,6 +20,8 @@ import {
 import { DataGrid, GridColDef, GridRenderCellParams, GridRowParams } from '@mui/x-data-grid';
 import { MaintenanceRequest, MaintenanceStatus, MaintenancePriority, MaintenanceCategory } from '../../types/maintenance';
 import { apiService } from '../../api';
+import { usePropertyService } from '../../services/propertyService';
+import { Property } from '../../types/property';
 
 interface MaintenanceRequestsListProps {
   onRequestClick: (request: MaintenanceRequest) => void;
@@ -31,6 +33,7 @@ const MaintenanceRequestsList: React.FC<MaintenanceRequestsListProps> = ({
   onNewRequest
 }) => {
   const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterModel, setFilterModel] = useState({
@@ -40,9 +43,11 @@ const MaintenanceRequestsList: React.FC<MaintenanceRequestsListProps> = ({
     category: ''
   });
   const theme = useTheme();
+  const propertyService = usePropertyService();
 
   useEffect(() => {
     fetchRequests();
+    fetchProperties();
   }, []);
 
   const fetchRequests = async () => {
@@ -55,6 +60,15 @@ const MaintenanceRequestsList: React.FC<MaintenanceRequestsListProps> = ({
       console.error('Error fetching maintenance requests:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchProperties = async () => {
+    try {
+      const props = await propertyService.getPublicProperties();
+      setProperties(props);
+    } catch (err) {
+      console.error('Error fetching properties:', err);
     }
   };
 
@@ -77,19 +91,24 @@ const MaintenanceRequestsList: React.FC<MaintenanceRequestsListProps> = ({
     }
   };
 
-  const getPriorityColor = (priority: MaintenancePriority) => {
+  const getPriorityColor = (priority: "low" | "medium" | "high" | "urgent") => {
     switch (priority) {
-      case MaintenancePriority.URGENT:
+      case "urgent":
         return theme.palette.error.main;
-      case MaintenancePriority.HIGH:
+      case "high":
         return theme.palette.warning.main;
-      case MaintenancePriority.MEDIUM:
+      case "medium":
         return theme.palette.info.main;
-      case MaintenancePriority.LOW:
+      case "low":
         return theme.palette.success.main;
       default:
         return theme.palette.text.primary;
     }
+  };
+
+  const getPropertyName = (propertyId: string) => {
+    const property = properties.find((p) => p._id === propertyId);
+    return property ? property.name : '';
   };
 
   const columns: GridColDef[] = [
@@ -135,7 +154,7 @@ const MaintenanceRequestsList: React.FC<MaintenanceRequestsListProps> = ({
       renderCell: (params: GridRenderCellParams<MaintenanceRequest>) => (
         <Box
           sx={{
-            backgroundColor: getStatusColor(params.row.status),
+            backgroundColor: getStatusColor((params.row.status as MaintenanceStatus) || "pending"),
             color: 'white',
             px: 1,
             py: 0.5,
@@ -173,7 +192,7 @@ const MaintenanceRequestsList: React.FC<MaintenanceRequestsListProps> = ({
 
   const filteredRequests = requests.filter(request => {
     return (
-      (!filterModel.property || request.propertyId.name.toLowerCase().includes(filterModel.property.toLowerCase())) &&
+      (!filterModel.property || getPropertyName(request.propertyId).toLowerCase().includes(filterModel.property.toLowerCase())) &&
       (!filterModel.status || request.status === filterModel.status) &&
       (!filterModel.priority || request.priority === filterModel.priority) &&
       (!filterModel.category || request.category === filterModel.category)

@@ -36,6 +36,24 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MaintenanceRequest = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const MaintenanceAttachmentSchema = new mongoose_1.Schema({
+    name: {
+        type: String,
+        required: true
+    },
+    url: {
+        type: String,
+        required: true
+    },
+    size: {
+        type: Number,
+        required: true
+    },
+    type: {
+        type: String,
+        required: true
+    }
+}, { _id: false });
 const MaintenanceRequestSchema = new mongoose_1.Schema({
     propertyId: {
         type: mongoose_1.Schema.Types.ObjectId,
@@ -67,16 +85,14 @@ const MaintenanceRequestSchema = new mongoose_1.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'in_progress', 'completed', 'cancelled'],
+        enum: ['pending', 'pending_approval', 'approved', 'pending_completion', 'in_progress', 'completed', 'cancelled'],
         default: 'pending'
     },
     estimatedCost: {
         type: Number,
         min: 0
     },
-    attachments: [{
-            type: String
-        }],
+    attachments: [MaintenanceAttachmentSchema],
     messages: [{
             sender: {
                 type: mongoose_1.Schema.Types.ObjectId,

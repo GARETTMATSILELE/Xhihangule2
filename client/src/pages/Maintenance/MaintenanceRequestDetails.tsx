@@ -23,7 +23,7 @@ import {
   AttachFile as AttachmentIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
-import { MaintenanceRequest, MaintenanceStatus, MaintenancePriority, MaintenanceCategory } from '../../types/maintenance';
+import { MaintenanceRequest, MaintenanceStatus, MaintenancePriority, MaintenanceCategory, MaintenanceAttachment } from '../../types/maintenance';
 import { apiService } from '../../api';
 import MaintenanceComments from './MaintenanceComments';
 import MaintenanceAuditLog from './MaintenanceAuditLog';
@@ -47,9 +47,13 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState('');
   const [rejectReason, setRejectReason] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [attachment, setAttachment] = useState<MaintenanceAttachment | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const theme = useTheme();
 
   const handleStatusChange = async (newStatus: MaintenanceStatus) => {
+    if (!request._id) return;
     try {
       setLoading(true);
       const response = await apiService.updateMaintenanceStatus(request._id, newStatus);
@@ -63,6 +67,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
   };
 
   const handleAssign = async () => {
+    if (!request._id) return;
     try {
       setLoading(true);
       const response = await apiService.assignMaintenanceRequest(request._id, selectedVendor);
@@ -77,6 +82,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
   };
 
   const handleReject = async () => {
+    if (!request._id) return;
     try {
       setLoading(true);
       const response = await apiService.rejectMaintenanceRequest(request._id, rejectReason);
@@ -91,6 +97,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
   };
 
   const handleApprove = async () => {
+    if (!request._id) return;
     try {
       setLoading(true);
       const response = await apiService.approveMaintenanceRequest(request._id);
@@ -104,6 +111,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
   };
 
   const handleDelete = async () => {
+    if (!request._id) return;
     if (window.confirm('Are you sure you want to delete this request?')) {
       try {
         setLoading(true);
@@ -115,6 +123,49 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
       } finally {
         setLoading(false);
       }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFile(e.target.files[0]);
+    }
+  };
+
+  const handleSendPaymentRequest = async () => {
+    if (!file || !request._id) return;
+    setUploading(true);
+    try {
+      // Upload file
+      const formData = new FormData();
+      formData.append('files', file);
+      const uploadRes = await apiService.uploadFiles(formData);
+      const uploaded = uploadRes.data[0];
+      // Attach file to request and set status to pending_approval
+      const updateRes = await apiService.updateMaintenanceRequest(request._id, {
+        attachments: [uploaded],
+        status: 'pending_approval',
+      });
+      setAttachment(uploaded);
+      onRequestUpdated(updateRes.data);
+      setFile(null);
+    } catch (err) {
+      setError('Failed to send payment request');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleMarkCompleted = async () => {
+    if (!request._id) return;
+    setLoading(true);
+    try {
+      const updateRes = await apiService.completeMaintenanceRequest(request._id);
+      onRequestUpdated(updateRes.data);
+    } catch (err) {
+      setError('Failed to mark as completed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -192,7 +243,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
                   Property
                 </Typography>
                 <Typography variant="body1">
-                  {request.propertyId.name}
+                  {typeof request.propertyId === 'string' ? request.propertyId : ''}
                 </Typography>
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -210,7 +261,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
                 <Chip
                   label={request.priority}
                   sx={{
-                    backgroundColor: getPriorityColor(request.priority),
+                    backgroundColor: getPriorityColor(request.priority as any),
                     color: 'white'
                   }}
                 />
@@ -222,7 +273,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
                 <Chip
                   label={request.status}
                   sx={{
-                    backgroundColor: getStatusColor(request.status),
+                    backgroundColor: getStatusColor((request.status as any) || 'pending'),
                     color: 'white'
                   }}
                 />
@@ -257,7 +308,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
                   Estimated Cost
                 </Typography>
                 <Typography variant="body1">
-                  ${request.estimatedCost.toFixed(2)}
+                  ${request.estimatedCost ? request.estimatedCost.toFixed(2) : '0.00'}
                 </Typography>
               </Grid>
             </Grid>
@@ -320,7 +371,7 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
 
         <Grid item xs={12} md={6}>
           <MaintenanceComments
-            requestId={request._id}
+            requestId={request._id || ''}
             comments={request.comments}
             onCommentAdded={(comment) => {
               onRequestUpdated({
@@ -333,6 +384,81 @@ const MaintenanceRequestDetails: React.FC<MaintenanceRequestDetailsProps> = ({
 
         <Grid item xs={12} md={6}>
           <MaintenanceAuditLog request={request} />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Payment Request
+            </Typography>
+            {attachment ? (
+              <Box sx={{ my: 2 }}>
+                <Typography variant="subtitle2">Quotation Attachment</Typography>
+                <Button
+                  variant="outlined"
+                  href={attachment.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  startIcon={<AttachmentIcon />}
+                >
+                  View/Download {attachment.name}
+                </Button>
+              </Box>
+            ) : (
+              <Box sx={{ my: 2 }}>
+                <Button
+                  variant="contained"
+                  component="label"
+                  disabled={uploading}
+                >
+                  Attach Quotation (PDF/Image)
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    hidden
+                    onChange={handleFileChange}
+                  />
+                </Button>
+                {file && (
+                  <Typography variant="body2" sx={{ mt: 1 }}>{file.name}</Typography>
+                )}
+                <Button
+                  variant="contained"
+                  color="primary"
+                  sx={{ mt: 1, ml: 2 }}
+                  onClick={handleSendPaymentRequest}
+                  disabled={!file || uploading}
+                >
+                  {uploading ? 'Uploading...' : 'Send Payment Request'}
+                </Button>
+              </Box>
+            )}
+            {/* Status Chips */}
+            {request.status === 'pending_approval' && (
+              <Chip label="Pending Approval" color="warning" sx={{ mt: 2 }} />
+            )}
+            {request.status === 'approved' && (
+              <Chip label="Approved" color="success" sx={{ mt: 2 }} />
+            )}
+            {request.status === 'pending_completion' && (
+              <Chip label="Pending Completion" color="primary" sx={{ mt: 2 }} />
+            )}
+            {request.status === 'completed' && (
+              <Chip label="Completed" color="success" sx={{ mt: 2 }} />
+            )}
+            {/* Mark as Completed Button */}
+            {request.status === 'pending_completion' && (
+              <Button
+                variant="contained"
+                color="success"
+                sx={{ mt: 2, ml: 2 }}
+                onClick={handleMarkCompleted}
+                disabled={loading}
+              >
+                Mark as Completed
+              </Button>
+            )}
+          </Paper>
         </Grid>
       </Grid>
 

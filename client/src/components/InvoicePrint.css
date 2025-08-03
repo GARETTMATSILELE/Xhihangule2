@@ -1,0 +1,285 @@
+/* Print styles for invoices */
+@media print {
+  /* Hide elements that shouldn't be printed */
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Ensure proper page breaks */
+  .invoice-page {
+    page-break-after: always;
+  }
+  
+  /* Set paper size and margins */
+  @page {
+    size: A4;
+    margin: 1cm;
+  }
+  
+  /* Ensure text is readable */
+  body {
+    font-size: 12pt;
+    line-height: 1.4;
+    color: #000;
+    background: #fff;
+  }
+  
+  /* Ensure images print properly */
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+  
+  /* Ensure proper spacing */
+  .invoice-header {
+    margin-bottom: 20px;
+  }
+  
+  .invoice-content {
+    margin-bottom: 30px;
+  }
+  
+  .invoice-footer {
+    margin-top: 40px;
+    border-top: 1px solid #ccc;
+    padding-top: 20px;
+  }
+  
+  /* Ensure colors print properly */
+  .status-paid {
+    color: #2e7d32 !important;
+    background-color: #e8f5e8 !important;
+  }
+  
+  .status-unpaid {
+    color: #f57c00 !important;
+    background-color: #fff3e0 !important;
+  }
+  
+  .status-overdue {
+    color: #d32f2f !important;
+    background-color: #ffeaea !important;
+  }
+  
+  /* Ensure proper table formatting */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  
+  th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+  }
+  
+  th {
+    background-color: #f2f2f2 !important;
+    font-weight: bold;
+  }
+  
+  /* Tax breakdown table styles */
+  .tax-breakdown {
+    margin-bottom: 20px;
+  }
+  
+  .tax-breakdown-box {
+    border: 1px solid #ccc !important;
+    background-color: #fafafa !important;
+  }
+}
+
+/* Screen styles for better display */
+.invoice-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+}
+
+.invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #1976d2;
+}
+
+.company-info {
+  flex: 1;
+}
+
+.company-logo {
+  max-height: 60px;
+  max-width: 200px;
+  object-fit: contain;
+  margin-bottom: 15px;
+}
+
+.invoice-details {
+  text-align: right;
+  flex: 1;
+}
+
+.invoice-number {
+  font-size: 1.2em;
+  font-weight: bold;
+  color: #1976d2;
+  margin-bottom: 5px;
+}
+
+.client-section {
+  background-color: #f5f5f5;
+  padding: 15px;
+  border-radius: 5px;
+  margin-bottom: 25px;
+}
+
+.invoice-content {
+  margin-bottom: 25px;
+}
+
+/* Items table styles */
+.items-table {
+  margin-bottom: 20px;
+}
+
+.items-table th {
+  background-color: #f5f5f5;
+  font-weight: bold;
+  padding: 12px 8px;
+  border-bottom: 2px solid #1976d2;
+}
+
+.items-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.items-table tr:hover {
+  background-color: #fafafa;
+}
+
+/* Tax breakdown styles */
+.tax-breakdown {
+  margin-bottom: 25px;
+}
+
+.tax-breakdown-box {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  background-color: #fafafa;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.tax-breakdown-title {
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 10px;
+  margin-bottom: 15px;
+  font-weight: bold;
+  color: #1976d2;
+}
+
+.tax-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 4px 0;
+}
+
+.tax-row.discount {
+  color: #d32f2f;
+}
+
+.tax-row.total {
+  border-top: 2px solid #1976d2;
+  padding-top: 10px;
+  margin-top: 10px;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+
+.tax-amount {
+  font-weight: bold;
+}
+
+.tax-amount.total {
+  color: #1976d2;
+  font-size: 1.2em;
+}
+
+.amount-section {
+  border-top: 2px solid #1976d2;
+  padding-top: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 20px;
+}
+
+.total-amount {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #1976d2;
+}
+
+.invoice-footer {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+  text-align: center;
+  color: #666;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8em;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.status-paid {
+  background-color: #e8f5e8;
+  color: #2e7d32;
+}
+
+.status-unpaid {
+  background-color: #fff3e0;
+  color: #f57c00;
+}
+
+.status-overdue {
+  background-color: #ffeaea;
+  color: #d32f2f;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .invoice-header {
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .invoice-details {
+    text-align: left;
+  }
+  
+  .tax-breakdown-box {
+    padding: 15px;
+  }
+  
+  .items-table {
+    font-size: 0.9em;
+  }
+  
+  .items-table th,
+  .items-table td {
+    padding: 8px 4px;
+  }
+} 

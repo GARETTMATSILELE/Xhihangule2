@@ -12,12 +12,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createAgentFile = exports.updateAgentPayment = exports.createAgentPayment = exports.createAgentLease = exports.createAgentTenant = exports.createAgentProperty = exports.getAgentCommission = exports.getAgentFiles = exports.getAgentLeases = exports.getAgentTenants = exports.getAgentProperties = void 0;
+exports.deleteAgentPropertyOwner = exports.updateAgentPropertyOwner = exports.createAgentPropertyOwner = exports.getAgentPropertyOwners = exports.createAgentFile = exports.updateAgentPayment = exports.createAgentPayment = exports.createAgentLease = exports.createAgentTenant = exports.createAgentProperty = exports.getAgentCommission = exports.getAgentFiles = exports.getAgentLeases = exports.getAgentTenants = exports.getAgentProperties = void 0;
 const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const Lease_1 = require("../models/Lease");
 const Payment_1 = require("../models/Payment");
 const File_1 = __importDefault(require("../models/File"));
+const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 // Get properties managed by the agent
@@ -656,3 +657,191 @@ const createAgentFile = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.createAgentFile = createAgentFile;
+// Get property owners for the agent's company
+const getAgentPropertyOwners = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        console.log('Fetching property owners for agent:', {
+            companyId: req.user.companyId,
+            userId: req.user.userId,
+            role: req.user.role
+        });
+        // Get property owners for the agent's company
+        const owners = yield PropertyOwner_1.PropertyOwner.find({
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+        }).populate('properties', 'name address');
+        res.json({ owners });
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            throw error;
+        }
+        console.error('Error fetching agent property owners:', error);
+        res.status(500).json({ message: 'Error fetching property owners' });
+    }
+});
+exports.getAgentPropertyOwners = getAgentPropertyOwners;
+// Create a new property owner for the agent's company
+const createAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
+        }
+        // Only allow agents
+        if (req.user.role !== 'agent') {
+            return res.status(403).json({ message: 'Only agents can create property owners via this endpoint.' });
+        }
+        const { email, password, firstName, lastName, phone, propertyIds } = req.body;
+        // Validate required fields
+        if (!email || !password || !firstName || !lastName || !phone) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+        // Check if owner already exists
+        const existingOwner = yield PropertyOwner_1.PropertyOwner.findOne({ email });
+        if (existingOwner) {
+            return res.status(400).json({ message: 'Property owner with this email already exists' });
+        }
+        // Validate that all properties belong to this agent
+        if (propertyIds && propertyIds.length > 0) {
+            const agentProperties = yield Property_1.Property.find({
+                _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
+                ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            });
+            if (agentProperties.length !== propertyIds.length) {
+                return res.status(403).json({ message: 'You can only assign your own properties to property owners.' });
+            }
+        }
+        const ownerData = {
+            email,
+            password,
+            firstName,
+            lastName,
+            phone,
+            companyId: req.user.companyId,
+            properties: propertyIds || []
+        };
+        const owner = new PropertyOwner_1.PropertyOwner(ownerData);
+        yield owner.save();
+        // Update properties to assign them to the new owner
+        if (propertyIds && propertyIds.length > 0) {
+            yield Property_1.Property.updateMany({ _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } }, { $set: { ownerId: owner._id } });
+        }
+        res.status(201).json(owner);
+    }
+    catch (error) {
+        console.error('Error creating agent property owner:', error);
+        res.status(500).json({ message: 'Error creating property owner' });
+    }
+});
+exports.createAgentPropertyOwner = createAgentPropertyOwner;
+// Update a property owner for the agent's company
+const updateAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
+        }
+        // Only allow agents
+        if (req.user.role !== 'agent') {
+            return res.status(403).json({ message: 'Only agents can update property owners via this endpoint.' });
+        }
+        const { id } = req.params;
+        const { firstName, lastName, email, phone, propertyIds } = req.body;
+        // Find the property owner and ensure it belongs to the agent's company
+        const owner = yield PropertyOwner_1.PropertyOwner.findOne({
+            _id: id,
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+        });
+        if (!owner) {
+            return res.status(404).json({ message: 'Property owner not found' });
+        }
+        // Validate that all properties belong to this agent
+        if (propertyIds && propertyIds.length > 0) {
+            const agentProperties = yield Property_1.Property.find({
+                _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
+                ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            });
+            if (agentProperties.length !== propertyIds.length) {
+                return res.status(403).json({ message: 'You can only assign your own properties to property owners.' });
+            }
+        }
+        // Update owner data
+        const updateData = {};
+        if (firstName)
+            updateData.firstName = firstName;
+        if (lastName)
+            updateData.lastName = lastName;
+        if (email)
+            updateData.email = email;
+        if (phone)
+            updateData.phone = phone;
+        if (propertyIds)
+            updateData.properties = propertyIds;
+        const updatedOwner = yield PropertyOwner_1.PropertyOwner.findByIdAndUpdate(id, updateData, { new: true });
+        // Update property assignments
+        if (propertyIds) {
+            // Remove owner from all properties first
+            yield Property_1.Property.updateMany({ ownerId: new mongoose_1.default.Types.ObjectId(id) }, { $unset: { ownerId: 1 } });
+            // Assign new properties to the owner
+            if (propertyIds.length > 0) {
+                yield Property_1.Property.updateMany({ _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } }, { $set: { ownerId: new mongoose_1.default.Types.ObjectId(id) } });
+            }
+        }
+        res.json(updatedOwner);
+    }
+    catch (error) {
+        console.error('Error updating agent property owner:', error);
+        res.status(500).json({ message: 'Error updating property owner' });
+    }
+});
+exports.updateAgentPropertyOwner = updateAgentPropertyOwner;
+// Delete a property owner for the agent's company
+const deleteAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
+        }
+        // Only allow agents
+        if (req.user.role !== 'agent') {
+            return res.status(403).json({ message: 'Only agents can delete property owners via this endpoint.' });
+        }
+        const { id } = req.params;
+        // Find the property owner and ensure it belongs to the agent's company
+        const owner = yield PropertyOwner_1.PropertyOwner.findOne({
+            _id: id,
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+        });
+        if (!owner) {
+            return res.status(404).json({ message: 'Property owner not found' });
+        }
+        // Remove owner from all properties
+        yield Property_1.Property.updateMany({ ownerId: new mongoose_1.default.Types.ObjectId(id) }, { $unset: { ownerId: 1 } });
+        // Delete the property owner
+        yield PropertyOwner_1.PropertyOwner.findByIdAndDelete(id);
+        res.json({ message: 'Property owner deleted successfully' });
+    }
+    catch (error) {
+        console.error('Error deleting agent property owner:', error);
+        res.status(500).json({ message: 'Error deleting property owner' });
+    }
+});
+exports.deleteAgentPropertyOwner = deleteAgentPropertyOwner;

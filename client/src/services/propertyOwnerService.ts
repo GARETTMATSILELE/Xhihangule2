@@ -1,4 +1,4 @@
-import publicApi from '../api/publicApi';
+import api from '../api';
 
 export interface PropertyOwner {
   _id: string;
@@ -7,7 +7,7 @@ export interface PropertyOwner {
   email: string;
   phone: string;
   companyId: string;
-  properties?: string[];
+  properties?: Array<string | { $oid: string }>;
 }
 
 export interface CreatePropertyOwnerData extends Omit<PropertyOwner, '_id'> {
@@ -29,7 +29,7 @@ export const usePropertyOwnerService = () => {
         config.params = { companyId };
       }
       
-      const response = await publicApi.get('/property-owners/public', config);
+      const response = await api.get('/property-owners', config);
       return { owners: response.data.owners || response.data };
     } catch (error: any) {
       console.error('Error fetching property owners:', error);
@@ -37,7 +37,7 @@ export const usePropertyOwnerService = () => {
     }
   };
 
-  // Public method for fetching all property owners
+  // Method for fetching all property owners (authenticated)
   const getAllPublic = async (companyId?: string) => {
     try {
       const config: any = {};
@@ -45,7 +45,7 @@ export const usePropertyOwnerService = () => {
         config.params = { companyId };
       }
       
-      const response = await publicApi.get('/property-owners/public', config);
+      const response = await api.get('/property-owners', config);
       return response.data.owners || response.data;
     } catch (error) {
       throw error;
@@ -61,7 +61,7 @@ export const usePropertyOwnerService = () => {
         config.params = { companyId };
       }
       
-      const response = await publicApi.get(`/property-owners/public/${id}`, config);
+      const response = await api.get(`/property-owners/${id}`, config);
       return response.data;
     } catch (error: any) {
       console.error('Error fetching property owner:', error);
@@ -78,7 +78,7 @@ export const usePropertyOwnerService = () => {
         ownerData.companyId = companyId;
       }
       
-      const response = await publicApi.post('/property-owners/public', ownerData);
+      const response = await api.post('/property-owners', ownerData);
       return response.data;
     } catch (error: any) {
       console.error('Error creating property owner:', error);
@@ -95,7 +95,7 @@ export const usePropertyOwnerService = () => {
         ownerData.companyId = companyId;
       }
       
-      const response = await publicApi.patch(`/property-owners/public/${id}`, ownerData);
+      const response = await api.patch(`/property-owners/${id}`, ownerData);
       return response.data;
     } catch (error: any) {
       console.error('Error updating property owner:', error);
@@ -105,7 +105,7 @@ export const usePropertyOwnerService = () => {
 
   const remove = async (id: string) => {
     try {
-      await publicApi.delete(`/property-owners/public/${id}`);
+      await api.delete(`/property-owners/${id}`);
     } catch (error: any) {
       console.error('Error deleting property owner:', error);
       throw new Error('Failed to delete property owner');

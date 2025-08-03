@@ -145,6 +145,8 @@ export const apiService = {
 
   // Charts
   getChartData: (type: string) => apiInstance.get(`/charts/${type}`),
+  // Owner Payments (for owner dashboard)
+  getOwnerPayments: () => apiInstance.get('/charts/owner/payments'),
 
   // User Management
   getCurrentUser: () => apiInstance.get('/users/me'),
@@ -171,6 +173,7 @@ export const apiService = {
   assignMaintenanceRequest: (requestId: string, vendorId: string) => apiInstance.put(`/maintenance/${requestId}/assign`, { vendorId }),
   requestOwnerApproval: (requestId: string) => apiInstance.post(`/maintenance/${requestId}/request-approval`),
   approveMaintenanceRequest: (requestId: string) => apiInstance.put(`/maintenance/${requestId}/approve`),
+  completeMaintenanceRequest: (requestId: string) => apiInstance.put(`/maintenance/${requestId}/complete`),
   rejectMaintenanceRequest: (requestId: string, reason: string) => apiInstance.put(`/maintenance/${requestId}/reject`, { reason }),
 
   // Public Maintenance endpoints (for maintenance page)
@@ -187,6 +190,50 @@ export const apiService = {
       config.params = { companyId };
     }
     return publicApi.get('/maintenance/public/events', config);
+  },
+
+  // Public Owner Maintenance endpoints (for owner dashboard)
+  getOwnerMaintenanceRequestsPublic: (userId?: string, companyId?: string) => {
+    const config: any = {};
+    if (userId) {
+      config.params = { userId };
+    }
+    if (companyId) {
+      config.params = { ...config.params, companyId };
+    }
+    return publicApi.get('/owners/maintenance-requests', config);
+  },
+  getOwnerMaintenanceRequestPublic: (requestId: string, userId?: string, companyId?: string) => {
+    const config: any = {};
+    if (userId) {
+      config.params = { userId };
+    }
+    if (companyId) {
+      config.params = { ...config.params, companyId };
+    }
+    return publicApi.get(`/owners/maintenance-requests/${requestId}`, config);
+  },
+  approveOwnerMaintenanceRequest: (requestId: string, userId?: string, companyId?: string) => {
+    const config: any = {};
+    if (userId) {
+      config.params = { userId };
+    }
+    if (companyId) {
+      config.params = { ...config.params, companyId };
+    }
+    return publicApi.patch(`/owners/maintenance-requests/${requestId}/approve`, {}, config);
+  },
+
+  // Public Owner Net Income endpoint (for owner dashboard)
+  getOwnerNetIncomePublic: (userId?: string, companyId?: string) => {
+    const config: any = {};
+    if (userId) {
+      config.params = { userId };
+    }
+    if (companyId) {
+      config.params = { ...config.params, companyId };
+    }
+    return publicApi.get('/owners/net-income', config);
   },
 
   // File upload endpoint

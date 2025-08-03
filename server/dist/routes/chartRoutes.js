@@ -281,28 +281,73 @@ router.get('/owner/payments', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
             .populate('tenantId', 'firstName lastName')
             .sort({ paymentDate: -1 })
             .limit(50); // Limit to recent payments
-        // Group payments by month for chart data
+        // Get maintenance payments for these properties
+        const maintenancePaymentQuery = {
+            propertyId: { $in: propertyIds }
+        };
+        if (propertyOwnerContext.companyId) {
+            maintenancePaymentQuery.companyId = propertyOwnerContext.companyId;
+        }
+        // Use MaintenanceRequest instead of non-existent MaintenancePayment
+        const { MaintenanceRequest } = require('../models/MaintenanceRequest');
+        const maintenanceRequests = yield MaintenanceRequest.find(maintenancePaymentQuery)
+            .populate('propertyId', 'name')
+            .sort({ createdAt: -1 })
+            .limit(50);
+        // Group payments by month for chart data using commissionDetails.ownerAmount, totalCommission, and maintenance expenses
         const monthlyData = {};
         const currentYear = new Date().getFullYear();
+        // Process rental payments
         payments.forEach((payment) => {
+            var _a, _b;
             const paymentDate = new Date(payment.paymentDate);
             const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
             if (!monthlyData[monthKey]) {
-                monthlyData[monthKey] = 0;
+                monthlyData[monthKey] = { ownerAmount: 0, totalCommission: 0, expenses: 0 };
             }
-            monthlyData[monthKey] += payment.amount || 0;
+            // Use commissionDetails.ownerAmount and totalCommission
+            const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
+            const totalCommission = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.totalCommission) || 0;
+            monthlyData[monthKey].ownerAmount += ownerAmount;
+            monthlyData[monthKey].totalCommission += totalCommission;
+        });
+        // Process maintenance requests (estimated costs as expenses)
+        maintenanceRequests.forEach((maintenanceRequest) => {
+            const requestDate = new Date(maintenanceRequest.createdAt);
+            const monthKey = `${requestDate.getFullYear()}-${String(requestDate.getMonth() + 1).padStart(2, '0')}`;
+            if (!monthlyData[monthKey]) {
+                monthlyData[monthKey] = { ownerAmount: 0, totalCommission: 0, expenses: 0 };
+            }
+            // Add maintenance request estimated cost to expenses
+            const expenseAmount = maintenanceRequest.estimatedCost || 0;
+            monthlyData[monthKey].expenses += expenseAmount;
         });
         // Convert to chart format
         const chartData = Object.entries(monthlyData)
-            .map(([month, amount]) => ({
+            .map(([month, data]) => ({
             month,
-            amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+            amount: Math.round(data.ownerAmount * 100) / 100, // Round to 2 decimal places
+            totalCommission: Math.round(data.totalCommission * 100) / 100,
+            expenses: Math.round(data.expenses * 100) / 100
         }))
             .sort((a, b) => a.month.localeCompare(b.month))
             .slice(-12); // Last 12 months
-        // Also provide summary statistics
+        // Also provide summary statistics using commissionDetails.ownerAmount, totalCommission, and maintenance expenses
         const totalPayments = payments.length;
-        const totalAmount = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+        const totalAmount = payments.reduce((sum, payment) => {
+            var _a;
+            const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
+            return sum + ownerAmount;
+        }, 0);
+        const totalCommission = payments.reduce((sum, payment) => {
+            var _a;
+            const commission = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.totalCommission) || 0;
+            return sum + commission;
+        }, 0);
+        const totalExpenses = maintenanceRequests.reduce((sum, maintenanceRequest) => {
+            const expenseAmount = maintenanceRequest.estimatedCost || 0;
+            return sum + expenseAmount;
+        }, 0);
         const averageAmount = totalPayments > 0 ? totalAmount / totalPayments : 0;
         res.json({
             type: 'payments',
@@ -310,17 +355,20 @@ router.get('/owner/payments', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
             summary: {
                 totalPayments,
                 totalAmount: Math.round(totalAmount * 100) / 100,
+                totalCommission: Math.round(totalCommission * 100) / 100,
+                totalExpenses: Math.round(totalExpenses * 100) / 100,
                 averageAmount: Math.round(averageAmount * 100) / 100
             },
             recentPayments: payments.slice(0, 10).map(payment => {
-                var _a, _b, _c;
+                var _a, _b, _c, _d;
                 return ({
                     id: payment._id,
-                    amount: payment.amount,
+                    amount: ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0, // Use ownerAmount instead of total amount
                     paymentDate: payment.paymentDate,
-                    propertyName: ((_a = payment.propertyId) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Property',
-                    tenantName: `${((_b = payment.tenantId) === null || _b === void 0 ? void 0 : _b.firstName) || ''} ${((_c = payment.tenantId) === null || _c === void 0 ? void 0 : _c.lastName) || ''}`.trim() || 'Unknown Tenant',
-                    status: payment.status
+                    propertyName: ((_b = payment.propertyId) === null || _b === void 0 ? void 0 : _b.name) || 'Unknown Property',
+                    tenantName: `${((_c = payment.tenantId) === null || _c === void 0 ? void 0 : _c.firstName) || ''} ${((_d = payment.tenantId) === null || _d === void 0 ? void 0 : _d.lastName) || ''}`.trim() || 'Unknown Tenant',
+                    status: payment.status,
+                    commissionDetails: payment.commissionDetails // Include full commission details
                 });
             })
         });

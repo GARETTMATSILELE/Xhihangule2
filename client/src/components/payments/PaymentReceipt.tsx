@@ -124,11 +124,11 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 </div>
                 <div class="detail-row">
                   <span class="label">Property:</span>
-                  <span class="value">${receipt.property?.name || 'N/A'}</span>
+                  <span class="value">${receipt.manualPropertyAddress || receipt.property?.name || 'N/A'}</span>
                 </div>
                 <div class="detail-row">
                   <span class="label">Tenant:</span>
-                  <span class="value">${receipt.tenant?.firstName} ${receipt.tenant?.lastName}</span>
+                  <span class="value">${receipt.manualTenantName || (receipt.tenant ? receipt.tenant.firstName + ' ' + receipt.tenant.lastName : 'N/A')}</span>
                 </div>
                 <div class="detail-row">
                   <span class="label">Agent:</span>
@@ -269,13 +269,13 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
         <Grid item xs={6}>
           <Typography variant="subtitle2" color="textSecondary">Property</Typography>
           <Typography variant="body1">
-            {receipt.property?.name || 'N/A'}
+            {receipt.manualPropertyAddress || receipt.property?.name || 'N/A'}
           </Typography>
         </Grid>
         <Grid item xs={6}>
           <Typography variant="subtitle2" color="textSecondary">Tenant</Typography>
           <Typography variant="body1">
-            {receipt.tenant?.firstName} {receipt.tenant?.lastName}
+            {receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : 'N/A')}
           </Typography>
         </Grid>
         <Grid item xs={6}>

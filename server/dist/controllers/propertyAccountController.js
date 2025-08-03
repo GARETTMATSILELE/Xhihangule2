@@ -12,172 +12,450 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.createPropertyPayment = exports.getPropertyTransactions = void 0;
-exports.getPropertyAccount = getPropertyAccount;
-exports.addExpense = addExpense;
+exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.getPropertyAccount = void 0;
 const Property_1 = require("../models/Property");
-const Payment_1 = require("../models/Payment");
-const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
+const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
+const errorHandler_1 = require("../middleware/errorHandler");
+const logger_1 = require("../utils/logger");
+/**
+ * Get property account with summary
+ */
+const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { propertyId } = req.params;
+        console.log('getPropertyAccount controller called with propertyId:', propertyId);
+        console.log('User:', req.user);
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        console.log('Calling propertyAccountService.getOrCreatePropertyAccount...');
+        const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(propertyId);
+        res.json({
+            success: true,
+            data: account
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in getPropertyAccount:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.getPropertyAccount = getPropertyAccount;
+/**
+ * Get all property accounts for company
+ */
+const getCompanyPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(400).json({ message: 'Company ID is required' });
+        }
+        const accounts = yield propertyAccountService_1.default.getCompanyPropertyAccounts(req.user.companyId);
+        res.json({
+            success: true,
+            data: accounts
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in getCompanyPropertyAccounts:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.getCompanyPropertyAccounts = getCompanyPropertyAccounts;
+/**
+ * Get property transactions with filters
+ */
 const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { propertyId } = req.params;
-        const { type } = req.query;
-        if (!propertyId)
-            return res.status(400).json({ message: 'Property ID required' });
-        if (!type || (type !== 'income' && type !== 'expenditure')) {
-            return res.status(400).json({ message: 'Query param type=income|expenditure required' });
+        const { type, startDate, endDate, category, status } = req.query;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
         }
-        if (type === 'income') {
-            // Find all rental income payments for this property (after commission)
-            const payments = yield Payment_1.Payment.find({ propertyId, type: 'rent', status: 'completed' })
-                .sort({ createdAt: 1 });
-            // Map to show net income (after commission)
-            const income = payments.map((p) => {
-                var _a, _b;
-                return ({
-                    _id: p._id,
-                    date: p.createdAt,
-                    amount: p.amount - (((_a = p.commissionDetails) === null || _a === void 0 ? void 0 : _a.totalCommission) || 0),
-                    grossAmount: p.amount,
-                    commission: ((_b = p.commissionDetails) === null || _b === void 0 ? void 0 : _b.totalCommission) || 0,
-                    tenant: p.tenantId,
-                    lease: p.leaseId,
-                    description: p.description || 'Rental income',
-                });
-            });
-            return res.json(income);
-        }
-        else {
-            // Expenditure: payments made from this property account (type: 'expenditure' or similar)
-            const payments = yield Payment_1.Payment.find({ propertyId, type: 'expenditure', status: 'completed' })
-                .sort({ createdAt: 1 });
-            return res.json(payments);
-        }
+        const filters = {};
+        if (type)
+            filters.type = type;
+        if (startDate)
+            filters.startDate = new Date(startDate);
+        if (endDate)
+            filters.endDate = new Date(endDate);
+        if (category)
+            filters.category = category;
+        if (status)
+            filters.status = status;
+        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters);
+        res.json({
+            success: true,
+            data: transactions
+        });
     }
-    catch (err) {
-        res.status(500).json({ message: 'Server error', error: err });
+    catch (error) {
+        logger_1.logger.error('Error in getPropertyTransactions:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
     }
 });
 exports.getPropertyTransactions = getPropertyTransactions;
-const createPropertyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+/**
+ * Add expense to property account
+ */
+const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const { propertyId } = req.params;
-        const { amount, recipientId, recipientType, reason } = req.body;
-        if (!propertyId || !amount || !recipientId || !recipientType) {
-            return res.status(400).json({ message: 'Missing required fields' });
+        const { amount, date, description, category, recipientId, recipientType, notes } = req.body;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
         }
-        // For now, just create a Payment with type 'expenditure'
-        const payment = new Payment_1.Payment({
-            propertyId,
-            amount,
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ message: 'Valid amount is required' });
+        }
+        if (!description) {
+            return res.status(400).json({ message: 'Description is required' });
+        }
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'User authentication required' });
+        }
+        const expenseData = {
+            amount: Number(amount),
+            date: date ? new Date(date) : new Date(),
+            description,
+            category,
             recipientId,
-            recipientType, // 'owner' or 'contractor'
-            reason,
-            type: 'expenditure',
-            status: 'completed',
-            createdAt: new Date(),
+            recipientType,
+            processedBy: req.user.userId,
+            notes
+        };
+        const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData);
+        res.json({
+            success: true,
+            message: 'Expense added successfully',
+            data: account
         });
-        yield payment.save();
-        res.status(201).json(payment);
     }
-    catch (err) {
-        res.status(500).json({ message: 'Server error', error: err });
+    catch (error) {
+        logger_1.logger.error('Error in addExpense:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
     }
 });
-exports.createPropertyPayment = createPropertyPayment;
-const getPaymentRequestDocument = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+exports.addExpense = addExpense;
+/**
+ * Create owner payout
+ */
+const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const { propertyId, paymentId } = req.params;
-        // Fetch payment and property
-        const payment = yield Payment_1.Payment.findById(paymentId);
-        const property = yield Property_1.Property.findById(propertyId);
-        if (!payment || !property) {
-            return res.status(404).json({ message: 'Payment or property not found' });
+        const { propertyId } = req.params;
+        const { amount, paymentMethod, recipientId, recipientName, recipientBankDetails, notes } = req.body;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
         }
-        // For now, return a JSON with the details needed for the payment request document
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ message: 'Valid amount is required' });
+        }
+        if (!paymentMethod) {
+            return res.status(400).json({ message: 'Payment method is required' });
+        }
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'User authentication required' });
+        }
+        // Get the property account to access owner information
+        console.log('Getting property account for propertyId:', propertyId);
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
+        console.log('Property account retrieved:', {
+            accountId: account._id,
+            ownerId: account.ownerId,
+            ownerName: account.ownerName,
+            runningBalance: account.runningBalance
+        });
+        // Use provided recipientId or fall back to property owner
+        let finalRecipientId = recipientId;
+        let finalRecipientName = recipientName;
+        if (!finalRecipientId || finalRecipientId.trim() === '') {
+            console.log('RecipientId is empty, using property owner');
+            if (!account.ownerId) {
+                console.log('Property has no owner assigned');
+                return res.status(400).json({ message: 'Property has no owner assigned' });
+            }
+            finalRecipientId = account.ownerId.toString();
+            finalRecipientName = account.ownerName || 'Property Owner';
+            console.log('Using owner as recipient:', { finalRecipientId, finalRecipientName });
+        }
+        if (!finalRecipientName) {
+            return res.status(400).json({ message: 'Recipient name is required' });
+        }
+        const payoutData = {
+            amount: Number(amount),
+            paymentMethod,
+            recipientId: finalRecipientId,
+            recipientName: finalRecipientName,
+            recipientBankDetails,
+            processedBy: req.user.userId,
+            notes
+        };
+        const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData);
         res.json({
-            documentType: 'Payment Request',
-            property: {
-                name: property.name,
-                address: property.address,
-            },
-            payment: {
-                amount: payment.amount,
-                recipientId: payment.recipientId,
-                recipientType: payment.recipientType,
-                reason: payment.reason,
-                date: payment.createdAt,
-            },
+            success: true,
+            message: 'Owner payout created successfully',
+            data: { account: updatedAccount, payout }
         });
     }
-    catch (err) {
-        res.status(500).json({ message: 'Server error', error: err });
+    catch (error) {
+        logger_1.logger.error('Error in createOwnerPayout:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.createOwnerPayout = createOwnerPayout;
+/**
+ * Update payout status
+ */
+const updatePayoutStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { propertyId, payoutId } = req.params;
+        const { status } = req.body;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        if (!payoutId) {
+            return res.status(400).json({ message: 'Payout ID is required' });
+        }
+        if (!status || !['pending', 'completed', 'failed', 'cancelled'].includes(status)) {
+            return res.status(400).json({ message: 'Valid status is required' });
+        }
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            return res.status(401).json({ message: 'User authentication required' });
+        }
+        const account = yield propertyAccountService_1.default.updatePayoutStatus(propertyId, payoutId, status, req.user.userId);
+        res.json({
+            success: true,
+            message: 'Payout status updated successfully',
+            data: account
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in updatePayoutStatus:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.updatePayoutStatus = updatePayoutStatus;
+/**
+ * Get payout history
+ */
+const getPayoutHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { propertyId } = req.params;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        const payouts = yield propertyAccountService_1.default.getPayoutHistory(propertyId);
+        res.json({
+            success: true,
+            data: payouts
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in getPayoutHistory:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.getPayoutHistory = getPayoutHistory;
+/**
+ * Sync property accounts with payments
+ */
+const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        yield propertyAccountService_1.default.syncPropertyAccountsWithPayments();
+        res.json({
+            success: true,
+            message: 'Property accounts synced successfully'
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in syncPropertyAccounts:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.syncPropertyAccounts = syncPropertyAccounts;
+/**
+ * Get payment request document
+ */
+const getPaymentRequestDocument = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { propertyId, payoutId } = req.params;
+        if (!propertyId || !payoutId) {
+            return res.status(400).json({ message: 'Property ID and Payout ID are required' });
+        }
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
+        const payout = account.ownerPayouts.find(p => { var _a; return ((_a = p._id) === null || _a === void 0 ? void 0 : _a.toString()) === payoutId; });
+        if (!payout) {
+            return res.status(404).json({ message: 'Payout not found' });
+        }
+        const property = yield Property_1.Property.findById(propertyId);
+        if (!property) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
+        res.json({
+            success: true,
+            data: {
+                documentType: 'Payment Request',
+                property: {
+                    name: property.name,
+                    address: property.address,
+                },
+                payout: {
+                    amount: payout.amount,
+                    recipientName: payout.recipientName,
+                    paymentMethod: payout.paymentMethod,
+                    referenceNumber: payout.referenceNumber,
+                    date: payout.date,
+                    notes: payout.notes,
+                },
+            }
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in getPaymentRequestDocument:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
     }
 });
 exports.getPaymentRequestDocument = getPaymentRequestDocument;
+/**
+ * Get acknowledgement document
+ */
 const getAcknowledgementDocument = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { propertyId, paymentId } = req.params;
-        const payment = yield Payment_1.Payment.findById(paymentId);
-        const property = yield Property_1.Property.findById(propertyId);
-        if (!payment || !property) {
-            return res.status(404).json({ message: 'Payment or property not found' });
+        const { propertyId, payoutId } = req.params;
+        if (!propertyId || !payoutId) {
+            return res.status(400).json({ message: 'Property ID and Payout ID are required' });
         }
-        // For now, return a JSON with the details needed for the acknowledgement document
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
+        const payout = account.ownerPayouts.find(p => { var _a; return ((_a = p._id) === null || _a === void 0 ? void 0 : _a.toString()) === payoutId; });
+        if (!payout) {
+            return res.status(404).json({ message: 'Payout not found' });
+        }
+        const property = yield Property_1.Property.findById(propertyId);
+        if (!property) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
         res.json({
-            documentType: 'Acknowledgement of Receipt',
-            property: {
-                address: property.address,
-            },
-            payment: {
-                amount: payment.amount,
-                reason: payment.reason,
-                recipientId: payment.recipientId,
-                recipientType: payment.recipientType,
-                date: payment.createdAt,
-            },
-            blanks: {
-                name: '',
-                idNumber: '',
-                signature: '',
-                contactNumber: payment.recipientType === 'contractor' ? '' : undefined,
-            },
+            success: true,
+            data: {
+                documentType: 'Acknowledgement of Receipt',
+                property: {
+                    name: property.name,
+                    address: property.address,
+                },
+                payout: {
+                    amount: payout.amount,
+                    recipientName: payout.recipientName,
+                    paymentMethod: payout.paymentMethod,
+                    referenceNumber: payout.referenceNumber,
+                    date: payout.date,
+                    notes: payout.notes,
+                },
+                blanks: {
+                    name: '',
+                    idNumber: '',
+                    signature: '',
+                    contactNumber: '',
+                    date: '',
+                },
+            }
         });
     }
-    catch (err) {
-        res.status(500).json({ message: 'Server error', error: err });
+    catch (error) {
+        logger_1.logger.error('Error in getAcknowledgementDocument:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
     }
 });
 exports.getAcknowledgementDocument = getAcknowledgementDocument;
-function getPropertyAccount(req, res) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const { propertyId } = req.params;
-        const account = yield PropertyAccount_1.default.findOne({ propertyId });
-        if (!account)
-            return res.status(404).json({ error: 'Not found' });
-        res.json(account);
-    });
-}
-function addExpense(req, res) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const { propertyId } = req.params;
-        const { amount, date, description } = req.body;
-        let account = yield PropertyAccount_1.default.findOne({ propertyId });
-        if (!account) {
-            account = new PropertyAccount_1.default({ propertyId, transactions: [], runningBalance: 0 });
-        }
-        account.transactions.push({
-            type: 'expense',
-            amount,
-            date: date ? new Date(date) : new Date(),
-            description
-        });
-        account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        account.runningBalance = account.transactions.reduce((sum, t) => {
-            return t.type === 'income' ? sum + t.amount : sum - t.amount;
-        }, 0);
-        account.lastUpdated = new Date();
-        yield account.save();
-        res.json(account);
-    });
-}

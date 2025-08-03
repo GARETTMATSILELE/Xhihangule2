@@ -1,162 +1,518 @@
 import { Request, Response } from 'express';
 import { Property } from '../models/Property';
 import { Payment } from '../models/Payment';
-import { Lease } from '../models/Lease';
-import { Tenant } from '../models/Tenant';
 import { User } from '../models/User';
-import PropertyAccount from '../models/PropertyAccount';
+import propertyAccountService from '../services/propertyAccountService';
+import { AppError } from '../middleware/errorHandler';
+import { logger } from '../utils/logger';
 
+/**
+ * Get property account with summary
+ */
+export const getPropertyAccount = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    
+    console.log('getPropertyAccount controller called with propertyId:', propertyId);
+    console.log('User:', req.user);
+    
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    console.log('Calling propertyAccountService.getOrCreatePropertyAccount...');
+    const account = await propertyAccountService.getOrCreatePropertyAccount(propertyId);
+    
+    res.json({
+      success: true,
+      data: account
+    });
+  } catch (error) {
+    logger.error('Error in getPropertyAccount:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
+ * Get all property accounts for company
+ */
+export const getCompanyPropertyAccounts = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.companyId) {
+      return res.status(400).json({ message: 'Company ID is required' });
+    }
+
+    const accounts = await propertyAccountService.getCompanyPropertyAccounts(req.user.companyId);
+    
+    res.json({
+      success: true,
+      data: accounts
+    });
+  } catch (error) {
+    logger.error('Error in getCompanyPropertyAccounts:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
+ * Get property transactions with filters
+ */
 export const getPropertyTransactions = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const { type } = req.query;
-    if (!propertyId) return res.status(400).json({ message: 'Property ID required' });
-    if (!type || (type !== 'income' && type !== 'expenditure')) {
-      return res.status(400).json({ message: 'Query param type=income|expenditure required' });
+    const { type, startDate, endDate, category, status } = req.query;
+    
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
     }
-    if (type === 'income') {
-      // Find all rental income payments for this property (after commission)
-      const payments = await Payment.find({ propertyId, type: 'rent', status: 'completed' })
-        .sort({ createdAt: 1 });
-      // Map to show net income (after commission)
-      const income = payments.map((p: any) => ({
-        _id: p._id,
-        date: p.createdAt,
-        amount: p.amount - (p.commissionDetails?.totalCommission || 0),
-        grossAmount: p.amount,
-        commission: p.commissionDetails?.totalCommission || 0,
-        tenant: p.tenantId,
-        lease: p.leaseId,
-        description: p.description || 'Rental income',
-      }));
-      return res.json(income);
-    } else {
-      // Expenditure: payments made from this property account (type: 'expenditure' or similar)
-      const payments = await Payment.find({ propertyId, type: 'expenditure', status: 'completed' })
-        .sort({ createdAt: 1 });
-      return res.json(payments);
+
+    const filters: any = {};
+    if (type) filters.type = type;
+    if (startDate) filters.startDate = new Date(startDate as string);
+    if (endDate) filters.endDate = new Date(endDate as string);
+    if (category) filters.category = category;
+    if (status) filters.status = status;
+
+    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters);
+    
+    res.json({
+      success: true,
+      data: transactions
+    });
+  } catch (error) {
+    logger.error('Error in getPropertyTransactions:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
     }
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 };
 
-export const createPropertyPayment = async (req: Request, res: Response) => {
+/**
+ * Add expense to property account
+ */
+export const addExpense = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const { amount, recipientId, recipientType, reason } = req.body;
-    if (!propertyId || !amount || !recipientId || !recipientType) {
-      return res.status(400).json({ message: 'Missing required fields' });
+    const { 
+      amount, 
+      date, 
+      description, 
+      category, 
+      recipientId, 
+      recipientType, 
+      notes 
+    } = req.body;
+    
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
     }
-    // For now, just create a Payment with type 'expenditure'
-    const payment = new Payment({
-      propertyId,
-      amount,
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Valid amount is required' });
+    }
+
+    if (!description) {
+      return res.status(400).json({ message: 'Description is required' });
+    }
+
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User authentication required' });
+    }
+
+    const expenseData = {
+      amount: Number(amount),
+      date: date ? new Date(date) : new Date(),
+      description,
+      category,
       recipientId,
-      recipientType, // 'owner' or 'contractor'
-      reason,
-      type: 'expenditure',
-      status: 'completed',
-      createdAt: new Date(),
+      recipientType,
+      processedBy: req.user.userId,
+      notes
+    };
+
+    const account = await propertyAccountService.addExpense(propertyId, expenseData);
+    
+    res.json({
+      success: true,
+      message: 'Expense added successfully',
+      data: account
     });
-    await payment.save();
-    res.status(201).json(payment);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err });
+  } catch (error) {
+    logger.error('Error in addExpense:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 };
 
+/**
+ * Create owner payout
+ */
+export const createOwnerPayout = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    const { 
+      amount,
+      paymentMethod, 
+      recipientId, 
+      recipientName, 
+      recipientBankDetails, 
+      notes 
+    } = req.body;
+    
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Valid amount is required' });
+    }
+
+    if (!paymentMethod) {
+      return res.status(400).json({ message: 'Payment method is required' });
+    }
+
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User authentication required' });
+    }
+
+    // Get the property account to access owner information
+    console.log('Getting property account for propertyId:', propertyId);
+    const account = await propertyAccountService.getPropertyAccount(propertyId);
+    console.log('Property account retrieved:', {
+      accountId: account._id,
+      ownerId: account.ownerId,
+      ownerName: account.ownerName,
+      runningBalance: account.runningBalance
+    });
+    
+    // Use provided recipientId or fall back to property owner
+    let finalRecipientId = recipientId;
+    let finalRecipientName = recipientName;
+    
+    if (!finalRecipientId || finalRecipientId.trim() === '') {
+      console.log('RecipientId is empty, using property owner');
+      if (!account.ownerId) {
+        console.log('Property has no owner assigned');
+        return res.status(400).json({ message: 'Property has no owner assigned' });
+      }
+      finalRecipientId = account.ownerId.toString();
+      finalRecipientName = account.ownerName || 'Property Owner';
+      console.log('Using owner as recipient:', { finalRecipientId, finalRecipientName });
+    }
+
+    if (!finalRecipientName) {
+      return res.status(400).json({ message: 'Recipient name is required' });
+    }
+
+    const payoutData = {
+      amount: Number(amount),
+      paymentMethod,
+      recipientId: finalRecipientId,
+      recipientName: finalRecipientName,
+      recipientBankDetails,
+      processedBy: req.user.userId,
+      notes
+    };
+
+    const { account: updatedAccount, payout } = await propertyAccountService.createOwnerPayout(propertyId, payoutData);
+    
+    res.json({
+      success: true,
+      message: 'Owner payout created successfully',
+      data: { account: updatedAccount, payout }
+    });
+  } catch (error) {
+    logger.error('Error in createOwnerPayout:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
+ * Update payout status
+ */
+export const updatePayoutStatus = async (req: Request, res: Response) => {
+  try {
+    const { propertyId, payoutId } = req.params;
+    const { status } = req.body;
+    
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    if (!payoutId) {
+      return res.status(400).json({ message: 'Payout ID is required' });
+    }
+
+    if (!status || !['pending', 'completed', 'failed', 'cancelled'].includes(status)) {
+      return res.status(400).json({ message: 'Valid status is required' });
+    }
+
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User authentication required' });
+    }
+
+    const account = await propertyAccountService.updatePayoutStatus(
+      propertyId, 
+      payoutId, 
+      status, 
+      req.user.userId
+    );
+    
+    res.json({
+      success: true,
+      message: 'Payout status updated successfully',
+      data: account
+    });
+  } catch (error) {
+    logger.error('Error in updatePayoutStatus:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
+ * Get payout history
+ */
+export const getPayoutHistory = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    const payouts = await propertyAccountService.getPayoutHistory(propertyId);
+    
+    res.json({
+      success: true,
+      data: payouts
+    });
+  } catch (error) {
+    logger.error('Error in getPayoutHistory:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
+ * Sync property accounts with payments
+ */
+export const syncPropertyAccounts = async (req: Request, res: Response) => {
+  try {
+    await propertyAccountService.syncPropertyAccountsWithPayments();
+    
+    res.json({
+      success: true,
+      message: 'Property accounts synced successfully'
+    });
+  } catch (error) {
+    logger.error('Error in syncPropertyAccounts:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
+ * Get payment request document
+ */
 export const getPaymentRequestDocument = async (req: Request, res: Response) => {
   try {
-    const { propertyId, paymentId } = req.params;
-    // Fetch payment and property
-    const payment = await Payment.findById(paymentId);
-    const property = await Property.findById(propertyId);
-    if (!payment || !property) {
-      return res.status(404).json({ message: 'Payment or property not found' });
+    const { propertyId, payoutId } = req.params;
+    
+    if (!propertyId || !payoutId) {
+      return res.status(400).json({ message: 'Property ID and Payout ID are required' });
     }
-    // For now, return a JSON with the details needed for the payment request document
+
+    const account = await propertyAccountService.getPropertyAccount(propertyId);
+    const payout = account.ownerPayouts.find(p => p._id?.toString() === payoutId);
+    
+    if (!payout) {
+      return res.status(404).json({ message: 'Payout not found' });
+    }
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
+
     res.json({
+      success: true,
+      data: {
       documentType: 'Payment Request',
       property: {
         name: property.name,
         address: property.address,
       },
-      payment: {
-        amount: payment.amount,
-        recipientId: payment.recipientId,
-        recipientType: payment.recipientType,
-        reason: payment.reason,
-        date: payment.createdAt,
-      },
+        payout: {
+          amount: payout.amount,
+          recipientName: payout.recipientName,
+          paymentMethod: payout.paymentMethod,
+          referenceNumber: payout.referenceNumber,
+          date: payout.date,
+          notes: payout.notes,
+        },
+      }
     });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err });
+  } catch (error) {
+    logger.error('Error in getPaymentRequestDocument:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 };
 
+/**
+ * Get acknowledgement document
+ */
 export const getAcknowledgementDocument = async (req: Request, res: Response) => {
   try {
-    const { propertyId, paymentId } = req.params;
-    const payment = await Payment.findById(paymentId);
-    const property = await Property.findById(propertyId);
-    if (!payment || !property) {
-      return res.status(404).json({ message: 'Payment or property not found' });
+    const { propertyId, payoutId } = req.params;
+    
+    if (!propertyId || !payoutId) {
+      return res.status(400).json({ message: 'Property ID and Payout ID are required' });
     }
-    // For now, return a JSON with the details needed for the acknowledgement document
+
+    const account = await propertyAccountService.getPropertyAccount(propertyId);
+    const payout = account.ownerPayouts.find(p => p._id?.toString() === payoutId);
+    
+    if (!payout) {
+      return res.status(404).json({ message: 'Payout not found' });
+    }
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
+
     res.json({
+      success: true,
+      data: {
       documentType: 'Acknowledgement of Receipt',
       property: {
+          name: property.name,
         address: property.address,
       },
-      payment: {
-        amount: payment.amount,
-        reason: payment.reason,
-        recipientId: payment.recipientId,
-        recipientType: payment.recipientType,
-        date: payment.createdAt,
+        payout: {
+          amount: payout.amount,
+          recipientName: payout.recipientName,
+          paymentMethod: payout.paymentMethod,
+          referenceNumber: payout.referenceNumber,
+          date: payout.date,
+          notes: payout.notes,
       },
       blanks: {
         name: '',
         idNumber: '',
         signature: '',
-        contactNumber: payment.recipientType === 'contractor' ? '' : undefined,
-      },
+          contactNumber: '',
+          date: '',
+        },
+      }
     });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err });
+  } catch (error) {
+    logger.error('Error in getAcknowledgementDocument:', error);
+    
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
-};
-
-export async function getPropertyAccount(req: Request, res: Response) {
-  const { propertyId } = req.params;
-  const account = await PropertyAccount.findOne({ propertyId });
-  if (!account) return res.status(404).json({ error: 'Not found' });
-  res.json(account);
-}
-
-export async function addExpense(req: Request, res: Response) {
-  const { propertyId } = req.params;
-  const { amount, date, description } = req.body;
-
-  let account = await PropertyAccount.findOne({ propertyId });
-  if (!account) {
-    account = new PropertyAccount({ propertyId, transactions: [], runningBalance: 0 });
-  }
-
-  account.transactions.push({
-    type: 'expense',
-    amount,
-    date: date ? new Date(date) : new Date(),
-    description
-  });
-
-  account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  account.runningBalance = account.transactions.reduce((sum, t) => {
-    return t.type === 'income' ? sum + t.amount : sum - t.amount;
-  }, 0);
-  account.lastUpdated = new Date();
-
-  await account.save();
-  res.json(account);
-} 
+}; 

@@ -80,6 +80,9 @@ export interface PaymentFormData {
   };
   processedBy?: string;
   ownerId?: string;
+  // Manual entry fields for properties/tenants not in database
+  manualPropertyAddress?: string;
+  manualTenantName?: string;
 }
 
 export interface Payment {

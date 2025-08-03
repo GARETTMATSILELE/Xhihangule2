@@ -298,32 +298,78 @@ router.get('/owner/payments', propertyOwnerAuth, async (req, res) => {
       .sort({ paymentDate: -1 })
       .limit(50); // Limit to recent payments
 
-    // Group payments by month for chart data
-    const monthlyData: { [key: string]: number } = {};
+    // Get maintenance payments for these properties
+    const maintenancePaymentQuery: any = { 
+      propertyId: { $in: propertyIds }
+    };
+    if (propertyOwnerContext.companyId) {
+      maintenancePaymentQuery.companyId = propertyOwnerContext.companyId;
+    }
+
+    // Use MaintenanceRequest instead of non-existent MaintenancePayment
+    const { MaintenanceRequest } = require('../models/MaintenanceRequest');
+    const maintenanceRequests = await MaintenanceRequest.find(maintenancePaymentQuery)
+      .populate('propertyId', 'name')
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    // Group payments by month for chart data using commissionDetails.ownerAmount, totalCommission, and maintenance expenses
+    const monthlyData: { [key: string]: { ownerAmount: number; totalCommission: number; expenses: number } } = {};
     const currentYear = new Date().getFullYear();
     
+    // Process rental payments
     payments.forEach((payment: any) => {
       const paymentDate = new Date(payment.paymentDate);
       const monthKey = `${paymentDate.getFullYear()}-${String(paymentDate.getMonth() + 1).padStart(2, '0')}`;
       
       if (!monthlyData[monthKey]) {
-        monthlyData[monthKey] = 0;
+        monthlyData[monthKey] = { ownerAmount: 0, totalCommission: 0, expenses: 0 };
       }
-      monthlyData[monthKey] += payment.amount || 0;
+      // Use commissionDetails.ownerAmount and totalCommission
+      const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
+      const totalCommission = payment.commissionDetails?.totalCommission || 0;
+      monthlyData[monthKey].ownerAmount += ownerAmount;
+      monthlyData[monthKey].totalCommission += totalCommission;
+    });
+
+    // Process maintenance requests (estimated costs as expenses)
+    maintenanceRequests.forEach((maintenanceRequest: any) => {
+      const requestDate = new Date(maintenanceRequest.createdAt);
+      const monthKey = `${requestDate.getFullYear()}-${String(requestDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { ownerAmount: 0, totalCommission: 0, expenses: 0 };
+      }
+      // Add maintenance request estimated cost to expenses
+      const expenseAmount = maintenanceRequest.estimatedCost || 0;
+      monthlyData[monthKey].expenses += expenseAmount;
     });
 
     // Convert to chart format
     const chartData = Object.entries(monthlyData)
-      .map(([month, amount]) => ({
+      .map(([month, data]) => ({
         month,
-        amount: Math.round(amount * 100) / 100 // Round to 2 decimal places
+        amount: Math.round(data.ownerAmount * 100) / 100, // Round to 2 decimal places
+        totalCommission: Math.round(data.totalCommission * 100) / 100,
+        expenses: Math.round(data.expenses * 100) / 100
       }))
       .sort((a, b) => a.month.localeCompare(b.month))
       .slice(-12); // Last 12 months
 
-    // Also provide summary statistics
+    // Also provide summary statistics using commissionDetails.ownerAmount, totalCommission, and maintenance expenses
     const totalPayments = payments.length;
-    const totalAmount = payments.reduce((sum: number, payment: any) => sum + (payment.amount || 0), 0);
+    const totalAmount = payments.reduce((sum: number, payment: any) => {
+      const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
+      return sum + ownerAmount;
+    }, 0);
+    const totalCommission = payments.reduce((sum: number, payment: any) => {
+      const commission = payment.commissionDetails?.totalCommission || 0;
+      return sum + commission;
+    }, 0);
+    const totalExpenses = maintenanceRequests.reduce((sum: number, maintenanceRequest: any) => {
+      const expenseAmount = maintenanceRequest.estimatedCost || 0;
+      return sum + expenseAmount;
+    }, 0);
     const averageAmount = totalPayments > 0 ? totalAmount / totalPayments : 0;
 
     res.json({
@@ -332,15 +378,18 @@ router.get('/owner/payments', propertyOwnerAuth, async (req, res) => {
       summary: {
         totalPayments,
         totalAmount: Math.round(totalAmount * 100) / 100,
+        totalCommission: Math.round(totalCommission * 100) / 100,
+        totalExpenses: Math.round(totalExpenses * 100) / 100,
         averageAmount: Math.round(averageAmount * 100) / 100
       },
       recentPayments: payments.slice(0, 10).map(payment => ({
         id: payment._id,
-        amount: payment.amount,
+        amount: payment.commissionDetails?.ownerAmount || 0, // Use ownerAmount instead of total amount
         paymentDate: payment.paymentDate,
         propertyName: (payment.propertyId as any)?.name || 'Unknown Property',
         tenantName: `${(payment.tenantId as any)?.firstName || ''} ${(payment.tenantId as any)?.lastName || ''}`.trim() || 'Unknown Tenant',
-        status: payment.status
+        status: payment.status,
+        commissionDetails: payment.commissionDetails // Include full commission details
       }))
     });
   } catch (error) {

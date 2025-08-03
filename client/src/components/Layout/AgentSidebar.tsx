@@ -24,6 +24,7 @@ import {
   CalendarToday as CalendarIcon,
   Folder as FolderIcon,
   Receipt as ReceiptIcon,
+  Person as PersonIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -58,6 +59,11 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
       text: 'Leases', 
       icon: <DescriptionIcon />, 
       path: '/agent-dashboard/leases' 
+    },
+    { 
+      text: 'Property Owners', 
+      icon: <PersonIcon />, 
+      path: '/agent-dashboard/property-owners' 
     },
     { 
       text: 'Payments', 

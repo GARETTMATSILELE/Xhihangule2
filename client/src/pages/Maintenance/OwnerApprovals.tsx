@@ -12,15 +12,18 @@ import {
 } from '@mui/material';
 import { MaintenanceRequest, MaintenanceStatus } from '../../types/maintenance';
 import { apiService } from '../../api';
+import { Property } from '../../types/property';
 
 interface OwnerApprovalsProps {
   requests: MaintenanceRequest[];
   onRequestUpdated: (request: MaintenanceRequest) => void;
+  properties: Property[];
 }
 
 const OwnerApprovals: React.FC<OwnerApprovalsProps> = ({
   requests,
-  onRequestUpdated
+  onRequestUpdated,
+  properties
 }) => {
   const theme = useTheme();
 
@@ -53,6 +56,11 @@ const OwnerApprovals: React.FC<OwnerApprovalsProps> = ({
     }
   };
 
+  const getPropertyName = (propertyId: string) => {
+    const property = properties.find((p) => p._id === propertyId);
+    return property ? property.name : propertyId;
+  };
+
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="h6" gutterBottom>
@@ -72,7 +80,7 @@ const OwnerApprovals: React.FC<OwnerApprovalsProps> = ({
           >
             <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="subtitle1">
-                {request.propertyId.name}
+                {getPropertyName(request.propertyId)}
               </Typography>
               <Chip
                 label={request.ownerApprovalStatus}
@@ -90,8 +98,8 @@ const OwnerApprovals: React.FC<OwnerApprovalsProps> = ({
                 variant="contained"
                 color="success"
                 size="small"
-                onClick={() => handleApprove(request._id)}
-                disabled={request.ownerApprovalStatus === 'approved'}
+                onClick={() => { if (request._id) handleApprove(request._id); }}
+                disabled={request.ownerApprovalStatus === 'approved' || !request._id}
               >
                 Approve
               </Button>
@@ -99,8 +107,8 @@ const OwnerApprovals: React.FC<OwnerApprovalsProps> = ({
                 variant="contained"
                 color="error"
                 size="small"
-                onClick={() => handleReject(request._id)}
-                disabled={request.ownerApprovalStatus === 'rejected'}
+                onClick={() => { if (request._id) handleReject(request._id); }}
+                disabled={request.ownerApprovalStatus === 'rejected' || !request._id}
               >
                 Reject
               </Button>

@@ -183,6 +183,15 @@ const PaymentSchema = new mongoose_1.Schema({
         type: String,
         required: false,
     },
+    // Manual entry fields for properties/tenants not in database
+    manualPropertyAddress: {
+        type: String,
+        required: false,
+    },
+    manualTenantName: {
+        type: String,
+        required: false,
+    },
 }, {
     timestamps: true
 });

@@ -7,7 +7,9 @@ import {
   getMaintenanceRequestDetails, 
   deleteMaintenanceRequest, 
   getMaintenanceRequests,
-  getMaintenanceRequestsPublic
+  getMaintenanceRequestsPublic,
+  approveMaintenanceRequest,
+  completeMaintenanceRequest
 } from '../controllers/maintenanceRequestController';
 import { auth } from '../middleware/auth';
 
@@ -64,8 +66,11 @@ router.put('/:id/assign', updateMaintenanceRequest);
 // Request owner approval
 router.post('/:id/request-approval', updateMaintenanceRequest);
 
-// Approve maintenance request
-router.put('/:id/approve', updateMaintenanceRequest);
+// Approve maintenance request (owner action)
+router.put('/:id/approve', approveMaintenanceRequest);
+
+// Complete maintenance request (agent action)
+router.put('/:id/complete', completeMaintenanceRequest);
 
 // Reject maintenance request
 router.put('/:id/reject', updateMaintenanceRequest);

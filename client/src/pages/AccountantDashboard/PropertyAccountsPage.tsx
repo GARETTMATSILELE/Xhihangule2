@@ -6,6 +6,7 @@ import { Property } from '../../types/property';
 import { usePropertyService } from '../../services/propertyService';
 import { useLeaseService } from '../../services/leaseService';
 import { useTenantService } from '../../services/tenantService';
+import { usePropertyOwnerService, PropertyOwner } from '../../services/propertyOwnerService';
 
 const PropertyAccountsPage: React.FC = () => {
   const { user } = useAuth();
@@ -16,33 +17,68 @@ const PropertyAccountsPage: React.FC = () => {
   const { getProperties } = usePropertyService();
   const { getAllPublic: getAllLeases } = useLeaseService();
   const { getAllPublic: getAllTenants } = useTenantService();
+  const { getAllPublic: getAllPropertyOwners } = usePropertyOwnerService();
   const [tenantMap, setTenantMap] = useState<Record<string, string>>({});
+  const [ownerMap, setOwnerMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const fetchProperties = async () => {
       try {
         setLoading(true);
         setError(null);
-        // Use propertyService for accountants
-        const props = await getProperties();
+        
+        // Fetch properties, leases, tenants, and property owners in parallel
+        const [props, leases, tenantsResp, propertyOwners] = await Promise.all([
+          getProperties(),
+          getAllLeases(),
+          getAllTenants(),
+          getAllPropertyOwners().catch(err => {
+            console.error('Error fetching property owners:', err);
+            return [];
+          })
+        ]);
+        
         setProperties(props);
-        // Fetch all active leases and tenants
-        const leases = await getAllLeases();
-        const tenantsResp = await getAllTenants();
         const tenants = tenantsResp.tenants || tenantsResp;
+        
         // Map propertyId to tenant name for active leases
-        const map: Record<string, string> = {};
+        const tenantMap: Record<string, string> = {};
         leases.forEach((lease: any) => {
           if (lease.status === 'active' && lease.propertyId && lease.tenantId) {
             const tenant = tenants.find((t: any) => t._id === (lease.tenantId._id || lease.tenantId));
             if (tenant) {
-              map[lease.propertyId._id || lease.propertyId] = `${tenant.firstName} ${tenant.lastName}`;
+              tenantMap[lease.propertyId._id || lease.propertyId] = `${tenant.firstName} ${tenant.lastName}`;
             }
           }
         });
-        setTenantMap(map);
+        setTenantMap(tenantMap);
+        
+        // Map propertyId to owner name using owner.properties array
+        const ownerMap: Record<string, string> = {};
+        console.log('Property owners fetched:', propertyOwners.length);
+        console.log('Properties fetched:', props.length);
+        
+        propertyOwners.forEach((owner: PropertyOwner) => {
+          console.log(`Owner ${owner._id}: ${owner.firstName} ${owner.lastName}`);
+          console.log('Owner properties:', owner.properties);
+          
+          // Check if owner has properties array
+          if (owner.properties && Array.isArray(owner.properties)) {
+            owner.properties.forEach((propertyId: any) => {
+              // Handle both string and ObjectId formats
+              const propId = typeof propertyId === 'object' && propertyId.$oid ? propertyId.$oid : propertyId;
+              console.log(`Checking property ${propId} for owner ${owner.firstName} ${owner.lastName}`);
+              ownerMap[propId] = `${owner.firstName} ${owner.lastName}`;
+              console.log(`Mapped property ${propId} to owner ${owner.firstName} ${owner.lastName}`);
+            });
+          }
+        });
+        console.log('Final owner map:', ownerMap);
+        setOwnerMap(ownerMap);
+        
       } catch (err: any) {
-        setError('Failed to fetch properties');
+        console.error('Error fetching data:', err);
+        setError('Failed to fetch properties and related data');
       } finally {
         setLoading(false);
       }
@@ -71,7 +107,8 @@ const PropertyAccountsPage: React.FC = () => {
               <CardContent>
                 <Typography variant="h6">{property.name}</Typography>
                 <Typography variant="body2" color="text.secondary">{property.address}</Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>Tenant: {tenantMap[property._id] || 'N/A'}</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Owner: {ownerMap[property._id] || 'N/A'}</Typography>
+                <Typography variant="body2">Tenant: {tenantMap[property._id] || 'N/A'}</Typography>
                 <Typography variant="body2">Rental Amount: ${property.rent?.toLocaleString() || '0'}</Typography>
               </CardContent>
             </Card>
@@ -80,6 +117,6 @@ const PropertyAccountsPage: React.FC = () => {
       </Grid>
     </Box>
   );
-};
-
-export default PropertyAccountsPage; 
+  };
+  
+  export default PropertyAccountsPage; 

@@ -43,8 +43,10 @@ router.put('/:id/status', maintenanceRequestController_1.updateMaintenanceReques
 router.put('/:id/assign', maintenanceRequestController_1.updateMaintenanceRequest);
 // Request owner approval
 router.post('/:id/request-approval', maintenanceRequestController_1.updateMaintenanceRequest);
-// Approve maintenance request
-router.put('/:id/approve', maintenanceRequestController_1.updateMaintenanceRequest);
+// Approve maintenance request (owner action)
+router.put('/:id/approve', maintenanceRequestController_1.approveMaintenanceRequest);
+// Complete maintenance request (agent action)
+router.put('/:id/complete', maintenanceRequestController_1.completeMaintenanceRequest);
 // Reject maintenance request
 router.put('/:id/reject', maintenanceRequestController_1.updateMaintenanceRequest);
 exports.default = router;

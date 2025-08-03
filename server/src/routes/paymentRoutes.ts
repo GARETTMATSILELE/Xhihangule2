@@ -13,7 +13,6 @@ import {
   getPaymentReceiptDownload,
 } from '../controllers/paymentController';
 import { Payment } from '../models/Payment';
-import * as propertyAccountController from '../controllers/propertyAccountController';
 
 const router = express.Router();
 
@@ -55,14 +54,5 @@ router.get('/:id', auth, canManagePayments, getPaymentDetails);
 
 // Update payment status
 router.patch('/:id/status', auth, canManagePayments, updatePaymentStatus);
-
-// Property account transactions (income/expenditure)
-router.get('/property-accounts/:propertyId/transactions', propertyAccountController.getPropertyTransactions);
-// Create a payment from property account
-router.post('/property-accounts/:propertyId/pay', propertyAccountController.createPropertyPayment);
-// Generate payment request document
-router.get('/property-accounts/:propertyId/payment-request/:paymentId', propertyAccountController.getPaymentRequestDocument);
-// Generate acknowledgement of receipt document
-router.get('/property-accounts/:propertyId/acknowledgement/:paymentId', propertyAccountController.getAcknowledgementDocument);
 
 export default router; 

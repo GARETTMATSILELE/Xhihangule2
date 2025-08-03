@@ -19,6 +19,7 @@ const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
+const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const getPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
@@ -236,108 +237,121 @@ exports.createPayment = createPayment;
 // Create a new payment (for accountant dashboard - handles PaymentFormData structure)
 const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
-        return res.status(401).json({ message: 'Unauthorized' });
+        return res.status(401).json({ message: 'Authentication required' });
     }
+    const session = yield mongoose_1.default.startSession();
+    session.startTransaction();
     try {
-        console.log('Creating accountant payment with data:', req.body);
-        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, companyId, processedBy, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
+        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, leaseId, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, processedBy, ownerId, manualPropertyAddress, manualTenantName } = req.body;
         // Validate required fields
-        if (!propertyId || !tenantId || !agentId || !amount || !paymentDate || !paymentMethod) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Missing required fields: propertyId, tenantId, agentId, amount, paymentDate, paymentMethod',
-            });
+        if (!amount || !paymentDate) {
+            return res.status(400).json({ message: 'Missing required fields: amount and paymentDate' });
         }
-        // Get property details
-        const property = yield Property_1.Property.findById(propertyId);
-        if (!property) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Property not found',
-            });
+        // Check if using manual entries
+        const isManualProperty = propertyId && propertyId.startsWith('manual_');
+        const isManualTenant = tenantId && tenantId.startsWith('manual_');
+        // Validate manual entries
+        if (isManualProperty && !manualPropertyAddress) {
+            return res.status(400).json({ message: 'Manual property address is required when using manual property entry' });
         }
-        const commissionPercentage = property.commission || 0;
-        // Calculate commission based on property commission percentage
-        const accountantCommissionDetails = calculateCommission(amount, commissionPercentage);
+        if (isManualTenant && !manualTenantName) {
+            return res.status(400).json({ message: 'Manual tenant name is required when using manual tenant entry' });
+        }
+        // Validate that either propertyId/tenantId are provided or manual entries are used
+        if (!propertyId && !manualPropertyAddress) {
+            return res.status(400).json({ message: 'Either propertyId or manual property address is required' });
+        }
+        if (!tenantId && !manualTenantName) {
+            return res.status(400).json({ message: 'Either tenantId or manual tenant name is required' });
+        }
+        // Calculate commission if not provided
+        let finalCommissionDetails = commissionDetails;
+        if (!finalCommissionDetails) {
+            const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
+            const totalCommission = (amount * baseCommissionRate) / 100;
+            const preaFee = totalCommission * 0.03;
+            const remainingCommission = totalCommission - preaFee;
+            const agentShare = remainingCommission * 0.6;
+            const agencyShare = remainingCommission * 0.4;
+            finalCommissionDetails = {
+                totalCommission,
+                preaFee,
+                agentShare,
+                agencyShare,
+                ownerAmount: amount - totalCommission,
+            };
+        }
         // Create payment record
         const payment = new Payment_1.Payment({
-            paymentType,
-            propertyType,
-            propertyId,
-            tenantId,
-            agentId,
-            companyId: companyId || req.user.companyId,
-            paymentDate,
+            paymentType: paymentType || 'rental',
+            propertyType: propertyType || 'residential',
+            propertyId: isManualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(propertyId), // Generate new ID for manual entries
+            tenantId: isManualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(tenantId), // Generate new ID for manual entries
+            agentId: new mongoose_1.default.Types.ObjectId(agentId || req.user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            paymentDate: new Date(paymentDate),
             paymentMethod,
             amount,
             depositAmount: depositAmount || 0,
             rentalPeriodMonth,
             rentalPeriodYear,
-            advanceMonthsPaid,
-            advancePeriodStart,
-            advancePeriodEnd,
-            referenceNumber: '', // Placeholder, will update after save
+            referenceNumber: referenceNumber || `RCPT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             notes: notes || '',
-            processedBy: processedBy || req.user.userId,
-            commissionDetails: accountantCommissionDetails,
+            processedBy: new mongoose_1.default.Types.ObjectId(processedBy || req.user.userId),
+            commissionDetails: finalCommissionDetails,
             status: 'completed',
             currency: currency || 'USD',
+            leaseId: leaseId ? new mongoose_1.default.Types.ObjectId(leaseId) : undefined,
+            rentUsed,
+            // Add manual entry fields
+            manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
+            manualTenantName: isManualTenant ? manualTenantName : undefined,
         });
-        yield payment.save();
-        payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
-        yield payment.save();
-        // If depositAmount > 0, record in rentaldeposits
-        if (payment.depositAmount && payment.depositAmount > 0) {
-            const { RentalDeposit } = require('../models/rentalDeposit');
-            yield RentalDeposit.create({
-                propertyId: payment.propertyId,
-                agentId: payment.agentId,
-                companyId: payment.companyId,
-                tenantId: payment.tenantId,
-                depositAmount: payment.depositAmount,
-                depositDate: payment.paymentDate,
-                paymentId: payment._id,
-            });
-        }
+        yield payment.save({ session });
         // Update company revenue
-        yield Company_1.Company.findByIdAndUpdate(companyId || req.user.companyId, {
+        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), {
             $inc: {
-                revenue: accountantCommissionDetails.agencyShare,
+                revenue: finalCommissionDetails.agencyShare,
             },
-        });
+        }, { session });
         // Update agent commission
-        yield User_1.User.findByIdAndUpdate(agentId, {
+        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || req.user.userId), {
             $inc: {
-                commission: accountantCommissionDetails.agentShare,
+                commission: finalCommissionDetails.agentShare,
             },
-        });
+        }, { session });
         // If it's a rental payment, update property owner's balance
-        if (paymentType === 'rental' && property.ownerId) {
-            yield User_1.User.findByIdAndUpdate(property.ownerId, {
+        if (paymentType === 'rental' && ownerId) {
+            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId), {
                 $inc: {
-                    balance: accountantCommissionDetails.ownerAmount,
+                    balance: finalCommissionDetails.ownerAmount,
                 },
-            });
+            }, { session });
         }
-        // Update property arrears after payment
-        if (property.currentArrears !== undefined) {
-            const arrears = property.currentArrears - amount;
-            yield Property_1.Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
+        // Record income in property account
+        try {
+            yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
         }
-        console.log('Accountant payment created successfully:', { id: payment._id, amount: payment.amount });
+        catch (error) {
+            console.error('Failed to record income in property account:', error);
+            // Don't fail the entire transaction if property account recording fails
+        }
+        yield session.commitTransaction();
         res.status(201).json({
-            status: 'success',
-            data: payment,
-            message: 'Payment processed successfully'
+            message: 'Payment processed successfully',
+            payment,
         });
     }
     catch (error) {
-        console.error('Error creating accountant payment:', error);
+        yield session.abortTransaction();
+        console.error('Error processing payment:', error);
         res.status(500).json({
-            status: 'error',
             message: 'Failed to process payment',
             error: error instanceof Error ? error.message : 'Unknown error',
         });
+    }
+    finally {
+        session.endSession();
     }
 });
 exports.createPaymentAccountant = createPaymentAccountant;
@@ -878,7 +892,10 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             company: company,
             commissionDetails: payment.commissionDetails,
             notes: payment.notes,
-            createdAt: payment.createdAt
+            createdAt: payment.createdAt,
+            // Include manual entry fields
+            manualPropertyAddress: payment.manualPropertyAddress,
+            manualTenantName: payment.manualTenantName
         };
         console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });
         res.json({

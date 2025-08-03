@@ -9,20 +9,27 @@ import {
   Paper,
   useTheme,
   useMediaQuery,
-  Dialog
+  Dialog,
+  Tabs,
+  Tab
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { usePropertyService } from '../services/propertyService';
 import { useTenantService } from '../services/tenantService';
+import { usePropertyOwnerService } from '../services/propertyOwnerService';
 import paymentService from '../services/paymentService';
 import { agentService } from '../services/agentService';
+import paymentRequestService, { PaymentRequest as PaymentRequestType } from '../services/paymentRequestService';
 import { Payment, PaymentStatus, PaymentFormData, PaymentFilter } from '../types/payment';
 import { Property } from '../types/property';
 import { Tenant } from '../types/tenant';
+import { PropertyOwner } from '../services/propertyOwnerService';
 import PaymentList from '../components/payments/PaymentList';
 import PaymentForm from '../components/payments/PaymentForm';
 import PaymentSummary from '../components/payments/PaymentSummary';
+import PaymentRequests from '../components/payments/PaymentRequests';
+import PaymentRequestForm from '../components/payments/PaymentRequestForm';
 import { Header } from '../components/Layout/Header';
 import { AuthErrorReport } from '../components/AuthErrorReport';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -35,11 +42,13 @@ const PaymentsPage: React.FC = () => {
   const location = useLocation();
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
+  const propertyOwnerService = usePropertyOwnerService();
   const [activeTab, setActiveTab] = useState(4); // 4 is the index for Payments in AdminSidebar
   
   const [payments, setPayments] = useState<Payment[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [owners, setOwners] = useState<PropertyOwner[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -50,6 +59,10 @@ const PaymentsPage: React.FC = () => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequestType[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [currentTab, setCurrentTab] = useState<'payments' | 'requests'>('payments');
+  const [showPaymentRequestForm, setShowPaymentRequestForm] = useState(false);
 
   // Determine which sidebar to use based on user role
   const SidebarComponent = useMemo(() => {
@@ -86,9 +99,9 @@ const PaymentsPage: React.FC = () => {
   // Load all data in a single effect
   useEffect(() => {
     let isMounted = true;
-    
+
     const loadData = async () => {
-      if (authLoading) {
+      if (authLoading || !user?.companyId) {
         return;
       }
       
@@ -113,12 +126,22 @@ const PaymentsPage: React.FC = () => {
           ]);
         }
 
+        // Load owners data
+        let ownersData;
+        try {
+          ownersData = await propertyOwnerService.getAllPublic(user?.companyId);
+        } catch (err) {
+          console.warn('Failed to load owners:', err);
+          ownersData = [];
+        }
+
         if (!isMounted) return;
 
         // Handle different response formats
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
         const payments = Array.isArray(paymentsData) ? paymentsData : (paymentsData.data || []);
+        const owners = Array.isArray(ownersData) ? ownersData : [];
 
         if (!Array.isArray(properties) || !Array.isArray(tenants) || !Array.isArray(payments)) {
           throw new Error('Invalid data format received from server');
@@ -127,6 +150,7 @@ const PaymentsPage: React.FC = () => {
         setProperties(properties);
         setTenants(tenants);
         setPayments(payments);
+        setOwners(owners);
         
         // Debug logging
         console.log('Loaded properties:', properties);
@@ -161,6 +185,26 @@ const PaymentsPage: React.FC = () => {
       isMounted = false;
     };
   }, [authLoading, user?.role]);
+
+  // Load payment requests when tab changes to requests
+  useEffect(() => {
+    if (currentTab === 'requests' && user?.companyId) {
+      loadPaymentRequests();
+    }
+  }, [currentTab, user?.companyId]);
+
+  const loadPaymentRequests = async () => {
+    try {
+      setRequestsLoading(true);
+      const response = await paymentRequestService.getPaymentRequests();
+      setPaymentRequests(response.data);
+    } catch (err: any) {
+      console.error('Error loading payment requests:', err);
+      setError('Failed to load payment requests');
+    } finally {
+      setRequestsLoading(false);
+    }
+  };
 
   // Debounce filter changes
   useEffect(() => {
@@ -394,7 +438,37 @@ const PaymentsPage: React.FC = () => {
       document.body.removeChild(a);
     } catch (err: any) {
       console.error('Error downloading receipt:', err);
-      setError('Failed to download receipt. Please try again.');
+      setError('Failed to download receipt');
+    }
+  }, [user?.companyId]);
+
+  const handlePaymentRequestSubmit = useCallback(async (formData: any) => {
+    if (!user?.companyId) {
+      setError('Please log in to create payment requests');
+      setShowAuthError(true);
+      return;
+    }
+    try {
+      const newRequest = {
+        propertyId: formData.propertyId,
+        tenantId: formData.tenant || undefined,
+        ownerId: formData.owner || undefined,
+        amount: formData.amount,
+        currency: formData.currency,
+        reason: formData.reason,
+        requestDate: formData.date,
+        dueDate: new Date(formData.date.getTime() + 7 * 24 * 60 * 60 * 1000), // 7 days from request date
+        notes: formData.reason,
+        payTo: formData.payTo
+      };
+      
+      const response = await paymentRequestService.createPaymentRequest(newRequest);
+      setPaymentRequests(prev => [response, ...prev]);
+      setShowPaymentRequestForm(false);
+      setSuccessMessage('Payment request created successfully');
+    } catch (err: any) {
+      console.error('Error creating payment request:', err);
+      setError(err.message || 'Failed to create payment request. Please try again.');
     }
   }, [user?.companyId]);
 
@@ -464,35 +538,57 @@ const PaymentsPage: React.FC = () => {
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <Box sx={{ flexGrow: 1 }}>
         <Header />
-        <Box sx={{ mt: 8, p: 3 }}>
-          <Paper elevation={0} sx={{ p: 3, borderRadius: 2 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Box sx={{ 
+          height: 'calc(100vh - 64px)', 
+          display: 'flex', 
+          flexDirection: 'column',
+          bgcolor: 'background.paper'
+        }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
               <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
                 Payments
               </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<AddIcon />}
-                onClick={() => {
-                  if (!user?.companyId) {
-                    setError('Please log in to create payments');
-                    setShowAuthError(true);
-                    return;
-                  }
-                  setSelectedPayment(undefined);
-                  setShowForm(true);
-                }}
-                sx={{ borderRadius: 2 }}
-              >
-                Add Payment
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    if (!user?.companyId) {
+                      setError('Please log in to create payment requests');
+                      setShowAuthError(true);
+                      return;
+                    }
+                    setShowPaymentRequestForm(true);
+                  }}
+                  sx={{ borderRadius: 2 }}
+                >
+                  Add Payment Request
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    if (!user?.companyId) {
+                      setError('Please log in to create payments');
+                      setShowAuthError(true);
+                      return;
+                    }
+                    setSelectedPayment(undefined);
+                    setShowForm(true);
+                  }}
+                  sx={{ borderRadius: 2 }}
+                >
+                  Add Payment
+                </Button>
+              </Box>
             </Box>
 
             {error && (
               <Alert 
                 severity="error" 
-                sx={{ mb: 3 }}
+                sx={{ m: 2 }}
                 onClose={() => setError(null)}
               >
                 {error}
@@ -502,41 +598,101 @@ const PaymentsPage: React.FC = () => {
             {successMessage && (
               <Alert 
                 severity="success" 
-                sx={{ mb: 3 }}
+                sx={{ m: 2 }}
                 onClose={() => setSuccessMessage(null)}
               >
                 {successMessage}
               </Alert>
             )}
 
-            <PaymentSummary summary={summary} />
+            <Box sx={{ px: 2, py: 1 }}>
+              <PaymentSummary summary={summary} />
+            </Box>
 
-            {showForm ? (
-              <PaymentForm
-                onSubmit={handleFormSubmit}
-                onCancel={() => {
-                  setShowForm(false);
-                  setSelectedPayment(undefined);
-                }}
-                initialData={selectedPayment}
-                properties={properties}
-                tenants={tenants}
-              />
-            ) : (
-              <PaymentList
-                payments={payments}
-                onEdit={handlePaymentClick}
-                onDownloadReceipt={handleDownloadReceipt}
-                onFilterChange={handleFilterChange}
-                isMobile={isMobile}
-                filters={filters}
-                loading={loading}
-                error={error}
-                properties={properties}
-                tenants={tenants}
-              />
-            )}
-          </Paper>
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <Tabs 
+                value={currentTab} 
+                onChange={(e, newValue) => setCurrentTab(newValue)}
+                sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}
+              >
+                <Tab label="Payments" value="payments" />
+                <Tab label="Payment Requests" value="requests" />
+              </Tabs>
+
+              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                {showPaymentRequestForm ? (
+                  <Box sx={{ p: 2, overflow: 'auto' }}>
+                    <PaymentRequestForm
+                      onSubmit={handlePaymentRequestSubmit}
+                      onCancel={() => setShowPaymentRequestForm(false)}
+                      properties={properties}
+                      owners={owners}
+                      tenants={tenants}
+                      loading={loading}
+                    />
+                  </Box>
+                ) : currentTab === 'payments' ? (
+                  showForm ? (
+                    <PaymentForm
+                      onSubmit={handleFormSubmit}
+                      onCancel={() => {
+                        setShowForm(false);
+                        setSelectedPayment(undefined);
+                      }}
+                      initialData={selectedPayment}
+                      properties={properties}
+                      tenants={tenants}
+                    />
+                  ) : (
+                    <PaymentList
+                      payments={payments}
+                      onEdit={handlePaymentClick}
+                      onDownloadReceipt={handleDownloadReceipt}
+                      onFilterChange={handleFilterChange}
+                      isMobile={isMobile}
+                      filters={filters}
+                      loading={loading}
+                      error={error}
+                      properties={properties}
+                      tenants={tenants}
+                    />
+                  )
+                ) : (
+                  <PaymentRequests
+                    requests={paymentRequests}
+                    onApprove={async (requestId) => {
+                      try {
+                        await paymentRequestService.markAsPaid(requestId);
+                        await loadPaymentRequests(); // Reload the list
+                        setSuccessMessage('Payment request marked as paid');
+                      } catch (err: any) {
+                        setError(err.message || 'Failed to approve payment request');
+                      }
+                    }}
+                    onReject={async (requestId) => {
+                      try {
+                        await paymentRequestService.markAsRejected(requestId);
+                        await loadPaymentRequests(); // Reload the list
+                        setSuccessMessage('Payment request rejected');
+                      } catch (err: any) {
+                        setError(err.message || 'Failed to reject payment request');
+                      }
+                    }}
+                    onView={(request) => {
+                      // TODO: Implement view functionality
+                      console.log('View request:', request);
+                    }}
+                    onEdit={(request) => {
+                      // TODO: Implement edit functionality
+                      console.log('Edit request:', request);
+                    }}
+                    loading={requestsLoading}
+                    error={null}
+                    isMobile={isMobile}
+                  />
+                )}
+              </Box>
+            </Box>
         </Box>
       </Box>
 

@@ -24,9 +24,10 @@ import healthRoutes from './routes/healthRoutes';
 import maintenanceRequestRoutes from './routes/maintenanceRequestRoutes';
 import fileRoutes from './routes/fileRoutes';
 import invoiceRoutes from './routes/invoiceRoutes';
-import propertyAccountRoutes from './routes/propertyAccountRoutes';
+
 import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
+import paymentRequestRoutes from './routes/paymentRequestRoutes';
 
 // Load environment variables
 config();
@@ -117,9 +118,10 @@ app.use('/api/companies', companyRoutes);
 app.use('/api/maintenance', maintenanceRequestRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/invoices', invoiceRoutes);
-app.use('/api/property-accounts', propertyAccountRoutes);
+
 app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);
+app.use('/api/payment-requests', paymentRequestRoutes);
 
 // Error handling
 app.use(errorHandler);
