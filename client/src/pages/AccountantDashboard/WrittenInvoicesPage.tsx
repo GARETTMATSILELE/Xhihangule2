@@ -4,6 +4,7 @@ import {
 } from '@mui/material';
 import { Print as PrintIcon, Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { apiService } from '../../api';
+import { useCompany } from '../../contexts/CompanyContext';
 import InvoicePrint from '../../components/InvoicePrint';
 
 interface InvoiceItem {
@@ -16,12 +17,12 @@ interface InvoiceItem {
 interface ClientDetails {
   name: string;
   address: string;
-  tinNumber: string;
-  bpNumber: string;
-  vatNumber: string;
+  tinNumber?: string;
+  vatNumber?: string;
 }
 
 const WrittenInvoicesPage: React.FC = () => {
+  const { company } = useCompany();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [open, setOpen] = useState(false);
@@ -30,11 +31,11 @@ const WrittenInvoicesPage: React.FC = () => {
   const [invoiceType, setInvoiceType] = useState<'rental' | 'sale'>('rental');
   const [taxPercentage, setTaxPercentage] = useState(15);
   const [discount, setDiscount] = useState(0);
+  const [selectedBankAccount, setSelectedBankAccount] = useState<string>('');
   const [clientDetails, setClientDetails] = useState<ClientDetails>({
     name: '',
     address: '',
     tinNumber: '',
-    bpNumber: '',
     vatNumber: ''
   });
   const [items, setItems] = useState<InvoiceItem[]>([
@@ -82,12 +83,12 @@ const WrittenInvoicesPage: React.FC = () => {
       name: '',
       address: '',
       tinNumber: '',
-      bpNumber: '',
       vatNumber: ''
     });
     setItems([{ description: '', taxPercentage: 15, netPrice: 0 }]);
     setDiscount(0);
     setTaxPercentage(15);
+    setSelectedBankAccount('');
   };
 
   const handleTypeChange = (e: SelectChangeEvent) => {
@@ -133,12 +134,14 @@ const WrittenInvoicesPage: React.FC = () => {
     setLoading(true);
     try {
       // Validate client details
-      const requiredClientFields = ['name', 'address', 'tinNumber', 'bpNumber', 'vatNumber'];
-      for (const field of requiredClientFields) {
-        if (!clientDetails[field as keyof ClientDetails] || clientDetails[field as keyof ClientDetails].trim() === '') {
-          alert(`Please fill in client ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`);
-          return;
-        }
+      const requiredClientFields = ['name', 'address'];
+      if (!clientDetails.name || clientDetails.name.trim() === '') {
+        alert('Please fill in client name');
+        return;
+      }
+      if (!clientDetails.address || clientDetails.address.trim() === '') {
+        alert('Please fill in client address');
+        return;
       }
 
       // Validate items
@@ -155,6 +158,7 @@ const WrittenInvoicesPage: React.FC = () => {
         items,
         discount,
         taxPercentage,
+        selectedBankAccount: selectedBankAccount !== '' ? company?.bankAccounts[parseInt(selectedBankAccount)] : null,
       };
 
       await apiService.createInvoice(invoiceData);
@@ -352,7 +356,6 @@ const WrittenInvoicesPage: React.FC = () => {
                   label="TIN Number"
                   value={clientDetails.tinNumber}
                   onChange={(e) => handleClientChange('tinNumber', e.target.value)}
-                  required
                 />
               </Grid>
               <Grid item xs={12}>
@@ -369,19 +372,9 @@ const WrittenInvoicesPage: React.FC = () => {
               <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
-                  label="BP Number"
-                  value={clientDetails.bpNumber}
-                  onChange={(e) => handleClientChange('bpNumber', e.target.value)}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
                   label="VAT Number"
                   value={clientDetails.vatNumber}
                   onChange={(e) => handleClientChange('vatNumber', e.target.value)}
-                  required
                 />
               </Grid>
             </Grid>
@@ -426,6 +419,69 @@ const WrittenInvoicesPage: React.FC = () => {
                 />
               </Grid>
             </Grid>
+
+            {/* Bank Account Selection */}
+            {company?.bankAccounts && company.bankAccounts.length > 0 && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="h6" sx={{ mb: 2, color: '#1976d2' }}>
+                  Bank Account Details
+                </Typography>
+                <Grid container spacing={2} sx={{ mb: 3 }}>
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Select Bank Account (Optional)</InputLabel>
+                      <Select
+                        value={selectedBankAccount}
+                        label="Select Bank Account (Optional)"
+                        onChange={(e) => setSelectedBankAccount(e.target.value)}
+                      >
+                        <MenuItem value="">
+                          <em>No bank account selected</em>
+                        </MenuItem>
+                        {company.bankAccounts.map((account, index) => (
+                          <MenuItem key={index} value={index.toString()}>
+                            {account.accountName} - {account.accountNumber} ({account.accountType})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  {selectedBankAccount !== '' && company.bankAccounts[parseInt(selectedBankAccount)] && (
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ 
+                        border: '1px solid #e0e0e0', 
+                        borderRadius: 1, 
+                        p: 2, 
+                        bgcolor: '#f9f9f9' 
+                      }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          Selected Bank Account:
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          <strong>Account Name:</strong> {company.bankAccounts[parseInt(selectedBankAccount)].accountName}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          <strong>Account Number:</strong> {company.bankAccounts[parseInt(selectedBankAccount)].accountNumber}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          <strong>Account Type:</strong> {company.bankAccounts[parseInt(selectedBankAccount)].accountType}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          <strong>Bank Name:</strong> {company.bankAccounts[parseInt(selectedBankAccount)].bankName}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          <strong>Branch:</strong> {company.bankAccounts[parseInt(selectedBankAccount)].branchName}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Branch Code:</strong> {company.bankAccounts[parseInt(selectedBankAccount)].branchCode}
+                        </Typography>
+                      </Box>
+                    </Grid>
+                  )}
+                </Grid>
+              </>
+            )}
 
             {/* Items Section */}
             <Typography variant="h6" sx={{ mb: 2, color: '#1976d2' }}>

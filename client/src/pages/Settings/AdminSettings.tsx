@@ -34,6 +34,9 @@ import {
   TableRow,
   TableCell,
   SelectChangeEvent,
+  Card,
+  CardHeader,
+  CardContent,
 } from '@mui/material';
 import {
   Security as SecurityIcon,
@@ -146,7 +149,16 @@ export const AdminSettings: React.FC = () => {
     email: '',
     website: '',
     registrationNumber: '',
-    taxNumber: '',
+    tinNumber: '',
+    vatNumber: '',
+    bankAccounts: [] as Array<{
+      accountNumber: string;
+      accountName: string;
+      accountType: 'USD NOSTRO' | 'ZiG';
+      bankName: string;
+      branchName: string;
+      branchCode: string;
+    }>,
   });
   const [branches, setBranches] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -244,7 +256,9 @@ export const AdminSettings: React.FC = () => {
         email: company.email || '',
         website: company.website || '',
         registrationNumber: company.registrationNumber || '',
-        taxNumber: company.taxNumber || '',
+        tinNumber: company.tinNumber || '',
+        vatNumber: company.vatNumber || '',
+        bankAccounts: company.bankAccounts || [],
       });
     }
   }, [company]);
@@ -379,6 +393,44 @@ export const AdminSettings: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleBankAccountChange = (index: number, field: string, value: string) => {
+    setCompanyData(prev => ({
+      ...prev,
+      bankAccounts: prev.bankAccounts.map((account, i) => 
+        i === index ? { ...account, [field]: value } : account
+      )
+    }));
+  };
+
+  const addBankAccount = () => {
+    if (companyData.bankAccounts.length >= 2) {
+      setMessage({
+        type: 'error',
+        text: 'Maximum of 2 bank accounts allowed.',
+      });
+      return;
+    }
+    
+    setCompanyData(prev => ({
+      ...prev,
+      bankAccounts: [...prev.bankAccounts, {
+        accountNumber: '',
+        accountName: '',
+        accountType: 'USD NOSTRO',
+        bankName: '',
+        branchName: '',
+        branchCode: ''
+      }]
+    }));
+  };
+
+  const removeBankAccount = (index: number) => {
+    setCompanyData(prev => ({
+      ...prev,
+      bankAccounts: prev.bankAccounts.filter((_, i) => i !== index)
+    }));
   };
 
   const handleOpenUserDialog = () => {
@@ -881,10 +933,19 @@ export const AdminSettings: React.FC = () => {
                 <Grid item xs={12} sm={6}>
                   <TextField
                     fullWidth
-                    label="Tax Number"
-                    value={companyData.taxNumber}
-                    onChange={(e) => setCompanyData({ ...companyData, taxNumber: e.target.value })}
+                    label="TIN Number"
+                    value={companyData.tinNumber}
+                    onChange={(e) => setCompanyData({ ...companyData, tinNumber: e.target.value })}
                     required
+                  />
+                </Grid>
+
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="VAT Number"
+                    value={companyData.vatNumber}
+                    onChange={(e) => setCompanyData({ ...companyData, vatNumber: e.target.value })}
                   />
                 </Grid>
 
@@ -939,6 +1000,119 @@ export const AdminSettings: React.FC = () => {
                   >
                     {loading ? <CircularProgress size={24} /> : 'Update Company Information'}
                   </Button>
+                </Grid>
+
+                {/* Bank Account Management */}
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 3 }} />
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Bank Accounts
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddIcon />}
+                      onClick={addBankAccount}
+                      disabled={companyData.bankAccounts.length >= 2}
+                    >
+                      Add Bank Account
+                    </Button>
+                  </Box>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                    Manage your company's bank accounts. You can add up to 2 bank accounts.
+                  </Typography>
+
+                  {companyData.bankAccounts.map((account, index) => (
+                    <Card key={index} sx={{ mb: 2 }}>
+                      <CardHeader
+                        title={`Bank Account ${index + 1}`}
+                        action={
+                          <IconButton
+                            onClick={() => removeBankAccount(index)}
+                            color="error"
+                            size="small"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        }
+                      />
+                      <CardContent>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Account Number"
+                              value={account.accountNumber}
+                              onChange={(e) => handleBankAccountChange(index, 'accountNumber', e.target.value)}
+                              margin="normal"
+                              required
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Account Name"
+                              value={account.accountName}
+                              onChange={(e) => handleBankAccountChange(index, 'accountName', e.target.value)}
+                              margin="normal"
+                              required
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <FormControl fullWidth margin="normal">
+                              <InputLabel>Account Type</InputLabel>
+                              <Select
+                                value={account.accountType}
+                                onChange={(e) => handleBankAccountChange(index, 'accountType', e.target.value)}
+                                label="Account Type"
+                              >
+                                <MenuItem value="USD NOSTRO">USD NOSTRO</MenuItem>
+                                <MenuItem value="ZiG">ZiG</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Bank Name"
+                              value={account.bankName}
+                              onChange={(e) => handleBankAccountChange(index, 'bankName', e.target.value)}
+                              margin="normal"
+                              required
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Branch Name"
+                              value={account.branchName}
+                              onChange={(e) => handleBankAccountChange(index, 'branchName', e.target.value)}
+                              margin="normal"
+                              required
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              fullWidth
+                              label="Branch Code"
+                              value={account.branchCode}
+                              onChange={(e) => handleBankAccountChange(index, 'branchCode', e.target.value)}
+                              margin="normal"
+                              required
+                            />
+                          </Grid>
+                        </Grid>
+                      </CardContent>
+                    </Card>
+                  ))}
+
+                  {companyData.bankAccounts.length === 0 && (
+                    <Box sx={{ textAlign: 'center', py: 4 }}>
+                      <Typography variant="body2" color="textSecondary">
+                        No bank accounts added yet. Click "Add Bank Account" to add your first bank account.
+                      </Typography>
+                    </Box>
+                  )}
                 </Grid>
               </Grid>
             </form>

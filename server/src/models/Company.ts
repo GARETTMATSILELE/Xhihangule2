@@ -1,6 +1,16 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
+// Bank Account interface
+export interface IBankAccount {
+  accountNumber: string;
+  accountName: string;
+  accountType: 'USD NOSTRO' | 'ZiG';
+  bankName: string;
+  branchName: string;
+  branchCode: string;
+}
+
 export interface ICompany extends Document {
   name: string;
   address: string;
@@ -8,14 +18,49 @@ export interface ICompany extends Document {
   email: string;
   website?: string;
   registrationNumber: string;
-  taxNumber: string;
+  tinNumber: string;
+  vatNumber?: string;
   ownerId: Types.ObjectId;
   description?: string;
   logo?: string;
   isActive: boolean;
   subscriptionStatus: 'active' | 'inactive' | 'trial';
   subscriptionEndDate?: Date;
+  bankAccounts: IBankAccount[];
 }
+
+const bankAccountSchema = new Schema<IBankAccount>({
+  accountNumber: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  accountName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  accountType: {
+    type: String,
+    enum: ['USD NOSTRO', 'ZiG'],
+    required: true
+  },
+  bankName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  branchName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  branchCode: {
+    type: String,
+    required: true,
+    trim: true
+  }
+});
 
 const companySchema = new Schema<ICompany>({
   name: {
@@ -48,9 +93,13 @@ const companySchema = new Schema<ICompany>({
     required: true,
     trim: true
   },
-  taxNumber: {
+  tinNumber: {
     type: String,
     required: true,
+    trim: true
+  },
+  vatNumber: {
+    type: String,
     trim: true
   },
   ownerId: {
@@ -72,6 +121,16 @@ const companySchema = new Schema<ICompany>({
   },
   subscriptionEndDate: {
     type: Date
+  },
+  bankAccounts: {
+    type: [bankAccountSchema],
+    default: [],
+    validate: {
+      validator: function(accounts: IBankAccount[]) {
+        return accounts.length <= 2;
+      },
+      message: 'Company can have a maximum of 2 bank accounts'
+    }
   }
 }, {
   timestamps: true

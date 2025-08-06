@@ -49,21 +49,22 @@ const calculateTaxBreakdown = (items, discount = 0, taxPercentage = 15) => {
 };
 // Function to validate client details
 const validateClientDetails = (client) => {
+    var _a, _b;
     if (!client || typeof client !== 'object') {
         throw new errorHandler_1.AppError('Client details are required', 400);
     }
-    const requiredFields = ['name', 'address', 'tinNumber', 'bpNumber', 'vatNumber'];
-    for (const field of requiredFields) {
-        if (!client[field] || typeof client[field] !== 'string' || client[field].trim() === '') {
-            throw new errorHandler_1.AppError(`Client ${field} is required`, 400);
-        }
+    // Only name and address are required
+    if (!client.name || typeof client.name !== 'string' || client.name.trim() === '') {
+        throw new errorHandler_1.AppError('Client name is required', 400);
+    }
+    if (!client.address || typeof client.address !== 'string' || client.address.trim() === '') {
+        throw new errorHandler_1.AppError('Client address is required', 400);
     }
     return {
         name: client.name.trim(),
         address: client.address.trim(),
-        tinNumber: client.tinNumber.trim(),
-        bpNumber: client.bpNumber.trim(),
-        vatNumber: client.vatNumber.trim()
+        tinNumber: ((_a = client.tinNumber) === null || _a === void 0 ? void 0 : _a.trim()) || undefined,
+        vatNumber: ((_b = client.vatNumber) === null || _b === void 0 ? void 0 : _b.trim()) || undefined
     };
 };
 const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {

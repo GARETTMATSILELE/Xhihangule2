@@ -33,7 +33,8 @@ export interface SignUpData {
     email: string;
     website?: string;
     registrationNumber?: string;
-    taxNumber?: string;
+    tinNumber?: string;
+    vatNumber?: string;
   };
 }
 
@@ -88,7 +89,8 @@ export interface CompanyData {
   email: string;
   website?: string;
   registrationNumber?: string;
-  taxNumber?: string;
+  tinNumber?: string;
+  vatNumber?: string;
   ownerId: Types.ObjectId;
 }
 

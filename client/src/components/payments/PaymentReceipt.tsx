@@ -101,7 +101,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 <p>Phone: ${receipt.company?.phone || 'Phone not available'} | Email: ${receipt.company?.email || 'Email not available'}</p>
                 ${receipt.company?.website ? `<p>Website: ${receipt.company.website}</p>` : ''}
                 ${receipt.company?.registrationNumber ? `<p>Reg. No: ${receipt.company.registrationNumber}</p>` : ''}
-                ${receipt.company?.taxNumber ? `<p>Tax No: ${receipt.company.taxNumber}</p>` : ''}
+                ${receipt.company?.tinNumber ? `<p>Tax No: ${receipt.company.tinNumber}</p>` : ''}
                 <div class="receipt-number">Receipt #${receipt.receiptNumber}</div>
               </div>
               
@@ -227,10 +227,10 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 </Typography>
               </Grid>
             )}
-            {receipt.company.taxNumber && (
+            {receipt.company.tinNumber && (
               <Grid item xs={12} sm={6}>
                 <Typography variant="body2">
-                  <strong>Tax No:</strong> {receipt.company.taxNumber}
+                  <strong>Tax No:</strong> {receipt.company.tinNumber}
                 </Typography>
               </Grid>
             )}

@@ -31,8 +31,6 @@ const router = express.Router();
 // Debug middleware
 router.use((req, res, next) => {
   console.log('Accountant route accessed:', req.method, req.path);
-  console.log('User:', req.user);
-  console.log('Full URL:', req.originalUrl);
   next();
 });
 

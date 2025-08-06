@@ -147,7 +147,16 @@ export const Settings: React.FC = () => {
     email: '',
     website: '',
     registrationNumber: '',
-    taxNumber: '',
+    tinNumber: '',
+    vatNumber: '',
+    bankAccounts: [] as Array<{
+      accountNumber: string;
+      accountName: string;
+      accountType: 'USD NOSTRO' | 'ZiG';
+      bankName: string;
+      branchName: string;
+      branchCode: string;
+    }>,
   });
   const [branches, setBranches] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -245,7 +254,9 @@ export const Settings: React.FC = () => {
         email: company.email || '',
         website: company.website || '',
         registrationNumber: company.registrationNumber || '',
-        taxNumber: company.taxNumber || '',
+        tinNumber: company.tinNumber || '',
+        vatNumber: company.vatNumber || '',
+        bankAccounts: company.bankAccounts || [],
       });
     }
   }, [company]);
@@ -882,10 +893,19 @@ export const Settings: React.FC = () => {
                       <Grid item xs={12} sm={6}>
                   <TextField
                     fullWidth
-                        label="Tax Number"
-                        value={companyData.taxNumber}
-                        onChange={(e) => setCompanyData({ ...companyData, taxNumber: e.target.value })}
+                        label="TIN Number"
+                        value={companyData.tinNumber}
+                        onChange={(e) => setCompanyData({ ...companyData, tinNumber: e.target.value })}
                         required
+                  />
+                </Grid>
+
+                      <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                        label="VAT Number"
+                        value={companyData.vatNumber}
+                        onChange={(e) => setCompanyData({ ...companyData, vatNumber: e.target.value })}
                   />
                 </Grid>
 

@@ -42,7 +42,8 @@ import {
   Download as DownloadIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
-  Pending as PendingIcon
+  Pending as PendingIcon,
+  Print as PrintIcon
 } from '@mui/icons-material';
 import { usePropertyService } from '../../services/propertyService';
 import { propertyAccountService, PropertyAccount, Transaction, OwnerPayout, ExpenseData, PayoutData } from '../../services/propertyAccountService';
@@ -72,7 +73,7 @@ function TabPanel(props: TabPanelProps) {
 
 const PropertyAccountDetailPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
-  const { user } = useAuth();
+  const { user, company } = useAuth();
   const { getProperties } = usePropertyService();
   const { getAllPublic: getAllPropertyOwners } = usePropertyOwnerService();
   
@@ -87,6 +88,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   // Dialog states
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
   const [payoutDialogOpen, setPayoutDialogOpen] = useState(false);
+  const [statementDialogOpen, setStatementDialogOpen] = useState(false);
   const [expenseData, setExpenseData] = useState<ExpenseData>({
     amount: 0,
     date: new Date(),
@@ -100,6 +102,12 @@ const PropertyAccountDetailPage: React.FC = () => {
     recipientId: '',
     recipientName: '',
     notes: ''
+  });
+  
+  const [statementData, setStatementData] = useState({
+    startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1), // First day of current month
+    endDate: new Date(),
+    includeAllTransactions: false
   });
   
   // Form states
@@ -235,6 +243,377 @@ const PropertyAccountDetailPage: React.FC = () => {
       setSuccess(`Payout status updated to ${status}`);
     } catch (err: any) {
       setSubmitError(err.message || 'Failed to update payout status');
+    }
+  };
+
+  const handlePrintAcknowledgement = async (payout: OwnerPayout) => {
+    if (!propertyId) return;
+    
+    try {
+      const acknowledgementData = await propertyAccountService.getAcknowledgementDocument(propertyId, payout._id!);
+      
+      // Create a new window for printing
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        setSubmitError('Please allow popups to print the acknowledgement');
+        return;
+      }
+
+      // Get company details and property address
+      const companyName = company?.name || 'Property Management Company';
+      const propertyAddress = property?.address || 'Property Address Not Available';
+
+      // Create the print content
+      const printContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Payment Acknowledgement Receipt</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+            .title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+            .subtitle { font-size: 16px; color: #666; margin-bottom: 5px; }
+            .property-address { font-size: 14px; color: #666; }
+            .receipt-details { margin: 30px 0; }
+            .detail-row { display: flex; justify-content: space-between; margin: 15px 0; padding: 10px 0; border-bottom: 1px solid #eee; }
+            .detail-label { font-weight: bold; min-width: 120px; }
+            .detail-value { flex: 1; }
+            .signature-section { margin-top: 50px; }
+            .signature-line { border-top: 1px solid #000; margin-top: 30px; width: 200px; }
+            .signature-label { font-size: 12px; color: #666; margin-top: 5px; }
+            .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #666; }
+            @media print {
+              body { margin: 20px; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="title">Payment Acknowledgement Receipt</div>
+            <div class="subtitle">${companyName}</div>
+            <div class="property-address">${propertyAddress}</div>
+          </div>
+          
+          <div class="receipt-details">
+            <div class="detail-row">
+              <span class="detail-label">Date:</span>
+              <span class="detail-value">${new Date(payout.date).toLocaleDateString()}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Reference:</span>
+              <span class="detail-value">${payout.referenceNumber}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Recipient:</span>
+              <span class="detail-value">${payout.recipientName}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Amount:</span>
+              <span class="detail-value">${propertyAccountService.formatCurrency(payout.amount)}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Method:</span>
+              <span class="detail-value">${propertyAccountService.getPaymentMethodLabel(payout.paymentMethod)}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Status:</span>
+              <span class="detail-value">${payout.status}</span>
+            </div>
+            ${payout.notes ? `
+            <div class="detail-row">
+              <span class="detail-label">Notes:</span>
+              <span class="detail-value">${payout.notes}</span>
+            </div>
+            ` : ''}
+          </div>
+          
+          <div class="signature-section">
+            <p>I, <strong>${payout.recipientName}</strong>, acknowledge receipt of the above payment.</p>
+            <div class="signature-line"></div>
+            <div class="signature-label">Recipient Signature</div>
+          </div>
+          
+          <div class="footer">
+            <p>This document serves as proof of payment receipt. Please keep this for your records.</p>
+            <p>Generated on ${new Date().toLocaleString()}</p>
+          </div>
+          
+          <div class="no-print" style="position: fixed; top: 20px; right: 20px;">
+            <button onclick="window.print()" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer;">
+              Print Receipt
+            </button>
+            <button onclick="window.close()" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">
+              Close
+            </button>
+          </div>
+        </body>
+        </html>
+      `;
+
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to generate acknowledgement document');
+    }
+  };
+
+  const handlePrintStatement = async () => {
+    if (!propertyId) return;
+    
+    try {
+      // Create a new window for printing
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        setSubmitError('Please allow popups to print the statement');
+        return;
+      }
+
+      // Get company details and property information
+      const companyName = company?.name || 'Property Management Company';
+      const propertyAddress = property?.address || 'Property Address Not Available';
+      const ownerName = ownerMap[propertyId!] || account?.ownerName || 'Unknown Owner';
+      
+      // Filter transactions based on date range or include all
+      let filteredTransactions = transactions;
+      if (!statementData.includeAllTransactions) {
+        filteredTransactions = transactions.filter(transaction => {
+          const transactionDate = new Date(transaction.date);
+          return transactionDate >= statementData.startDate && transactionDate <= statementData.endDate;
+        });
+      }
+
+      // Calculate summary for the period
+      const periodIncome = filteredTransactions
+        .filter(t => t.type === 'income')
+        .reduce((sum, t) => sum + t.amount, 0);
+      
+      const periodExpenses = filteredTransactions
+        .filter(t => t.type === 'expense')
+        .reduce((sum, t) => sum + t.amount, 0);
+      
+      // Get payouts from the account's ownerPayouts array and filter by date range
+      let periodPayouts = 0;
+      let filteredPayouts: OwnerPayout[] = [];
+      
+      if (account?.ownerPayouts) {
+        if (statementData.includeAllTransactions) {
+          filteredPayouts = account.ownerPayouts;
+          periodPayouts = account.totalOwnerPayouts;
+        } else {
+          filteredPayouts = account.ownerPayouts.filter(payout => {
+            const payoutDate = new Date(payout.date);
+            return payoutDate >= statementData.startDate && payoutDate <= statementData.endDate;
+          });
+          periodPayouts = filteredPayouts.reduce((sum, payout) => sum + payout.amount, 0);
+        }
+      }
+
+      // Calculate net income after payouts
+      const netIncomeAfterPayouts = periodIncome - periodPayouts;
+      const netIncomeAfterExpenses = netIncomeAfterPayouts - periodExpenses;
+
+      // Create the print content
+      const printContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Property Statement</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+            .title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+            .subtitle { font-size: 16px; color: #666; margin-bottom: 5px; }
+            .property-address { font-size: 14px; color: #666; }
+            .property-info { margin: 20px 0; padding: 15px; background: #f9f9f9; border-radius: 5px; }
+            .info-row { display: flex; justify-content: space-between; margin: 8px 0; }
+            .info-label { font-weight: bold; min-width: 120px; }
+            .info-value { flex: 1; }
+            .period-info { margin: 20px 0; padding: 15px; background: #e3f2fd; border-radius: 5px; }
+            .summary-section { margin: 20px 0; }
+            .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 15px 0; }
+            .summary-card { padding: 15px; border: 1px solid #ddd; border-radius: 5px; text-align: center; }
+            .summary-amount { font-size: 20px; font-weight: bold; margin: 5px 0; }
+            .income { color: #4caf50; }
+            .expense { color: #f44336; }
+            .payout { color: #2196f3; }
+            .transactions-table { margin: 30px 0; }
+            .transactions-table table { width: 100%; border-collapse: collapse; }
+            .transactions-table th, .transactions-table td { 
+              border: 1px solid #ddd; 
+              padding: 8px; 
+              text-align: left; 
+            }
+            .transactions-table th { background: #f5f5f5; font-weight: bold; }
+            .income-row { background: #f1f8e9; }
+            .expense-row { background: #ffebee; }
+            .payout-row { background: #e3f2fd; }
+            .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #666; }
+            @media print {
+              body { margin: 20px; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="title">Property Statement</div>
+            <div class="subtitle">${companyName}</div>
+            <div class="property-address">${propertyAddress}</div>
+          </div>
+          
+          <div class="property-info">
+            <div class="info-row">
+              <span class="info-label">Property Owner:</span>
+              <span class="info-value">${ownerName}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Property Address:</span>
+              <span class="info-value">${propertyAddress}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Statement Period:</span>
+              <span class="info-value">${statementData.includeAllTransactions ? 'All Transactions' : `${statementData.startDate.toLocaleDateString()} to ${statementData.endDate.toLocaleDateString()}`}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Generated On:</span>
+              <span class="info-value">${new Date().toLocaleString()}</span>
+            </div>
+          </div>
+          
+          <div class="summary-section">
+            <h3>Period Summary</h3>
+            <div class="summary-grid">
+              <div class="summary-card">
+                <div>Total Rent Income</div>
+                <div class="summary-amount income">${propertyAccountService.formatCurrency(periodIncome)}</div>
+              </div>
+              <div class="summary-card">
+                <div>Owner Payouts (Deductions)</div>
+                <div class="summary-amount expense">-${propertyAccountService.formatCurrency(periodPayouts)}</div>
+              </div>
+              <div class="summary-card">
+                <div>Net Income After Payouts</div>
+                <div class="summary-amount ${netIncomeAfterPayouts >= 0 ? 'income' : 'expense'}">${propertyAccountService.formatCurrency(netIncomeAfterPayouts)}</div>
+              </div>
+            </div>
+            <div class="summary-grid" style="margin-top: 15px;">
+              <div class="summary-card">
+                <div>Total Expenses</div>
+                <div class="summary-amount expense">${propertyAccountService.formatCurrency(periodExpenses)}</div>
+              </div>
+              <div class="summary-card">
+                <div>Final Net Income</div>
+                <div class="summary-amount ${netIncomeAfterExpenses >= 0 ? 'income' : 'expense'}">${propertyAccountService.formatCurrency(netIncomeAfterExpenses)}</div>
+              </div>
+              <div class="summary-card" style="background: #f5f5f5;">
+                <div>Available for Payouts</div>
+                <div class="summary-amount payout">${propertyAccountService.formatCurrency(account?.runningBalance || 0)}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="transactions-table">
+            <h3>Income & Expense Transactions</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Amount</th>
+                  <th>Balance</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredTransactions
+                  .filter(transaction => transaction.type !== 'owner_payout')
+                  .map(transaction => {
+                    const isIncome = transaction.type === 'income';
+                    const isExpense = transaction.type === 'expense';
+                    
+                    let amountDisplay = '';
+                    if (isIncome) {
+                      amountDisplay = `+${propertyAccountService.formatCurrency(transaction.amount)}`;
+                    } else {
+                      amountDisplay = `-${propertyAccountService.formatCurrency(transaction.amount)}`;
+                    }
+                    
+                    return `
+                      <tr class="${isIncome ? 'income-row' : 'expense-row'}">
+                        <td>${new Date(transaction.date).toLocaleDateString()}</td>
+                        <td>${propertyAccountService.getTransactionTypeLabel(transaction.type)}</td>
+                        <td>${transaction.description}</td>
+                        <td style="color: ${isIncome ? '#4caf50' : '#f44336'};">
+                          ${amountDisplay}
+                        </td>
+                        <td>${propertyAccountService.formatCurrency(transaction.runningBalance || 0)}</td>
+                        <td>${transaction.status}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+              </tbody>
+            </table>
+          </div>
+          
+          ${filteredPayouts.length > 0 ? `
+          <div class="transactions-table">
+            <h3>Owner Payouts (Deductions from Rent)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Reference</th>
+                  <th>Recipient</th>
+                  <th>Amount (Deduction)</th>
+                  <th>Payment Method</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredPayouts.map(payout => `
+                  <tr class="payout-row">
+                    <td>${new Date(payout.date).toLocaleDateString()}</td>
+                    <td>${payout.referenceNumber}</td>
+                    <td>${payout.recipientName}</td>
+                    <td style="color: #ff9800; font-weight: bold;">
+                      -${propertyAccountService.formatCurrency(payout.amount)} (Deduction)
+                    </td>
+                    <td>${propertyAccountService.getPaymentMethodLabel(payout.paymentMethod)}</td>
+                    <td>${payout.status}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          ` : ''}
+          
+          <div class="footer">
+            <p>This statement shows all transactions for the specified period. Please keep this for your records.</p>
+            <p>Generated by ${companyName} on ${new Date().toLocaleString()}</p>
+          </div>
+          
+          <div class="no-print" style="position: fixed; top: 20px; right: 20px;">
+            <button onclick="window.print()" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer;">
+              Print Statement
+            </button>
+            <button onclick="window.close()" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">
+              Close
+            </button>
+          </div>
+        </body>
+        </html>
+      `;
+
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      setStatementDialogOpen(false);
+      
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to generate statement');
     }
   };
 
@@ -502,28 +881,41 @@ const PropertyAccountDetailPage: React.FC = () => {
                     </Box>
                   </TableCell>
                   <TableCell>
-                    {payout.status === 'pending' && (
-                      <Box>
-                        <Tooltip title="Mark as Completed">
+                    <Box>
+                      {payout.status === 'pending' && (
+                        <>
+                          <Tooltip title="Mark as Completed">
+                            <IconButton
+                              size="small"
+                              color="success"
+                              onClick={() => handleUpdatePayoutStatus(payout._id!, 'completed')}
+                            >
+                              <CheckCircleIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Mark as Failed">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleUpdatePayoutStatus(payout._id!, 'failed')}
+                            >
+                              <CancelIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </>
+                      )}
+                      {payout.status === 'completed' && (
+                        <Tooltip title="Print Acknowledgement Receipt">
                           <IconButton
                             size="small"
-                            color="success"
-                            onClick={() => handleUpdatePayoutStatus(payout._id!, 'completed')}
+                            color="primary"
+                            onClick={() => handlePrintAcknowledgement(payout)}
                           >
-                            <CheckCircleIcon />
+                            <PrintIcon />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Mark as Failed">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleUpdatePayoutStatus(payout._id!, 'failed')}
-                          >
-                            <CancelIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    )}
+                      )}
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -574,6 +966,15 @@ const PropertyAccountDetailPage: React.FC = () => {
                     disabled={account.runningBalance <= 0}
                   >
                     Pay Owner
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    sx={{ mb: 1 }}
+                    onClick={() => setStatementDialogOpen(true)}
+                    startIcon={<PrintIcon />}
+                  >
+                    Print Statement
                   </Button>
                 </Box>
               </CardContent>
@@ -714,6 +1115,79 @@ const PropertyAccountDetailPage: React.FC = () => {
           <Button onClick={() => setPayoutDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleCreatePayout} variant="contained" disabled={submitting}>
             {submitting ? <CircularProgress size={24} /> : 'Create Payout'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Print Statement Dialog */}
+      <Dialog open={statementDialogOpen} onClose={() => setStatementDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Print Property Statement</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Statement Period</InputLabel>
+                <Select
+                  value={statementData.includeAllTransactions ? 'all' : 'period'}
+                  onChange={(e) => setStatementData({ 
+                    ...statementData, 
+                    includeAllTransactions: e.target.value === 'all' 
+                  })}
+                  label="Statement Period"
+                >
+                  <MenuItem value="period">Specific Period</MenuItem>
+                  <MenuItem value="all">All Transactions</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            {!statementData.includeAllTransactions && (
+              <>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="Start Date"
+                    type="date"
+                    value={statementData.startDate.toISOString().split('T')[0]}
+                    onChange={(e) => setStatementData({ 
+                      ...statementData, 
+                      startDate: new Date(e.target.value) 
+                    })}
+                    fullWidth
+                    required
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="End Date"
+                    type="date"
+                    value={statementData.endDate.toISOString().split('T')[0]}
+                    onChange={(e) => setStatementData({ 
+                      ...statementData, 
+                      endDate: new Date(e.target.value) 
+                    })}
+                    fullWidth
+                    required
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+              </>
+            )}
+            <Grid item xs={12}>
+              <Alert severity="info">
+                <Typography variant="body2">
+                  <strong>Property:</strong> {property?.name}<br />
+                  <strong>Owner:</strong> {ownerMap[propertyId!] || account?.ownerName || 'Unknown'}<br />
+                  <strong>Address:</strong> {property?.address}<br />
+                  <strong>Company:</strong> {company?.name}
+                </Typography>
+              </Alert>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStatementDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handlePrintStatement} variant="contained" disabled={submitting}>
+            {submitting ? <CircularProgress size={24} /> : 'Print Statement'}
           </Button>
         </DialogActions>
       </Dialog>

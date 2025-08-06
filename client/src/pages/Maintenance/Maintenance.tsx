@@ -16,7 +16,7 @@ interface CompanyInfo {
   email?: string;
   website?: string;
   registrationNumber?: string;
-  taxNumber?: string;
+  tinNumber?: string;
   description?: string;
   isActive?: boolean;
   subscriptionStatus?: 'active' | 'inactive' | 'trial';

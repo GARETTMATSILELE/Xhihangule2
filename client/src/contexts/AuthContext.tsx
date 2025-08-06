@@ -19,7 +19,7 @@ interface CreateCompany {
   email?: string;
   website?: string;
   registrationNumber?: string;
-  taxNumber?: string;
+  tinNumber?: string;
 }
 
 interface AuthContextType {

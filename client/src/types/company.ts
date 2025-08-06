@@ -1,3 +1,12 @@
+export interface BankAccount {
+  accountNumber: string;
+  accountName: string;
+  accountType: 'USD NOSTRO' | 'ZiG';
+  bankName: string;
+  branchName: string;
+  branchCode: string;
+}
+
 export interface Company {
   _id: string;
   name: string;
@@ -6,13 +15,15 @@ export interface Company {
   email: string;
   website?: string;
   registrationNumber: string;
-  taxNumber: string;
+  tinNumber: string;
+  vatNumber?: string;
   ownerId: string;
   description?: string;
   logo?: string;
   isActive: boolean;
   subscriptionStatus: 'active' | 'inactive' | 'trial';
   subscriptionEndDate?: Date;
+  bankAccounts: BankAccount[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,6 +35,8 @@ export interface CreateCompany {
   email: string;
   website?: string;
   registrationNumber: string;
-  taxNumber: string;
+  tinNumber: string;
+  vatNumber?: string;
   description?: string;
+  bankAccounts?: BankAccount[];
 } 

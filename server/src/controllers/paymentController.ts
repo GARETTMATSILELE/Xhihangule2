@@ -875,7 +875,7 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
     let company = null;
     if (payment.companyId) {
       company = await Company.findById(payment.companyId).select(
-        'name address phone email website registrationNumber taxNumber logo description'
+        'name address phone email website registrationNumber tinNumber vatNumber logo description'
       );
     }
 
@@ -912,7 +912,7 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
               <div class="company-details">Phone: ${company?.phone || 'Phone not available'} | Email: ${company?.email || 'Email not available'}</div>
               ${company?.website ? `<div class="company-details">Website: ${company.website}</div>` : ''}
               ${company?.registrationNumber ? `<div class="company-details">Reg. No: ${company.registrationNumber}</div>` : ''}
-              ${company?.taxNumber ? `<div class="company-details">Tax No: ${company.taxNumber}</div>` : ''}
+              ${company?.tinNumber ? `<div class="company-details">Tax No: ${company.tinNumber}</div>` : ''}
               <div class="receipt-number">Receipt #${payment.referenceNumber}</div>
             </div>
             
@@ -1022,7 +1022,7 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
     let company = null;
     if (payment.companyId) {
       company = await Company.findById(payment.companyId).select(
-        'name address phone email website registrationNumber taxNumber logo description'
+        'name address phone email website registrationNumber tinNumber vatNumber logo description'
       );
     }
 

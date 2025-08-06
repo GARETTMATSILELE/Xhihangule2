@@ -14,9 +14,8 @@ interface InvoiceItem {
 interface ClientDetails {
   name: string;
   address: string;
-  tinNumber: string;
-  bpNumber: string;
-  vatNumber: string;
+  tinNumber?: string;
+  vatNumber?: string;
 }
 
 interface Invoice {
@@ -36,6 +35,14 @@ interface Invoice {
   status: 'paid' | 'unpaid' | 'overdue';
   createdAt: Date;
   companyId: string;
+  selectedBankAccount?: {
+    accountNumber: string;
+    accountName: string;
+    accountType: 'USD NOSTRO' | 'ZiG';
+    bankName: string;
+    branchName: string;
+    branchCode: string;
+  } | null;
 }
 
 interface InvoicePrintProps {
@@ -82,9 +89,8 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
       return {
         name: invoice.client,
         address: 'N/A',
-        tinNumber: 'N/A',
-        bpNumber: 'N/A',
-        vatNumber: 'N/A'
+        tinNumber: undefined,
+        vatNumber: undefined
       };
     } else {
       // New format - client is an object
@@ -115,7 +121,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
           <div className="company-info">
             {company?.logo && (
               <img 
-                src={company.logo} 
+                src={`data:image/png;base64,${company.logo}`}
                 alt={`${company.name} Logo`}
                 className="company-logo"
               />
@@ -175,13 +181,10 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
             </Grid>
             <Grid item xs={12} md={6}>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                <strong>TIN Number:</strong> {clientDetails.tinNumber}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                <strong>BP Number:</strong> {clientDetails.bpNumber}
+                <strong>TIN Number:</strong> {clientDetails.tinNumber || 'N/A'}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                <strong>VAT Number:</strong> {clientDetails.vatNumber}
+                <strong>VAT Number:</strong> {clientDetails.vatNumber || 'N/A'}
               </Typography>
             </Grid>
           </Grid>
@@ -220,7 +223,39 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
         <div className="tax-breakdown">
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid item xs={12} md={6}>
-              {/* Left side - empty for spacing */}
+              {/* Bank Account Details */}
+              {invoice.selectedBankAccount && (
+                <Box sx={{ 
+                  border: '1px solid #e0e0e0', 
+                  borderRadius: 1, 
+                  p: 2,
+                  bgcolor: '#f9f9f9',
+                  height: 'fit-content'
+                }}>
+                  <Typography variant="h6" gutterBottom sx={{ borderBottom: '1px solid #e0e0e0', pb: 1 }}>
+                    Bank Account Details
+                  </Typography>
+                  
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>Account Name:</strong> {invoice.selectedBankAccount.accountName}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>Account Number:</strong> {invoice.selectedBankAccount.accountNumber}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>Account Type:</strong> {invoice.selectedBankAccount.accountType}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>Bank Name:</strong> {invoice.selectedBankAccount.bankName}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>Branch Name:</strong> {invoice.selectedBankAccount.branchName}
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Branch Code:</strong> {invoice.selectedBankAccount.branchCode}
+                  </Typography>
+                </Box>
+              )}
             </Grid>
             <Grid item xs={12} md={6}>
               <Box sx={{ 
@@ -299,7 +334,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
           </Typography>
           {company && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              {company.name} | Reg: {company.registrationNumber} | Tax: {company.taxNumber}
+              {company.name} | Reg: {company.registrationNumber} | Tax: {company.tinNumber}
             </Typography>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

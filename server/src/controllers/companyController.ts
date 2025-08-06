@@ -49,8 +49,8 @@ export const getCompany = async (req: Request, res: Response) => {
 
 export const createCompany = async (req: Request, res: Response) => {
   try {
-    const { name, description, email } = req.body;
-    console.log('Creating company with data:', { name, description, email });
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
+    console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
 
     // Check if company with same name or email already exists
     const existingCompany = await Company.findOne({
@@ -69,6 +69,12 @@ export const createCompany = async (req: Request, res: Response) => {
       name,
       description,
       email,
+      address,
+      phone,
+      website,
+      registrationNumber,
+      tinNumber,
+      vatNumber,
       ownerId: (req.user as JwtPayload).userId
     });
 
@@ -97,7 +103,7 @@ export const createCompany = async (req: Request, res: Response) => {
 
 export const updateCompany = async (req: Request, res: Response) => {
   try {
-    const { name, description, email, address, phone, website, registrationNumber, taxNumber, logo } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -107,8 +113,10 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (phone !== undefined) updateData.phone = phone;
     if (website !== undefined) updateData.website = website;
     if (registrationNumber !== undefined) updateData.registrationNumber = registrationNumber;
-    if (taxNumber !== undefined) updateData.taxNumber = taxNumber;
+    if (tinNumber !== undefined) updateData.tinNumber = tinNumber;
+    if (vatNumber !== undefined) updateData.vatNumber = vatNumber;
     if (logo !== undefined) updateData.logo = logo;
+    if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
 
     const company = await Company.findByIdAndUpdate(
       req.params.id,
@@ -245,6 +253,77 @@ export const getCurrentCompany = async (req: Request, res: Response) => {
       error: error?.message || String(error),
       code: 'INTERNAL_ERROR'
     });
+  }
+};
+
+export const updateCurrentCompany = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const companyId = req.user?.companyId;
+    const userRole = req.user?.role;
+
+    if (!userId) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    // Find the current user's company
+    let company = null;
+    
+    // First try to find company by companyId if it exists
+    if (companyId && mongoose.Types.ObjectId.isValid(companyId)) {
+      company = await Company.findById(companyId);
+    }
+    
+    // If no company found by companyId, try to find by ownerId
+    if (!company) {
+      company = await Company.findOne({ ownerId: userId });
+    }
+
+    // If still no company found and user is a property owner, check their companyId
+    if (!company && userRole === 'owner') {
+      const propertyOwner = await PropertyOwner.findById(userId);
+      if (propertyOwner && propertyOwner.companyId) {
+        company = await Company.findById(propertyOwner.companyId);
+      }
+    }
+
+    if (!company) {
+      throw new AppError('Company not found', 404);
+    }
+
+    // Update the company
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
+    const updateData: Partial<ICompany> = {};
+
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (email !== undefined) updateData.email = email;
+    if (address !== undefined) updateData.address = address;
+    if (phone !== undefined) updateData.phone = phone;
+    if (website !== undefined) updateData.website = website;
+    if (registrationNumber !== undefined) updateData.registrationNumber = registrationNumber;
+    if (tinNumber !== undefined) updateData.tinNumber = tinNumber;
+    if (vatNumber !== undefined) updateData.vatNumber = vatNumber;
+    if (logo !== undefined) updateData.logo = logo;
+    if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
+
+    const updatedCompany = await Company.findByIdAndUpdate(
+      company._id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedCompany) {
+      throw new AppError('Error updating company', 500);
+    }
+
+    res.json(updatedCompany);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    console.error('Error in updateCurrentCompany:', error);
+    throw new AppError('Error updating company', 500);
   }
 };
 

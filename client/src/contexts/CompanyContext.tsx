@@ -2,6 +2,15 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import api from '../api/axios';
 import { useAuth } from './AuthContext';
 
+interface BankAccount {
+  accountNumber: string;
+  accountName: string;
+  accountType: 'USD NOSTRO' | 'ZiG';
+  bankName: string;
+  branchName: string;
+  branchCode: string;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -10,13 +19,15 @@ interface Company {
   email: string;
   website?: string;
   registrationNumber: string;
-  taxNumber: string;
+  tinNumber: string;
+  vatNumber?: string;
   ownerId: string;
   description?: string;
   logo?: string;
   isActive: boolean;
   subscriptionStatus: 'active' | 'inactive' | 'trial';
   subscriptionEndDate?: Date;
+  bankAccounts: BankAccount[];
   createdAt: string;
   updatedAt: string;
   __v: number;
@@ -42,7 +53,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const validateCompanyData = (data: any): Company => {
     if (!data._id || !data.name || !data.email || 
-        !data.registrationNumber || !data.taxNumber || 
+        !data.registrationNumber || !data.tinNumber || 
         !data.address || !data.phone) {
       console.error('Invalid company data:', data);
       throw new Error('Invalid company data received');
@@ -56,13 +67,15 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
       email: data.email,
       website: data.website,
       registrationNumber: data.registrationNumber,
-      taxNumber: data.taxNumber,
+      tinNumber: data.tinNumber,
+      vatNumber: data.vatNumber,
       ownerId: data.ownerId,
       description: data.description,
       logo: data.logo,
       isActive: data.isActive ?? true,
       subscriptionStatus: data.subscriptionStatus ?? 'trial',
       subscriptionEndDate: data.subscriptionEndDate,
+      bankAccounts: data.bankAccounts || [],
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
       __v: data.__v || 0
@@ -118,7 +131,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       // Validate required fields
       if (!companyData._id || !companyData.name || !companyData.email || 
-          !companyData.registrationNumber || !companyData.taxNumber || 
+          !companyData.registrationNumber || !companyData.tinNumber || 
           !companyData.address || !companyData.phone) {
         console.error('Invalid company data:', companyData);
         throw new Error('Invalid company data received');
@@ -133,13 +146,15 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         email: companyData.email,
         website: companyData.website,
         registrationNumber: companyData.registrationNumber,
-        taxNumber: companyData.taxNumber,
+        tinNumber: companyData.tinNumber,
+        vatNumber: companyData.vatNumber,
         ownerId: companyData.ownerId,
         description: companyData.description,
         logo: companyData.logo,
         isActive: companyData.isActive ?? true,
         subscriptionStatus: companyData.subscriptionStatus ?? 'trial',
         subscriptionEndDate: companyData.subscriptionEndDate,
+        bankAccounts: companyData.bankAccounts || [],
         createdAt: companyData.createdAt,
         updatedAt: companyData.updatedAt,
         __v: companyData.__v || 0

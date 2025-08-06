@@ -3,6 +3,7 @@ import { User } from '../models/User';
 import { Lease } from '../models/Lease';
 import { Property } from '../models/Property';
 import { AppError } from '../middleware/errorHandler';
+import { Payment } from '../models/Payment'; // Added import for Payment
 
 interface CommissionData {
   monthly: number;
@@ -26,10 +27,13 @@ interface AgencyCommission {
   yearly: number;
   total: number;
   details: {
+    paymentId: string;
+    paymentDate: Date;
     propertyId: string;
     propertyName: string;
-    rent: number;
-    commission: number;
+    propertyAddress: string;
+    rentalAmount: number;
+    agencyShare: number;
   }[];
 }
 
@@ -52,6 +56,11 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 404);
     }
 
+    // Get query parameters for filtering
+    const { year, month } = req.query;
+    const filterYear = year ? parseInt(year as string) : new Date().getFullYear();
+    const filterMonth = month !== undefined ? parseInt(month as string) : null;
+
     // Get all agents for the company
     const agents = await User.find({ companyId, role: 'agent' });
     
@@ -71,6 +80,7 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
         agentId: agent._id.toString(),
         agentName: `${agent.firstName} ${agent.lastName}`,
         commission: 0,
+        monthlyCommissions: [] as { month: number; year: number; commission: number }[],
         properties: [] as { propertyId: string; propertyName: string; rent: number; commission: number }[]
       };
 
@@ -96,6 +106,35 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
           rent,
           commission
         });
+
+        // Calculate monthly commissions for the lease period
+        const leaseStart = new Date(lease.startDate);
+        const leaseEnd = new Date(lease.endDate);
+        
+        // Generate monthly commission entries for the lease period
+        let currentDate = new Date(leaseStart);
+        while (currentDate <= leaseEnd) {
+          const month = currentDate.getMonth();
+          const year = currentDate.getFullYear();
+          
+          // Check if this month/year combination already exists
+          const existingMonth = agentDetails.monthlyCommissions.find(
+            m => m.month === month && m.year === year
+          );
+          
+          if (existingMonth) {
+            existingMonth.commission += commission;
+          } else {
+            agentDetails.monthlyCommissions.push({
+              month,
+              year,
+              commission
+            });
+          }
+          
+          // Move to next month
+          currentDate.setMonth(currentDate.getMonth() + 1);
+        }
 
         agentDetails.commission += commission;
 
@@ -137,38 +176,44 @@ export const getAgencyCommission = async (req: Request, res: Response) => {
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
 
-    // Get all active leases for the company
-    const properties = await Property.find({ companyId });
-    const propertyIds = properties.map(p => p._id);
+    // Get all payments for the company with commission details
+    const payments = await Payment.find({ 
+      companyId,
+      status: 'completed'
+    }).populate('propertyId', 'name address');
 
-    const leases = await Lease.find({
-      propertyId: { $in: propertyIds },
-      status: 'active'
-    });
+    for (const payment of payments) {
+      const property = payment.propertyId as any; // Cast to access populated fields
+      const agencyShare = payment.commissionDetails?.agencyShare || 0;
+      const rentalAmount = payment.amount;
 
-    for (const lease of leases) {
-      const property = properties.find(p => p._id.toString() === lease.propertyId.toString());
-      if (!property) continue;
+      // Only include payments with agency commission
+      if (agencyShare > 0) {
+        const commissionDetail = {
+          paymentId: payment._id.toString(),
+          paymentDate: payment.paymentDate,
+          propertyId: payment.propertyId.toString(),
+          propertyName: property?.name || 'Unknown Property',
+          propertyAddress: property?.address || 'Unknown Address',
+          rentalAmount: rentalAmount,
+          agencyShare: agencyShare
+        };
 
-      const rent = lease.rentAmount;
-      const commission = rent * 0.15; // 15% agency commission
+        agencyCommission.details.push(commissionDetail);
 
-      agencyCommission.details.push({
-        propertyId: property._id.toString(),
-        propertyName: property.name,
-        rent,
-        commission
-      });
-
-      // Add to monthly and yearly totals if lease is current
-      if (lease.startDate.getMonth() === currentMonth && lease.startDate.getFullYear() === currentYear) {
-        agencyCommission.monthly += commission;
+        // Add to monthly and yearly totals if payment is in current period
+        if (payment.paymentDate.getMonth() === currentMonth && payment.paymentDate.getFullYear() === currentYear) {
+          agencyCommission.monthly += agencyShare;
+        }
+        if (payment.paymentDate.getFullYear() === currentYear) {
+          agencyCommission.yearly += agencyShare;
+        }
+        agencyCommission.total += agencyShare;
       }
-      if (lease.startDate.getFullYear() === currentYear) {
-        agencyCommission.yearly += commission;
-      }
-      agencyCommission.total += commission;
     }
+
+    // Sort details by payment date (most recent first)
+    agencyCommission.details.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
 
     res.json(agencyCommission);
   } catch (error) {

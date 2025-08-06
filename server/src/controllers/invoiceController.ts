@@ -32,19 +32,19 @@ const validateClientDetails = (client: any) => {
     throw new AppError('Client details are required', 400);
   }
 
-  const requiredFields = ['name', 'address', 'tinNumber', 'bpNumber', 'vatNumber'];
-  for (const field of requiredFields) {
-    if (!client[field] || typeof client[field] !== 'string' || client[field].trim() === '') {
-      throw new AppError(`Client ${field} is required`, 400);
-    }
+  // Only name and address are required
+  if (!client.name || typeof client.name !== 'string' || client.name.trim() === '') {
+    throw new AppError('Client name is required', 400);
+  }
+  if (!client.address || typeof client.address !== 'string' || client.address.trim() === '') {
+    throw new AppError('Client address is required', 400);
   }
 
   return {
     name: client.name.trim(),
     address: client.address.trim(),
-    tinNumber: client.tinNumber.trim(),
-    bpNumber: client.bpNumber.trim(),
-    vatNumber: client.vatNumber.trim()
+    tinNumber: client.tinNumber?.trim() || undefined,
+    vatNumber: client.vatNumber?.trim() || undefined
   };
 };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Container,
@@ -25,7 +25,8 @@ import {
   MenuItem,
   InputLabel,
   FormControl,
-  SelectChangeEvent
+  SelectChangeEvent,
+  CircularProgress
 } from '@mui/material';
 import {
   Save as SaveIcon,
@@ -35,6 +36,9 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon
 } from '@mui/icons-material';
+import { useCompany } from '../../contexts/CompanyContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { apiService } from '../../api';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -65,6 +69,16 @@ const TabPanel = (props: TabPanelProps) => {
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  
+  // Get company data from context
+  const { company, loading: companyLoading, refreshCompany } = useCompany();
+  const { user } = useAuth();
+  
   const [settings, setSettings] = useState({
     // Account Settings
     name: '',
@@ -84,8 +98,20 @@ const SettingsPage: React.FC = () => {
     // Company Settings
     companyName: '',
     registrationNumber: '',
-    taxId: '',
-    bankAccount: '',
+    tinNumber: '',
+    vatNumber: '',
+    companyAddress: '',
+    companyPhone: '',
+    companyEmail: '',
+    companyWebsite: '',
+    bankAccounts: [] as Array<{
+      accountNumber: string;
+      accountName: string;
+      accountType: 'USD NOSTRO' | 'ZiG';
+      bankName: string;
+      branchName: string;
+      branchCode: string;
+    }>,
     // Finance Settings
     defaultCurrency: 'USD',
     taxRate: 0,
@@ -102,9 +128,39 @@ const SettingsPage: React.FC = () => {
     defaultInvoiceTerms: 'net30',
     invoiceReminderDays: [7, 3, 1],
     // Bank Settings
-    bankAccounts: [],
     importFormat: 'CSV'
   });
+
+  // Update settings when company data is loaded
+  useEffect(() => {
+    if (company) {
+      setSettings(prev => ({
+        ...prev,
+        companyName: company.name || '',
+        registrationNumber: company.registrationNumber || '',
+        tinNumber: company.tinNumber || '',
+        vatNumber: company.vatNumber || '',
+        companyAddress: company.address || '',
+        companyPhone: company.phone || '',
+        companyEmail: company.email || '',
+        companyWebsite: company.website || '',
+        bankAccounts: company.bankAccounts || [],
+      }));
+    }
+  }, [company]);
+
+  // Update user data when user is loaded
+  useEffect(() => {
+    if (user) {
+      setSettings(prev => ({
+        ...prev,
+        name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+        email: user.email || '',
+        phone: user.phone || '',
+        twoFactorEnabled: user.twoFactorEnabled || false,
+      }));
+    }
+  }, [user]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
@@ -126,20 +182,148 @@ const SettingsPage: React.FC = () => {
     }));
   };
 
-  const handleSave = async () => {
+  const handleBankAccountChange = (index: number, field: string, value: string) => {
+    setSettings(prev => ({
+      ...prev,
+      bankAccounts: prev.bankAccounts.map((account, i) => 
+        i === index ? { ...account, [field]: value } : account
+      )
+    }));
+  };
+
+  const addBankAccount = () => {
+    if (settings.bankAccounts.length >= 2) {
+      setMessage({
+        type: 'error',
+        text: 'Maximum of 2 bank accounts allowed.',
+      });
+      return;
+    }
+    
+    setSettings(prev => ({
+      ...prev,
+      bankAccounts: [...prev.bankAccounts, {
+        accountNumber: '',
+        accountName: '',
+        accountType: 'USD NOSTRO',
+        bankName: '',
+        branchName: '',
+        branchCode: ''
+      }]
+    }));
+  };
+
+  const removeBankAccount = (index: number) => {
+    setSettings(prev => ({
+      ...prev,
+      bankAccounts: prev.bankAccounts.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleCompanyUpdate = async () => {
+    if (!company?._id) {
+      setMessage({
+        type: 'error',
+        text: 'Company information not found.',
+      });
+      return;
+    }
+
     try {
-      // TODO: Implement save functionality
-      console.log('Saving settings:', settings);
-    } catch (error) {
-      console.error('Error saving settings:', error);
+      setLoading(true);
+      setMessage(null);
+      
+      const companyUpdateData = {
+        name: settings.companyName,
+        registrationNumber: settings.registrationNumber,
+        tinNumber: settings.tinNumber,
+        vatNumber: settings.vatNumber,
+        address: settings.companyAddress,
+        phone: settings.companyPhone,
+        email: settings.companyEmail,
+        website: settings.companyWebsite,
+        bankAccounts: settings.bankAccounts,
+      };
+
+      await apiService.updateCompany(companyUpdateData);
+      await refreshCompany(); // Refresh company data
+      
+      setMessage({
+        type: 'success',
+        text: 'Company information updated successfully',
+      });
+    } catch (error: any) {
+      console.error('Error updating company:', error);
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.message || 'Error updating company information. Please try again.',
+      });
+    } finally {
+      setLoading(false);
     }
   };
+
+  const handleSave = async () => {
+    try {
+      setLoading(true);
+      setMessage(null);
+      
+      // Save company data including bank accounts
+      if (company?._id) {
+        const companyUpdateData = {
+          name: settings.companyName,
+          registrationNumber: settings.registrationNumber,
+          tinNumber: settings.tinNumber,
+          vatNumber: settings.vatNumber,
+          address: settings.companyAddress,
+          phone: settings.companyPhone,
+          email: settings.companyEmail,
+          website: settings.companyWebsite,
+          bankAccounts: settings.bankAccounts,
+        };
+
+        await apiService.updateCompany(companyUpdateData);
+        await refreshCompany(); // Refresh company data
+      }
+      
+      setMessage({
+        type: 'success',
+        text: 'Settings saved successfully',
+      });
+    } catch (error: any) {
+      console.error('Error saving settings:', error);
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.message || 'Error saving settings. Please try again.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (companyLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Settings
       </Typography>
+
+      {message && (
+        <Alert 
+          severity={message.type} 
+          sx={{ mb: 2 }}
+          onClose={() => setMessage(null)}
+        >
+          {message.text}
+        </Alert>
+      )}
 
       <Paper sx={{ width: '100%', mb: 2 }}>
         <Tabs
@@ -172,6 +356,8 @@ const SettingsPage: React.FC = () => {
                 value={settings.name}
                 onChange={handleInputChange}
                 margin="normal"
+                disabled
+                helperText="Contact administrator to update profile information"
               />
               <TextField
                 fullWidth
@@ -181,6 +367,8 @@ const SettingsPage: React.FC = () => {
                 value={settings.email}
                 onChange={handleInputChange}
                 margin="normal"
+                disabled
+                helperText="Contact administrator to update email"
               />
               <TextField
                 fullWidth
@@ -189,6 +377,8 @@ const SettingsPage: React.FC = () => {
                 value={settings.phone}
                 onChange={handleInputChange}
                 margin="normal"
+                disabled
+                helperText="Contact administrator to update phone"
               />
             </Grid>
 
@@ -300,10 +490,16 @@ const SettingsPage: React.FC = () => {
         {/* Company Settings */}
         <TabPanel value={activeTab} index={1}>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12}>
               <Typography variant="h6" gutterBottom>
                 Company Information
               </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Update your company details. These changes will be reflected across the system.
+              </Typography>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
                 label="Company Name"
@@ -311,6 +507,7 @@ const SettingsPage: React.FC = () => {
                 value={settings.companyName}
                 onChange={handleInputChange}
                 margin="normal"
+                required
               />
               <TextField
                 fullWidth
@@ -319,29 +516,194 @@ const SettingsPage: React.FC = () => {
                 value={settings.registrationNumber}
                 onChange={handleInputChange}
                 margin="normal"
+                required
               />
               <TextField
                 fullWidth
-                label="Tax ID"
-                name="taxId"
-                value={settings.taxId}
+                label="Tax Number (TIN)"
+                name="tinNumber"
+                value={settings.tinNumber}
                 onChange={handleInputChange}
                 margin="normal"
+                required
+              />
+              <TextField
+                fullWidth
+                label="VAT Number"
+                name="vatNumber"
+                value={settings.vatNumber}
+                onChange={handleInputChange}
+                margin="normal"
+              />
+              <TextField
+                fullWidth
+                label="Company Email"
+                name="companyEmail"
+                type="email"
+                value={settings.companyEmail}
+                onChange={handleInputChange}
+                margin="normal"
+                required
               />
             </Grid>
 
             <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                Bank Details
-              </Typography>
               <TextField
                 fullWidth
-                label="Bank Account"
-                name="bankAccount"
-                value={settings.bankAccount}
+                label="Company Address"
+                name="companyAddress"
+                value={settings.companyAddress}
                 onChange={handleInputChange}
                 margin="normal"
+                multiline
+                rows={3}
+                required
               />
+              <TextField
+                fullWidth
+                label="Company Phone"
+                name="companyPhone"
+                value={settings.companyPhone}
+                onChange={handleInputChange}
+                margin="normal"
+                required
+              />
+              <TextField
+                fullWidth
+                label="Company Website"
+                name="companyWebsite"
+                value={settings.companyWebsite}
+                onChange={handleInputChange}
+                margin="normal"
+                placeholder="https://www.example.com"
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
+                  onClick={handleCompanyUpdate}
+                  disabled={loading}
+                >
+                  {loading ? 'Updating...' : 'Update Company Information'}
+                </Button>
+              </Box>
+            </Grid>
+
+            {/* Bank Account Management */}
+            <Grid item xs={12}>
+              <Divider sx={{ my: 3 }} />
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Bank Accounts
+                </Typography>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={addBankAccount}
+                  disabled={settings.bankAccounts.length >= 2}
+                >
+                  Add Bank Account
+                </Button>
+              </Box>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Manage your company's bank accounts. You can add up to 2 bank accounts.
+              </Typography>
+
+              {settings.bankAccounts.map((account, index) => (
+                <Card key={index} sx={{ mb: 2 }}>
+                  <CardHeader
+                    title={`Bank Account ${index + 1}`}
+                    action={
+                      <IconButton
+                        onClick={() => removeBankAccount(index)}
+                        color="error"
+                        size="small"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    }
+                  />
+                  <CardContent>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Account Number"
+                          value={account.accountNumber}
+                          onChange={(e) => handleBankAccountChange(index, 'accountNumber', e.target.value)}
+                          margin="normal"
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Account Name"
+                          value={account.accountName}
+                          onChange={(e) => handleBankAccountChange(index, 'accountName', e.target.value)}
+                          margin="normal"
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <FormControl fullWidth margin="normal">
+                          <InputLabel>Account Type</InputLabel>
+                          <Select
+                            value={account.accountType}
+                            onChange={(e) => handleBankAccountChange(index, 'accountType', e.target.value)}
+                            label="Account Type"
+                          >
+                            <MenuItem value="USD NOSTRO">USD NOSTRO</MenuItem>
+                            <MenuItem value="ZiG">ZiG</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Bank Name"
+                          value={account.bankName}
+                          onChange={(e) => handleBankAccountChange(index, 'bankName', e.target.value)}
+                          margin="normal"
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Branch Name"
+                          value={account.branchName}
+                          onChange={(e) => handleBankAccountChange(index, 'branchName', e.target.value)}
+                          margin="normal"
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Branch Code"
+                          value={account.branchCode}
+                          onChange={(e) => handleBankAccountChange(index, 'branchCode', e.target.value)}
+                          margin="normal"
+                          required
+                        />
+                      </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
+              ))}
+
+              {settings.bankAccounts.length === 0 && (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography variant="body2" color="textSecondary">
+                    No bank accounts added yet. Click "Add Bank Account" to add your first bank account.
+                  </Typography>
+                </Box>
+              )}
             </Grid>
           </Grid>
         </TabPanel>
@@ -542,10 +904,11 @@ const SettingsPage: React.FC = () => {
         <Button
           variant="contained"
           color="primary"
-          startIcon={<SaveIcon />}
+          startIcon={loading ? <CircularProgress size={20} /> : <SaveIcon />}
           onClick={handleSave}
+          disabled={loading}
         >
-          Save Changes
+          {loading ? 'Saving...' : 'Save Changes'}
         </Button>
       </Box>
     </Box>

@@ -740,7 +740,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
         // Get company details if available
         let company = null;
         if (payment.companyId) {
-            company = yield Company_1.Company.findById(payment.companyId).select('name address phone email website registrationNumber taxNumber logo description');
+            company = yield Company_1.Company.findById(payment.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
         }
         // Generate HTML receipt with logo
         const htmlReceipt = `
@@ -775,7 +775,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               <div class="company-details">Phone: ${(company === null || company === void 0 ? void 0 : company.phone) || 'Phone not available'} | Email: ${(company === null || company === void 0 ? void 0 : company.email) || 'Email not available'}</div>
               ${(company === null || company === void 0 ? void 0 : company.website) ? `<div class="company-details">Website: ${company.website}</div>` : ''}
               ${(company === null || company === void 0 ? void 0 : company.registrationNumber) ? `<div class="company-details">Reg. No: ${company.registrationNumber}</div>` : ''}
-              ${(company === null || company === void 0 ? void 0 : company.taxNumber) ? `<div class="company-details">Tax No: ${company.taxNumber}</div>` : ''}
+              ${(company === null || company === void 0 ? void 0 : company.tinNumber) ? `<div class="company-details">Tax No: ${company.tinNumber}</div>` : ''}
               <div class="receipt-number">Receipt #${payment.referenceNumber}</div>
             </div>
             
@@ -875,7 +875,7 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Get company details if available
         let company = null;
         if (payment.companyId) {
-            company = yield Company_1.Company.findById(payment.companyId).select('name address phone email website registrationNumber taxNumber logo description');
+            company = yield Company_1.Company.findById(payment.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
         }
         // Create receipt data
         const receipt = {

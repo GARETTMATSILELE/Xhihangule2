@@ -26,6 +26,7 @@ const upload = (0, multer_1.default)({
 });
 // Protected routes
 router.get('/current', auth_1.auth, companyController_1.getCurrentCompany);
+router.put('/current', auth_1.auth, companyController_1.updateCurrentCompany);
 // Public routes
 router.get('/', companyController_1.getCompanies);
 router.get('/:id', companyController_1.getCompany);

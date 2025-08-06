@@ -10,6 +10,8 @@ export interface Company {
   _id: string;
   name: string;
   ownerId: string;
+  tinNumber?: string;
+  vatNumber?: string;
 }
 
 export interface CreateCompany {
@@ -19,5 +21,6 @@ export interface CreateCompany {
   email?: string;
   website?: string;
   registrationNumber?: string;
-  taxNumber?: string;
+  tinNumber?: string;
+  vatNumber?: string;
 } 

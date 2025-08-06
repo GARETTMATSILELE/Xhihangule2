@@ -7,7 +7,8 @@ import {
   updateCompany,
   deleteCompany,
   getCurrentCompany,
-  uploadCompanyLogo
+  uploadCompanyLogo,
+  updateCurrentCompany
 } from '../controllers/companyController';
 import { auth } from '../middleware/auth';
 
@@ -31,6 +32,7 @@ const upload = multer({
 
 // Protected routes
 router.get('/current', auth, getCurrentCompany);
+router.put('/current', auth, updateCurrentCompany);
 
 // Public routes
 router.get('/', getCompanies);

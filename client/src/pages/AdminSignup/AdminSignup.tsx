@@ -36,7 +36,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
     companyEmail: '',
     companyWebsite: '',
     companyRegistration: '',
-    companyTaxNumber: '',
+    companyTinNumber: '',
   });
   const [error, setError] = useState('');
 
@@ -74,7 +74,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
 
     // Validate company details
     if (!formData.companyName || !formData.companyAddress || !formData.companyPhone || 
-        !formData.companyEmail || !formData.companyRegistration || !formData.companyTaxNumber) {
+        !formData.companyEmail || !formData.companyRegistration || !formData.companyTinNumber) {
       setError('Please fill in all required company fields');
       return;
     }
@@ -92,7 +92,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
           email: formData.companyEmail,
           website: formData.companyWebsite,
           registrationNumber: formData.companyRegistration,
-          taxNumber: formData.companyTaxNumber,
+          tinNumber: formData.companyTinNumber,
         }
       );
       navigate('/login', { state: { message: 'Registration successful! Please log in.' } });
@@ -223,10 +223,10 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
               margin="normal"
               required
               fullWidth
-              id="companyTaxNumber"
+              id="companyTinNumber"
               label="Company Tax Number"
-              name="companyTaxNumber"
-              value={formData.companyTaxNumber}
+              name="companyTinNumber"
+              value={formData.companyTinNumber}
               onChange={handleChange}
             />
           </>

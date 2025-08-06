@@ -11,9 +11,17 @@ interface InvoiceItem {
 interface ClientDetails {
   name: string;
   address: string;
-  tinNumber: string;
-  bpNumber: string;
-  vatNumber: string;
+  tinNumber?: string;
+  vatNumber?: string;
+}
+
+interface BankAccount {
+  accountNumber: string;
+  accountName: string;
+  accountType: 'USD NOSTRO' | 'ZiG';
+  bankName: string;
+  branchName: string;
+  branchCode: string;
 }
 
 export interface IInvoice extends Document {
@@ -31,6 +39,7 @@ export interface IInvoice extends Document {
   type: 'rental' | 'sale';
   saleDetails?: string;
   status: 'paid' | 'unpaid' | 'overdue';
+  selectedBankAccount?: BankAccount;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,9 +54,17 @@ const InvoiceItemSchema = new Schema<InvoiceItem>({
 const ClientDetailsSchema = new Schema<ClientDetails>({
   name: { type: String, required: true },
   address: { type: String, required: true },
-  tinNumber: { type: String, required: true },
-  bpNumber: { type: String, required: true },
-  vatNumber: { type: String, required: true }
+  tinNumber: { type: String, required: false },
+  vatNumber: { type: String, required: false }
+});
+
+const BankAccountSchema = new Schema<BankAccount>({
+  accountNumber: { type: String, required: true },
+  accountName: { type: String, required: true },
+  accountType: { type: String, enum: ['USD NOSTRO', 'ZiG'], required: true },
+  bankName: { type: String, required: true },
+  branchName: { type: String, required: true },
+  branchCode: { type: String, required: true }
 });
 
 const InvoiceSchema: Schema = new Schema({
@@ -65,6 +82,7 @@ const InvoiceSchema: Schema = new Schema({
   type: { type: String, enum: ['rental', 'sale'], required: true },
   saleDetails: { type: String },
   status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
+  selectedBankAccount: { type: BankAccountSchema, required: false },
 }, { timestamps: true });
 
 export const Invoice = accountingConnection.model<IInvoice>('Invoice', InvoiceSchema, 'invoices'); 

@@ -36,6 +36,38 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Company = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const bankAccountSchema = new mongoose_1.Schema({
+    accountNumber: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    accountName: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    accountType: {
+        type: String,
+        enum: ['USD NOSTRO', 'ZiG'],
+        required: true
+    },
+    bankName: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    branchName: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    branchCode: {
+        type: String,
+        required: true,
+        trim: true
+    }
+});
 const companySchema = new mongoose_1.Schema({
     name: {
         type: String,
@@ -67,9 +99,13 @@ const companySchema = new mongoose_1.Schema({
         required: true,
         trim: true
     },
-    taxNumber: {
+    tinNumber: {
         type: String,
         required: true,
+        trim: true
+    },
+    vatNumber: {
+        type: String,
         trim: true
     },
     ownerId: {
@@ -91,6 +127,16 @@ const companySchema = new mongoose_1.Schema({
     },
     subscriptionEndDate: {
         type: Date
+    },
+    bankAccounts: {
+        type: [bankAccountSchema],
+        default: [],
+        validate: {
+            validator: function (accounts) {
+                return accounts.length <= 2;
+            },
+            message: 'Company can have a maximum of 2 bank accounts'
+        }
     }
 }, {
     timestamps: true

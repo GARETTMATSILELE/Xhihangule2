@@ -12,9 +12,13 @@ const propertyAccountController_1 = require("../controllers/propertyAccountContr
 const router = express_1.default.Router();
 // Debug middleware
 router.use((req, res, next) => {
+    console.log('=== ACCOUNTANT ROUTE DEBUG ===');
     console.log('Accountant route accessed:', req.method, req.path);
     console.log('User:', req.user);
     console.log('Full URL:', req.originalUrl);
+    console.log('Base URL:', req.baseUrl);
+    console.log('Original URL:', req.originalUrl);
+    console.log('=============================');
     next();
 });
 // Apply authentication middleware to all routes

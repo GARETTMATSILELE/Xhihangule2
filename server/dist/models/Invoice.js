@@ -12,9 +12,16 @@ const InvoiceItemSchema = new mongoose_1.Schema({
 const ClientDetailsSchema = new mongoose_1.Schema({
     name: { type: String, required: true },
     address: { type: String, required: true },
-    tinNumber: { type: String, required: true },
-    bpNumber: { type: String, required: true },
-    vatNumber: { type: String, required: true }
+    tinNumber: { type: String, required: false },
+    vatNumber: { type: String, required: false }
+});
+const BankAccountSchema = new mongoose_1.Schema({
+    accountNumber: { type: String, required: true },
+    accountName: { type: String, required: true },
+    accountType: { type: String, enum: ['USD NOSTRO', 'ZiG'], required: true },
+    bankName: { type: String, required: true },
+    branchName: { type: String, required: true },
+    branchCode: { type: String, required: true }
 });
 const InvoiceSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true },
@@ -31,5 +38,6 @@ const InvoiceSchema = new mongoose_1.Schema({
     type: { type: String, enum: ['rental', 'sale'], required: true },
     saleDetails: { type: String },
     status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
+    selectedBankAccount: { type: BankAccountSchema, required: false },
 }, { timestamps: true });
 exports.Invoice = database_1.accountingConnection.model('Invoice', InvoiceSchema, 'invoices');

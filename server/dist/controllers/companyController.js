@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadCompanyLogo = exports.getCompanyById = exports.getCurrentCompany = exports.deleteCompany = exports.updateCompany = exports.createCompany = exports.getCompany = exports.getCompanies = void 0;
+exports.uploadCompanyLogo = exports.getCompanyById = exports.updateCurrentCompany = exports.getCurrentCompany = exports.deleteCompany = exports.updateCompany = exports.createCompany = exports.getCompany = exports.getCompanies = void 0;
 const Company_1 = require("../models/Company");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -60,8 +60,8 @@ const getCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.getCompany = getCompany;
 const createCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, email } = req.body;
-        console.log('Creating company with data:', { name, description, email });
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
+        console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
         // Check if company with same name or email already exists
         const existingCompany = yield Company_1.Company.findOne({
             $or: [
@@ -77,6 +77,12 @@ const createCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             name,
             description,
             email,
+            address,
+            phone,
+            website,
+            registrationNumber,
+            tinNumber,
+            vatNumber,
             ownerId: req.user.userId
         });
         console.log('Saving new company:', company);
@@ -102,7 +108,7 @@ const createCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.createCompany = createCompany;
 const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, email, address, phone, website, registrationNumber, taxNumber, logo } = req.body;
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -118,10 +124,14 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             updateData.website = website;
         if (registrationNumber !== undefined)
             updateData.registrationNumber = registrationNumber;
-        if (taxNumber !== undefined)
-            updateData.taxNumber = taxNumber;
+        if (tinNumber !== undefined)
+            updateData.tinNumber = tinNumber;
+        if (vatNumber !== undefined)
+            updateData.vatNumber = vatNumber;
         if (logo !== undefined)
             updateData.logo = logo;
+        if (bankAccounts !== undefined)
+            updateData.bankAccounts = bankAccounts;
         const company = yield Company_1.Company.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true, runValidators: true });
         if (!company) {
             throw new errorHandler_1.AppError('Company not found', 404);
@@ -250,6 +260,75 @@ const getCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getCurrentCompany = getCurrentCompany;
+const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const userRole = (_c = req.user) === null || _c === void 0 ? void 0 : _c.role;
+        if (!userId) {
+            throw new errorHandler_1.AppError('User not authenticated', 401);
+        }
+        // Find the current user's company
+        let company = null;
+        // First try to find company by companyId if it exists
+        if (companyId && mongoose_1.default.Types.ObjectId.isValid(companyId)) {
+            company = yield Company_1.Company.findById(companyId);
+        }
+        // If no company found by companyId, try to find by ownerId
+        if (!company) {
+            company = yield Company_1.Company.findOne({ ownerId: userId });
+        }
+        // If still no company found and user is a property owner, check their companyId
+        if (!company && userRole === 'owner') {
+            const propertyOwner = yield PropertyOwner_1.PropertyOwner.findById(userId);
+            if (propertyOwner && propertyOwner.companyId) {
+                company = yield Company_1.Company.findById(propertyOwner.companyId);
+            }
+        }
+        if (!company) {
+            throw new errorHandler_1.AppError('Company not found', 404);
+        }
+        // Update the company
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
+        const updateData = {};
+        if (name !== undefined)
+            updateData.name = name;
+        if (description !== undefined)
+            updateData.description = description;
+        if (email !== undefined)
+            updateData.email = email;
+        if (address !== undefined)
+            updateData.address = address;
+        if (phone !== undefined)
+            updateData.phone = phone;
+        if (website !== undefined)
+            updateData.website = website;
+        if (registrationNumber !== undefined)
+            updateData.registrationNumber = registrationNumber;
+        if (tinNumber !== undefined)
+            updateData.tinNumber = tinNumber;
+        if (vatNumber !== undefined)
+            updateData.vatNumber = vatNumber;
+        if (logo !== undefined)
+            updateData.logo = logo;
+        if (bankAccounts !== undefined)
+            updateData.bankAccounts = bankAccounts;
+        const updatedCompany = yield Company_1.Company.findByIdAndUpdate(company._id, { $set: updateData }, { new: true, runValidators: true });
+        if (!updatedCompany) {
+            throw new errorHandler_1.AppError('Error updating company', 500);
+        }
+        res.json(updatedCompany);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            throw error;
+        }
+        console.error('Error in updateCurrentCompany:', error);
+        throw new errorHandler_1.AppError('Error updating company', 500);
+    }
+});
+exports.updateCurrentCompany = updateCurrentCompany;
 const getCompanyById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companyId = req.params.id;

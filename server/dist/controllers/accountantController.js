@@ -14,10 +14,12 @@ const User_1 = require("../models/User");
 const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
+const Payment_1 = require("../models/Payment"); // Added import for Payment
 const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
-        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        console.log('Getting agent commissions for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
@@ -70,6 +72,7 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
             commissionData.details.push(agentDetails);
         }
+        console.log('Agent commissions data:', JSON.stringify(commissionData, null, 2));
         res.json(commissionData);
     }
     catch (error) {
@@ -79,9 +82,10 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.getAgentCommissions = getAgentCommissions;
 const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     try {
-        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        console.log('Getting agency commission for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
@@ -94,34 +98,40 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
         const currentDate = new Date();
         const currentMonth = currentDate.getMonth();
         const currentYear = currentDate.getFullYear();
-        // Get all active leases for the company
-        const properties = yield Property_1.Property.find({ companyId });
-        const propertyIds = properties.map(p => p._id);
-        const leases = yield Lease_1.Lease.find({
-            propertyId: { $in: propertyIds },
-            status: 'active'
-        });
-        for (const lease of leases) {
-            const property = properties.find(p => p._id.toString() === lease.propertyId.toString());
-            if (!property)
-                continue;
-            const rent = lease.rentAmount;
-            const commission = rent * 0.15; // 15% agency commission
-            agencyCommission.details.push({
-                propertyId: property._id.toString(),
-                propertyName: property.name,
-                rent,
-                commission
-            });
-            // Add to monthly and yearly totals if lease is current
-            if (lease.startDate.getMonth() === currentMonth && lease.startDate.getFullYear() === currentYear) {
-                agencyCommission.monthly += commission;
+        // Get all payments for the company with commission details
+        const payments = yield Payment_1.Payment.find({
+            companyId,
+            status: 'completed'
+        }).populate('propertyId', 'name address');
+        for (const payment of payments) {
+            const property = payment.propertyId; // Cast to access populated fields
+            const agencyShare = ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.agencyShare) || 0;
+            const rentalAmount = payment.amount;
+            // Only include payments with agency commission
+            if (agencyShare > 0) {
+                const commissionDetail = {
+                    paymentId: payment._id.toString(),
+                    paymentDate: payment.paymentDate,
+                    propertyId: payment.propertyId.toString(),
+                    propertyName: (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property',
+                    propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || 'Unknown Address',
+                    rentalAmount: rentalAmount,
+                    agencyShare: agencyShare
+                };
+                agencyCommission.details.push(commissionDetail);
+                // Add to monthly and yearly totals if payment is in current period
+                if (payment.paymentDate.getMonth() === currentMonth && payment.paymentDate.getFullYear() === currentYear) {
+                    agencyCommission.monthly += agencyShare;
+                }
+                if (payment.paymentDate.getFullYear() === currentYear) {
+                    agencyCommission.yearly += agencyShare;
+                }
+                agencyCommission.total += agencyShare;
             }
-            if (lease.startDate.getFullYear() === currentYear) {
-                agencyCommission.yearly += commission;
-            }
-            agencyCommission.total += commission;
         }
+        // Sort details by payment date (most recent first)
+        agencyCommission.details.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
+        console.log('Agency commission data:', JSON.stringify(agencyCommission, null, 2));
         res.json(agencyCommission);
     }
     catch (error) {
@@ -131,9 +141,10 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.getAgencyCommission = getAgencyCommission;
 const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
-        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        console.log('Getting PREA commission for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
@@ -174,6 +185,7 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
             preaCommission.total += commission;
         }
+        console.log('PREA commission data:', JSON.stringify(preaCommission, null, 2));
         res.json(preaCommission);
     }
     catch (error) {
