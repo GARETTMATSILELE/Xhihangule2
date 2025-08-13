@@ -259,8 +259,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       // Ensure ownerId is included (only if not manual property)
       if (!useManualProperty && formData.propertyId) {
         const property = properties.find(p => String(p._id) === String(formData.propertyId));
-        if (property && property.ownerId) {
-          dataToSubmit.ownerId = property.ownerId;
+        if (property && (property as any).ownerId) {
+          const rawOwner = (property as any).ownerId;
+          dataToSubmit.ownerId = typeof rawOwner === 'string' ? rawOwner : rawOwner?._id;
         }
       }
 

@@ -201,4 +201,6 @@ PaymentSchema.index({ propertyId: 1 });
 PaymentSchema.index({ tenantId: 1 });
 PaymentSchema.index({ agentId: 1 });
 PaymentSchema.index({ status: 1 });
+// Add compound index for agent commission queries
+PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
 exports.Payment = mongoose_1.default.model('Payment', PaymentSchema, collections_1.COLLECTIONS.PAYMENTS);

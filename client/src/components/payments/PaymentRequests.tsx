@@ -20,14 +20,25 @@ import {
   CircularProgress,
   Alert,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Grid,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
   Edit as EditIcon,
   CheckCircle as ApproveIcon,
   Cancel as RejectIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  Person as PersonIcon,
+  Home as PropertyIcon,
+  AccountBalance as BankIcon,
+  CalendarToday as DateIcon,
+  AttachMoney as MoneyIcon,
+  Description as ReasonIcon
 } from '@mui/icons-material';
 import { PaymentRequest } from '../../services/paymentRequestService';
 import { format } from 'date-fns';
@@ -57,6 +68,7 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   const [actionDialog, setActionDialog] = useState<'approve' | 'reject' | null>(null);
   const [notes, setNotes] = useState('');
+  const [detailsDialog, setDetailsDialog] = useState(false);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -101,6 +113,209 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
     setSelectedRequest(null);
     setNotes('');
   };
+
+  const handleViewDetails = (request: PaymentRequest) => {
+    setSelectedRequest(request);
+    setDetailsDialog(true);
+  };
+
+  const renderPaymentRequestDetails = (request: PaymentRequest) => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        Payment Request Details
+      </Typography>
+      
+      <Grid container spacing={3}>
+        {/* Basic Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Basic Information
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <MoneyIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Amount"
+                  secondary={`${request.currency} ${request.amount.toLocaleString()}`}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <ReasonIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Reason"
+                  secondary={request.reason}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <DateIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Request Date"
+                  secondary={format(new Date(request.requestDate), 'MMM dd, yyyy')}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <DateIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Due Date"
+                  secondary={format(new Date(request.dueDate), 'MMM dd, yyyy')}
+                />
+              </ListItem>
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Pay To Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Pay To Information
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <PersonIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Name"
+                  secondary={`${request.payTo.name} ${request.payTo.surname}`}
+                />
+              </ListItem>
+              {request.payTo.bankDetails && (
+                <ListItem>
+                  <ListItemIcon>
+                    <BankIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Bank Details"
+                    secondary={request.payTo.bankDetails}
+                  />
+                </ListItem>
+              )}
+              {request.payTo.accountNumber && (
+                <ListItem>
+                  <ListItemIcon>
+                    <BankIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Account Number"
+                    secondary={request.payTo.accountNumber}
+                  />
+                </ListItem>
+              )}
+              {request.payTo.address && (
+                <ListItem>
+                  <ListItemIcon>
+                    <PersonIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Address"
+                    secondary={request.payTo.address}
+                  />
+                </ListItem>
+              )}
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Property Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Property Information
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <PropertyIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Property Name"
+                  secondary={request.property?.name || 'Unknown Property'}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <PropertyIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Property Address"
+                  secondary={request.property?.address || 'No address available'}
+                />
+              </ListItem>
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Status and Processing Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Status & Processing
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <ViewIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Status"
+                  secondary={
+                    <Chip
+                      label={getStatusLabel(request.status)}
+                      color={getStatusColor(request.status) as any}
+                      size="small"
+                    />
+                  }
+                />
+              </ListItem>
+              {request.processedByUser && (
+                <ListItem>
+                  <ListItemIcon>
+                    <PersonIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Processed By"
+                    secondary={`${request.processedByUser.firstName} ${request.processedByUser.lastName}`}
+                  />
+                </ListItem>
+              )}
+              {request.processedDate && (
+                <ListItem>
+                  <ListItemIcon>
+                    <DateIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Processed Date"
+                    secondary={format(new Date(request.processedDate), 'MMM dd, yyyy HH:mm')}
+                  />
+                </ListItem>
+              )}
+              {request.notes && (
+                <ListItem>
+                  <ListItemIcon>
+                    <ReasonIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Notes"
+                    secondary={request.notes}
+                  />
+                </ListItem>
+              )}
+            </List>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Box>
+  );
 
   if (loading) {
     return (
@@ -186,9 +401,9 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
                 size="small"
                 variant="outlined"
                 startIcon={<ViewIcon />}
-                onClick={() => onView(request)}
+                onClick={() => handleViewDetails(request)}
               >
-                View
+                View Details
               </Button>
             </Box>
           </Paper>
@@ -278,7 +493,7 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
                     )}
                     <IconButton
                       size="small"
-                      onClick={() => onView(request)}
+                      onClick={() => handleViewDetails(request)}
                       title="View Details"
                     >
                       <ViewIcon />
@@ -335,6 +550,35 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
             color={actionDialog === 'approve' ? 'success' : 'error'}
           >
             {actionDialog === 'approve' ? 'Mark as Paid' : 'Reject'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Details Dialog */}
+      <Dialog
+        open={detailsDialog}
+        onClose={() => setDetailsDialog(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          sx: { maxHeight: '90vh' }
+        }}
+      >
+        <DialogTitle>
+          Payment Request Details
+          <Button
+            onClick={() => setDetailsDialog(false)}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            ×
+          </Button>
+        </DialogTitle>
+        <DialogContent>
+          {selectedRequest && renderPaymentRequestDetails(selectedRequest)}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetailsDialog(false)}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

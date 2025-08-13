@@ -125,7 +125,7 @@ const AccountantPaymentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      let response: Payment | undefined;
+      let response: any;
       if (data.paymentType === 'levy') {
         response = await paymentService.createLevyPayment(data);
         setSuccessMessage('Levy payment created successfully');
@@ -133,9 +133,11 @@ const AccountantPaymentsPage: React.FC = () => {
         response = await paymentService.createMunicipalPayment(data);
         setSuccessMessage('Municipal payment created successfully');
       } else {
-        response = await paymentService.createPayment(data);
-        if (response) {
-          setPayments(prev => [...prev, response as Payment]);
+        // Use accountant endpoint that accepts PaymentFormData
+        const resp = await paymentService.createPaymentAccountant(data);
+        const created = (resp as any)?.data || resp;
+        if (created) {
+          setPayments(prev => [...prev, created as Payment]);
         }
         setSuccessMessage('Payment created successfully');
       }

@@ -15,14 +15,25 @@ const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
 const Payment_1 = require("../models/Payment"); // Added import for Payment
+// Helper function to get week of year
+const getWeekOfYear = (date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+};
 const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     try {
-        console.log('Getting agent commissions for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
-        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
+        // Get query parameters for filtering
+        const { year, month } = req.query;
+        const filterYear = year ? parseInt(year) : new Date().getFullYear();
+        const filterMonth = month !== undefined ? parseInt(month) : null;
         // Get all agents for the company
         const agents = yield User_1.User.find({ companyId, role: 'agent' });
         const commissionData = {
@@ -39,40 +50,95 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 agentId: agent._id.toString(),
                 agentName: `${agent.firstName} ${agent.lastName}`,
                 commission: 0,
+                monthlyCommissions: [],
                 properties: []
             };
-            // Get all active leases for properties managed by this agent
-            const properties = yield Property_1.Property.find({ agentId: agent._id });
-            const propertyIds = properties.map(p => p._id);
+            // Get all leases where this agent is the owner (agent who created/manages the lease)
             const leases = yield Lease_1.Lease.find({
-                propertyId: { $in: propertyIds },
+                ownerId: agent._id,
                 status: 'active'
+            }).populate('propertyId', 'name address');
+            // Get all payments for properties managed by this agent
+            const propertyIds = leases.map(lease => lease.propertyId);
+            const payments = yield Payment_1.Payment.find({
+                propertyId: { $in: propertyIds },
+                status: 'completed'
+            }).populate('propertyId', 'name address');
+            // Create a map of payments by property and month/year for filtering
+            const paymentMap = new Map();
+            const agentCommissionMap = new Map(); // Track agent commissions by month/year
+            payments.forEach(payment => {
+                var _a;
+                const paymentDate = new Date(payment.paymentDate);
+                const month = paymentDate.getMonth();
+                const year = paymentDate.getFullYear();
+                const key = `${payment.propertyId.toString()}-${year}-${month}`;
+                paymentMap.set(key, payment);
+                // Track agent commission by month/year
+                const commissionKey = `${year}-${month}`;
+                const agentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
+                if (agentCommissionMap.has(commissionKey)) {
+                    agentCommissionMap.set(commissionKey, agentCommissionMap.get(commissionKey) + agentShare);
+                }
+                else {
+                    agentCommissionMap.set(commissionKey, agentShare);
+                }
             });
+            // Process each lease to build property details
             for (const lease of leases) {
-                const property = properties.find(p => p._id.toString() === lease.propertyId.toString());
+                const property = lease.propertyId; // Cast to access populated fields
                 if (!property)
                     continue;
                 const rent = lease.rentAmount;
-                const commission = rent * 0.1; // 10% commission
+                const commission = rent * 0.1; // Default commission calculation
+                // Check if this property has payments for the filtered period
+                let hasPayment = false;
+                if (filterMonth !== null) {
+                    // Check specific month
+                    const key = `${lease.propertyId.toString()}-${filterYear}-${filterMonth}`;
+                    hasPayment = paymentMap.has(key);
+                }
+                else {
+                    // Check entire year
+                    const yearPayments = Array.from(paymentMap.keys()).filter(key => key.startsWith(`${lease.propertyId.toString()}-${filterYear}-`));
+                    hasPayment = yearPayments.length > 0;
+                }
                 agentDetails.properties.push({
                     propertyId: property._id.toString(),
                     propertyName: property.name,
                     rent,
-                    commission
+                    commission,
+                    hasPayment
                 });
-                agentDetails.commission += commission;
-                // Add to monthly and yearly totals if lease is current
-                if (lease.startDate.getMonth() === currentMonth && lease.startDate.getFullYear() === currentYear) {
-                    commissionData.monthly += commission;
-                }
-                if (lease.startDate.getFullYear() === currentYear) {
-                    commissionData.yearly += commission;
-                }
-                commissionData.total += commission;
             }
+            // Calculate agent commissions from actual payment data
+            let totalAgentCommission = 0;
+            // Build monthly commissions array from actual payment data
+            for (const [key, agentShare] of agentCommissionMap) {
+                const [year, month] = key.split('-').map(Number);
+                // Apply filters if specified
+                if (filterYear && year !== filterYear)
+                    continue;
+                if (filterMonth !== null && month !== filterMonth)
+                    continue;
+                agentDetails.monthlyCommissions.push({
+                    month,
+                    year,
+                    commission: agentShare
+                });
+                totalAgentCommission += agentShare;
+                // Add to monthly and yearly totals if in current period
+                if (month === currentMonth && year === currentYear) {
+                    commissionData.monthly += agentShare;
+                }
+                if (year === currentYear) {
+                    commissionData.yearly += agentShare;
+                }
+                commissionData.total += agentShare;
+            }
+            agentDetails.commission = totalAgentCommission;
             commissionData.details.push(agentDetails);
         }
-        console.log('Agent commissions data:', JSON.stringify(commissionData, null, 2));
         res.json(commissionData);
     }
     catch (error) {
@@ -82,13 +148,19 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.getAgentCommissions = getAgentCommissions;
 const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b;
     try {
-        console.log('Getting agency commission for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
-        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
+        // Get query parameters for filtering
+        const { year, month, week, day, filterType } = req.query;
+        const filterYear = year ? parseInt(year) : new Date().getFullYear();
+        const filterMonth = month !== undefined ? parseInt(month) : null;
+        const filterWeek = week !== undefined ? parseInt(week) : null;
+        const filterDay = day !== undefined ? parseInt(day) : null;
+        const filterPeriod = filterType || 'monthly';
         const agencyCommission = {
             monthly: 0,
             yearly: 0,
@@ -105,33 +177,55 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
         }).populate('propertyId', 'name address');
         for (const payment of payments) {
             const property = payment.propertyId; // Cast to access populated fields
-            const agencyShare = ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.agencyShare) || 0;
+            const agencyShare = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare) || 0;
             const rentalAmount = payment.amount;
             // Only include payments with agency commission
             if (agencyShare > 0) {
-                const commissionDetail = {
-                    paymentId: payment._id.toString(),
-                    paymentDate: payment.paymentDate,
-                    propertyId: payment.propertyId.toString(),
-                    propertyName: (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property',
-                    propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || 'Unknown Address',
-                    rentalAmount: rentalAmount,
-                    agencyShare: agencyShare
-                };
-                agencyCommission.details.push(commissionDetail);
-                // Add to monthly and yearly totals if payment is in current period
-                if (payment.paymentDate.getMonth() === currentMonth && payment.paymentDate.getFullYear() === currentYear) {
-                    agencyCommission.monthly += agencyShare;
+                const paymentDate = new Date(payment.paymentDate);
+                const paymentYear = paymentDate.getFullYear();
+                const paymentMonth = paymentDate.getMonth();
+                const paymentWeek = getWeekOfYear(paymentDate);
+                const paymentDay = paymentDate.getDate();
+                // Apply filters based on filter type
+                let shouldInclude = true;
+                if (filterPeriod === 'yearly') {
+                    shouldInclude = paymentYear === filterYear;
                 }
-                if (payment.paymentDate.getFullYear() === currentYear) {
-                    agencyCommission.yearly += agencyShare;
+                else if (filterPeriod === 'monthly') {
+                    shouldInclude = paymentYear === filterYear && (filterMonth === null || paymentMonth === filterMonth);
                 }
-                agencyCommission.total += agencyShare;
+                else if (filterPeriod === 'weekly') {
+                    shouldInclude = paymentYear === filterYear && (filterWeek === null || paymentWeek === filterWeek);
+                }
+                else if (filterPeriod === 'daily') {
+                    shouldInclude = paymentYear === filterYear &&
+                        (filterMonth === null || paymentMonth === filterMonth) &&
+                        (filterDay === null || paymentDay === filterDay);
+                }
+                if (shouldInclude) {
+                    const commissionDetail = {
+                        paymentId: payment._id.toString(),
+                        paymentDate: payment.paymentDate,
+                        propertyId: payment.propertyId.toString(),
+                        propertyName: (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property',
+                        propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || 'Unknown Address',
+                        rentalAmount: rentalAmount,
+                        agencyShare: agencyShare
+                    };
+                    agencyCommission.details.push(commissionDetail);
+                    // Add to monthly and yearly totals if payment is in current period
+                    if (paymentMonth === currentMonth && paymentYear === currentYear) {
+                        agencyCommission.monthly += agencyShare;
+                    }
+                    if (paymentYear === currentYear) {
+                        agencyCommission.yearly += agencyShare;
+                    }
+                    agencyCommission.total += agencyShare;
+                }
             }
         }
         // Sort details by payment date (most recent first)
         agencyCommission.details.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
-        console.log('Agency commission data:', JSON.stringify(agencyCommission, null, 2));
         res.json(agencyCommission);
     }
     catch (error) {
@@ -141,10 +235,9 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.getAgencyCommission = getAgencyCommission;
 const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     try {
-        console.log('Getting PREA commission for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
-        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
@@ -185,7 +278,6 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
             preaCommission.total += commission;
         }
-        console.log('PREA commission data:', JSON.stringify(preaCommission, null, 2));
         res.json(preaCommission);
     }
     catch (error) {

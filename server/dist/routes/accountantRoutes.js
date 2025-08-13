@@ -9,17 +9,20 @@ const roles_1 = require("../middleware/roles");
 const accountantController_1 = require("../controllers/accountantController");
 const paymentController_1 = require("../controllers/paymentController");
 const propertyAccountController_1 = require("../controllers/propertyAccountController");
+const agentAccountController_1 = require("../controllers/agentAccountController");
 const router = express_1.default.Router();
 // Debug middleware
 router.use((req, res, next) => {
-    console.log('=== ACCOUNTANT ROUTE DEBUG ===');
     console.log('Accountant route accessed:', req.method, req.path);
-    console.log('User:', req.user);
-    console.log('Full URL:', req.originalUrl);
-    console.log('Base URL:', req.baseUrl);
-    console.log('Original URL:', req.originalUrl);
-    console.log('=============================');
     next();
+});
+// Test route to verify routes are working
+router.get('/test', (req, res) => {
+    res.json({
+        message: 'Accountant routes are working',
+        timestamp: new Date().toISOString(),
+        user: req.user ? { id: req.user.id, role: req.user.role } : null
+    });
 });
 // Apply authentication middleware to all routes
 router.use(auth_1.auth);
@@ -57,4 +60,18 @@ router.get('/property-accounts/:propertyId/payouts', roles_1.isAccountant, prope
 router.post('/property-accounts/sync', roles_1.isAccountant, propertyAccountController_1.syncPropertyAccounts);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.isAccountant, propertyAccountController_1.getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.isAccountant, propertyAccountController_1.getAcknowledgementDocument);
+// Agent Account routes - require accountant role
+router.get('/agent-accounts', roles_1.isAccountant, agentAccountController_1.getCompanyAgentAccounts);
+router.get('/agent-accounts/:agentId', roles_1.isAccountant, (req, res) => {
+    var _a;
+    console.log('Agent account detail route hit:', req.params.agentId);
+    console.log('User role:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.role);
+    (0, agentAccountController_1.getAgentAccount)(req, res);
+});
+router.post('/agent-accounts/:agentId/penalty', roles_1.isAccountant, agentAccountController_1.addPenalty);
+router.post('/agent-accounts/:agentId/payout', roles_1.isAccountant, agentAccountController_1.createAgentPayout);
+router.put('/agent-accounts/:agentId/payout/:payoutId/status', roles_1.isAccountant, agentAccountController_1.updatePayoutStatus);
+router.post('/agent-accounts/sync', roles_1.isAccountant, agentAccountController_1.syncAgentAccounts);
+router.post('/agent-accounts/:agentId/sync-commissions', roles_1.isAccountant, agentAccountController_1.syncAgentCommissions);
+router.get('/agent-accounts/:agentId/payout/:payoutId/acknowledgement', roles_1.isAccountant, agentAccountController_1.getAcknowledgementDocument);
 exports.default = router;

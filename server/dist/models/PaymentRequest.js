@@ -42,16 +42,16 @@ const PaymentRequestSchema = new mongoose_1.Schema({
         index: true
     },
     propertyId: {
-        type: String,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         required: true,
         ref: 'Property'
     },
     tenantId: {
-        type: String,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Tenant'
     },
     ownerId: {
-        type: String,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'PropertyOwner'
     },
     amount: {
@@ -90,7 +90,7 @@ const PaymentRequestSchema = new mongoose_1.Schema({
         required: true
     },
     processedBy: {
-        type: String,
+        type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'User'
     },
     processedDate: {

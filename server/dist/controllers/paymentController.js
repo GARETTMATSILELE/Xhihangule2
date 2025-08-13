@@ -239,30 +239,30 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     if (!req.user) {
         return res.status(401).json({ message: 'Authentication required' });
     }
-    const session = yield mongoose_1.default.startSession();
-    session.startTransaction();
-    try {
+    const currentUser = req.user;
+    // Helper to perform the actual create logic, with optional transaction session
+    const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
         const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, leaseId, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, processedBy, ownerId, manualPropertyAddress, manualTenantName } = req.body;
         // Validate required fields
         if (!amount || !paymentDate) {
-            return res.status(400).json({ message: 'Missing required fields: amount and paymentDate' });
+            return { error: { status: 400, message: 'Missing required fields: amount and paymentDate' } };
         }
         // Check if using manual entries
         const isManualProperty = propertyId && propertyId.startsWith('manual_');
         const isManualTenant = tenantId && tenantId.startsWith('manual_');
         // Validate manual entries
         if (isManualProperty && !manualPropertyAddress) {
-            return res.status(400).json({ message: 'Manual property address is required when using manual property entry' });
+            return { error: { status: 400, message: 'Manual property address is required when using manual property entry' } };
         }
         if (isManualTenant && !manualTenantName) {
-            return res.status(400).json({ message: 'Manual tenant name is required when using manual tenant entry' });
+            return { error: { status: 400, message: 'Manual tenant name is required when using manual tenant entry' } };
         }
         // Validate that either propertyId/tenantId are provided or manual entries are used
         if (!propertyId && !manualPropertyAddress) {
-            return res.status(400).json({ message: 'Either propertyId or manual property address is required' });
+            return { error: { status: 400, message: 'Either propertyId or manual property address is required' } };
         }
         if (!tenantId && !manualTenantName) {
-            return res.status(400).json({ message: 'Either tenantId or manual tenant name is required' });
+            return { error: { status: 400, message: 'Either tenantId or manual tenant name is required' } };
         }
         // Calculate commission if not provided
         let finalCommissionDetails = commissionDetails;
@@ -287,8 +287,8 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             propertyType: propertyType || 'residential',
             propertyId: isManualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(propertyId), // Generate new ID for manual entries
             tenantId: isManualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(tenantId), // Generate new ID for manual entries
-            agentId: new mongoose_1.default.Types.ObjectId(agentId || req.user.userId),
-            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            agentId: new mongoose_1.default.Types.ObjectId(agentId || user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
             paymentDate: new Date(paymentDate),
             paymentMethod,
             amount,
@@ -297,7 +297,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             rentalPeriodYear,
             referenceNumber: referenceNumber || `RCPT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             notes: notes || '',
-            processedBy: new mongoose_1.default.Types.ObjectId(processedBy || req.user.userId),
+            processedBy: new mongoose_1.default.Types.ObjectId(processedBy || user.userId),
             commissionDetails: finalCommissionDetails,
             status: 'completed',
             currency: currency || 'USD',
@@ -307,51 +307,91 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
             manualTenantName: isManualTenant ? manualTenantName : undefined,
         });
-        yield payment.save({ session });
-        // Update company revenue
-        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), {
-            $inc: {
-                revenue: finalCommissionDetails.agencyShare,
-            },
-        }, { session });
-        // Update agent commission
-        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || req.user.userId), {
-            $inc: {
-                commission: finalCommissionDetails.agentShare,
-            },
-        }, { session });
-        // If it's a rental payment, update property owner's balance
+        // Save and related updates (with or without session)
+        yield payment.save(session ? { session } : undefined);
+        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare } }, session ? { session } : undefined);
+        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
         if (paymentType === 'rental' && ownerId) {
-            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId), {
-                $inc: {
-                    balance: finalCommissionDetails.ownerAmount,
-                },
-            }, { session });
+            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId), { $inc: { balance: finalCommissionDetails.ownerAmount } }, session ? { session } : undefined);
         }
-        // Record income in property account
         try {
             yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
         }
         catch (error) {
             console.error('Failed to record income in property account:', error);
-            // Don't fail the entire transaction if property account recording fails
         }
-        yield session.commitTransaction();
-        res.status(201).json({
-            message: 'Payment processed successfully',
-            payment,
-        });
+        return { payment };
+    });
+    let session = null;
+    let useTransaction = false;
+    try {
+        // Try to use a transaction; if unsupported, we will fallback
+        try {
+            session = yield mongoose_1.default.startSession();
+            session.startTransaction();
+            useTransaction = true;
+        }
+        catch (e) {
+            console.warn('Transactions not supported or failed to start. Proceeding without transaction.', e);
+        }
+        const result = yield performCreate(currentUser, session || undefined);
+        if ('error' in result && result.error) {
+            return res.status(result.error.status).json({ message: result.error.message });
+        }
+        if (useTransaction && session) {
+            yield session.commitTransaction();
+        }
+        if ('payment' in result) {
+            return res.status(201).json({
+                message: 'Payment processed successfully',
+                payment: result.payment,
+            });
+        }
+        return res.status(500).json({ message: 'Unknown error creating payment' });
     }
     catch (error) {
-        yield session.abortTransaction();
+        if (useTransaction && session) {
+            try {
+                yield session.abortTransaction();
+            }
+            catch (_a) { }
+        }
+        // Fallback: if error is due to transactions not supported, retry without session
+        if ((error === null || error === void 0 ? void 0 : error.code) === 20 /* IllegalOperation */ || /Transaction numbers are only allowed/.test(String(error === null || error === void 0 ? void 0 : error.message))) {
+            try {
+                const result = yield performCreate(currentUser);
+                if ('error' in result && result.error) {
+                    return res.status(result.error.status).json({ message: result.error.message });
+                }
+                if ('payment' in result) {
+                    return res.status(201).json({
+                        message: 'Payment processed successfully',
+                        payment: result.payment,
+                    });
+                }
+                return res.status(500).json({ message: 'Unknown error creating payment' });
+            }
+            catch (fallbackErr) {
+                console.error('Fallback create payment failed:', fallbackErr);
+                return res.status(500).json({
+                    message: 'Failed to process payment',
+                    error: fallbackErr instanceof Error ? fallbackErr.message : 'Unknown error',
+                });
+            }
+        }
         console.error('Error processing payment:', error);
-        res.status(500).json({
+        return res.status(500).json({
             message: 'Failed to process payment',
             error: error instanceof Error ? error.message : 'Unknown error',
         });
     }
     finally {
-        session.endSession();
+        if (session) {
+            try {
+                session.endSession();
+            }
+            catch (_b) { }
+        }
     }
 });
 exports.createPaymentAccountant = createPaymentAccountant;

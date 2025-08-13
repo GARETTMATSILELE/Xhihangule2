@@ -21,3 +21,10 @@
 {"level":"info","message":"Added expense of 30 to property 68778f56a77a7624d898bde7","timestamp":"2025-07-30T10:01:16.867Z"}
 {"level":"info","message":"Created owner payout of 1000 for property 68778f56a77a7624d898bde7","timestamp":"2025-08-05T12:03:02.311Z"}
 {"level":"info","message":"Updated payout 6891f2f6b059dcda107658c5 status to completed for property 68778f56a77a7624d898bde7","timestamp":"2025-08-05T12:03:21.815Z"}
+{"level":"info","message":"Created new agent account for agent: 68583b3402abcc117d1c037d","timestamp":"2025-08-08T10:39:44.354Z"}
+{"level":"info","message":"Created new agent account for agent: 683dc55672d212a2f8aebff0","timestamp":"2025-08-08T10:39:44.367Z"}
+{"level":"info","message":"Created payout of 300 for agent 68583b3402abcc117d1c037d","timestamp":"2025-08-08T12:29:33.382Z"}
+{"level":"info","message":"Updated payout status to completed for agent 68583b3402abcc117d1c037d","timestamp":"2025-08-08T12:29:39.027Z"}
+{"level":"info","message":"Created payout of 200 for agent 68583b3402abcc117d1c037d","timestamp":"2025-08-08T12:36:21.418Z"}
+{"level":"info","message":"Added expense of 70 to property 68778f56a77a7624d898bde7","timestamp":"2025-08-08T12:45:44.799Z"}
+{"code":20,"codeName":"IllegalOperation","level":"error","message":"Error recording income from payment: Transaction numbers are only allowed on a replica set member or mongos","ok":0,"stack":"MongoServerError: Transaction numbers are only allowed on a replica set member or mongos\n    at Connection.onMessage (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\mongodb\\lib\\cmap\\connection.js:202:26)\n    at MessageStream.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\mongodb\\lib\\cmap\\connection.js:61:60)\n    at MessageStream.emit (node:events:507:28)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\mongodb\\lib\\cmap\\message_stream.js:147:16\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-08-09T19:23:37.137Z"}

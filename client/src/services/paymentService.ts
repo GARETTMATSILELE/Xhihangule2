@@ -64,7 +64,7 @@ class PaymentService {
   async createPaymentAccountant(paymentData: PaymentFormData): Promise<{ status: string; data: Payment; message: string }> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.post('/api/accountants/payments', paymentData);
+        const response = await api.post('/accountants/payments', paymentData);
         return response.data;
       });
     } catch (error: any) {
@@ -76,7 +76,7 @@ class PaymentService {
   async getPaymentsAccountant(): Promise<Payment[]> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.get('/api/accountants/payments');
+        const response = await api.get('/accountants/payments');
         return response.data;
       });
     } catch (error: any) {

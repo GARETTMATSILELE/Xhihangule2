@@ -93,9 +93,7 @@ app.use(databaseCheck_1.checkDatabaseConnection);
 // Protected routes
 app.use('/api/auth', auth_1.default);
 app.use('/api/agents', agentRoutes_1.default);
-console.log('Registering accountant routes at /api/accountants');
 app.use('/api/accountants', accountantRoutes_1.default);
-console.log('Accountant routes registered successfully');
 app.use('/api/charts', chartRoutes_1.default);
 app.use('/api/reports', reportRoutes_1.default);
 app.use('/api/users', userRoutes_1.default);

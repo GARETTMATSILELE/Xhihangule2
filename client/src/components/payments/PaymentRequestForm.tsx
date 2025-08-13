@@ -35,8 +35,8 @@ interface PaymentRequestFormData {
   currency: 'USD' | 'ZWL';
   reason: string;
   propertyId: string;
-  owner: string;
-  tenant: string;
+  ownerId?: string; // Changed from owner: string to ownerId?: string
+  tenantId?: string; // Changed from tenant: string to tenantId?: string
 }
 
 interface Property {
@@ -81,8 +81,8 @@ interface FormErrors {
   currency?: string;
   reason?: string;
   propertyId?: string;
-  owner?: string;
-  tenant?: string;
+  ownerId?: string;
+  tenantId?: string;
 }
 
 const PaymentRequestForm: React.FC<PaymentRequestFormProps> = ({
@@ -106,8 +106,8 @@ const PaymentRequestForm: React.FC<PaymentRequestFormProps> = ({
     currency: 'USD',
     reason: '',
     propertyId: '',
-    owner: '',
-    tenant: ''
+    ownerId: undefined,
+    tenantId: undefined
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -351,51 +351,32 @@ const PaymentRequestForm: React.FC<PaymentRequestFormProps> = ({
           <Grid item xs={12} md={6}>
             <Autocomplete
               options={owners}
-              getOptionLabel={(option: Owner | string) => {
-                if (typeof option === 'string') {
-                  return option;
-                }
+              getOptionLabel={(option: Owner) => {
                 return `${option.firstName} ${option.lastName}`;
               }}
-              value={owners.find((owner: Owner) => `${owner.firstName} ${owner.lastName}` === formData.owner) || null}
-              onChange={(_, newValue: Owner | string | null) => {
-                let ownerName = '';
-                if (typeof newValue === 'string') {
-                  ownerName = newValue;
-                } else if (newValue) {
-                  ownerName = `${newValue.firstName} ${newValue.lastName}`;
-                }
-                handleInputChange('owner', ownerName);
+              value={owners.find((owner: Owner) => owner._id === formData.ownerId) || null}
+              onChange={(_, newValue: Owner | null) => {
+                handleInputChange('ownerId', newValue?._id || undefined);
               }}
               renderInput={(params) => (
                 <TextField
                   {...params}
                   label="Owner"
-                  placeholder="Type or select from list"
+                  placeholder="Select owner from list"
                 />
               )}
-              renderOption={(props, option: Owner | string) => {
-                if (typeof option === 'string') {
-                  return <li {...props}>{option}</li>;
-                }
-                return (
-                  <li {...props}>
-                    <Box>
-                      <Typography variant="body2">
-                        {option.firstName} {option.lastName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {option.email}
-                      </Typography>
-                    </Box>
-                  </li>
-                );
-              }}
-              freeSolo
-              inputValue={formData.owner}
-              onInputChange={(_, newInputValue) => {
-                handleInputChange('owner', newInputValue);
-              }}
+              renderOption={(props, option: Owner) => (
+                <li {...props}>
+                  <Box>
+                    <Typography variant="body2">
+                      {option.firstName} {option.lastName}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {option.email}
+                    </Typography>
+                  </Box>
+                </li>
+              )}
             />
           </Grid>
 
@@ -403,51 +384,32 @@ const PaymentRequestForm: React.FC<PaymentRequestFormProps> = ({
           <Grid item xs={12} md={6}>
             <Autocomplete
               options={tenants}
-              getOptionLabel={(option: Tenant | string) => {
-                if (typeof option === 'string') {
-                  return option;
-                }
+              getOptionLabel={(option: Tenant) => {
                 return `${option.firstName} ${option.lastName}`;
               }}
-              value={tenants.find((tenant: Tenant) => `${tenant.firstName} ${tenant.lastName}` === formData.tenant) || null}
-              onChange={(_, newValue: Tenant | string | null) => {
-                let tenantName = '';
-                if (typeof newValue === 'string') {
-                  tenantName = newValue;
-                } else if (newValue) {
-                  tenantName = `${newValue.firstName} ${newValue.lastName}`;
-                }
-                handleInputChange('tenant', tenantName);
+              value={tenants.find((tenant: Tenant) => tenant._id === formData.tenantId) || null}
+              onChange={(_, newValue: Tenant | null) => {
+                handleInputChange('tenantId', newValue?._id || undefined);
               }}
               renderInput={(params) => (
                 <TextField
                   {...params}
                   label="Tenant"
-                  placeholder="Type or select from list"
+                  placeholder="Select tenant from list"
                 />
               )}
-              renderOption={(props, option: Tenant | string) => {
-                if (typeof option === 'string') {
-                  return <li {...props}>{option}</li>;
-                }
-                return (
-                  <li {...props}>
-                    <Box>
-                      <Typography variant="body2">
-                        {option.firstName} {option.lastName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {option.email}
-                      </Typography>
-                    </Box>
-                  </li>
-                );
-              }}
-              freeSolo
-              inputValue={formData.tenant}
-              onInputChange={(_, newInputValue) => {
-                handleInputChange('tenant', newInputValue);
-              }}
+              renderOption={(props, option: Tenant) => (
+                <li {...props}>
+                  <Box>
+                    <Typography variant="body2">
+                      {option.firstName} {option.lastName}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {option.email}
+                    </Typography>
+                  </Box>
+                </li>
+              )}
             />
           </Grid>
         </Grid>

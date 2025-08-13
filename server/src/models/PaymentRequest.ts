@@ -2,9 +2,9 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IPaymentRequest extends Document {
   companyId: string;
-  propertyId: string;
-  tenantId?: string;
-  ownerId?: string;
+  propertyId: mongoose.Types.ObjectId;
+  tenantId?: mongoose.Types.ObjectId;
+  ownerId?: mongoose.Types.ObjectId;
   amount: number;
   currency: 'USD' | 'ZWL';
   reason: string;
@@ -13,7 +13,7 @@ export interface IPaymentRequest extends Document {
   status: 'pending' | 'paid' | 'rejected';
   notes?: string;
   requestedBy: string;
-  processedBy?: string;
+  processedBy?: mongoose.Types.ObjectId;
   processedDate?: Date;
   payTo: {
     name: string;
@@ -33,16 +33,16 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
     index: true
   },
   propertyId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
     required: true,
     ref: 'Property'
   },
   tenantId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant'
   },
   ownerId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'PropertyOwner'
   },
   amount: {
@@ -81,7 +81,7 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
     required: true
   },
   processedBy: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
   processedDate: {

@@ -28,6 +28,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import TestAuth from './pages/TestAuth';
 import PropertyAccountsPage from './pages/AccountantDashboard/PropertyAccountsPage';
 import PropertyAccountDetailPage from './pages/AccountantDashboard/PropertyAccountDetailPage';
+import AgentAccountsPage from './pages/AccountantDashboard/AgentAccountsPage';
+import AgentAccountDetailPage from './pages/AccountantDashboard/AgentAccountDetailPage';
 import WrittenInvoicesPage from './pages/AccountantDashboard/WrittenInvoicesPage';
 import LevyPaymentsPage from './pages/AccountantDashboard/LevyPaymentsPage';
 import TasksPage from './pages/AccountantDashboard/TasksPage';
@@ -120,6 +122,8 @@ const App: React.FC = () => {
                 <Route path="payments" element={<AccountantPaymentsPage />} />
                 <Route path="property-accounts" element={<PropertyAccountsPage />} />
                 <Route path="property-accounts/:propertyId" element={<ProtectedRoute requiredRoles={['accountant']}><PropertyAccountDetailPage /></ProtectedRoute>} />
+                <Route path="agent-accounts" element={<AgentAccountsPage />} />
+                <Route path="agent-accounts/:agentId" element={<ProtectedRoute requiredRoles={['accountant']}><AgentAccountDetailPage /></ProtectedRoute>} />
                 <Route path="commissions" element={<CommissionsPage />} />
                 <Route path="written-invoices" element={<WrittenInvoicesPage />} />
                 <Route path="settings" element={<SettingsPage />} />

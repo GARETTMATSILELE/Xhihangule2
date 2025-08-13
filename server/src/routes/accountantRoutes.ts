@@ -25,6 +25,16 @@ import {
   getAcknowledgementDocument,
   getCompanyPropertyAccounts
 } from '../controllers/propertyAccountController';
+import {
+  getAgentAccount,
+  getCompanyAgentAccounts,
+  addPenalty,
+  createAgentPayout,
+  updatePayoutStatus as updateAgentPayoutStatus,
+  syncAgentAccounts,
+  syncAgentCommissions,
+  getAcknowledgementDocument as getAgentAcknowledgementDocument
+} from '../controllers/agentAccountController';
 
 const router = express.Router();
 
@@ -34,7 +44,14 @@ router.use((req, res, next) => {
   next();
 });
 
-
+// Test route to verify routes are working
+router.get('/test', (req, res) => {
+  res.json({ 
+    message: 'Accountant routes are working', 
+    timestamp: new Date().toISOString(),
+    user: req.user ? { id: (req.user as any).id, role: (req.user as any).role } : null
+  });
+});
 
 // Apply authentication middleware to all routes
 router.use(auth);
@@ -76,5 +93,19 @@ router.get('/property-accounts/:propertyId/payouts', isAccountant, getPayoutHist
 router.post('/property-accounts/sync', isAccountant, syncPropertyAccounts);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', isAccountant, getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', isAccountant, getAcknowledgementDocument);
+
+// Agent Account routes - require accountant role
+router.get('/agent-accounts', isAccountant, getCompanyAgentAccounts);
+router.get('/agent-accounts/:agentId', isAccountant, (req, res) => {
+  console.log('Agent account detail route hit:', req.params.agentId);
+  console.log('User role:', req.user?.role);
+  getAgentAccount(req, res);
+});
+router.post('/agent-accounts/:agentId/penalty', isAccountant, addPenalty);
+router.post('/agent-accounts/:agentId/payout', isAccountant, createAgentPayout);
+router.put('/agent-accounts/:agentId/payout/:payoutId/status', isAccountant, updateAgentPayoutStatus);
+router.post('/agent-accounts/sync', isAccountant, syncAgentAccounts);
+router.post('/agent-accounts/:agentId/sync-commissions', isAccountant, syncAgentCommissions);
+router.get('/agent-accounts/:agentId/payout/:payoutId/acknowledgement', isAccountant, getAgentAcknowledgementDocument);
 
 export default router; 

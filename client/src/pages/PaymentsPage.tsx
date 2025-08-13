@@ -451,8 +451,8 @@ const PaymentsPage: React.FC = () => {
     try {
       const newRequest = {
         propertyId: formData.propertyId,
-        tenantId: formData.tenant || undefined,
-        ownerId: formData.owner || undefined,
+        tenantId: formData.tenantId || undefined,
+        ownerId: formData.ownerId || undefined,
         amount: formData.amount,
         currency: formData.currency,
         reason: formData.reason,
@@ -633,16 +633,18 @@ const PaymentsPage: React.FC = () => {
                   </Box>
                 ) : currentTab === 'payments' ? (
                   showForm ? (
-                    <PaymentForm
-                      onSubmit={handleFormSubmit}
-                      onCancel={() => {
-                        setShowForm(false);
-                        setSelectedPayment(undefined);
-                      }}
-                      initialData={selectedPayment}
-                      properties={properties}
-                      tenants={tenants}
-                    />
+                    <Box sx={{ p: 2, overflow: 'auto', height: '100%', minHeight: 0, flex: 1 }}>
+                      <PaymentForm
+                        onSubmit={handleFormSubmit}
+                        onCancel={() => {
+                          setShowForm(false);
+                          setSelectedPayment(undefined);
+                        }}
+                        initialData={selectedPayment}
+                        properties={properties}
+                        tenants={tenants}
+                      />
+                    </Box>
                   ) : (
                     <PaymentList
                       payments={payments}
@@ -679,7 +681,7 @@ const PaymentsPage: React.FC = () => {
                       }
                     }}
                     onView={(request) => {
-                      // TODO: Implement view functionality
+                      // View functionality is now handled within the PaymentRequests component
                       console.log('View request:', request);
                     }}
                     onEdit={(request) => {

@@ -41,7 +41,7 @@
 
 export type PaymentType = 'rental' | 'introduction' | 'levy' | 'municipal';
 export type PropertyType = 'residential' | 'commercial';
-export type PaymentMethod = 'cash' | 'bank_transfer';
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money';
 export type PaymentStatus = 'pending' | 'completed' | 'failed';
 export type Currency = 'USD' | 'ZWL';
 
@@ -49,6 +49,8 @@ export type Currency = 'USD' | 'ZWL';
 export const PAYMENT_METHODS: PaymentMethod[] = [
   'cash',
   'bank_transfer',
+  'credit_card',
+  'mobile_money',
 ];
 
 export const SUPPORTED_CURRENCIES: Currency[] = ['USD', 'ZWL'];
@@ -71,6 +73,10 @@ export interface PaymentFormData {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   rentUsed?: number;
+  // Advance payment fields
+  advanceMonthsPaid?: number;
+  advancePeriodStart?: { month: number; year: number };
+  advancePeriodEnd?: { month: number; year: number };
   commissionDetails?: {
     totalCommission: number;
     preaFee: number;

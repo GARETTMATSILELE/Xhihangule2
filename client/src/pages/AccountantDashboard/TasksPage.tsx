@@ -16,7 +16,17 @@ import {
   Tab,
   Badge,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon
 } from '@mui/material';
 import {
   CheckCircle as ApproveIcon,
@@ -25,7 +35,13 @@ import {
   Assignment as TaskIcon,
   Payment as PaymentIcon,
   Warning as UrgentIcon,
-  Schedule as PendingIcon
+  Schedule as PendingIcon,
+  Person as PersonIcon,
+  Home as PropertyIcon,
+  AccountBalance as BankIcon,
+  CalendarToday as DateIcon,
+  AttachMoney as MoneyIcon,
+  Description as ReasonIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import paymentRequestService, { PaymentRequest } from '../../services/paymentRequestService';
@@ -59,6 +75,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
   const [actionDialog, setActionDialog] = useState<'approve' | 'reject' | null>(null);
   const [notes, setNotes] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [detailsDialog, setDetailsDialog] = useState(false);
 
   // Mock tasks for demonstration
   const [tasks] = useState<Task[]>([
@@ -127,6 +144,11 @@ const TasksPage: React.FC<TasksPageProps> = () => {
     setNotes('');
   };
 
+  const handleViewDetails = (task: Task | PaymentRequest) => {
+    setSelectedTask(task);
+    setDetailsDialog(true);
+  };
+
   const confirmAction = async () => {
     if (!selectedTask || !('_id' in selectedTask)) return;
 
@@ -165,6 +187,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'paid':
       case 'completed':
         return 'success';
       case 'rejected':
@@ -242,6 +265,204 @@ const TasksPage: React.FC<TasksPageProps> = () => {
 
   const pendingCount = paymentRequests.filter(req => req.status === 'pending').length;
   const urgentCount = tasks.filter(task => task.priority === 'urgent').length;
+
+  const renderPaymentRequestDetails = (request: PaymentRequest) => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        Payment Request Details
+      </Typography>
+      
+      <Grid container spacing={3}>
+        {/* Basic Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Basic Information
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <MoneyIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Amount"
+                  secondary={`${request.currency} ${request.amount.toLocaleString()}`}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <ReasonIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Reason"
+                  secondary={request.reason}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <DateIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Request Date"
+                  secondary={format(new Date(request.requestDate), 'MMM dd, yyyy')}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <DateIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Due Date"
+                  secondary={format(new Date(request.dueDate), 'MMM dd, yyyy')}
+                />
+              </ListItem>
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Pay To Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Pay To Information
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <PersonIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Name"
+                  secondary={`${request.payTo.name} ${request.payTo.surname}`}
+                />
+              </ListItem>
+              {request.payTo.bankDetails && (
+                <ListItem>
+                  <ListItemIcon>
+                    <BankIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Bank Details"
+                    secondary={request.payTo.bankDetails}
+                  />
+                </ListItem>
+              )}
+              {request.payTo.accountNumber && (
+                <ListItem>
+                  <ListItemIcon>
+                    <BankIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Account Number"
+                    secondary={request.payTo.accountNumber}
+                  />
+                </ListItem>
+              )}
+              {request.payTo.address && (
+                <ListItem>
+                  <ListItemIcon>
+                    <PersonIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Address"
+                    secondary={request.payTo.address}
+                  />
+                </ListItem>
+              )}
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Property Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Property Information
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <PropertyIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Property Name"
+                  secondary={request.property?.name || 'Unknown Property'}
+                />
+              </ListItem>
+              <ListItem>
+                <ListItemIcon>
+                  <PropertyIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Property Address"
+                  secondary={request.property?.address || 'No address available'}
+                />
+              </ListItem>
+            </List>
+          </Paper>
+        </Grid>
+
+        {/* Status and Processing Information */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Status & Processing
+            </Typography>
+            <List dense>
+              <ListItem>
+                <ListItemIcon>
+                  <PaymentIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Status"
+                  secondary={
+                    <Chip
+                      label={request.status.toUpperCase()}
+                      color={getStatusColor(request.status) as any}
+                      size="small"
+                    />
+                  }
+                />
+              </ListItem>
+              {request.processedByUser && (
+                <ListItem>
+                  <ListItemIcon>
+                    <PersonIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Processed By"
+                    secondary={`${request.processedByUser.firstName} ${request.processedByUser.lastName}`}
+                  />
+                </ListItem>
+              )}
+              {request.processedDate && (
+                <ListItem>
+                  <ListItemIcon>
+                    <DateIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Processed Date"
+                    secondary={format(new Date(request.processedDate), 'MMM dd, yyyy HH:mm')}
+                  />
+                </ListItem>
+              )}
+              {request.notes && (
+                <ListItem>
+                  <ListItemIcon>
+                    <ReasonIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Notes"
+                    secondary={request.notes}
+                  />
+                </ListItem>
+              )}
+            </List>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Box>
+  );
 
   if (loading) {
     return (
@@ -357,7 +578,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
                   size="small"
                   variant="outlined"
                   startIcon={<ViewIcon />}
-                  onClick={() => setSelectedTask(task)}
+                  onClick={() => handleViewDetails(task)}
                 >
                   View Details
                 </Button>
@@ -403,6 +624,76 @@ const TasksPage: React.FC<TasksPageProps> = () => {
           </Typography>
         </Box>
       )}
+
+      {/* Details Dialog */}
+      <Dialog
+        open={detailsDialog}
+        onClose={() => setDetailsDialog(false)}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{
+          sx: { maxHeight: '90vh' }
+        }}
+      >
+        <DialogTitle>
+          Payment Request Details
+          <Button
+            onClick={() => setDetailsDialog(false)}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            ×
+          </Button>
+        </DialogTitle>
+        <DialogContent>
+          {selectedTask && '_id' in selectedTask && renderPaymentRequestDetails(selectedTask)}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetailsDialog(false)}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Action Confirmation Dialog */}
+      <Dialog
+        open={actionDialog !== null}
+        onClose={() => setActionDialog(null)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {actionDialog === 'approve' ? 'Mark as Paid' : 'Reject Payment Request'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" mb={2}>
+            {actionDialog === 'approve' 
+              ? 'Are you sure you want to mark this payment request as paid?'
+              : 'Are you sure you want to reject this payment request?'
+            }
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="Notes (optional)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Add any additional notes..."
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setActionDialog(null)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmAction}
+            variant="contained"
+            color={actionDialog === 'approve' ? 'success' : 'error'}
+          >
+            {actionDialog === 'approve' ? 'Mark as Paid' : 'Reject'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

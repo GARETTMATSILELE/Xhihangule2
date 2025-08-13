@@ -18,6 +18,7 @@ export interface CommissionData {
       propertyName: string;
       rent: number;
       commission: number;
+      hasPayment: boolean;
     }[];
   }[];
 }
@@ -57,8 +58,21 @@ export const accountantService = {
   },
 
   // Get agency commission
-  getAgencyCommission: async (): Promise<AgencyCommission> => {
-    const response = await api.get('/accountants/agency-commission');
+  getAgencyCommission: async (filters?: {
+    year?: number;
+    month?: number;
+    week?: number;
+    day?: number;
+    filterType?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  }): Promise<AgencyCommission> => {
+    const params = new URLSearchParams();
+    if (filters?.year) params.append('year', filters.year.toString());
+    if (filters?.month !== undefined) params.append('month', filters.month.toString());
+    if (filters?.week !== undefined) params.append('week', filters.week.toString());
+    if (filters?.day !== undefined) params.append('day', filters.day.toString());
+    if (filters?.filterType) params.append('filterType', filters.filterType);
+    
+    const response = await api.get(`/accountants/agency-commission?${params.toString()}`);
     return response.data;
   },
 
@@ -69,10 +83,16 @@ export const accountantService = {
   },
 
   // Get all commission data
-  getAllCommissions: async () => {
+  getAllCommissions: async (agencyFilters?: {
+    year?: number;
+    month?: number;
+    week?: number;
+    day?: number;
+    filterType?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  }) => {
     const [agentData, agencyData, preaData] = await Promise.all([
       accountantService.getAgentCommissions(),
-      accountantService.getAgencyCommission(),
+      accountantService.getAgencyCommission(agencyFilters),
       accountantService.getPREACommission()
     ]);
 

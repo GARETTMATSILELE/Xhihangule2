@@ -9,6 +9,8 @@ import DashboardOverview from './DashboardOverview';
 import AccountantPaymentsPage from './AccountantPaymentsPage';
 import PropertyAccountsPage from './PropertyAccountsPage';
 import PropertyAccountDetailPage from './PropertyAccountDetailPage';
+import AgentAccountsPage from './AgentAccountsPage';
+import AgentAccountDetailPage from './AgentAccountDetailPage';
 import CommissionsPage from './CommissionsPage';
 import WrittenInvoicesPage from './WrittenInvoicesPage';
 import SettingsPage from './SettingsPage';
@@ -112,6 +114,8 @@ const AccountantDashboard: React.FC = () => {
           <Route path="tasks" element={<TasksPage />} />
           <Route path="property-accounts" element={<PropertyAccountsPage />} />
           <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
+          <Route path="agent-accounts" element={<AgentAccountsPage />} />
+          <Route path="agent-accounts/:agentId" element={<AgentAccountDetailPage />} />
           <Route path="commissions" element={<CommissionsPage />} />
           <Route path="written-invoices" element={<WrittenInvoicesPage />} />
           <Route path="settings" element={<SettingsPage />} />
