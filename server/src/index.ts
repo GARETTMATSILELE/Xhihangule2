@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
+import path from 'path';
 import propertyRoutes from './routes/propertyRoutes';
 import tenantRoutes from './routes/tenantRoutes';
 import leaseRoutes from './routes/leaseRoutes';
@@ -33,10 +34,15 @@ dotenv.config();
 const app = express();
 
 // Middleware
+const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 const allowedOrigins = [
   process.env.CLIENT_URL || 'http://localhost:3000',
   'http://localhost:5173', // Vite default port
-  'http://localhost:3000'  // Create React App default port
+  'http://localhost:3000', // Create React App default port
+  ...allowedOriginsFromEnv
 ];
 
 app.use(cors({
@@ -96,6 +102,17 @@ app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/sync', syncRoutes);
+
+// Serve client build in production
+if (process.env.NODE_ENV === 'production') {
+  const staticPath = path.join(__dirname, 'public');
+  app.use(express.static(staticPath));
+
+  // SPA fallback
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(staticPath, 'index.html'));
+  });
+}
 
 // Debug route to catch unmatched requests - temporarily disabled
 // app.use('/api/*', (req, res, next) => {

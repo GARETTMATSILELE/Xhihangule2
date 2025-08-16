@@ -49,6 +49,7 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
+const path_1 = __importDefault(require("path"));
 const propertyRoutes_1 = __importDefault(require("./routes/propertyRoutes"));
 const tenantRoutes_1 = __importDefault(require("./routes/tenantRoutes"));
 const leaseRoutes_1 = __importDefault(require("./routes/leaseRoutes"));
@@ -77,10 +78,15 @@ const startSyncServices_1 = require("./scripts/startSyncServices");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 // Middleware
+const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
 const allowedOrigins = [
     process.env.CLIENT_URL || 'http://localhost:3000',
     'http://localhost:5173', // Vite default port
-    'http://localhost:3000' // Create React App default port
+    'http://localhost:3000', // Create React App default port
+    ...allowedOriginsFromEnv
 ];
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
@@ -135,6 +141,16 @@ app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
 app.use('/api/invoices', invoiceRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
+
+// Serve client build in production
+if (process.env.NODE_ENV === 'production') {
+    const staticPath = path_1.default.join(__dirname, 'public');
+    app.use(express_1.default.static(staticPath));
+    // SPA fallback
+    app.get('*', (req, res) => {
+        res.sendFile(path_1.default.join(staticPath, 'index.html'));
+    });
+}
 // Debug route to catch unmatched requests - temporarily disabled
 // app.use('/api/*', (req, res, next) => {
 //   console.log('DEBUG: Unmatched API route:', req.method, req.originalUrl);

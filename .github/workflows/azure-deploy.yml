@@ -1,38 +1,81 @@
-name: Deploy to Azure App Service
+name: Deploy to Azure App Service (Container)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main, master ]
   workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: Xhihangule-Property-Management
+  NODE_VERSION: '18.x'
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    
+
+    permissions:
+      id-token: write
+      contents: read
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '7.0.x'
-    
-    - name: Restore dependencies
-      run: dotnet restore src/server/PropertyManagement.csproj
-    
-    - name: Build
-      run: dotnet build src/server/PropertyManagement.csproj --configuration Release --no-restore
-    
-    - name: Test
-      run: dotnet test src/server/PropertyManagement.csproj --no-build --verbosity normal
-    
-    - name: Publish
-      run: dotnet publish src/server/PropertyManagement.csproj --configuration Release --output ./publish
-    
-    - name: Deploy to Azure App Service
-      uses: azure/webapps-deploy@v2
-      with:
-        app-name: ${{ secrets.AZURE_APP_NAME }}
-        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: ./publish 
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd client && npm ci
+          cd ../server && npm ci
+
+      - name: Build application
+        run: |
+          cd client && npm run build
+          cd ../server && npm run build
+        env:
+          CI: false
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ env.AZURE_WEBAPP_NAME }}:latest
+
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Push Docker image
+        run: |
+          docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
+          docker tag ${{ env.AZURE_WEBAPP_NAME }}:latest ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
+          docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
+          docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
+
+      - name: Ensure App Service container port setting
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az webapp config appsettings set \
+              --name ${{ env.AZURE_WEBAPP_NAME }} \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --settings WEBSITES_PORT=8080
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          images: ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
