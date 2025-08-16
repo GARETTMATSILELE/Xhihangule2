@@ -145,8 +145,10 @@ export const apiService = {
 
   // Charts
   getChartData: (type: string) => apiInstance.get(`/charts/${type}`),
-  // Owner Payments (for owner dashboard)
+  // Owner Payments (for owner dashboard) - DEPRECATED: Use getOwnerFinancialData instead
   getOwnerPayments: () => apiInstance.get('/charts/owner/payments'),
+  // New method to get owner financial data from accounting database
+  getOwnerFinancialData: () => apiInstance.get('/owners/financial-data'),
 
   // User Management
   getCurrentUser: () => apiInstance.get('/users/me'),
@@ -222,6 +224,16 @@ export const apiService = {
       config.params = { ...config.params, companyId };
     }
     return publicApi.patch(`/owners/maintenance-requests/${requestId}/approve`, {}, config);
+  },
+  rejectOwnerMaintenanceRequest: (requestId: string, reason?: string, userId?: string, companyId?: string) => {
+    const config: any = {};
+    if (userId) {
+      config.params = { userId };
+    }
+    if (companyId) {
+      config.params = { ...config.params, companyId };
+    }
+    return publicApi.patch(`/owners/maintenance-requests/${requestId}/reject`, { reason }, config);
   },
 
   // Public Owner Net Income endpoint (for owner dashboard)

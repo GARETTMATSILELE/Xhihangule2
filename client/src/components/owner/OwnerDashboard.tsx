@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Routes, Route } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import api from '../../api/axios';
@@ -30,7 +30,7 @@ import {
   Select,
   MenuItem,
   InputLabel,
-  FormControl
+  FormControl,
 } from '@mui/material';
 import {
   BarChart,
@@ -45,19 +45,21 @@ import {
   Line,
   PieChart,
   Pie,
-  Cell
+  Cell,
 } from 'recharts';
 import {
   Business as BusinessIcon,
   Payment as PaymentIcon,
   Build as BuildIcon,
   Assessment as AssessmentIcon,
-  Add as AddIcon
+  Add as AddIcon,
 } from '@mui/icons-material';
 import { AuthErrorReport } from '../AuthErrorReport';
 import { getChartData } from '../../services/chartService';
 import ErrorBoundary from '../common/ErrorBoundary';
+import PropertyDetails from './PropertyDetails';
 
+// ---------- Interfaces ----------
 interface Property {
   _id: string;
   name: string;
@@ -77,7 +79,7 @@ interface Property {
   nextLeaseExpiry: string;
   units: number;
   occupiedUnits: number;
-  commission?: number; // Added for new net income calculation
+  commission?: number;
 }
 
 interface MaintenanceRequest {
@@ -88,7 +90,7 @@ interface MaintenanceRequest {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'pending_approval' | 'approved' | 'pending_completion' | 'in_progress' | 'completed' | 'cancelled';
   estimatedCost: number;
   createdAt: string;
 }
@@ -98,11 +100,11 @@ interface ChartData {
   payment?: {
     data: any[];
     summary?: {
-      totalPayments: number;
       totalAmount: number;
-      averageAmount: number;
+      totalIncome: number;
+      totalExpenses: number;
+      netIncome: number;
     };
-    recentPayments?: any[];
   };
   maintenance?: any[];
 }
@@ -115,10 +117,12 @@ interface LoadingStates {
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
-const OwnerDashboard: React.FC = () => {
+// ---------- Component ----------
+export default function OwnerDashboard() {
   const navigate = useNavigate();
-  const { logout, isAuthenticated } = useAuth();
+  const { logout, user } = useAuth();
   const { company } = useCompany();
+
   const [activeTab, setActiveTab] = useState(0);
   const [properties, setProperties] = useState<Property[]>([]);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
@@ -126,175 +130,274 @@ const OwnerDashboard: React.FC = () => {
   const [loading, setLoading] = useState<LoadingStates>({
     properties: true,
     maintenance: true,
-    charts: true
+    charts: true,
   });
   const [error, setError] = useState('');
   const [showAuthError, setShowAuthError] = useState(false);
-  const [chartErrors, setChartErrors] = useState<{[key: string]: string}>({});
-  const [netIncome, setNetIncome] = useState(0);
-  const [ownerPayments, setOwnerPayments] = useState<any[]>([]);
-  const [totalCommission, setTotalCommission] = useState(0);
-  const [totalExpenses, setTotalExpenses] = useState(0);
+  const [chartErrors, setChartErrors] = useState<{ [key: string]: string }>({});
+  const [financialData, setFinancialData] = useState<any>(null);
+  const [financialLoading, setFinancialLoading] = useState(true);
+  const [userName, setUserName] = useState<string>('');
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [timeFilter, setTimeFilter] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
+  const [selectedWeek, setSelectedWeek] = useState<number>(Math.ceil((new Date().getDate() + new Date(new Date().getFullYear(), new Date().getMonth(), 1).getDay()) / 7));
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
-  // Cleanup function to prevent memory leaks
+  // Cleanup
   const cleanup = useCallback(() => {
     setProperties([]);
     setMaintenanceRequests([]);
     setChartData({});
     setError('');
     setChartErrors({});
-    setNetIncome(0);
+    setFinancialData(null);
+    setUserName('');
   }, []);
 
-  // Helper function to transform property data for charts
+  // Transform property data for charts
   const transformPropertyDataForCharts = useCallback((properties: Property[]) => {
-    return properties.map(property => ({
+    return properties.map((property) => ({
       name: property.name || 'Unnamed Property',
       occupancyRate: property.occupancyRate || 0,
       totalRentCollected: property.totalRentCollected || 0,
       currentArrears: property.currentArrears || 0,
       units: property.units || 1,
       occupiedUnits: property.occupiedUnits || 0,
-      vacantUnits: Math.max(0, (property.units || 1) - (property.occupiedUnits || 0))
+      vacantUnits: Math.max(0, (property.units || 1) - (property.occupiedUnits || 0)),
     }));
   }, []);
 
-  // Helper function to transform maintenance data for charts
+  // Transform maintenance data for charts
   const transformMaintenanceDataForCharts = useCallback((requests: MaintenanceRequest[]) => {
     const statusCounts = {
-      pending: requests.filter(req => req.status === 'pending').length,
-      in_progress: requests.filter(req => req.status === 'in_progress').length,
-      completed: requests.filter(req => req.status === 'completed').length,
-      cancelled: requests.filter(req => req.status === 'cancelled').length
+      pending: requests.filter((req) => req.status === 'pending').length,
+      in_progress: requests.filter((req) => req.status === 'in_progress').length,
+      completed: requests.filter((req) => req.status === 'completed').length,
+      cancelled: requests.filter((req) => req.status === 'cancelled').length,
     };
 
     return [
       { name: 'Pending', value: statusCounts.pending },
       { name: 'In Progress', value: statusCounts.in_progress },
       { name: 'Completed', value: statusCounts.completed },
-      { name: 'Cancelled', value: statusCounts.cancelled }
-    ].filter(item => item.value > 0); // Only show categories with data
+      { name: 'Cancelled', value: statusCounts.cancelled },
+    ].filter((item) => item.value > 0);
   }, []);
 
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue);
+  };
 
+  const handleLogout = () => {
+    logout();
+    setShowAuthError(true);
+  };
 
-  // Show all payment data using commissionDetails.ownerAmount
-  const filteredPayments = ownerPayments;
-  const filteredRecentPayments = ownerPayments.slice(0, 10);
-  const filteredNetIncome = ownerPayments.reduce((sum: number, payment: any) => {
-    // Use the amount field which now contains ownerAmount from the API
-    if (typeof payment.amount === 'number') {
-      return sum + payment.amount;
+  const handleApproveMaintenance = async (requestId: string) => {
+    try {
+      setActionLoadingId(requestId);
+      const userStr = localStorage.getItem('user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      await apiService.approveOwnerMaintenanceRequest(requestId, user?._id, user?.companyId);
+      // Optimistically update status locally
+      setMaintenanceRequests((prev) => prev.map((r) => r._id === requestId ? { ...r, status: 'approved' } : r));
+    } catch (e) {
+      console.error('Approve maintenance failed', e);
+    } finally {
+      setActionLoadingId(null);
     }
-    // Fallback to commissionDetails.ownerAmount if available
-    if (payment.commissionDetails && typeof payment.commissionDetails.ownerAmount === 'number') {
-      return sum + payment.commissionDetails.ownerAmount;
-    }
-    return sum;
-  }, 0);
+  };
 
+  const handleRejectMaintenance = async (requestId: string) => {
+    try {
+      setActionLoadingId(requestId);
+      const reason = window.prompt('Please provide a reason for rejection (optional):') || undefined;
+      const userStr = localStorage.getItem('user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      await apiService.rejectOwnerMaintenanceRequest(requestId, reason, user?._id, user?.companyId);
+      // Optimistically update status locally
+      setMaintenanceRequests((prev) => prev.map((r) => r._id === requestId ? { ...r, status: 'cancelled' } : r));
+    } catch (e) {
+      console.error('Reject maintenance failed', e);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Filter financial data based on time period
+  const getFilteredFinancialData = useCallback(() => {
+    if (!financialData) return null;
+
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date;
+
+    switch (timeFilter) {
+      case 'day':
+        startDate = new Date(selectedYear, selectedMonth, selectedDay);
+        endDate = new Date(selectedYear, selectedMonth, selectedDay, 23, 59, 59);
+        break;
+      case 'week':
+        // Calculate the start of the selected week (Monday)
+        const weekStart = new Date(selectedYear, selectedMonth, 1);
+        const firstDayOfMonth = weekStart.getDay();
+        const daysToAdd = (selectedWeek - 1) * 7;
+        const mondayOffset = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
+        startDate = new Date(selectedYear, selectedMonth, 1 + daysToAdd - mondayOffset);
+        endDate = new Date(startDate.getTime() + 6 * 24 * 60 * 60 * 1000);
+        endDate.setHours(23, 59, 59);
+        break;
+      case 'month':
+        startDate = new Date(selectedYear, selectedMonth, 1);
+        endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
+        break;
+      case 'year':
+        startDate = new Date(selectedYear, 0, 1);
+        endDate = new Date(selectedYear, 11, 31, 23, 59, 59);
+        break;
+      default:
+        startDate = new Date(selectedYear, selectedMonth, 1);
+        endDate = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
+    }
+
+    // Filter transactions within the time period
+    const filteredTransactions = financialData.recentTransactions?.filter((transaction: any) => {
+      const transactionDate = new Date(transaction.date);
+      return transactionDate >= startDate && transactionDate <= endDate;
+    }) || [];
+
+    // Calculate filtered summary
+    const filteredSummary = {
+      totalIncome: filteredTransactions
+        .filter((t: any) => t.type === 'income')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0),
+      totalExpenses: filteredTransactions
+        .filter((t: any) => t.type === 'expense')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0),
+      totalOwnerPayouts: filteredTransactions
+        .filter((t: any) => t.type === 'owner_payout')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0),
+      runningBalance: 0,
+      totalProperties: financialData.summary?.totalProperties || 0
+    };
+
+    filteredSummary.runningBalance = filteredSummary.totalIncome - filteredSummary.totalExpenses - filteredSummary.totalOwnerPayouts;
+
+    // Filter property breakdown
+    const filteredPropertyBreakdown = financialData.propertyBreakdown?.map((property: any) => {
+      const propertyTransactions = filteredTransactions.filter((t: any) => 
+        t.propertyName === property.propertyName
+      );
+
+      const propertyIncome = propertyTransactions
+        .filter((t: any) => t.type === 'income')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+      
+      const propertyExpenses = propertyTransactions
+        .filter((t: any) => t.type === 'expense')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+      
+      const propertyPayouts = propertyTransactions
+        .filter((t: any) => t.type === 'owner_payout')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+
+      return {
+        ...property,
+        totalIncome: propertyIncome,
+        totalExpenses: propertyExpenses,
+        totalOwnerPayouts: propertyPayouts,
+        runningBalance: propertyIncome - propertyExpenses - propertyPayouts
+      };
+    }) || [];
+
+    return {
+      summary: filteredSummary,
+      recentTransactions: filteredTransactions,
+      propertyBreakdown: filteredPropertyBreakdown
+    };
+  }, [financialData, timeFilter, selectedDay, selectedWeek, selectedMonth, selectedYear]);
+
+  // Fetch data
   useEffect(() => {
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
 
     const fetchData = async () => {
       try {
-        // Wait for user data to be available in localStorage
-        const userStr = localStorage.getItem('user');
-        if (!userStr) {
-          console.log('User data not available yet, waiting...');
-          // Wait a bit and try again, but only if component is still mounted
+        if (!user) {
+          console.log('OwnerDashboard: User not available yet, waiting...');
           if (isMounted) {
             timeoutId = setTimeout(() => {
-              if (isMounted) {
-                fetchData();
-              }
-            }, 1000);
+              if (isMounted) fetchData();
+            }, 500);
           }
           return;
         }
-        
-        const user = JSON.parse(userStr);
+
         console.log('OwnerDashboard: User data available:', user);
-        
-        // Check if user has required fields
+
+        const displayName =
+          user.firstName && user.lastName
+            ? `${user.firstName} ${user.lastName}`
+            : user.firstName || user.lastName || user.email || 'Property Owner';
+        setUserName(displayName);
+
         if (!user._id) {
           console.error('OwnerDashboard: User ID not found in user data');
           setError('User ID not found');
           return;
         }
-        
-        // Fetch properties, maintenance requests, net income, and owner payments
-        const [propertiesRes, maintenanceRes, netIncomeRes, ownerPaymentsRes] = await Promise.all([
+
+        const [propertiesRes, maintenanceRes, financialDataRes] = await Promise.all([
           api.get('/owners/properties'),
-          apiService.getOwnerMaintenanceRequestsPublic(user._id as string, user.companyId),
-          apiService.getOwnerNetIncomePublic(user._id as string, user.companyId),
-          apiService.getOwnerPayments()
+          apiService.getOwnerMaintenanceRequestsPublic(user._id as string, (user as any).companyId),
+          apiService.getOwnerFinancialData(),
         ]);
-        
+
         if (isMounted) {
           setProperties(propertiesRes.data);
           setMaintenanceRequests(maintenanceRes.data);
-          setNetIncome(netIncomeRes.data.netIncome || 0);
-          setOwnerPayments(ownerPaymentsRes.data.recentPayments || []);
-          setTotalCommission(ownerPaymentsRes.data.summary?.totalCommission || 0);
-          setTotalExpenses(ownerPaymentsRes.data.summary?.totalExpenses || 0);
-          setLoading(prev => ({ ...prev, properties: false, maintenance: false }));
+
+          if (financialDataRes.data?.success) {
+            setFinancialData(financialDataRes.data.data);
+          }
+
+          setLoading((prev) => ({ ...prev, properties: false, maintenance: false }));
+          setFinancialLoading(false);
         }
 
-        // Fetch chart data individually with error handling
+        // Charts
         const chartTypes = ['occupancy', 'payment', 'maintenance'];
         const newChartData: ChartData = {};
-        const newChartErrors: {[key: string]: string} = {};
+        const newChartErrors: { [key: string]: string } = {};
 
         for (const type of chartTypes) {
           try {
             const chartResponse = await getChartData(type);
-            console.log(`OwnerDashboard: ${type} chart response:`, chartResponse);
             if (isMounted) {
               if (type === 'occupancy') {
-                // Transform the occupancy data to match chart expectations
                 if (chartResponse.data && Array.isArray(chartResponse.data)) {
-                newChartData.occupancy = chartResponse.data;
+                  newChartData.occupancy = chartResponse.data;
                 } else {
-                  // Fallback: create occupancy data from properties
                   const transformedData = transformPropertyDataForCharts(propertiesRes.data);
-                  newChartData.occupancy = transformedData.map(prop => ({
+                  newChartData.occupancy = transformedData.map((prop) => ({
                     name: prop.name,
                     occupied: prop.occupiedUnits,
-                    vacant: prop.vacantUnits
+                    vacant: prop.vacantUnits,
                   }));
                 }
               } else if (type === 'payment') {
-                // The payment endpoint returns the entire object with data, summary, and recentPayments
                 newChartData.payment = chartResponse;
-                console.log(`OwnerDashboard: Payment data set:`, newChartData.payment);
-              } else if (type === 'maintenance') {
-                // Transform the maintenance data to match chart expectations
-                if (chartResponse.data && Array.isArray(chartResponse.data)) {
-                newChartData.maintenance = chartResponse.data;
-                } else {
-                  // Fallback: create maintenance data from maintenance requests
-                  newChartData.maintenance = transformMaintenanceDataForCharts(maintenanceRes.data);
-                }
-              }
-            }
-          } catch (err: any) {
-            console.error(`Error fetching ${type} chart data:`, err);
-            if (isMounted) {
-              newChartErrors[type] = err.response?.data?.message || `Failed to load ${type} data`;
-              
-              // Provide fallback data for charts
-              if (type === 'occupancy') {
-                const transformedData = transformPropertyDataForCharts(propertiesRes.data);
-                newChartData.occupancy = transformedData.map(prop => ({
-                  name: prop.name,
-                  occupied: prop.occupiedUnits,
-                  vacant: prop.vacantUnits
-                }));
               } else if (type === 'maintenance') {
                 newChartData.maintenance = transformMaintenanceDataForCharts(maintenanceRes.data);
               }
+            }
+          } catch (err: any) {
+            console.error(`OwnerDashboard: Error fetching ${type} chart data:`, err);
+            if (isMounted) {
+              newChartErrors[type] = err.response?.data?.error || err.message || 'Unknown error';
             }
           }
         }
@@ -302,71 +405,36 @@ const OwnerDashboard: React.FC = () => {
         if (isMounted) {
           setChartData(newChartData);
           setChartErrors(newChartErrors);
-          setLoading(prev => ({ ...prev, charts: false }));
+          setLoading((prev) => ({ ...prev, charts: false }));
         }
       } catch (err: any) {
-        console.error('OwnerDashboard fetchData error:', err);
+        console.error('OwnerDashboard: Error fetching data:', err);
         if (isMounted) {
-          setError(err.response?.data?.message || 'Error fetching data');
-          setLoading(prev => ({ ...prev, properties: false, maintenance: false, charts: false }));
+          setError(err.response?.data?.error || 'Error fetching dashboard data');
+          setLoading({ properties: false, maintenance: false, charts: false });
+          setFinancialLoading(false);
         }
       }
     };
 
-    // Only fetch data if authenticated
-    if (isAuthenticated) {
-      fetchData();
-    }
+    fetchData();
 
-    // Cleanup function
     return () => {
       isMounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      if (timeoutId) clearTimeout(timeoutId);
       cleanup();
     };
-  }, [isAuthenticated, cleanup, transformPropertyDataForCharts, transformMaintenanceDataForCharts]);
+  }, [cleanup, transformPropertyDataForCharts, transformMaintenanceDataForCharts]);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      // Navigation will be handled by the AuthContext
-    } catch (error) {
-      console.error('Logout failed:', error);
-      setShowAuthError(true);
-    }
-  };
-
-  const handleLogin = () => {
-    setShowAuthError(true);
-  };
-
-  // Calculate summary statistics with proper validation
+  // Stats
   const totalProperties = properties.length;
-  const occupiedUnits = properties.reduce((sum, property) => sum + (property.occupiedUnits || 0), 0);
+  const occupiedUnits = properties.reduce((sum, property) => {
+    if (property.status === 'rented') return sum + (property.units || 1);
+    return sum + (property.occupiedUnits || 0);
+  }, 0);
   const totalUnits = properties.reduce((sum, property) => sum + (property.units || 1), 0);
   const vacantUnits = Math.max(0, totalUnits - occupiedUnits);
-  
-  // Get total rent collected from payment data (same source as chart) for consistency
-  const totalRentCollected = chartData?.payment?.summary?.totalAmount || 0;
-  
-  // Fallback to property data if payment data is not available
-  const totalRentCollectedFromProperties = properties.reduce((sum, property) => sum + (property.totalRentCollected || 0), 0);
-  const finalTotalRentCollected = totalRentCollected > 0 ? totalRentCollected : totalRentCollectedFromProperties;
-  
-  const totalArrears = properties.reduce((sum, property) => sum + (property.currentArrears || 0), 0);
-  const pendingMaintenance = maintenanceRequests.filter(req => req.status === 'pending').length;
-  const completedMaintenance = maintenanceRequests.filter(req => req.status === 'completed').length;
 
-  // Net income is now fetched directly from the API (sum of commissionDetails.ownerAmount from payments)
-  // No need for complex calculation here anymore
-
-  // Check if any data is still loading
   const isAnyLoading = Object.values(loading).some(Boolean);
 
   if (isAnyLoading) {
@@ -376,7 +444,7 @@ const OwnerDashboard: React.FC = () => {
           <Grid item xs={12}>
             <Box display="flex" justifyContent="space-between" alignItems="center">
               <Typography variant="h4" component="h1">
-                {company?.name || 'Property'} Owner Dashboard
+                Welcome {userName || 'Property Owner'}
               </Typography>
               <Button variant="outlined" color="primary" onClick={handleLogout}>
                 Logout
@@ -397,477 +465,596 @@ const OwnerDashboard: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography variant="h4" component="h1">
-                {company?.name || 'Property'} Owner Dashboard
-              </Typography>
-              <Button variant="outlined" color="primary" onClick={handleLogout}>
-                Logout
-              </Button>
-            </Box>
-          </Grid>
-
-          {error && (
-            <Grid item xs={12}>
-              <Alert severity="error">{error}</Alert>
-            </Grid>
-          )}
-
-          <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Tabs value={activeTab} onChange={handleTabChange} aria-label="dashboard tabs">
-                <Tab label="Properties" icon={<BusinessIcon />} iconPosition="start" />
-                <Tab label="Payments" icon={<PaymentIcon />} iconPosition="start" />
-                <Tab label="Maintenance" icon={<BuildIcon />} iconPosition="start" />
-                <Tab label="Reports" icon={<AssessmentIcon />} iconPosition="start" />
-              </Tabs>
-
-              {/* Properties Tab */}
-              {activeTab === 0 && (
-                <Box sx={{ mt: 2 }}>
-                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Typography variant="h6">Properties Management</Typography>
-                    <Button variant="contained" startIcon={<AddIcon />}>
-                      Add New Property
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h4" component="h1">
+                      Welcome {userName || 'Property Owner'}
+                    </Typography>
+                    <Button variant="outlined" color="primary" onClick={handleLogout}>
+                      Logout
                     </Button>
                   </Box>
-                  <Divider sx={{ mb: 3 }} />
-                  
-                  {/* Summary Cards */}
-                  <Grid container spacing={3} sx={{ mb: 3 }}>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Total Properties</Typography>
-                        <Typography variant="h4">{totalProperties}</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Occupied Units</Typography>
-                        <Typography variant="h4">{occupiedUnits}</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Vacant Units</Typography>
-                        <Typography variant="h4">{vacantUnits}</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Occupancy Rate</Typography>
-                        <Typography variant="h4">
-                          {totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0}%
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  </Grid>
+                </Grid>
 
-                  {/* Property Cards */}
-                  <Grid container spacing={3} sx={{ mb: 4 }}>
-                    {properties.map((property) => (
-                      <Grid item xs={12} md={6} lg={4} key={property._id}>
-                        <Card>
-                          <CardContent>
-                            <Typography variant="h6" gutterBottom>
-                              {property.name || 'Unnamed Property'}
-                            </Typography>
-                            <Typography color="textSecondary" gutterBottom>
-                              {property.address || 'No address provided'}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                              <Typography variant="body2" component="span">
-                                Status:
+                {error && (
+                  <Grid item xs={12}>
+                    <Alert severity="error">{error}</Alert>
+                  </Grid>
+                )}
+
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 2 }}>
+                    <Tabs value={activeTab} onChange={handleTabChange} aria-label="dashboard tabs">
+                      <Tab label="Properties" icon={<BusinessIcon />} iconPosition="start" />
+                      <Tab label="Financial Data" icon={<PaymentIcon />} iconPosition="start" />
+                      <Tab label="Maintenance" icon={<BuildIcon />} iconPosition="start" />
+                      <Tab label="Reports" icon={<AssessmentIcon />} iconPosition="start" />
+                    </Tabs>
+
+                    {activeTab === 0 && (
+                      <Box sx={{ mt: 2 }}>
+                        {/* Summary Cards */}
+                        <Grid container spacing={3} sx={{ mb: 3 }}>
+                          <Grid item xs={12} md={6} lg={3}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1">Total Properties</Typography>
+                              <Typography variant="h4">{totalProperties}</Typography>
+                            </Paper>
+                          </Grid>
+                          <Grid item xs={12} md={6} lg={3}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1">Occupied Units</Typography>
+                              <Typography variant="h4">{occupiedUnits}</Typography>
+                            </Paper>
+                          </Grid>
+                          <Grid item xs={12} md={6} lg={3}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1">Vacant Units</Typography>
+                              <Typography variant="h4">{vacantUnits}</Typography>
+                            </Paper>
+                          </Grid>
+                          <Grid item xs={12} md={6} lg={3}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1">Occupancy Rate</Typography>
+                              <Typography variant="h4">
+                                {totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0}%
                               </Typography>
-                              <Chip 
-                                label={property.status || 'unknown'} 
-                                size="small" 
-                                color={property.status === 'available' ? 'success' : property.status === 'rented' ? 'primary' : 'warning'} 
-                              />
-                            </Box>
-                            <Typography variant="body2" sx={{ mb: 1 }}>
-                              Type: {property.type || 'N/A'}
-                            </Typography>
-                            <Typography variant="body2" sx={{ mb: 1 }}>
-                              Rent: ${property.rent ? property.rent.toLocaleString() : '0'}/month
-                            </Typography>
-                            <Typography variant="body2" sx={{ mb: 1 }}>
-                              Occupancy Rate: {property.occupancyRate || 0}%
-                            </Typography>
-                            <Typography variant="body2" sx={{ mb: 1 }}>
-                              Total Rent Collected: ${(property.totalRentCollected || 0).toLocaleString()}
-                            </Typography>
-                            <Typography variant="body2" sx={{ mb: 1 }}>
-                              Current Arrears: ${(property.currentArrears || 0).toLocaleString()}
-                            </Typography>
-                          </CardContent>
-                          <CardActions>
-                            <Button
-                              size="small"
-                              onClick={() => navigate(`/properties/${property._id}`)}
-                            >
-                              View Details
-                            </Button>
-                          </CardActions>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
+                            </Paper>
+                          </Grid>
+                        </Grid>
 
-                  {/* Property Performance Chart */}
-                  {properties.length > 0 && (
-                    <Box sx={{ height: 400, mb: 4 }}>
-                    <Typography variant="h6" gutterBottom>
-                      Property Performance Overview
-                    </Typography>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={transformPropertyDataForCharts(properties)}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="occupancyRate" name="Occupancy Rate (%)" fill="#8884d8" />
-                        <Bar dataKey="totalRentCollected" name="Total Rent Collected ($)" fill="#82ca9d" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </Box>
-                  )}
-
-                  {/* Occupancy Trend Chart */}
-                  {chartData?.occupancy && chartData.occupancy.length > 0 && !chartErrors.occupancy && (
-                    <Box sx={{ height: 400, mt: 4 }}>
-                      <Typography variant="h6" gutterBottom>
-                        Occupancy Trend
-                      </Typography>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartData.occupancy}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Line type="monotone" dataKey="occupied" stroke="#8884d8" name="Occupied Units" />
-                          <Line type="monotone" dataKey="vacant" stroke="#82ca9d" name="Vacant Units" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </Box>
-                  )}
-                  {chartErrors.occupancy && (
-                    <Box sx={{ mt: 4 }}>
-                      <Alert severity="warning">
-                        Unable to load occupancy trend data: {chartErrors.occupancy}
-                      </Alert>
-                    </Box>
-                  )}
-                </Box>
-              )}
-
-              {/* Payments Tab */}
-              {activeTab === 1 && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="h6" gutterBottom>Payment Overview</Typography>
-                  <Divider sx={{ mb: 3 }} />
-                  
-
-
-                  {/* Summary Cards */}
-                  <Grid container spacing={3} sx={{ mb: 4 }}>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Rental Income</Typography>
-                        <Typography variant="h4" color="success.main">
-                          ${filteredNetIncome.toLocaleString()}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Expenses</Typography>
-                        <Typography variant="h4" color="error.main">
-                          ${totalExpenses.toLocaleString()}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Commission</Typography>
-                        <Typography variant="h4" color="warning.main">
-                          ${totalCommission.toLocaleString()}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={3}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Net Income</Typography>
-                        <Typography variant="h4" color="primary.main">
-                          ${filteredNetIncome.toLocaleString()}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  </Grid>
-
-                  {/* Recent Payments Table */}
-                  {filteredRecentPayments.length > 0 && (
-                    <Box sx={{ mt: 4, mb: 4 }}>
-                      <Typography variant="h6" gutterBottom>Recent Payments</Typography>
-                      <TableContainer component={Paper}>
-                        <Table>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Date</TableCell>
-                              <TableCell>Property</TableCell>
-                              <TableCell>Tenant</TableCell>
-                              <TableCell>Amount</TableCell>
-                              <TableCell>Status</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {filteredRecentPayments.map((payment: any) => (
-                              <TableRow key={payment.id}>
-                                <TableCell>
-                                  {new Date(payment.paymentDate).toLocaleDateString()}
-                                </TableCell>
-                                <TableCell>{payment.propertyName}</TableCell>
-                                <TableCell>{payment.tenantName}</TableCell>
-                                <TableCell>${(payment.amount || 0).toFixed(2)}</TableCell>
-                                <TableCell>
-                                  <Chip
-                                    label={payment.status || 'unknown'}
-                                    color={payment.status === 'completed' ? 'success' : 'warning'}
+                        {/* Property Cards */}
+                        <Grid container spacing={3} sx={{ mb: 4 }}>
+                          {properties.map((property) => (
+                            <Grid item xs={12} md={6} lg={4} key={property._id}>
+                              <Card>
+                                <CardContent>
+                                  <Typography color="textSecondary" gutterBottom>
+                                    {property.address || 'No address provided'}
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                    <Typography variant="body2" component="span">
+                                      Status:
+                                    </Typography>
+                                    <Chip
+                                      label={property.status || 'unknown'}
+                                      size="small"
+                                      color={
+                                        property.status === 'available'
+                                          ? 'success'
+                                          : property.status === 'rented'
+                                          ? 'primary'
+                                          : 'warning'
+                                      }
+                                    />
+                                  </Box>
+                                  <Typography variant="body2" sx={{ mb: 1 }}>
+                                    Type: {property.type || 'N/A'}
+                                  </Typography>
+                                  <Typography variant="body2" sx={{ mb: 1 }}>
+                                    Rent: ${property.rent ? property.rent.toLocaleString() : '0'}/month
+                                  </Typography>
+                                </CardContent>
+                                <CardActions>
+                                  <Button
                                     size="small"
-                                  />
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </Box>
-                  )}
-
-                  {/* Bar Chart: Monthly Income vs Expenses */}
-                  {filteredPayments.length > 0 && (
-                    <Box sx={{ bgcolor: 'background.paper', p: 3, borderRadius: 2, boxShadow: 1, mb: 4 }}>
-                      <Typography variant="h6" gutterBottom>Monthly Income vs Expenses</Typography>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={filteredPayments}>
-                          <XAxis dataKey="month" />
-                          <YAxis />
-                          <Tooltip />
-                          <Bar dataKey="amount" fill="#4ade80" name="Owner Income" />
-                          <Bar dataKey="expenses" fill="#f87171" name="Expenses" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </Box>
-                  )}
-
-                  {/* Pie Chart: Income vs Expenses */}
-                  <Box sx={{ bgcolor: 'background.paper', p: 3, borderRadius: 2, boxShadow: 1, mb: 4 }}>
-                    <Typography variant="h6" gutterBottom>Income vs Expenses</Typography>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          dataKey="value"
-                          data={[
-                            { name: "Expenses", value: totalExpenses },
-                            { name: "Net Income", value: filteredNetIncome },
-                          ]}
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={100}
-                          fill="#8884d8"
-                          label
-                        >
-                          {[
-                            { name: "Expenses", value: totalExpenses },
-                            { name: "Net Income", value: filteredNetIncome },
-                          ].map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={index === 0 ? "#f87171" : "#00C49F"} />
+                                    onClick={() =>
+                                      navigate(`/owner-dashboard/property/${property._id}`)
+                                    }
+                                  >
+                                    View Details
+                                  </Button>
+                                </CardActions>
+                              </Card>
+                            </Grid>
                           ))}
-                        </Pie>
-                        <Legend />
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
+                        </Grid>
+                      </Box>
+                    )}
+
+                                         {activeTab === 1 && (
+                       <Box sx={{ mt: 2 }}>
+                         <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                           <Typography variant="h6">
+                             Financial Overview
+                           </Typography>
+                           
+                           {/* Time Filter Controls */}
+                           <Box display="flex" gap={1} alignItems="center">
+                             <Button
+                               variant={timeFilter === 'day' ? 'contained' : 'outlined'}
+                               size="small"
+                               onClick={() => setTimeFilter('day')}
+                             >
+                               Day
+                             </Button>
+                             {timeFilter === 'day' && (
+                               <FormControl size="small" sx={{ minWidth: 80 }}>
+                                 <Select
+                                   value={selectedDay}
+                                   onChange={(e) => setSelectedDay(e.target.value as number)}
+                                 >
+                                   {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                     <MenuItem key={day} value={day}>
+                                       {day}
+                                     </MenuItem>
+                                   ))}
+                                 </Select>
+                               </FormControl>
+                             )}
+
+                             <Button
+                               variant={timeFilter === 'week' ? 'contained' : 'outlined'}
+                               size="small"
+                               onClick={() => setTimeFilter('week')}
+                             >
+                               Week
+                             </Button>
+                             {timeFilter === 'week' && (
+                               <FormControl size="small" sx={{ minWidth: 80 }}>
+                                 <Select
+                                   value={selectedWeek}
+                                   onChange={(e) => setSelectedWeek(e.target.value as number)}
+                                 >
+                                   {Array.from({ length: 6 }, (_, i) => i + 1).map((week) => (
+                                     <MenuItem key={week} value={week}>
+                                       Week {week}
+                                     </MenuItem>
+                                   ))}
+                                 </Select>
+                               </FormControl>
+                             )}
+
+                             <Button
+                               variant={timeFilter === 'month' ? 'contained' : 'outlined'}
+                               size="small"
+                               onClick={() => setTimeFilter('month')}
+                             >
+                               Month
+                             </Button>
+                             {timeFilter === 'month' && (
+                               <FormControl size="small" sx={{ minWidth: 100 }}>
+                                 <Select
+                                   value={selectedMonth}
+                                   onChange={(e) => setSelectedMonth(e.target.value as number)}
+                                 >
+                                   {[
+                                     'January', 'February', 'March', 'April', 'May', 'June',
+                                     'July', 'August', 'September', 'October', 'November', 'December'
+                                   ].map((month, index) => (
+                                     <MenuItem key={index} value={index}>
+                                       {month}
+                                     </MenuItem>
+                                   ))}
+                                 </Select>
+                               </FormControl>
+                             )}
+
+                             <Button
+                               variant={timeFilter === 'year' ? 'contained' : 'outlined'}
+                               size="small"
+                               onClick={() => setTimeFilter('year')}
+                             >
+                               Year
+                             </Button>
+                             {timeFilter === 'year' && (
+                               <FormControl size="small" sx={{ minWidth: 80 }}>
+                                 <Select
+                                   value={selectedYear}
+                                   onChange={(e) => setSelectedYear(e.target.value as number)}
+                                 >
+                                   {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map((year) => (
+                                     <MenuItem key={year} value={year}>
+                                       {year}
+                                     </MenuItem>
+                                   ))}
+                                 </Select>
+                               </FormControl>
+                             )}
+                           </Box>
+                         </Box>
+                         
+                         {financialLoading ? (
+                           <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+                             <CircularProgress />
+                           </Box>
+                         ) : (
+                           <>
+                                                          {/* Summary Cards */}
+                         <Grid container spacing={3} sx={{ mb: 3 }}>
+                           <Grid item xs={12} md={6} lg={3}>
+                             <Paper sx={{ p: 2 }}>
+                               <Typography variant="subtitle1" color="textSecondary">
+                                 Total Income ({timeFilter})
+                               </Typography>
+                               <Typography variant="h4" color="success.main">
+                                 ${getFilteredFinancialData()?.summary?.totalIncome?.toLocaleString() || '0'}
+                               </Typography>
+                             </Paper>
+                           </Grid>
+                           <Grid item xs={12} md={6} lg={3}>
+                             <Paper sx={{ p: 2 }}>
+                               <Typography variant="subtitle1" color="textSecondary">
+                                 Total Expenses ({timeFilter})
+                               </Typography>
+                               <Typography variant="h4" color="error.main">
+                                 ${getFilteredFinancialData()?.summary?.totalExpenses?.toLocaleString() || '0'}
+                               </Typography>
+                             </Paper>
+                           </Grid>
+                           <Grid item xs={12} md={6} lg={3}>
+                             <Paper sx={{ p: 2 }}>
+                               <Typography variant="subtitle1" color="textSecondary">
+                                 Owner Payouts ({timeFilter})
+                               </Typography>
+                               <Typography variant="h4" color="warning.main">
+                                 ${getFilteredFinancialData()?.summary?.totalOwnerPayouts?.toLocaleString() || '0'}
+                               </Typography>
+                             </Paper>
+                           </Grid>
+                           <Grid item xs={12} md={6} lg={3}>
+                             <Paper sx={{ p: 2 }}>
+                               <Typography variant="subtitle1" color="textSecondary">
+                                 Running Balance ({timeFilter})
+                               </Typography>
+                                                               <Typography variant="h4" color={(getFilteredFinancialData()?.summary?.runningBalance ?? 0) >= 0 ? 'success.main' : 'error.main'}>
+                                  ${(getFilteredFinancialData()?.summary?.runningBalance ?? 0).toLocaleString()}
+                                </Typography>
+                             </Paper>
+                           </Grid>
+                         </Grid>
+
+
+
+                                                 {/* Property Financial Breakdown */}
+                         {getFilteredFinancialData()?.propertyBreakdown && getFilteredFinancialData()?.propertyBreakdown.length > 0 && (
+                           <Grid container spacing={3} sx={{ mb: 3 }}>
+                             <Grid item xs={12}>
+                               <Paper sx={{ p: 2 }}>
+                                 <Typography variant="h6" gutterBottom>
+                                   Property Financial Breakdown ({timeFilter})
+                                 </Typography>
+                                 <TableContainer>
+                                   <Table>
+                                     <TableHead>
+                                       <TableRow>
+                                         <TableCell>Property</TableCell>
+                                         <TableCell>Address</TableCell>
+                                         <TableCell align="right">Total Income</TableCell>
+                                         <TableCell align="right">Total Expenses</TableCell>
+                                         <TableCell align="right">Owner Payouts</TableCell>
+                                         <TableCell align="right">Running Balance</TableCell>
+                                       </TableRow>
+                                     </TableHead>
+                                     <TableBody>
+                                       {getFilteredFinancialData()?.propertyBreakdown.map((property: any) => (
+                                        <TableRow key={property.propertyId}>
+                                          <TableCell>
+                                            <Typography variant="subtitle2">
+                                              {property.propertyName || 'Unknown Property'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Typography variant="body2" color="textSecondary">
+                                              {property.propertyAddress || 'No Address'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell align="right">
+                                            <Typography variant="body2" color="success.main">
+                                              ${property.totalIncome?.toLocaleString() || '0'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell align="right">
+                                            <Typography variant="body2" color="error.main">
+                                              ${property.totalExpenses?.toLocaleString() || '0'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell align="right">
+                                            <Typography variant="body2" color="warning.main">
+                                              ${property.totalOwnerPayouts?.toLocaleString() || '0'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell align="right">
+                                            <Typography variant="body2" color={property.runningBalance >= 0 ? 'success.main' : 'error.main'}>
+                                              ${property.runningBalance?.toLocaleString() || '0'}
+                                            </Typography>
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </TableContainer>
+                              </Paper>
+                            </Grid>
+                          </Grid>
+                        )}
+
+                                                 {/* Recent Transactions */}
+                         {getFilteredFinancialData()?.recentTransactions && getFilteredFinancialData()?.recentTransactions.length > 0 && (
+                           <Grid container spacing={3}>
+                             <Grid item xs={12}>
+                               <Paper sx={{ p: 2 }}>
+                                 <Typography variant="h6" gutterBottom>
+                                   Recent Transactions ({timeFilter})
+                                 </Typography>
+                                 <TableContainer>
+                                   <Table>
+                                     <TableHead>
+                                       <TableRow>
+                                         <TableCell>Date</TableCell>
+                                         <TableCell>Property</TableCell>
+                                         <TableCell>Description</TableCell>
+                                         <TableCell>Type</TableCell>
+                                         <TableCell align="right">Amount</TableCell>
+                                         <TableCell>Status</TableCell>
+                                       </TableRow>
+                                     </TableHead>
+                                     <TableBody>
+                                       {getFilteredFinancialData()?.recentTransactions.map((transaction: any) => (
+                                        <TableRow key={transaction.id}>
+                                          <TableCell>
+                                            <Typography variant="body2">
+                                              {new Date(transaction.date).toLocaleDateString()}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Typography variant="body2">
+                                              {transaction.propertyName || 'Unknown Property'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Typography variant="body2" color="textSecondary">
+                                              {transaction.description || 'No description'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Chip
+                                              label={transaction.type || 'unknown'}
+                                              size="small"
+                                              color={
+                                                transaction.type === 'income'
+                                                  ? 'success'
+                                                  : transaction.type === 'owner_payout'
+                                                  ? 'warning'
+                                                  : 'default'
+                                              }
+                                            />
+                                          </TableCell>
+                                          <TableCell align="right">
+                                            <Typography 
+                                              variant="body2" 
+                                              color={
+                                                transaction.type === 'income' ? 'success.main' : 
+                                                transaction.type === 'owner_payout' ? 'warning.main' : 
+                                                'error.main'
+                                              }
+                                            >
+                                              ${transaction.amount?.toLocaleString() || '0'}
+                                            </Typography>
+                                          </TableCell>
+                                          <TableCell>
+                                            <Chip
+                                              label={transaction.status || 'unknown'}
+                                              size="small"
+                                              color={
+                                                transaction.status === 'completed'
+                                                  ? 'success'
+                                                  : transaction.status === 'pending'
+                                                  ? 'warning'
+                                                  : 'default'
+                                              }
+                                            />
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </TableContainer>
+                              </Paper>
+                            </Grid>
+                          </Grid>
+                        )}
+
+                                                 {/* No Financial Data Message */}
+                         {(!getFilteredFinancialData() || 
+                           (!getFilteredFinancialData()?.summary && !getFilteredFinancialData()?.propertyBreakdown && !getFilteredFinancialData()?.recentTransactions)) && (
+                           <Grid item xs={12}>
+                             <Paper sx={{ p: 3, textAlign: 'center' }}>
+                               <Typography variant="h6" color="textSecondary" gutterBottom>
+                                 No Financial Data Available for {timeFilter}
+                               </Typography>
+                               <Typography variant="body2" color="textSecondary">
+                                 No financial data found for the selected time period. Try selecting a different time filter or check if transactions exist for this period.
+                               </Typography>
+                             </Paper>
+                           </Grid>
+                         )}
+                      </>
+                    )}
                   </Box>
+                )}
 
-                  {chartErrors.payment && (
-                    <Box sx={{ mt: 4 }}>
-                      <Alert severity="warning">
-                        Unable to load payment data: {chartErrors.payment}
-                      </Alert>
-                    </Box>
-                  )}
+                    {activeTab === 2 && (
+                      <Box sx={{ mt: 2 }}>
+                        <Typography variant="h6" gutterBottom>
+                          Maintenance Requests
+                        </Typography>
+                        <Grid container spacing={3}>
+                          {maintenanceRequests.map((request) => (
+                            <Grid item xs={12} md={6} key={request._id}>
+                              <Card>
+                                <CardContent>
+                                  <Typography variant="h6">{request.title}</Typography>
+                                  <Typography color="textSecondary" gutterBottom>
+                                    {request.propertyName || request.propertyAddress || 'Unknown Property'}
+                                  </Typography>
+                                  <Typography variant="body2" sx={{ mb: 1 }}>
+                                    {request.description}
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                                    <Chip
+                                      label={request.priority}
+                                      size="small"
+                                      color={
+                                        request.priority === 'high'
+                                          ? 'error'
+                                          : request.priority === 'medium'
+                                          ? 'warning'
+                                          : 'default'
+                                      }
+                                    />
+                                    <Chip
+                                      label={request.status}
+                                      size="small"
+                                      color={
+                                        request.status === 'completed'
+                                          ? 'success'
+                                          : request.status === 'in_progress' || request.status === 'approved' || request.status === 'pending_completion'
+                                          ? 'primary'
+                                          : request.status === 'pending_approval'
+                                          ? 'warning'
+                                          : 'default'
+                                      }
+                                    />
+                                  </Box>
+                                  <Typography variant="body2">
+                                    Estimated Cost: ${request.estimatedCost?.toLocaleString() || '0'}
+                                  </Typography>
+                                  {(((request.status || '').toLowerCase().replace(/[^a-z]/g, '')) === 'pendingapproval') && (
+                                    <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                                      <Button
+                                        variant="contained"
+                                        color="primary"
+                                        size="small"
+                                        disabled={actionLoadingId === request._id}
+                                        onClick={() => handleApproveMaintenance(request._id)}
+                                      >
+                                        {actionLoadingId === request._id ? 'Approving...' : 'Approve'}
+                                      </Button>
+                                      <Button
+                                        variant="outlined"
+                                        color="error"
+                                        size="small"
+                                        disabled={actionLoadingId === request._id}
+                                        onClick={() => handleRejectMaintenance(request._id)}
+                                      >
+                                        {actionLoadingId === request._id ? 'Rejecting...' : 'Reject'}
+                                      </Button>
+                                    </Box>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Box>
+                    )}
 
-                  {/* Debug: Show when no payment data */}
-                  {!filteredPayments && !chartErrors.payment && (
-                    <Box sx={{ mt: 4 }}>
-                      <Alert severity="info">
-                        No payment data available for the selected period. This might be because there are no rental payments for your properties yet.
-                        Total rent collected is calculated from property records as a fallback.
-                      </Alert>
-                    </Box>
-                  )}
-                </Box>
-              )}
+                    {activeTab === 3 && (
+                      <Box sx={{ mt: 2 }}>
+                        <Typography variant="h6" gutterBottom>
+                          Reports & Analytics
+                        </Typography>
+                        <Grid container spacing={3}>
+                          <Grid item xs={12} md={6}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1">Occupancy Chart</Typography>
+                              {chartData.occupancy && chartData.occupancy.length > 0 ? (
+                                <ResponsiveContainer width="100%" height={200}>
+                                  <BarChart data={chartData.occupancy}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="name" />
+                                    <YAxis />
+                                    <Tooltip />
+                                    <Legend />
+                                    <Bar dataKey="occupied" fill="#8884d8" />
+                                    <Bar dataKey="vacant" fill="#82ca9d" />
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              ) : (
+                                <Typography variant="body2" color="textSecondary">
+                                  No occupancy data available
+                                </Typography>
+                              )}
+                            </Paper>
+                          </Grid>
+                          <Grid item xs={12} md={6}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1">Maintenance Status</Typography>
+                              {chartData.maintenance && chartData.maintenance.length > 0 ? (
+                                <ResponsiveContainer width="100%" height={200}>
+                                  <PieChart>
+                                    <Pie
+                                      data={chartData.maintenance}
+                                      cx="50%"
+                                      cy="50%"
+                                      labelLine={false}
+                                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                      outerRadius={80}
+                                      fill="#8884d8"
+                                      dataKey="value"
+                                    >
+                                      {chartData.maintenance.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                      ))}
+                                    </Pie>
+                                    <Tooltip />
+                                  </PieChart>
+                                </ResponsiveContainer>
+                              ) : (
+                                <Typography variant="body2" color="textSecondary">
+                                  No maintenance data available
+                                </Typography>
+                              )}
+                            </Paper>
+                          </Grid>
+                        </Grid>
+                      </Box>
+                    )}
+                  </Paper>
+                </Grid>
+              </Grid>
 
-              {/* Maintenance Tab */}
-              {activeTab === 2 && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="h6" gutterBottom>Maintenance Overview</Typography>
-                  <Divider sx={{ mb: 3 }} />
-                  
-                  {/* Maintenance Summary Cards */}
-                  <Grid container spacing={3} sx={{ mb: 4 }}>
-                    <Grid item xs={12} md={6} lg={4}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Total Requests</Typography>
-                        <Typography variant="h4">{maintenanceRequests.length}</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={4}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Pending Requests</Typography>
-                        <Typography variant="h4" color="warning.main">{pendingMaintenance}</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={12} md={6} lg={4}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1">Completed</Typography>
-                        <Typography variant="h4" color="success.main">{completedMaintenance}</Typography>
-                      </Paper>
-                    </Grid>
-                  </Grid>
-
-                  {/* Maintenance Requests List */}
-                  <Grid container spacing={3} sx={{ mb: 4 }}>
-                    {maintenanceRequests.map((request) => (
-                      <Grid item xs={12} md={6} key={request._id}>
-                        <Card>
-                          <CardContent>
-                            <Typography variant="h6" gutterBottom>
-                              {request.title || 'Untitled Request'}
-                            </Typography>
-                            <Typography color="textSecondary" gutterBottom>
-                              Property: {request.propertyName || 'Unknown Property'}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                              <Typography variant="body2" component="span">
-                                Priority:
-                              </Typography>
-                              <Chip 
-                                label={request.priority} 
-                                size="small" 
-                                color={request.priority === 'high' ? 'error' : request.priority === 'medium' ? 'warning' : 'success'} 
-                              />
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                              <Typography variant="body2" component="span">
-                                Status:
-                            </Typography>
-                              <Chip 
-                                label={request.status} 
-                                size="small" 
-                                color={request.status === 'completed' ? 'success' : request.status === 'in_progress' ? 'primary' : 'default'} 
-                              />
-                            </Box>
-                            <Typography variant="body2">
-                              Estimated Cost: ${(request.estimatedCost || 0).toLocaleString()}
-                            </Typography>
-                            <Typography variant="body2" sx={{ mt: 1 }}>
-                              {request.description || 'No description provided'}
-                            </Typography>
-                          </CardContent>
-                          <CardActions>
-                            <Button
-                              size="small"
-                              onClick={() => navigate(`/maintenance/${request._id}`)}
-                            >
-                              View Details
-                            </Button>
-                          </CardActions>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-
-                  {/* Maintenance by Category Chart */}
-                  {chartData?.maintenance && chartData.maintenance.length > 0 && !chartErrors.maintenance && (
-                    <Box sx={{ height: 400 }}>
-                      <Typography variant="h6" gutterBottom>Maintenance by Category</Typography>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={chartData.maintenance}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                            outerRadius={150}
-                            fill="#8884d8"
-                            dataKey="value"
-                          >
-                            {chartData.maintenance.map((entry: any, index: number) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                          <Legend />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </Box>
-                  )}
-                  {chartErrors.maintenance && (
-                    <Box sx={{ mt: 4 }}>
-                      <Alert severity="warning">
-                        Unable to load maintenance data: {chartErrors.maintenance}
-                      </Alert>
-                    </Box>
-                  )}
-                </Box>
-              )}
-
-              {/* Reports Tab */}
-              {activeTab === 3 && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="h6" gutterBottom>Financial Reports</Typography>
-                  <Divider sx={{ mb: 3 }} />
-                  <Grid container spacing={2}>
-                    <Grid item>
-                      <Button variant="outlined">Income Statement</Button>
-                    </Grid>
-                    <Grid item>
-                      <Button variant="outlined">Expense Report</Button>
-                    </Grid>
-                    <Grid item>
-                      <Button variant="outlined">Occupancy Report</Button>
-                    </Grid>
-                    <Grid item>
-                      <Button variant="outlined">Maintenance Report</Button>
-                    </Grid>
-                  </Grid>
-                </Box>
-              )}
-            </Paper>
-          </Grid>
-        </Grid>
-
-        <AuthErrorReport
-          open={showAuthError}
-          onClose={() => setShowAuthError(false)}
-          error="Please log in to access the owner dashboard"
-          onLogin={() => {
-            setShowAuthError(false);
-            navigate('/login');
-          }}
+              <AuthErrorReport
+                open={showAuthError}
+                onClose={() => setShowAuthError(false)}
+                error="Please log in to access the owner dashboard"
+                onLogin={() => {
+                  setShowAuthError(false);
+                  navigate('/login');
+                }}
+              />
+            </Container>
+          }
         />
-      </Container>
+        <Route path="property/:propertyId" element={<PropertyDetails />} />
+      </Routes>
     </ErrorBoundary>
   );
-};
-
-export default OwnerDashboard; 
+}

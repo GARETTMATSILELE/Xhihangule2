@@ -10,6 +10,8 @@ import {
   LinearProgress,
   CircularProgress,
   Alert,
+  Chip,
+  Divider,
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
@@ -35,9 +37,10 @@ import { AgentSettings } from './Settings/AgentSettings';
 import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWrapper';
 import LevyPaymentsPage from './agent/LevyPaymentsPage';
 import { SchedulePage } from './agent';
+import paymentService from '../services/paymentService';
 
-const StatCard = ({ title, value, icon, color, loading }: { title: string; value: string; icon: React.ReactNode; color: string; loading?: boolean }) => (
-  <Card>
+const StatCard = ({ title, value, icon, color, loading, onClick }: { title: string; value: string; icon: React.ReactNode; color: string; loading?: boolean; onClick?: () => void }) => (
+  <Card onClick={onClick} sx={{ cursor: onClick ? 'pointer' : 'default' }}>
     <CardContent>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
         <Box
@@ -80,6 +83,14 @@ const StatCard = ({ title, value, icon, color, loading }: { title: string; value
   </Card>
 );
 
+// Helper to normalize possible id shapes (string or {$oid})
+function getId(id: any): string {
+  if (!id) return '';
+  if (typeof id === 'string') return id;
+  if (typeof id === 'object' && id.$oid) return id.$oid;
+  return '';
+}
+
 const AgentDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
@@ -92,6 +103,44 @@ const AgentDashboard: React.FC = () => {
     activeLeases: 0,
     monthlyCommission: 0,
   });
+  const [properties, setProperties] = useState<any[]>([]);
+  const [tenants, setTenants] = useState<any[]>([]);
+  const [leases, setLeases] = useState<any[]>([]);
+  const [propertyById, setPropertyById] = useState<Record<string, any>>({});
+  const [tenantById, setTenantById] = useState<Record<string, any>>({});
+  const [tenantToActivePropertyId, setTenantToActivePropertyId] = useState<Record<string, string>>({});
+  const [showLeaseInsights, setShowLeaseInsights] = useState(false);
+  const [selectedLeaseCategory, setSelectedLeaseCategory] = useState<'all' | 'expired' | 'expiring' | 'aboutToExpire'>('all');
+  const [showCommissionDetails, setShowCommissionDetails] = useState(false);
+  const [commissionPayments, setCommissionPayments] = useState<any[]>([]);
+  const [commissionLoading, setCommissionLoading] = useState(false);
+  const [commissionError, setCommissionError] = useState<string | null>(null);
+  const [showActiveTenants, setShowActiveTenants] = useState(false);
+  const [showPropertiesList, setShowPropertiesList] = useState(false);
+
+  const loadCommissionPayments = async () => {
+    if (!user) return;
+    try {
+      setCommissionLoading(true);
+      setCommissionError(null);
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const filters: any = {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        status: 'completed',
+        agentId: user._id,
+      };
+      const response = await paymentService.getAllPublic(user.companyId, filters);
+      setCommissionPayments(response.data || []);
+    } catch (err: any) {
+      console.error('Error loading commission payments:', err);
+      setCommissionError(err instanceof Error ? err.message : 'Failed to load commission payments');
+    } finally {
+      setCommissionLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -118,6 +167,35 @@ const AgentDashboard: React.FC = () => {
           activeLeases: leases.filter((l: any) => l.status === 'active').length,
           monthlyCommission: commission.monthlyCommission || 0,
         });
+        setProperties(properties);
+        setTenants(tenants);
+        setLeases(leases);
+
+        // Build fast lookup maps to avoid ID shape issues and O(n^2) lookups
+        const propMap: Record<string, any> = {};
+        properties.forEach((p: any) => {
+          const key = getId(p._id) || getId(p.id);
+          if (key) propMap[key] = p;
+        });
+        setPropertyById(propMap);
+
+        const tenMap: Record<string, any> = {};
+        tenants.forEach((t: any) => {
+          const key = getId(t._id) || getId(t.id);
+          if (key) tenMap[key] = t;
+        });
+        setTenantById(tenMap);
+
+        // Map tenantId -> active lease's propertyId for reliable property lookup
+        const tToProp: Record<string, string> = {};
+        leases
+          .filter((l: any) => l.status === 'active')
+          .forEach((l: any) => {
+            const tKey = getId(l.tenantId);
+            const pKey = getId(l.propertyId);
+            if (tKey && pKey) tToProp[tKey] = pKey;
+          });
+        setTenantToActivePropertyId(tToProp);
       } catch (err: any) {
         console.error('Error fetching dashboard data:', err);
         setError(err.response?.data?.message || 'Failed to fetch dashboard data');
@@ -133,6 +211,17 @@ const AgentDashboard: React.FC = () => {
       setLoading(false);
     }
   }, [user]);
+
+  // Helper resolvers
+  const resolvePropertyForTenant = (tenant: any) => {
+    const explicitPropId = getId(tenant?.propertyId);
+    const fallbackPropId = tenantToActivePropertyId[getId(tenant?._id)];
+    const propId = explicitPropId || fallbackPropId || '';
+    return propertyById[propId];
+  };
+
+  const resolvePropertyById = (propertyId: any) => propertyById[getId(propertyId)];
+  const resolveTenantById = (tenantId: any) => tenantById[getId(tenantId)];
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -159,6 +248,12 @@ const AgentDashboard: React.FC = () => {
                       icon={<BusinessIcon />}
                       color="#5E72E4"
                       loading={loading}
+                      onClick={() => {
+                        setShowPropertiesList(true);
+                        setShowLeaseInsights(false);
+                        setShowCommissionDetails(false);
+                        setShowActiveTenants(false);
+                      }}
                     />
                   </Grid>
                   <Grid item xs={12} md={6} lg={3}>
@@ -168,6 +263,12 @@ const AgentDashboard: React.FC = () => {
                       icon={<PeopleIcon />}
                       color="#11CDEF"
                       loading={loading}
+                      onClick={() => {
+                        setShowActiveTenants(true);
+                        setShowLeaseInsights(false);
+                        setShowCommissionDetails(false);
+                        setShowPropertiesList(false);
+                      }}
                     />
                   </Grid>
                   <Grid item xs={12} md={6} lg={3}>
@@ -177,6 +278,13 @@ const AgentDashboard: React.FC = () => {
                       icon={<DescriptionIcon />}
                       color="#2DCE89"
                       loading={loading}
+                      onClick={() => {
+                        setShowLeaseInsights(true);
+                        setSelectedLeaseCategory('all');
+                        setShowCommissionDetails(false);
+                        setShowActiveTenants(false);
+                        setShowPropertiesList(false);
+                      }}
                     />
                   </Grid>
                   <Grid item xs={12} md={6} lg={3}>
@@ -186,22 +294,331 @@ const AgentDashboard: React.FC = () => {
                       icon={<PaymentIcon />}
                       color="#FB6340"
                       loading={loading}
+                      onClick={() => {
+                        setShowCommissionDetails(true);
+                        setShowLeaseInsights(false);
+                        setShowActiveTenants(false);
+                        setShowPropertiesList(false);
+                        loadCommissionPayments();
+                      }}
                     />
                   </Grid>
                   <Grid item xs={12}>
                     <Card>
                       <CardContent>
-                        <Typography variant="h6" sx={{ mb: 2 }}>
-                          Recent Activity
-                        </Typography>
-                        {loading ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
-                            <CircularProgress />
-                          </Box>
+                        {showCommissionDetails ? (
+                          <>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                              <Typography variant="h6">Monthly Commission Payments</Typography>
+                              <Button size="small" onClick={() => setShowCommissionDetails(false)}>Hide</Button>
+                            </Box>
+                            {commissionLoading ? (
+                              <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                                <CircularProgress />
+                              </Box>
+                            ) : commissionError ? (
+                              <Alert severity="error">{commissionError}</Alert>
+                            ) : (
+                              (() => {
+                                const now = new Date();
+                                const monthPayments = commissionPayments.filter((p: any) => {
+                                  const d = p.paymentDate ? new Date(p.paymentDate) : null;
+                                  return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                                });
+                                const summedAgentShare = monthPayments.reduce((sum: number, p: any) => sum + (p.commissionDetails?.agentShare || 0), 0);
+                                return (
+                                  <>
+                                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                                      Total agent share this month: ${summedAgentShare.toLocaleString()}
+                                    </Typography>
+                                    {monthPayments.length === 0 ? (
+                                      <Typography color="text.secondary">No commission payments found for this month.</Typography>
+                                    ) : (
+                                      <Grid container spacing={2}>
+                                        {monthPayments.map((pay: any) => {
+                                          const propertyId = getId(pay.propertyId);
+                                          const tenantId = getId(pay.tenantId);
+                                          const propertyObj = resolvePropertyById(propertyId);
+                                          const propertyName = propertyObj?.name || 'Unknown Property';
+                                          const tenantObj = resolveTenantById(tenantId);
+                                          const tenantName = tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'Unknown Tenant' : 'Unknown Tenant';
+                                          const paymentDate = pay.paymentDate ? new Date(pay.paymentDate) : null;
+                                          const agentShare = pay.commissionDetails?.agentShare || 0;
+                                          const totalCommission = pay.commissionDetails?.totalCommission || 0;
+                                          return (
+                                            <Grid item xs={12} key={pay._id}>
+                                              <Card>
+                                                <CardContent>
+                                                  <Grid container alignItems="center" spacing={2}>
+                                                    <Grid item xs={12} md={5}>
+                                                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{propertyName}</Typography>
+                                                      <Typography color="text.secondary">Tenant: {tenantName}</Typography>
+                                                    </Grid>
+                                                    <Grid item xs={12} md={4}>
+                                                      <Typography color="text.secondary">Payment Date</Typography>
+                                                      <Typography>{paymentDate ? paymentDate.toLocaleDateString() : 'N/A'}</Typography>
+                                                    </Grid>
+                                                    <Grid item xs={12} md={3}>
+                                                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                                        <Chip label={`Agent Share: $${agentShare.toLocaleString()}`} color="success" size="small" />
+                                                        <Chip label={`Commission: $${totalCommission.toLocaleString()}`} color="warning" size="small" />
+                                                      </Box>
+                                                    </Grid>
+                                                  </Grid>
+                                                </CardContent>
+                                              </Card>
+                                            </Grid>
+                                          );
+                                        })}
+                                      </Grid>
+                                    )}
+                                  </>
+                                );
+                              })()
+                            )}
+                          </>
+                        ) : showLeaseInsights ? (
+                          <>
+                            <Typography variant="h6" sx={{ mb: 2 }}>
+                              Leases Under My Portfolio
+                            </Typography>
+                            <Grid container spacing={2} sx={{ mb: 2 }}>
+                              {(() => {
+                                const now = new Date();
+                                const msPerDay = 1000 * 60 * 60 * 24;
+                                const categorize = (lease: any) => {
+                                  const end = lease?.endDate ? new Date(lease.endDate) : null;
+                                  if (!end || isNaN(end.getTime())) return 'other';
+                                  const diffDays = Math.ceil((end.getTime() - now.getTime()) / msPerDay);
+                                  if (diffDays < 0) return 'expired';
+                                  if (diffDays <= 30) return 'expiring';
+                                  if (diffDays <= 90) return 'aboutToExpire';
+                                  return 'other';
+                                };
+                                const expiredCount = leases.filter((l: any) => categorize(l) === 'expired').length;
+                                const expiringCount = leases.filter((l: any) => categorize(l) === 'expiring').length;
+                                const aboutToExpireCount = leases.filter((l: any) => categorize(l) === 'aboutToExpire').length;
+                                return (
+                                  <>
+                                    <Grid item xs={12} md={4}>
+                                      <Card onClick={() => setSelectedLeaseCategory('expired')} sx={{ cursor: 'pointer' }}>
+                                        <CardContent>
+                                          <Typography variant="subtitle2" color="text.secondary">Expired Leases</Typography>
+                                          <Typography variant="h4" sx={{ fontWeight: 600, color: '#F5365C' }}>{expiredCount}</Typography>
+                                        </CardContent>
+                                      </Card>
+                                    </Grid>
+                                    <Grid item xs={12} md={4}>
+                                      <Card onClick={() => setSelectedLeaseCategory('expiring')} sx={{ cursor: 'pointer' }}>
+                                        <CardContent>
+                                          <Typography variant="subtitle2" color="text.secondary">Expiring (≤ 1 month)</Typography>
+                                          <Typography variant="h4" sx={{ fontWeight: 600, color: '#FB6340' }}>{expiringCount}</Typography>
+                                        </CardContent>
+                                      </Card>
+                                    </Grid>
+                                    <Grid item xs={12} md={4}>
+                                      <Card onClick={() => setSelectedLeaseCategory('aboutToExpire')} sx={{ cursor: 'pointer' }}>
+                                        <CardContent>
+                                          <Typography variant="subtitle2" color="text.secondary">About to Expire (≤ 3 months)</Typography>
+                                          <Typography variant="h4" sx={{ fontWeight: 600, color: '#FFA534' }}>{aboutToExpireCount}</Typography>
+                                        </CardContent>
+                                      </Card>
+                                    </Grid>
+                                  </>
+                                );
+                              })()}
+                            </Grid>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                {selectedLeaseCategory === 'all' ? 'All Leases' : selectedLeaseCategory === 'expired' ? 'Expired Leases' : selectedLeaseCategory === 'expiring' ? 'Leases Expiring Within 1 Month' : 'Leases Expiring Within 3 Months'}
+                              </Typography>
+                              <Button size="small" onClick={() => setSelectedLeaseCategory('all')}>Show All</Button>
+                            </Box>
+                            <Divider sx={{ mb: 2 }} />
+                            {(() => {
+                              const now = new Date();
+                              const msPerDay = 1000 * 60 * 60 * 24;
+                              const categorize = (lease: any) => {
+                                const end = lease?.endDate ? new Date(lease.endDate) : null;
+                                if (!end || isNaN(end.getTime())) return 'other';
+                                const diffDays = Math.ceil((end.getTime() - now.getTime()) / msPerDay);
+                                if (diffDays < 0) return 'expired';
+                                if (diffDays <= 30) return 'expiring';
+                                if (diffDays <= 90) return 'aboutToExpire';
+                                return 'other';
+                              };
+                              const categoryOrder: Record<string, number> = { expired: 0, expiring: 1, aboutToExpire: 2, other: 3 };
+                              const daysUntil = (lease: any) => {
+                                const end = lease?.endDate ? new Date(lease.endDate) : null;
+                                if (!end || isNaN(end.getTime())) return Number.POSITIVE_INFINITY;
+                                return Math.ceil((end.getTime() - now.getTime()) / msPerDay);
+                              };
+                              const filtered = leases.filter((l: any) =>
+                                selectedLeaseCategory === 'all' ? true : categorize(l) === selectedLeaseCategory
+                              );
+                              const sorted = filtered.sort((a: any, b: any) => {
+                                const ca = categorize(a);
+                                const cb = categorize(b);
+                                if (categoryOrder[ca] !== categoryOrder[cb]) return categoryOrder[ca] - categoryOrder[cb];
+                                return daysUntil(a) - daysUntil(b);
+                              });
+                              if (!sorted.length) {
+                                return (
+                                  <Typography color="text.secondary">No leases to display.</Typography>
+                                );
+                              }
+                              return (
+                                <Grid container spacing={2}>
+                                  {sorted.map((lease: any) => {
+                                    const propertyId = getId(lease.propertyId);
+                                    const tenantId = getId(lease.tenantId);
+                                    const propertyObj = resolvePropertyById(propertyId);
+                                    const propertyName = propertyObj?.name || 'Unknown Property';
+                                    const tenantObj = resolveTenantById(tenantId);
+                                    const tenantName = tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'Unknown Tenant' : 'Unknown Tenant';
+                                    const end = lease?.endDate ? new Date(lease.endDate) : null;
+                                    const category = categorize(lease);
+                                    const chip = category === 'expired'
+                                      ? { label: 'Expired', color: 'error' as const }
+                                      : category === 'expiring'
+                                      ? { label: 'Expiring ≤1 mo', color: 'warning' as const }
+                                      : category === 'aboutToExpire'
+                                      ? { label: '≤3 mo', color: 'default' as const }
+                                      : { label: 'Active', color: 'success' as const };
+                                    return (
+                                      <Grid item xs={12} key={lease._id}>
+                                        <Card>
+                                          <CardContent>
+                                            <Grid container alignItems="center" spacing={2}>
+                                              <Grid item xs={12} md={5}>
+                                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{propertyName}</Typography>
+                                                <Typography color="text.secondary">Tenant: {tenantName}</Typography>
+                                              </Grid>
+                                              <Grid item xs={12} md={4}>
+                                                <Typography color="text.secondary">End Date</Typography>
+                                                <Typography>{end ? end.toLocaleDateString() : 'N/A'}</Typography>
+                                              </Grid>
+                                              <Grid item xs={12} md={3}>
+                                                <Chip label={chip.label} color={chip.color} size="small" />
+                                              </Grid>
+                                            </Grid>
+                                          </CardContent>
+                                        </Card>
+                                      </Grid>
+                                    );
+                                  })}
+                                </Grid>
+                              );
+                            })()}
+                          </>
+                        ) : showActiveTenants ? (
+                          <>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                              <Typography variant="h6">Active Tenants</Typography>
+                              <Button size="small" onClick={() => setShowActiveTenants(false)}>Hide</Button>
+                            </Box>
+                            {loading ? (
+                              <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                                <CircularProgress />
+                              </Box>
+                            ) : (
+                              (() => {
+                                const activeTenants = tenants.filter((t: any) => t.status === 'Active');
+                                if (!activeTenants.length) {
+                                  return <Typography color="text.secondary">No active tenants found.</Typography>;
+                                }
+                                return (
+                                  <Grid container spacing={2}>
+                                    {activeTenants.map((tenant: any) => {
+                                      const property = resolvePropertyForTenant(tenant);
+                                      const propertyName = property?.name || 'Unknown Property';
+                                      const propertyAddress = property?.address || '';
+                                      const fullName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || 'Unnamed Tenant';
+                                      return (
+                                        <Grid item xs={12} key={tenant._id}>
+                                          <Card>
+                                            <CardContent>
+                                              <Grid container alignItems="center" spacing={2}>
+                                                <Grid item xs={12} md={5}>
+                                                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{fullName}</Typography>
+                                                  <Typography color="text.secondary">{tenant.email || tenant.phone || ''}</Typography>
+                                                </Grid>
+                                                <Grid item xs={12} md={4}>
+                                                  <Typography color="text.secondary">Property</Typography>
+                                                  <Typography>{propertyName}</Typography>
+                                                  <Typography color="text.secondary">{propertyAddress}</Typography>
+                                                </Grid>
+                                                <Grid item xs={12} md={3}>
+                                                  <Chip label="Active" color="success" size="small" />
+                                                </Grid>
+                                              </Grid>
+                                            </CardContent>
+                                          </Card>
+                                        </Grid>
+                                      );
+                                    })}
+                                  </Grid>
+                                );
+                              })()
+                            )}
+                          </>
+                        ) : showPropertiesList ? (
+                          <>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                              <Typography variant="h6">My Properties</Typography>
+                              <Button size="small" onClick={() => setShowPropertiesList(false)}>Hide</Button>
+                            </Box>
+                            {loading ? (
+                              <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                                <CircularProgress />
+                              </Box>
+                            ) : (
+                              (() => {
+                                if (!properties.length) {
+                                  return <Typography color="text.secondary">No properties found.</Typography>;
+                                }
+                                return (
+                                  <Grid container spacing={2}>
+                                    {properties.map((property: any) => (
+                                      <Grid item xs={12} key={getId(property._id)}>
+                                        <Card>
+                                          <CardContent>
+                                            <Grid container alignItems="center" spacing={2}>
+                                              <Grid item xs={12} md={8}>
+                                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{property.name || 'Unnamed Property'}</Typography>
+                                                <Typography color="text.secondary">{property.address || ''}</Typography>
+                                              </Grid>
+                                              <Grid item xs={12} md={4}>
+                                                <Box sx={{ display: 'flex', gap: 1, justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
+                                                  {property.status && <Chip label={property.status} size="small" />}
+                                                  {typeof property.rent === 'number' && <Chip label={`Rent $${property.rent.toLocaleString()}`} size="small" />}
+                                                </Box>
+                                              </Grid>
+                                            </Grid>
+                                          </CardContent>
+                                        </Card>
+                                      </Grid>
+                                    ))}
+                                  </Grid>
+                                );
+                              })()
+                            )}
+                          </>
                         ) : (
-                          <Typography color="text.secondary">
-                            No recent activity to display
-                          </Typography>
+                          <>
+                            <Typography variant="h6" sx={{ mb: 2 }}>
+                              Recent Activity
+                            </Typography>
+                            {loading ? (
+                              <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                                <CircularProgress />
+                              </Box>
+                            ) : (
+                              <Typography color="text.secondary">
+                                No recent activity to display
+                              </Typography>
+                            )}
+                          </>
                         )}
                       </CardContent>
                     </Card>

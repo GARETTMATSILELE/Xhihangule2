@@ -149,6 +149,19 @@ api.interceptors.response.use(
       }
     }
 
+    // If the error is 403 (forbidden), treat it as an auth failure and redirect to login
+    if (error.response?.status === 403) {
+      console.log('403 forbidden detected, redirecting to login');
+      setTokens(null, null);
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      window.dispatchEvent(new CustomEvent('authError', { 
+        detail: 'Your session has expired or you do not have access. Please log in again.' 
+      }));
+      return Promise.reject(error);
+    }
+
     return Promise.reject(error);
   }
 );

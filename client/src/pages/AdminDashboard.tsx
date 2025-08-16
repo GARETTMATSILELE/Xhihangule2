@@ -82,6 +82,7 @@ import { AdminSettings } from './Settings/AdminSettings';
 import ReportsPage from './admin/ReportsPage';
 import AdminLeasesPage from './AdminLeasesPage';
 import LevyPaymentsPage from './admin/LevyPaymentsPage';
+import DatabaseSyncDashboard from '../components/admin/DatabaseSyncDashboard';
 
 // Theme colors
 const lightTheme = {
@@ -478,6 +479,7 @@ const AdminDashboard: React.FC = () => {
             <Route path="/communications" element={<CommunicationsPage />} />
             <Route path="/files" element={<Files />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/sync" element={<DatabaseSyncDashboard />} />
             <Route path="/settings" element={<AdminSettings />} />
           </Routes>
         </Box>

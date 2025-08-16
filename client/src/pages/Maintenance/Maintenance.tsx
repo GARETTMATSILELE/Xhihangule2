@@ -38,7 +38,7 @@ export const Maintenance: React.FC<MaintenanceProps> = ({
   isAuthenticated, 
   authLoading 
 }) => {
-  const { requests, loading, error } = useMaintenance(user);
+  const { requests, loading, error, updateRequest } = useMaintenance(user);
   const [showForm, setShowForm] = useState(false);
 
   // Show loading if maintenance data is loading
@@ -65,74 +65,77 @@ export const Maintenance: React.FC<MaintenanceProps> = ({
   }
 
   return (
-    <Box>
-      {/* User and Company Info Header */}
-      <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid #e0e0e0' }}>
-        <Typography variant="h6" gutterBottom>
-          Maintenance Dashboard
-        </Typography>
-        {user && (
-          <>
-            <Typography variant="body2" color="text.secondary">
-              User: {user.firstName} {user.lastName} ({user.email})
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Role: {user.role}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              User Company ID: {user.companyId}
-            </Typography>
-          </>
-        )}
-        {company && (
-          <>
-            <Typography variant="body2" color="text.secondary">
-              Company: {company.name}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Company ID: {company._id}
-            </Typography>
-          </>
-        )}
-        <Typography variant="body2" color="text.secondary">
-          Authentication Status: {isAuthenticated ? 'Authenticated' : 'Not Authenticated'}
-        </Typography>
+    <Box sx={{ width: '100%' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
+        <Typography variant="h4">Maintenance Requests</Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => setShowForm(true)}
+        >
+          New Request
+        </Button>
       </Box>
 
       <Grid container spacing={3}>
         <Grid item xs={12}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-            <Typography variant="h4">Maintenance Requests</Typography>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={() => setShowForm(true)}
-            >
-              New Request
-            </Button>
-          </Box>
-        </Grid>
-
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2 }}>
+          <Paper sx={{ p: 2, width: '100%' }}>
             {requests.length === 0 ? (
               <Typography>No maintenance requests found.</Typography>
             ) : (
-              requests.map((request) => (
-                <Box key={request._id} sx={{ mb: 2, p: 2, border: '1px solid #eee' }}>
-                  <Typography variant="h6">{request.title}</Typography>
-                  <Typography>Status: {request.status}</Typography>
-                  <Typography>Priority: {request.priority}</Typography>
-                  <Typography>Description: {request.description}</Typography>
-                </Box>
-              ))
+              <Grid container spacing={2}>
+                {requests.map((request) => (
+                  <Grid item xs={12} key={request._id}>
+                    <Box sx={{ p: 2, border: '1px solid #eee', borderRadius: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                      <Box sx={{ minWidth: 220 }}>
+                        <Typography variant="h6" sx={{ mb: 0.5 }}>{request.title}</Typography>
+                        <Typography color="text.secondary">{request.description}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Typography variant="body2">Status:</Typography>
+                        <strong>{request.status}</strong>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                        <Typography variant="body2">Priority:</Typography>
+                        <strong>{request.priority}</strong>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        {(request.status === 'pending' || request.status === 'rejected') && (
+                          <Button variant="outlined" size="small" onClick={async () => {
+                            try {
+                              await updateRequest(request._id!, { status: 'pending_approval' as any });
+                            } catch (e) {
+                              console.error('Error sending for owner approval', e);
+                            }
+                          }}>Send to Owner</Button>
+                        )}
+                        {request.status === 'approved' && (
+                          <Button variant="contained" color="primary" size="small" onClick={async () => {
+                            try {
+                              await updateRequest(request._id!, { status: 'in_progress' });
+                            } catch (e) {
+                              console.error('Error starting work', e);
+                            }
+                          }}>Start Work</Button>
+                        )}
+                        {request.status === 'in_progress' && (
+                          <Button variant="contained" color="success" size="small" onClick={async () => {
+                            try {
+                              await updateRequest(request._id!, { status: 'completed' });
+                            } catch (e) {
+                              console.error('Error completing', e);
+                            }
+                          }}>Mark Completed</Button>
+                        )}
+                        {request.status === 'completed' && (
+                          <Typography variant="body2" color="success.main">Completed</Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  </Grid>
+                ))}
+              </Grid>
             )}
-          </Paper>
-        </Grid>
-
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2 }}>
-            <MaintenanceCalendar />
           </Paper>
         </Grid>
       </Grid>

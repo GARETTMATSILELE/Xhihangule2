@@ -20,6 +20,7 @@ import {
   Settings as SettingsIcon,
   AccountBalance as AccountBalanceIcon,
   Assignment as TaskIcon,
+  Sync as SyncIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
@@ -45,6 +46,7 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
     { text: 'Agent Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/agent-accounts' },
     { text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
     { text: 'Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },
+    { text: 'Data Sync', icon: <SyncIcon />, path: '/accountant-dashboard/data-sync' },
     { text: 'Tasks', icon: <TaskIcon />, path: '/accountant-dashboard/tasks' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' }
   ];

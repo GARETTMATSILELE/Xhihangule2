@@ -21,9 +21,11 @@ import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
 import paymentRequestRoutes from './routes/paymentRequestRoutes';
 import invoiceRoutes from './routes/invoiceRoutes';
+import syncRoutes from './routes/syncRoutes';
 import { connectDatabase, closeDatabase } from './config/database';
 import { createServer } from 'http';
 import { initializeSocket } from './config/socket';
+import { initializeSyncServices } from './scripts/startSyncServices';
 
 // Load environment variables
 dotenv.config();
@@ -93,6 +95,7 @@ app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/sync', syncRoutes);
 
 // Debug route to catch unmatched requests - temporarily disabled
 // app.use('/api/*', (req, res, next) => {
@@ -123,8 +126,17 @@ const { io } = initializeSocket(httpServer);
 
 // Connect to MongoDB
 connectDatabase()
-  .then(() => {
+  .then(async () => {
     console.log('Connected to MongoDB');
+    
+    // Initialize sync services
+    try {
+      await initializeSyncServices();
+      console.log('Database synchronization services initialized');
+    } catch (error) {
+      console.error('Failed to initialize sync services:', error);
+      // Don't exit, continue with server startup
+    }
     
     // Start the server
     httpServer.listen(PORT, () => {
@@ -139,8 +151,15 @@ connectDatabase()
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received. Closing HTTP server...');
-  httpServer.close(() => {
+  httpServer.close(async () => {
     console.log('HTTP server closed');
+    try {
+      const { shutdownSyncServices } = await import('./scripts/startSyncServices');
+      await shutdownSyncServices();
+      console.log('Sync services shut down gracefully');
+    } catch (error) {
+      console.error('Error shutting down sync services:', error);
+    }
     process.exit(0);
   });
 });

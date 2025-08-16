@@ -125,7 +125,7 @@ export const getOwnerProperties = async (req: Request, res: Response) => {
 };
 
 // Get a specific property for the authenticated owner
-export const getOwnerPropertyById = async (req: Request, res: Response) => {
+export const getOwnerPropertyById = async (req: Request, res: Response, next: any) => {
   try {
     if (!req.user?.userId) {
       throw new AppError('Authentication required', 401);
@@ -133,6 +133,9 @@ export const getOwnerPropertyById = async (req: Request, res: Response) => {
 
     const ownerId = req.user.userId;
     const propertyId = req.params.id;
+    if (!propertyId || !mongoose.isValidObjectId(propertyId)) {
+      throw new AppError('Invalid property ID', 400);
+    }
     const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
 
     // Check if the property is in the owner's properties array
@@ -169,7 +172,11 @@ export const getOwnerPropertyById = async (req: Request, res: Response) => {
     // Get maintenance requests for this property
     const maintenanceRequests = await MaintenanceRequest.find({ 
       propertyId: property._id 
-    }).populate('tenantId', 'firstName lastName email');
+    })
+    .populate('propertyId', 'name address')
+    .populate('requestedBy', 'firstName lastName email')
+    .populate('ownerId', 'firstName lastName email')
+    .populate('messages.sender', 'firstName lastName email');
 
     // Calculate occupancy rate
     const occupancyRate = property.units && property.units > 0 
@@ -205,11 +212,16 @@ export const getOwnerPropertyById = async (req: Request, res: Response) => {
     };
 
     res.json(propertyWithMetrics);
-  } catch (error) {
+  } catch (error: any) {
+    // Handle known AppError consistently without crashing the process
     if (error instanceof AppError) {
-      throw error;
+      return res.status(error.statusCode).json({ message: error.message });
     }
-    throw new AppError('Error fetching property', 500);
+    if (error && error.name === 'CastError') {
+      return res.status(400).json({ message: 'Invalid property ID' });
+    }
+    console.error('getOwnerPropertyById: Unexpected error:', error);
+    return res.status(500).json({ message: 'Error fetching property' });
   }
 };
 
@@ -611,6 +623,95 @@ export const approveOwnerMaintenanceRequest = async (req: Request, res: Response
     }
     console.error('Error approving maintenance request:', error);
     throw new AppError('Error approving maintenance request', 500);
+  }
+};
+
+// Reject a maintenance request (owner action)
+export const rejectOwnerMaintenanceRequest = async (req: Request, res: Response) => {
+  try {
+    // Get user context from query parameters (for public API) or from authentication middleware
+    let ownerId: string;
+    let companyId: string | undefined;
+
+    if (req.user?.userId) {
+      // Authenticated request
+      ownerId = req.user.userId;
+      companyId = req.user.companyId;
+    } else {
+      // Public request - get from query parameters
+      ownerId = req.query.userId as string;
+      companyId = req.query.companyId as string;
+      
+      if (!ownerId) {
+        return res.status(400).json({ message: 'userId is required as query parameter' });
+      }
+    }
+
+    const requestId = req.params.id;
+    const { reason } = req.body || {};
+    if (!requestId) {
+      throw new AppError('Maintenance request ID is required', 400);
+    }
+
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+
+    let propertyIds: mongoose.Types.ObjectId[] = [];
+
+    if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+      propertyIds = propertyOwnerContext.properties;
+    } else {
+      const query: any = { ownerId: ownerId };
+      if (propertyOwnerContext.companyId) {
+        query.companyId = propertyOwnerContext.companyId;
+      }
+      const properties = await Property.find(query);
+      propertyIds = properties.map(p => p._id);
+    }
+
+    if (propertyIds.length === 0) {
+      throw new AppError('No properties found for this owner', 404);
+    }
+
+    const maintenanceRequest = await MaintenanceRequest.findOne({
+      _id: requestId,
+      propertyId: { $in: propertyIds }
+    });
+
+    if (!maintenanceRequest) {
+      throw new AppError('Maintenance request not found or access denied', 404);
+    }
+
+    // Only allow rejecting if pending approval or pending
+    if (!['pending_approval', 'pending'].includes(maintenanceRequest.status)) {
+      throw new AppError('Only requests pending approval can be rejected', 400);
+    }
+
+    // Update status to cancelled and add a message for audit trail
+    maintenanceRequest.status = 'cancelled';
+    maintenanceRequest.messages = maintenanceRequest.messages || [] as any;
+    maintenanceRequest.messages.push({
+      sender: propertyOwnerContext._id,
+      content: reason || 'Owner rejected the maintenance request',
+      timestamp: new Date()
+    } as any);
+    await maintenanceRequest.save();
+
+    const updatedRequest = await MaintenanceRequest.findById(requestId)
+      .populate('propertyId', 'name address')
+      .populate('requestedBy', 'firstName lastName email')
+      .populate('ownerId', 'firstName lastName email');
+
+    if (!updatedRequest) {
+      throw new AppError('Error retrieving updated maintenance request', 500);
+    }
+
+    res.json(updatedRequest);
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    console.error('Error rejecting maintenance request:', error);
+    throw new AppError('Error rejecting maintenance request', 500);
   }
 };
 

@@ -312,7 +312,7 @@ export const Properties: React.FC = () => {
         </Alert>
       )}
       
-      {user && user.companyId && !['admin', 'owner'].includes(user.role || '') && (
+      {user && user.companyId && !['admin', 'owner'].includes(user.role || '') && !isAgentRoute && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Only administrators and property owners can add properties. Your current role: {user.role}
         </Alert>

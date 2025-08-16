@@ -26,6 +26,7 @@ import {
   AccountBalance as AccountBalanceIcon,
   Folder as FolderIcon,
   Receipt as ReceiptIcon,
+  Sync as SyncIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -100,6 +101,11 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
       text: 'Reports', 
       icon: <AssessmentIcon />, 
       path: '/admin-dashboard/reports' 
+    },
+    { 
+      text: 'Database Sync', 
+      icon: <SyncIcon />, 
+      path: '/admin-dashboard/sync' 
     },
     { 
       text: 'Settings', 

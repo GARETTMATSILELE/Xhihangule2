@@ -34,6 +34,7 @@ import WrittenInvoicesPage from './pages/AccountantDashboard/WrittenInvoicesPage
 import LevyPaymentsPage from './pages/AccountantDashboard/LevyPaymentsPage';
 import TasksPage from './pages/AccountantDashboard/TasksPage';
 import { NotificationProvider } from './components/Layout/Header';
+import DatabaseSyncDashboard from './components/admin/DatabaseSyncDashboard';
 
 // Create a theme instance with proper configuration
 const theme = createTheme({
@@ -100,6 +101,7 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
+              
               <Route path="/agent-dashboard/*" element={
                 <ProtectedRoute requiredRoles={['agent']}>
                   <PropertyProvider>
@@ -109,7 +111,7 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
-              <Route path="/accountant-dashboard" element={
+              <Route path="/accountant-dashboard/*" element={
                 <ProtectedRoute requiredRoles={['accountant']}>
                   <PropertyProvider>
                     <CompanyProvider>
@@ -121,15 +123,16 @@ const App: React.FC = () => {
                 <Route index element={<AccountantDashboard />} />
                 <Route path="payments" element={<AccountantPaymentsPage />} />
                 <Route path="property-accounts" element={<PropertyAccountsPage />} />
-                <Route path="property-accounts/:propertyId" element={<ProtectedRoute requiredRoles={['accountant']}><PropertyAccountDetailPage /></ProtectedRoute>} />
+                <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
                 <Route path="agent-accounts" element={<AgentAccountsPage />} />
-                <Route path="agent-accounts/:agentId" element={<ProtectedRoute requiredRoles={['accountant']}><AgentAccountDetailPage /></ProtectedRoute>} />
+                <Route path="agent-accounts/:agentId" element={<AgentAccountDetailPage />} />
                 <Route path="commissions" element={<CommissionsPage />} />
                 <Route path="written-invoices" element={<WrittenInvoicesPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="levies" element={<LevyPaymentsPage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="tasks" element={<TasksPage />} />
+                <Route path="data-sync" element={<DatabaseSyncDashboard />} />
               </Route>
               <Route path="/admin/users" element={
                 <ProtectedRoute requiredRoles={['admin']}>

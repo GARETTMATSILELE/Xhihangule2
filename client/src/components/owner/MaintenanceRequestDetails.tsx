@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import api from '../../api/axios';
 import { apiService } from '../../api';
 import {
@@ -67,12 +68,12 @@ const MaintenanceRequestDetails: React.FC = () => {
     message: ''
   });
   const [openStatusDialog, setOpenStatusDialog] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const user = JSON.parse(localStorage.getItem('user') || '{}');
-        if (!user._id || !user.companyId) {
+        if (!user?._id || !(user as any).companyId) {
           setError('User ID or Company ID not found');
           return;
         }
@@ -81,7 +82,7 @@ const MaintenanceRequestDetails: React.FC = () => {
           setLoading(false);
           return;
         }
-        const response = await apiService.getOwnerMaintenanceRequestPublic(requestId, user._id as string, user.companyId as string);
+        const response = await apiService.getOwnerMaintenanceRequestPublic(requestId, user._id as string, (user as any).companyId as string);
         setRequest(response.data);
       } catch (err: any) {
         setError(err.response?.data?.error || 'Error fetching maintenance request details');
@@ -97,8 +98,7 @@ const MaintenanceRequestDetails: React.FC = () => {
     if (!newMessage.trim()) return;
 
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      if (!user._id || !user.companyId) {
+      if (!user?._id || !(user as any).companyId) {
         setError('User ID or Company ID not found');
         return;
       }
@@ -106,7 +106,7 @@ const MaintenanceRequestDetails: React.FC = () => {
         setError('Request ID not found');
         return;
       }
-      const response = await apiService.getOwnerMaintenanceRequestPublic(requestId, user._id as string, user.companyId as string);
+      const response = await apiService.getOwnerMaintenanceRequestPublic(requestId, user._id as string, (user as any).companyId as string);
       // For now, we'll use the authenticated API for posting messages since it requires more complex logic
       const messageResponse = await api.post(`/owners/maintenance-requests/${requestId}/messages`, {
         content: newMessage
@@ -120,8 +120,7 @@ const MaintenanceRequestDetails: React.FC = () => {
 
   const handleStatusUpdate = async () => {
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      if (!user._id) {
+      if (!user?._id) {
         setError('User ID not found');
         return;
       }
@@ -140,8 +139,7 @@ const MaintenanceRequestDetails: React.FC = () => {
 
   const handleApprove = async () => {
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      if (!user._id || !user.companyId) {
+      if (!user?._id || !(user as any).companyId) {
         setError('User ID or Company ID not found');
         return;
       }
@@ -149,7 +147,7 @@ const MaintenanceRequestDetails: React.FC = () => {
         setError('Request ID not found');
         return;
       }
-      const response = await apiService.approveOwnerMaintenanceRequest(requestId, user._id as string, user.companyId as string);
+      const response = await apiService.approveOwnerMaintenanceRequest(requestId, user._id as string, (user as any).companyId as string);
       setRequest(response.data);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error approving request');
