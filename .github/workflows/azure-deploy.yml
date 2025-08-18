@@ -30,6 +30,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Preflight – required secrets
+        shell: bash
+        run: |
+          required=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD)
+          for n in "${required[@]}"; do
+            if [ -z "${!n}" ]; then
+              echo "::error::Missing $n" && exit 1
+            fi
+          done
+
       - name: Azure login (OIDC)
         if: ${{ env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != '' }}
         uses: azure/login@v2
@@ -76,7 +86,7 @@ jobs:
           docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
 
       - name: Ensure App Service container port setting
-        uses: azure/cli@v1
+        uses: azure/CLI@v1
         with:
           inlineScript: |
             az webapp config appsettings set \

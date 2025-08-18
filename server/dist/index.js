@@ -141,7 +141,6 @@ app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
 app.use('/api/invoices', invoiceRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
-
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {
     const staticPath = path_1.default.join(__dirname, 'public');
