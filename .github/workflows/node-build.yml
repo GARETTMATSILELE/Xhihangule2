@@ -21,9 +21,25 @@ jobs:
           cache-dependency-path: |
             client/package-lock.json
             server/package-lock.json
+      - name: Show workspace layout
+        run: |
+          echo "PWD=$(pwd)"
+          ls -la
+          echo "-- client --" && ls -la client || true
+          echo "-- server --" && ls -la server || true
+      - name: Verify lockfile (client)
+        run: |
+          echo "PWD=$(pwd)" && ls -la
+          test -f package-lock.json && echo "Found client/package-lock.json" || { echo "::error::client/package-lock.json missing"; exit 1; }
+        working-directory: ./client
       - name: Install deps (client)
         run: npm ci
         working-directory: ./client
+      - name: Verify lockfile (server)
+        run: |
+          echo "PWD=$(pwd)" && ls -la
+          test -f package-lock.json && echo "Found server/package-lock.json" || { echo "::error::server/package-lock.json missing"; exit 1; }
+        working-directory: ./server
       - name: Install deps (server)
         run: npm ci
         working-directory: ./server
