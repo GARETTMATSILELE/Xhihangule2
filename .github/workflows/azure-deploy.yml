@@ -57,12 +57,23 @@ jobs:
             client/package-lock.json
             server/package-lock.json
 
-      - name: Install dependencies
+      - name: Ensure client lockfile
         run: |
-          if [ ! -f client/package-lock.json ]; then (cd client && npm i --package-lock-only); fi
-          if [ ! -f server/package-lock.json ]; then (cd server && npm i --package-lock-only); fi
-          cd client && npm ci
-          cd ../server && npm ci
+          if [ ! -f package-lock.json ]; then npm i --package-lock-only; fi
+        working-directory: ./client
+
+      - name: Install dependencies (client)
+        run: npm ci
+        working-directory: ./client
+
+      - name: Ensure server lockfile
+        run: |
+          if [ ! -f package-lock.json ]; then npm i --package-lock-only; fi
+        working-directory: ./server
+
+      - name: Install dependencies (server)
+        run: npm ci
+        working-directory: ./server
 
       - name: Build application
         run: |
