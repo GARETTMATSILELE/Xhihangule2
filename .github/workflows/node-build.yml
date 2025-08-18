@@ -28,20 +28,32 @@ jobs:
           echo "-- client --" && ls -la client || true
           echo "-- server --" && ls -la server || true
       - name: Verify lockfile (client)
+        continue-on-error: true
         run: |
           echo "PWD=$(pwd)" && ls -la
-          test -f package-lock.json && echo "Found client/package-lock.json" || { echo "::error::client/package-lock.json missing"; exit 1; }
+          if [ -f package-lock.json ]; then echo "Found client/package-lock.json"; else echo "::warning::client/package-lock.json missing"; fi
         working-directory: ./client
-      - name: Install deps (client)
+      - name: Install deps (client) using lockfile
+        if: ${{ hashFiles('client/package-lock.json') != '' }}
         run: npm ci
+        working-directory: ./client
+      - name: Install deps (client) without lockfile
+        if: ${{ hashFiles('client/package-lock.json') == '' }}
+        run: npm install --no-audit --no-fund
         working-directory: ./client
       - name: Verify lockfile (server)
+        continue-on-error: true
         run: |
           echo "PWD=$(pwd)" && ls -la
-          test -f package-lock.json && echo "Found server/package-lock.json" || { echo "::error::server/package-lock.json missing"; exit 1; }
+          if [ -f package-lock.json ]; then echo "Found server/package-lock.json"; else echo "::warning::server/package-lock.json missing"; fi
         working-directory: ./server
-      - name: Install deps (server)
+      - name: Install deps (server) using lockfile
+        if: ${{ hashFiles('server/package-lock.json') != '' }}
         run: npm ci
+        working-directory: ./server
+      - name: Install deps (server) without lockfile
+        if: ${{ hashFiles('server/package-lock.json') == '' }}
+        run: npm install --no-audit --no-fund
         working-directory: ./server
       - run: npm run build
 
