@@ -40,13 +40,10 @@ jobs:
           echo "PWD=$(pwd)" && ls -la
           if [ -f package-lock.json ]; then echo "Found client/package-lock.json"; else echo "::warning::client/package-lock.json missing"; fi
         working-directory: ./client
-      - name: Install dependencies (client) using lockfile
-        if: ${{ hashFiles('client/package-lock.json') != '' }}
-        run: npm ci
+      - name: Install dependencies (client)
+        run: |
+          npm ci || npm install --no-audit --no-fund
         working-directory: ./client
-      - name: Install dependencies (client) without lockfile
-        if: ${{ hashFiles('client/package-lock.json') == '' }}
-        run: npm install --no-audit --no-fund
         working-directory: ./client
       - name: Build app (client)
         run: npm run build
