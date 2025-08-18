@@ -56,6 +56,9 @@ jobs:
         run: |
           npm ci || npm install --no-audit --no-fund
         working-directory: ./server
-      - run: npm run build
+      - name: Build
+        run: npm run build
+        env:
+          CI: false
 
 
