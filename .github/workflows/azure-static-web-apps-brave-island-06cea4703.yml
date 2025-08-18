@@ -44,7 +44,6 @@ jobs:
         run: |
           npm ci || npm install --no-audit --no-fund
         working-directory: ./client
-        working-directory: ./client
       - name: Build app (client)
         run: npm run build
         working-directory: ./client
