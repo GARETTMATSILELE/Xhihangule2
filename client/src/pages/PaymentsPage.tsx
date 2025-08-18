@@ -243,7 +243,7 @@ const PaymentsPage: React.FC = () => {
         }
         
         // Use agent service if user is an agent, otherwise use regular payment service
-        let response;
+        let response: { data: Payment[] };
         if (user?.role === 'agent') {
           response = await paymentService.getAllPublic(user?.companyId, filterParams);
         } else {
@@ -283,7 +283,7 @@ const PaymentsPage: React.FC = () => {
       if (property && property.ownerId) {
         data.ownerId = property.ownerId;
       }
-      let response;
+      let response: any;
       if (data.paymentType === 'levy') {
         response = await paymentService.createLevyPayment(data);
       } else if (data.paymentType === 'municipal') {
@@ -315,7 +315,7 @@ const PaymentsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      let response;
+      let response: any;
       if (user?.role === 'agent') {
         response = await agentService.updatePayment(id, data, properties, user?._id);
       } else {

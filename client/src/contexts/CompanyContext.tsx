@@ -100,7 +100,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         role: user.role
       });
 
-      let response;
+      let response: any;
       let endpoint = '/companies/current';
       
       // If user has a companyId, use it to fetch the company
