@@ -18,16 +18,27 @@ jobs:
        id-token: write
        contents: read
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: true
           lfs: false
+          fetch-depth: 0
       - name: Use Node.js 20 with npm cache
         uses: actions/setup-node@v3
         with:
           node-version: 20.x
           cache: 'npm'
           cache-dependency-path: 'client/package-lock.json'
+      - name: Show workspace layout
+        run: |
+          echo "PWD=$(pwd)"
+          ls -la
+          echo "-- client --" && ls -la client || true
+      - name: Verify lockfile (client)
+        run: |
+          echo "PWD=$(pwd)" && ls -la
+          test -f package-lock.json && echo "Found client/package-lock.json" || { echo "::error::client/package-lock.json missing"; exit 1; }
+        working-directory: ./client
       - name: Install dependencies (client)
         run: npm ci
         working-directory: ./client
