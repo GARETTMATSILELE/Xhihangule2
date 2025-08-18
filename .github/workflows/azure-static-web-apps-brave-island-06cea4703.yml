@@ -47,6 +47,8 @@ jobs:
       - name: Build app (client)
         run: npm run build
         working-directory: ./client
+        env:
+          CI: false
       - name: Install OIDC Client from Core Package
         run: npm install @actions/core@1.6.0 @actions/http-client
       - name: Get Id Token
