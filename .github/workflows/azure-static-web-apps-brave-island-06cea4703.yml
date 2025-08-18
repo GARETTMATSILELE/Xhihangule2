@@ -28,6 +28,12 @@ jobs:
           node-version: 18.x
           cache: 'npm'
           cache-dependency-path: 'client/package-lock.json'
+      - name: Ensure lockfile exists (client)
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm i --package-lock-only
+          fi
+        working-directory: ./client
       - name: Install dependencies (client)
         run: npm ci
         working-directory: ./client
