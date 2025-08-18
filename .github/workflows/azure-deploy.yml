@@ -53,9 +53,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          cache-dependency-path: |
+            client/package-lock.json
+            server/package-lock.json
 
       - name: Install dependencies
         run: |
+          if [ ! -f client/package-lock.json ]; then (cd client && npm i --package-lock-only); fi
+          if [ ! -f server/package-lock.json ]; then (cd server && npm i --package-lock-only); fi
           cd client && npm ci
           cd ../server && npm ci
 
