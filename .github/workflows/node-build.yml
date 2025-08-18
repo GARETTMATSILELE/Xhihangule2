@@ -21,11 +21,15 @@ jobs:
           cache-dependency-path: |
             client/package-lock.json
             server/package-lock.json
+            package-lock.json
       - name: Show npm version and config
         run: |
           node -v
           npm -v
           npm config list
+      - name: Install deps (root)
+        run: |
+          npm ci || npm install --no-audit --no-fund
       - name: Show workspace layout
         run: |
           echo "PWD=$(pwd)"
