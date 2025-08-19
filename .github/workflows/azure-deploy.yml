@@ -12,7 +12,7 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-
+    
     permissions:
       id-token: write
       contents: read
@@ -52,7 +52,7 @@ jobs:
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
-        with:
+      with:
           node-version: 20.x
           cache: 'npm'
           cache-dependency-path: |
@@ -128,9 +128,9 @@ jobs:
               --name ${{ env.AZURE_WEBAPP_NAME }} \
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
               --settings WEBSITES_PORT=8080
-
-      - name: Deploy to Azure App Service
-        uses: azure/webapps-deploy@v2
-        with:
+    
+    - name: Deploy to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           images: ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
