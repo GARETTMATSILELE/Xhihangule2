@@ -49,12 +49,23 @@ jobs:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          environment: AzureCloud
           allow-no-subscriptions: true
 
       - name: Set default subscription
         run: |
           az account set --subscription "$AZURE_SUBSCRIPTION_ID"
           az account show -o table
+
+      - name: Validate tenant and subscription
+        shell: bash
+        run: |
+          TENANT=$(az account show --query tenantId -o tsv || true)
+          SUB=$(az account show --query id -o tsv || true)
+          echo "Logged tenant=$TENANT, expected=${AZURE_TENANT_ID}"
+          echo "Logged subscription=$SUB, expected=${AZURE_SUBSCRIPTION_ID}"
+          if [ "$TENANT" != "$AZURE_TENANT_ID" ]; then echo "::error::Tenant mismatch (not Kibycom)"; exit 1; fi
+          if [ "$SUB" != "$AZURE_SUBSCRIPTION_ID" ]; then echo "::error::Subscription mismatch"; exit 1; fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
