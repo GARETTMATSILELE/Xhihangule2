@@ -129,7 +129,8 @@ jobs:
       - name: ACR login (OIDC)
         shell: bash
         run: |
-          ACR_NAME=$(echo "$REGISTRY_LOGIN_SERVER" | cut -d'.' -f1)
+          # Derive ACR name from login server (strip scheme, then take first label)
+          ACR_NAME=$(echo "$REGISTRY_LOGIN_SERVER" | sed -E 's#^https?://##' | cut -d'.' -f1)
           az acr login --name "$ACR_NAME"
 
       - name: Push Docker image
