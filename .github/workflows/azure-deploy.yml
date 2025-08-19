@@ -111,10 +111,20 @@ jobs:
         env:
           CI: false
 
-      - name: Build Docker image
+      - name: Compute image repo (lowercase)
+        id: compute_repo
+        shell: bash
         run: |
-          docker build -t ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} .
-          docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ env.AZURE_WEBAPP_NAME }}:latest
+          IMAGE_REPO="${AZURE_WEBAPP_NAME,,}"
+          echo "IMAGE_REPO=$IMAGE_REPO" >> "$GITHUB_ENV"
+          echo "image_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        env:
+          IMAGE_REPO: ${{ steps.compute_repo.outputs.image_repo }}
+        run: |
+          docker build -t "$IMAGE_REPO:${{ github.sha }}" .
+          docker tag "$IMAGE_REPO:${{ github.sha }}" "$IMAGE_REPO:latest"
 
       - name: Login to Azure Container Registry
         uses: azure/docker-login@v1
@@ -124,18 +134,20 @@ jobs:
           password: ${{ env.REGISTRY_PASSWORD }}
 
       - name: Push Docker image
+        env:
+          IMAGE_REPO: ${{ steps.compute_repo.outputs.image_repo }}
         run: |
-          docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
-          docker tag ${{ env.AZURE_WEBAPP_NAME }}:latest ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
-          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
-          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
+          docker tag "$IMAGE_REPO:${{ github.sha }}" "$REGISTRY_LOGIN_SERVER/$IMAGE_REPO:${{ github.sha }}"
+          docker tag "$IMAGE_REPO:latest" "$REGISTRY_LOGIN_SERVER/$IMAGE_REPO:latest"
+          docker push "$REGISTRY_LOGIN_SERVER/$IMAGE_REPO:${{ github.sha }}"
+          docker push "$REGISTRY_LOGIN_SERVER/$IMAGE_REPO:latest"
 
       - name: Verify image exists in ACR
         shell: bash
         run: |
           ACR_NAME=$(echo "${REGISTRY_LOGIN_SERVER}" | cut -d'.' -f1)
-          echo "Checking repository '${AZURE_WEBAPP_NAME}' in ACR '${ACR_NAME}'"
-          az acr repository show-tags -n "$ACR_NAME" --repository "$AZURE_WEBAPP_NAME" -o table || true
+          echo "Checking repository '${{ steps.compute_repo.outputs.image_repo }}' in ACR '${ACR_NAME}'"
+          az acr repository show-tags -n "$ACR_NAME" --repository "${{ steps.compute_repo.outputs.image_repo }}" -o table || true
 
       - name: Ensure App Service container port setting
         uses: azure/CLI@v1
@@ -150,4 +162,4 @@ jobs:
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          images: ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
+          images: ${{ env.REGISTRY_LOGIN_SERVER }}/${{ steps.compute_repo.outputs.image_repo }}:${{ github.sha }}
