@@ -25,6 +25,7 @@ jobs:
       REGISTRY_LOGIN_SERVER: ${{ secrets.REGISTRY_LOGIN_SERVER }}
       REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
       REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      AZURE_ACR_NAME: ${{ secrets.AZURE_ACR_NAME }}
 
     steps:
       - name: Checkout code
@@ -129,9 +130,8 @@ jobs:
       - name: ACR login (OIDC)
         shell: bash
         run: |
-          # Derive ACR name from login server (strip scheme, then take first label)
-          ACR_NAME=$(echo "$REGISTRY_LOGIN_SERVER" | sed -E 's#^https?://##' | cut -d'.' -f1)
-          az acr login --name "$ACR_NAME"
+          if [ -z "$AZURE_ACR_NAME" ]; then echo "::error::AZURE_ACR_NAME is not set"; exit 1; fi
+          az acr login --name "$AZURE_ACR_NAME"
 
       - name: Push Docker image
         env:
@@ -145,9 +145,9 @@ jobs:
       - name: Verify image exists in ACR
         shell: bash
         run: |
-          ACR_NAME=$(echo "${REGISTRY_LOGIN_SERVER}" | cut -d'.' -f1)
-          echo "Checking repository '${{ steps.compute_repo.outputs.image_repo }}' in ACR '${ACR_NAME}'"
-          az acr repository show-tags -n "$ACR_NAME" --repository "${{ steps.compute_repo.outputs.image_repo }}" -o table || true
+          if [ -z "$AZURE_ACR_NAME" ]; then echo "::error::AZURE_ACR_NAME is not set"; exit 1; fi
+          echo "Checking repository '${{ steps.compute_repo.outputs.image_repo }}' in ACR '$AZURE_ACR_NAME'"
+          az acr repository show-tags -n "$AZURE_ACR_NAME" --repository "${{ steps.compute_repo.outputs.image_repo }}" -o table || true
 
       - name: Ensure App Service container port setting
         uses: azure/CLI@v1
