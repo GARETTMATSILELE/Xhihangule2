@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: Xhihangule-Property-Management
+  AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
   NODE_VERSION: '18.x'
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
       - name: Preflight – required secrets
         shell: bash
         run: |
-          required=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD)
+          required=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_WEBAPP_NAME REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD AZURE_ACR_NAME)
           for n in "${required[@]}"; do
             if [ -z "${!n}" ]; then
               echo "::error::Missing $n" && exit 1
