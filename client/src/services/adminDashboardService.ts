@@ -47,10 +47,16 @@ const handleApiError = (error: unknown): never => {
   throw error;
 };
 
+// Resolve API base URL consistently with other modules
+const isBrowser = typeof window !== 'undefined';
+const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
+const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
+const API_BASE = import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
+
 // Create a separate axios instance for unauthenticated requests
 // This instance does NOT have the request interceptor that adds Authorization headers
 const publicApi = axios.create({
-  baseURL: import.meta.env?.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -58,7 +64,7 @@ const publicApi = axios.create({
 
 // Create an authenticated axios instance for admin operations
 const authenticatedApi = axios.create({
-  baseURL: import.meta.env?.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json'
   }

@@ -1,8 +1,10 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { getAccessToken, getRefreshToken, setTokens } from '../contexts/AuthContext';
 
-// Default API URL if environment variable is not set
-const DEFAULT_API_URL = 'http://localhost:5000/api';
+// Default API URL with sensible defaults for dev and production
+const isBrowser = typeof window !== 'undefined';
+const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
+const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
 const API_URL = import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
 
 const api = axios.create({

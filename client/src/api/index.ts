@@ -2,8 +2,8 @@ import api from './axios';
 import publicApi from './publicApi';
 import axios from 'axios';
 
-// API configuration
-const API_BASE_URL = 'http://localhost:5000/api';
+// API configuration (kept for backward compatibility; base URL comes from api/publicApi)
+const API_BASE_URL = '';
 
 // Create API instance with proper configuration
 const apiInstance = api;

@@ -4,7 +4,11 @@ let socket: Socket | null = null;
 
 export const initializeSocket = (token: string) => {
   if (!socket) {
-    socket = io(process.env.REACT_APP_WS_URL || 'http://localhost:5000', {
+    const isBrowser = typeof window !== 'undefined';
+    const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
+    const defaultWsUrl = isLocalDev ? 'http://localhost:5000' : (isBrowser ? window.location.origin : 'http://localhost:5000');
+    const wsUrl = process.env.REACT_APP_WS_URL || defaultWsUrl;
+    socket = io(wsUrl, {
       auth: { token },
       transports: ['websocket'],
       reconnection: true,
