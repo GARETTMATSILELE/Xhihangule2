@@ -2,10 +2,14 @@ import React, { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import { Box, CircularProgress } from '@mui/material';
 import { CompanyProvider } from './contexts/CompanyContext';
 import { PropertyProvider } from './contexts/PropertyContext';
 import { AuthProvider } from './contexts/AuthContext';
-import { Layout } from './components/Layout/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
+import ProtectedRoute from './components/ProtectedRoute';
+import { NotificationProvider } from './components/Layout/Header';
+
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const Login = lazy(() => import('./components/Login'));
@@ -15,8 +19,6 @@ const UserManagement = lazy(() => import('./pages/UserManagement/UserManagement'
 const MaintenancePageWrapper = lazy(() => import('./components/maintenance/MaintenancePageWrapper'));
 const PaymentsPage = lazy(() => import('./pages/PaymentsPage'));
 const LeasesPage = lazy(() => import('./pages/LeasesPage'));
-import { Box, CircularProgress } from '@mui/material';
-import ErrorBoundary from './components/ErrorBoundary';
 const OwnerDashboard = lazy(() => import('./components/owner/OwnerDashboard'));
 const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
 const AccountantDashboard = lazy(() => import('./pages/AccountantDashboard'));
@@ -24,7 +26,6 @@ const AccountantPaymentsPage = lazy(() => import('./pages/AccountantDashboard/Ac
 const CommissionsPage = lazy(() => import('./pages/AccountantDashboard/CommissionsPage'));
 const SettingsPage = lazy(() => import('./pages/AccountantDashboard/SettingsPage'));
 const ReportsPage = lazy(() => import('./pages/AccountantDashboard/ReportsPage'));
-import ProtectedRoute from './components/ProtectedRoute';
 const TestAuth = lazy(() => import('./pages/TestAuth'));
 const PropertyAccountsPage = lazy(() => import('./pages/AccountantDashboard/PropertyAccountsPage'));
 const PropertyAccountDetailPage = lazy(() => import('./pages/AccountantDashboard/PropertyAccountDetailPage'));
@@ -33,7 +34,6 @@ const AgentAccountDetailPage = lazy(() => import('./pages/AccountantDashboard/Ag
 const WrittenInvoicesPage = lazy(() => import('./pages/AccountantDashboard/WrittenInvoicesPage'));
 const LevyPaymentsPage = lazy(() => import('./pages/AccountantDashboard/LevyPaymentsPage'));
 const TasksPage = lazy(() => import('./pages/AccountantDashboard/TasksPage'));
-import { NotificationProvider } from './components/Layout/Header';
 const DatabaseSyncDashboard = lazy(() => import('./components/admin/DatabaseSyncDashboard'));
 
 // Create a theme instance with proper configuration
