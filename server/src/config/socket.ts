@@ -23,9 +23,17 @@ type CustomSocket = Socket & {
 };
 
 export const initializeSocket = (httpServer: HttpServer) => {
+  const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const corsOrigin = allowedOriginsFromEnv.length > 0
+    ? allowedOriginsFromEnv
+    : (process.env.CLIENT_URL ? [process.env.CLIENT_URL] : true);
+
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:3000',
+      origin: corsOrigin,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
       credentials: true,
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
