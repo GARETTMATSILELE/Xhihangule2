@@ -14,6 +14,10 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
     const { email, password, name, company } = req.body;
     console.log('Signup attempt with data:', { email, name, hasCompany: !!company });
 
+    if (!email || !password || !name) {
+      throw new AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
+    }
+
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -23,11 +27,15 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 
     // Create user
     console.log('Creating new user...');
+    const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
+    const firstName = firstNameRaw || 'User';
+    const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
+
     const user = await User.create({
       email,
       password,
-      firstName: name.split(' ')[0],
-      lastName: name.split(' ').slice(1).join(' '),
+      firstName,
+      lastName,
       role: 'admin',
       isActive: true
     });
@@ -37,6 +45,11 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
     let companyId;
     let companyData = null;
     if (company) {
+      const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'] as const;
+      const missing = requiredCompanyFields.filter((f) => !company[f]);
+      if (missing.length > 0) {
+        throw new AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
+      }
       console.log('Creating new company...');
       const newCompany = await Company.create({
         ...company,
@@ -85,8 +98,21 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       token,
       refreshToken
     });
-  } catch (error) {
-    console.error('Signup error:', error);
+  } catch (error: any) {
+    console.error('Signup error:', {
+      message: error?.message,
+      name: error?.name,
+      code: error?.code,
+      details: error?.details,
+      stack: error?.stack
+    });
+    // Normalize Mongoose validation and duplicate errors
+    if (error?.name === 'ValidationError') {
+      return next(new AppError('Validation failed', 400, 'VALIDATION_ERROR', Object.values(error.errors || {}).map((e: any) => e.message)));
+    }
+    if (error?.code === 11000) {
+      return next(new AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+    }
     next(error);
   }
 };
