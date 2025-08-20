@@ -9,7 +9,7 @@ import tenantRoutes from './routes/tenantRoutes';
 import leaseRoutes from './routes/leaseRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import chartRoutes from './routes/chartRoutes';
-import authRoutes from './routes/authRoutes';
+import authRoutes from './routes/auth';
 import companyRoutes from './routes/companyRoutes';
 import userRoutes from './routes/userRoutes';
 import agentRoutes from './routes/agentRoutes';
@@ -25,6 +25,7 @@ import paymentRequestRoutes from './routes/paymentRequestRoutes';
 import invoiceRoutes from './routes/invoiceRoutes';
 import syncRoutes from './routes/syncRoutes';
 import { connectDatabase, closeDatabase } from './config/database';
+import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
 import { initializeSocket } from './config/socket';
 import { initializeSyncServices } from './scripts/startSyncServices';
@@ -141,14 +142,8 @@ app.get('/api/test', (req, res) => {
   res.json({ message: 'API is working' });
 });
 
-// Error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
-    status: 'error',
-    message: err.message || 'Internal server error'
-  });
-});
+// Centralized error handling middleware
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
