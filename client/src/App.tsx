@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -6,35 +6,35 @@ import { CompanyProvider } from './contexts/CompanyContext';
 import { PropertyProvider } from './contexts/PropertyContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { Layout } from './components/Layout/Layout';
-import LandingPage from './pages/LandingPage';
-import AdminDashboard from './pages/AdminDashboard';
-import Login from './components/Login';
-import Signup from './pages/Signup';
-import AdminSignup from './pages/AdminSignup';
-import { UserManagement } from './pages/UserManagement/UserManagement';
-import MaintenancePageWrapper from './components/maintenance/MaintenancePageWrapper';
-import PaymentsPage from './pages/PaymentsPage';
-import LeasesPage from './pages/LeasesPage';
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const Login = lazy(() => import('./components/Login'));
+const Signup = lazy(() => import('./pages/Signup'));
+const AdminSignup = lazy(() => import('./pages/AdminSignup'));
+const UserManagement = lazy(() => import('./pages/UserManagement/UserManagement').then(m => ({ default: m.UserManagement })));
+const MaintenancePageWrapper = lazy(() => import('./components/maintenance/MaintenancePageWrapper'));
+const PaymentsPage = lazy(() => import('./pages/PaymentsPage'));
+const LeasesPage = lazy(() => import('./pages/LeasesPage'));
 import { Box, CircularProgress } from '@mui/material';
 import ErrorBoundary from './components/ErrorBoundary';
-import OwnerDashboard from './components/owner/OwnerDashboard';
-import AgentDashboard from './pages/AgentDashboard';
-import AccountantDashboard from './pages/AccountantDashboard';
-import AccountantPaymentsPage from './pages/AccountantDashboard/AccountantPaymentsPage';
-import CommissionsPage from './pages/AccountantDashboard/CommissionsPage';
-import SettingsPage from './pages/AccountantDashboard/SettingsPage';
-import ReportsPage from './pages/AccountantDashboard/ReportsPage';
+const OwnerDashboard = lazy(() => import('./components/owner/OwnerDashboard'));
+const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
+const AccountantDashboard = lazy(() => import('./pages/AccountantDashboard'));
+const AccountantPaymentsPage = lazy(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
+const CommissionsPage = lazy(() => import('./pages/AccountantDashboard/CommissionsPage'));
+const SettingsPage = lazy(() => import('./pages/AccountantDashboard/SettingsPage'));
+const ReportsPage = lazy(() => import('./pages/AccountantDashboard/ReportsPage'));
 import ProtectedRoute from './components/ProtectedRoute';
-import TestAuth from './pages/TestAuth';
-import PropertyAccountsPage from './pages/AccountantDashboard/PropertyAccountsPage';
-import PropertyAccountDetailPage from './pages/AccountantDashboard/PropertyAccountDetailPage';
-import AgentAccountsPage from './pages/AccountantDashboard/AgentAccountsPage';
-import AgentAccountDetailPage from './pages/AccountantDashboard/AgentAccountDetailPage';
-import WrittenInvoicesPage from './pages/AccountantDashboard/WrittenInvoicesPage';
-import LevyPaymentsPage from './pages/AccountantDashboard/LevyPaymentsPage';
-import TasksPage from './pages/AccountantDashboard/TasksPage';
+const TestAuth = lazy(() => import('./pages/TestAuth'));
+const PropertyAccountsPage = lazy(() => import('./pages/AccountantDashboard/PropertyAccountsPage'));
+const PropertyAccountDetailPage = lazy(() => import('./pages/AccountantDashboard/PropertyAccountDetailPage'));
+const AgentAccountsPage = lazy(() => import('./pages/AccountantDashboard/AgentAccountsPage'));
+const AgentAccountDetailPage = lazy(() => import('./pages/AccountantDashboard/AgentAccountDetailPage'));
+const WrittenInvoicesPage = lazy(() => import('./pages/AccountantDashboard/WrittenInvoicesPage'));
+const LevyPaymentsPage = lazy(() => import('./pages/AccountantDashboard/LevyPaymentsPage'));
+const TasksPage = lazy(() => import('./pages/AccountantDashboard/TasksPage'));
 import { NotificationProvider } from './components/Layout/Header';
-import DatabaseSyncDashboard from './components/admin/DatabaseSyncDashboard';
+const DatabaseSyncDashboard = lazy(() => import('./components/admin/DatabaseSyncDashboard'));
 
 // Create a theme instance with proper configuration
 const theme = createTheme({
@@ -76,7 +76,8 @@ const App: React.FC = () => {
         <CssBaseline />
         <NotificationProvider>
           <AuthProvider>
-            <Routes>
+            <Suspense fallback={<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}><CircularProgress /></Box>}>
+              <Routes>
               {/* Public Routes - No PropertyProvider or CompanyProvider */}
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<Login />} />
@@ -179,7 +180,8 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
-            </Routes>
+              </Routes>
+            </Suspense>
           </AuthProvider>
         </NotificationProvider>
       </ThemeProvider>

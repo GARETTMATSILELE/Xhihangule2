@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
@@ -67,19 +68,24 @@ app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Debug middleware
-app.use((req, res, next) => {
-  console.log('Incoming request:', {
-    method: req.method,
-    url: req.url,
-    path: req.path,
-    baseUrl: req.baseUrl,
-    originalUrl: req.originalUrl,
-    headers: req.headers,
-    body: req.body
+// Enable gzip compression
+app.use(compression());
+
+// Debug middleware only in development
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log('Incoming request:', {
+      method: req.method,
+      url: req.url,
+      path: req.path,
+      baseUrl: req.baseUrl,
+      originalUrl: req.originalUrl,
+      headers: req.headers,
+      body: req.body
+    });
+    next();
   });
-  next();
-});
+}
 
 // Routes
 app.use('/api/properties', propertyRoutes);
@@ -106,10 +112,20 @@ app.use('/api/sync', syncRoutes);
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {
   const staticPath = path.join(__dirname, 'public');
+
+  // Set long-term caching for hashed static assets
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/static/')) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+    next();
+  });
+
   app.use(express.static(staticPath));
 
-  // SPA fallback
+  // SPA fallback with no-store to avoid caching HTML shell
   app.get('*', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     res.sendFile(path.join(staticPath, 'index.html'));
   });
 }
