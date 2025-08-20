@@ -42,13 +42,12 @@ const userSchema = new Schema<IUser>({
   role: {
     type: String,
     enum: ['admin', 'agent', 'accountant', 'owner'] as UserRole[],
-    default: 'agent' as UserRole
+    default: 'agent'
   },
   companyId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Company',
-    required: true,
-    immutable: true
+    required: false
   },
   isActive: {
     type: Boolean,
