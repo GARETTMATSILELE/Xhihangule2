@@ -30,7 +30,6 @@ import { Edit as EditIcon, Delete as DeleteIcon, Add as AddIcon } from '@mui/ico
 import { usePropertyOwnerService, PropertyOwner, CreatePropertyOwnerData } from '../../services/propertyOwnerService';
 import { usePropertyService } from '../../services/propertyService';
 import { useAuth } from '../../contexts/AuthContext';
-import api from '../../api/axios';
 
 interface PropertyOwnerFormData {
   firstName: string;
@@ -40,13 +39,6 @@ interface PropertyOwnerFormData {
   password?: string;
   companyId?: string;
   propertyIds?: string[];
-}
-
-interface Company {
-  _id: string;
-  name: string;
-  address: string;
-  email: string;
 }
 
 const initialFormData: PropertyOwnerFormData = {
@@ -67,7 +59,10 @@ const PropertyOwnersPage: React.FC = () => {
   const [selectedOwner, setSelectedOwner] = useState<PropertyOwner | null>(null);
   const [formData, setFormData] = useState<PropertyOwnerFormData>(initialFormData);
   const [properties, setProperties] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<Company[]>([]);
+  // Removed companies selection; companyId is taken from logged-in user
+  const [expandedOwnerId, setExpandedOwnerId] = useState<string | null>(null);
+  const [ownerPropertiesMap, setOwnerPropertiesMap] = useState<Record<string, any[]>>({});
+  const [propertiesLoadingOwnerId, setPropertiesLoadingOwnerId] = useState<string | null>(null);
 
   const propertyOwnerService = usePropertyOwnerService();
   const propertyService = usePropertyService();
@@ -75,7 +70,6 @@ const PropertyOwnersPage: React.FC = () => {
 
   useEffect(() => {
     fetchOwners();
-    fetchCompanies();
     fetchAllProperties();
   }, []);
 
@@ -93,14 +87,7 @@ const PropertyOwnersPage: React.FC = () => {
     }
   };
 
-  const fetchCompanies = async () => {
-    try {
-      const response = await api.get('/companies');
-      setCompanies(response.data || []);
-    } catch (err: any) {
-      console.error('Failed to fetch companies:', err);
-    }
-  };
+  // Removed fetchCompanies - company is derived from logged-in user
 
   const fetchAllProperties = async () => {
     try {
@@ -126,7 +113,10 @@ const PropertyOwnersPage: React.FC = () => {
       });
     } else {
       setSelectedOwner(null);
-      setFormData(initialFormData);
+      setFormData({
+        ...initialFormData,
+        companyId: user?.companyId || ''
+      });
     }
     setOpenDialog(true);
   };
@@ -179,7 +169,7 @@ const PropertyOwnersPage: React.FC = () => {
           return;
         }
         
-        if (user?.role !== 'admin' && !user?.companyId) {
+        if (!user?.companyId) {
           setError('Company ID is required');
           return;
         }
@@ -187,14 +177,9 @@ const PropertyOwnersPage: React.FC = () => {
         const createData: CreatePropertyOwnerData = {
           ...formData,
           password: formData.password,
-          companyId: user?.role === 'admin' ? formData.companyId || '' : user.companyId!,
+          companyId: user.companyId!,
           properties: formData.propertyIds || [],
         };
-        
-        if (user?.role === 'admin' && !createData.companyId) {
-          setError('Company ID is required for admin users when creating property owners');
-          return;
-        }
         
         await propertyOwnerService.create(createData);
       }
@@ -222,8 +207,19 @@ const PropertyOwnersPage: React.FC = () => {
   const handleViewProperties = async (ownerId: string) => {
     try {
       setError(null);
-      const properties = await propertyService.getByOwnerId(ownerId);
-      setProperties(properties);
+      // Toggle expand/collapse
+      if (expandedOwnerId === ownerId) {
+        setExpandedOwnerId(null);
+        return;
+      }
+      setExpandedOwnerId(ownerId);
+      // Fetch only if not already cached
+      if (!ownerPropertiesMap[ownerId]) {
+        setPropertiesLoadingOwnerId(ownerId);
+        const props = await propertyService.getByOwnerId(ownerId);
+        setOwnerPropertiesMap(prev => ({ ...prev, [ownerId]: props }));
+        setPropertiesLoadingOwnerId(null);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch properties');
       console.error(err);
@@ -271,27 +267,56 @@ const PropertyOwnersPage: React.FC = () => {
           </TableHead>
           <TableBody>
             {owners.map((owner) => (
-              <TableRow key={owner._id}>
-                <TableCell>{`${owner.firstName} ${owner.lastName}`}</TableCell>
-                <TableCell>{owner.email}</TableCell>
-                <TableCell>{owner.phone}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={`${owner.properties?.length || 0} Properties`}
-                    onClick={() => handleViewProperties(owner._id)}
-                    color="primary"
-                    variant="outlined"
-                  />
-                </TableCell>
-                <TableCell>
-                  <IconButton onClick={() => handleOpenDialog(owner)} color="primary">
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton onClick={() => handleDelete(owner._id)} color="error">
-                    <DeleteIcon />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
+              <React.Fragment key={owner._id}>
+                <TableRow>
+                  <TableCell>{`${owner.firstName} ${owner.lastName}`}</TableCell>
+                  <TableCell>{owner.email}</TableCell>
+                  <TableCell>{owner.phone}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={`${owner.properties?.length || 0} Properties`}
+                      onClick={() => handleViewProperties(owner._id)}
+                      color="primary"
+                      variant="outlined"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <IconButton onClick={() => handleOpenDialog(owner)} color="primary">
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton onClick={() => handleDelete(owner._id)} color="error">
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+                {expandedOwnerId === owner._id && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          Properties for {owner.firstName} {owner.lastName}
+                        </Typography>
+                        {propertiesLoadingOwnerId === owner._id ? (
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <CircularProgress size={20} />
+                            <Typography variant="body2">Loading properties…</Typography>
+                          </Box>
+                        ) : ownerPropertiesMap[owner._id] && ownerPropertiesMap[owner._id].length > 0 ? (
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                            {ownerPropertiesMap[owner._id].map((p: any) => (
+                              <Chip key={p._id} label={`${p.name} - ${p.address}`} size="small" />
+                            ))}
+                          </Box>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            No properties found for this owner
+                          </Typography>
+                        )}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </React.Fragment>
             ))}
           </TableBody>
         </Table>
@@ -357,26 +382,7 @@ const PropertyOwnersPage: React.FC = () => {
                 />
               </Grid>
             )}
-            {!selectedOwner && user?.role === 'admin' && (
-              <Grid item xs={12}>
-                <FormControl fullWidth>
-                  <InputLabel>Company</InputLabel>
-                  <Select
-                    name="companyId"
-                    value={formData.companyId}
-                    onChange={handleSelectChange}
-                    label="Company"
-                    required
-                  >
-                    {companies.map((company) => (
-                      <MenuItem key={company._id} value={company._id}>
-                        {company.name} - {company.address}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-            )}
+            {/* Company selection removed; companyId is taken from logged-in user */}
             <Grid item xs={12}>
               <FormControl fullWidth>
                 <InputLabel>Properties (optional)</InputLabel>

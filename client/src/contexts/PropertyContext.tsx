@@ -83,8 +83,8 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setLoading(true);
       setError(null);
       console.log('PropertyContext: All checks passed, fetching properties...');
-      console.log('PropertyContext: About to call propertyService.getPublicProperties()');
-      const fetchedProperties = await propertyService.getPublicProperties();
+      console.log('PropertyContext: About to call propertyService.getProperties()');
+      const fetchedProperties = await propertyService.getProperties();
       console.log('PropertyContext: Properties fetched successfully:', fetchedProperties?.length, 'properties');
       
       if (Array.isArray(fetchedProperties)) {

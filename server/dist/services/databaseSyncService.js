@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -398,9 +431,10 @@ class DatabaseSyncService extends events_1.EventEmitter {
      */
     syncPaymentToAccounting(payment) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
+            var _a, _b;
             try {
                 const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
+                const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
                 // Find or create property account
                 let propertyAccount = yield PropertyAccount.findOne({ propertyId: payment.propertyId });
                 if (!propertyAccount) {
@@ -461,6 +495,37 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     yield propertyAccount.save();
                     logger_1.logger.info(`Synced payment ${payment._id} to property account ${payment.propertyId}`);
                     this.recordSyncSuccess();
+                }
+                // Record agency commission into company account as revenue
+                if (payment.companyId && ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare)) {
+                    const companyId = payment.companyId;
+                    let companyAccount = yield CompanyAccount.findOne({ companyId });
+                    if (!companyAccount) {
+                        companyAccount = new CompanyAccount({ companyId, transactions: [], runningBalance: 0, totalIncome: 0, totalExpenses: 0 });
+                    }
+                    const alreadyLogged = companyAccount.transactions.some((t) => { var _a; return ((_a = t.paymentId) === null || _a === void 0 ? void 0 : _a.toString()) === payment._id.toString() && t.type === 'income'; });
+                    if (!alreadyLogged) {
+                        const agencyShare = payment.commissionDetails.agencyShare;
+                        const source = payment.paymentType === 'introduction' ? 'sales_commission' : 'rental_commission';
+                        companyAccount.transactions.push({
+                            type: 'income',
+                            source,
+                            amount: agencyShare,
+                            date: payment.paymentDate || new Date(),
+                            currency: payment.currency || 'USD',
+                            paymentMethod: payment.paymentMethod,
+                            paymentId: payment._id,
+                            referenceNumber: payment.referenceNumber,
+                            description: source === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+                            processedBy: payment.processedBy,
+                            notes: payment.notes
+                        });
+                        companyAccount.totalIncome += agencyShare;
+                        companyAccount.runningBalance += agencyShare;
+                        companyAccount.lastUpdated = new Date();
+                        yield companyAccount.save();
+                        logger_1.logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
+                    }
                 }
             }
             catch (error) {

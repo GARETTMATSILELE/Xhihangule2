@@ -8,6 +8,12 @@ export interface IRentalDeposit extends Document {
   depositAmount: number;
   depositDate: Date;
   paymentId: mongoose.Types.ObjectId;
+  type?: 'payment' | 'payout';
+  referenceNumber?: string;
+  notes?: string;
+  processedBy?: mongoose.Types.ObjectId;
+  paymentMethod?: 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money';
+  recipientName?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,7 +25,13 @@ const RentalDepositSchema: Schema = new Schema({
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
   depositAmount: { type: Number, required: true },
   depositDate: { type: Date, required: true },
-  paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', required: true },
+  paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', required: false },
+  type: { type: String, enum: ['payment', 'payout'], default: 'payment' },
+  referenceNumber: { type: String, default: '' },
+  notes: { type: String },
+  processedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  paymentMethod: { type: String, enum: ['cash', 'bank_transfer', 'credit_card', 'mobile_money'] },
+  recipientName: { type: String, required: false },
 }, { timestamps: true });
 
 export const RentalDeposit = mongoose.model<IRentalDeposit>('RentalDeposit', RentalDepositSchema, 'rentaldeposits'); 

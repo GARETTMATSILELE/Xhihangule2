@@ -192,6 +192,11 @@ const PaymentSchema = new mongoose_1.Schema({
         type: String,
         required: false,
     },
+    saleId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'SalesContract',
+        required: false
+    },
 }, {
     timestamps: true
 });
@@ -203,4 +208,5 @@ PaymentSchema.index({ agentId: 1 });
 PaymentSchema.index({ status: 1 });
 // Add compound index for agent commission queries
 PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
+PaymentSchema.index({ saleId: 1 });
 exports.Payment = mongoose_1.default.model('Payment', PaymentSchema, collections_1.COLLECTIONS.PAYMENTS);

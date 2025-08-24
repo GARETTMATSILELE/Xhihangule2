@@ -513,14 +513,16 @@ const AgentAccountDetailPage: React.FC = () => {
                     <TableCell>{new Date(commission.paymentDate).toLocaleDateString()}</TableCell>
                     <TableCell>
                       <Typography variant="body2" fontWeight="medium">
-                        {commission.propertyId.propertyName || 'N/A'}
+                        {(commission as any)?.propertyId?.propertyName || (commission as any)?.manualPropertyAddress || 'N/A'}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {commission.propertyId.address}
+                        {(commission as any)?.propertyId?.address || ''}
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      {`${commission.tenantId.firstName} ${commission.tenantId.lastName}`}
+                      {((commission as any)?.tenantId?.firstName && (commission as any)?.tenantId?.lastName)
+                        ? `${(commission as any).tenantId.firstName} ${(commission as any).tenantId.lastName}`
+                        : ((commission as any)?.manualTenantName || 'N/A')}
                     </TableCell>
                     <TableCell>
                       <Chip

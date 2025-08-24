@@ -17,6 +17,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = require("../models/User");
 const PropertyOwner_1 = require("../models/PropertyOwner");
+const errorHandler_1 = require("../middleware/errorHandler");
 const database_1 = require("../config/database");
 const jwt_1 = require("../config/jwt");
 // Token expiry times
@@ -62,40 +63,19 @@ class AuthService {
     login(email, password) {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.initialize();
-            // First try to find in PropertyOwner collection
-            let propertyOwner = yield PropertyOwner_1.PropertyOwner.findOne({ email });
-            if (propertyOwner) {
-                // Verify password for PropertyOwner
-                const isValidPassword = yield propertyOwner.comparePassword(password);
-                if (!isValidPassword) {
-                    throw new Error('Invalid credentials');
-                }
-                const token = this.generateAccessToken(propertyOwner, 'propertyOwner');
-                const refreshToken = this.generateRefreshToken(propertyOwner, 'propertyOwner');
-                return {
-                    user: {
-                        userId: propertyOwner._id.toString(),
-                        email: propertyOwner.email,
-                        role: 'owner',
-                        companyId: propertyOwner.companyId ? propertyOwner.companyId.toString() : undefined
-                    },
-                    token,
-                    refreshToken
-                };
-            }
-            // If not found in PropertyOwner collection, try User collection
+            // Check only the User collection
             let user = yield User_1.User.findOne({ email });
             if (!user) {
-                throw new Error('Invalid credentials');
+                throw new errorHandler_1.AppError('Invalid credentials', 401, 'AUTH_ERROR');
             }
             // Check if user is active
             if (!user.isActive) {
-                throw new Error('Account is inactive');
+                throw new errorHandler_1.AppError('Account is inactive', 403, 'ACCOUNT_INACTIVE');
             }
             // Verify password for User
             const isValidPassword = yield bcryptjs_1.default.compare(password, user.password);
             if (!isValidPassword) {
-                throw new Error('Invalid credentials');
+                throw new errorHandler_1.AppError('Invalid credentials', 401, 'AUTH_ERROR');
             }
             // Update last login
             user.lastLogin = new Date();

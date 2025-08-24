@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -54,13 +87,20 @@ const getPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.getPayment = getPayment;
-// Helper function to calculate commission
-const calculateCommission = (amount, commissionPercentage) => {
+// Helper function to calculate commission with company-specific splits
+const calculateCommission = (amount, commissionPercentage, companyId) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    const { Company } = yield Promise.resolve().then(() => __importStar(require('../models/Company')));
+    const company = yield Company.findById(companyId).lean();
     const totalCommission = (amount * commissionPercentage) / 100;
-    const preaFee = totalCommission * 0.03;
+    const preaPercentOfTotal = Math.max(0, Math.min(1, (_b = (_a = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _a === void 0 ? void 0 : _a.preaPercentOfTotal) !== null && _b !== void 0 ? _b : 0.03));
+    const agentPercentOfRemaining = Math.max(0, Math.min(1, (_d = (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.agentPercentOfRemaining) !== null && _d !== void 0 ? _d : 0.6));
+    const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_f = (_e = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _e === void 0 ? void 0 : _e.agencyPercentOfRemaining) !== null && _f !== void 0 ? _f : 0.4));
+    // PREA share comes off the top; handle 0% gracefully
+    const preaFee = totalCommission * preaPercentOfTotal;
     const remainingCommission = totalCommission - preaFee;
-    const agentShare = remainingCommission * 0.6;
-    const agencyShare = remainingCommission * 0.4;
+    const agentShare = remainingCommission * agentPercentOfRemaining;
+    const agencyShare = remainingCommission * agencyPercentOfRemaining;
     return {
         totalCommission,
         preaFee,
@@ -68,7 +108,7 @@ const calculateCommission = (amount, commissionPercentage) => {
         agencyShare,
         ownerAmount: amount - totalCommission,
     };
-};
+});
 // Create a new payment (for lease-based payments)
 const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
@@ -151,8 +191,8 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 });
             }
         }
-        // Calculate commission based on property commission percentage
-        const paymentCommissionDetails = calculateCommission(amount, property.commission || 0);
+        // Calculate commission based on property commission percentage and company config
+        const paymentCommissionDetails = yield calculateCommission(amount, property.commission || 0, new mongoose_1.default.Types.ObjectId(req.user.companyId));
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -242,7 +282,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     const currentUser = req.user;
     // Helper to perform the actual create logic, with optional transaction session
     const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
-        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, leaseId, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, processedBy, ownerId, manualPropertyAddress, manualTenantName } = req.body;
+        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, leaseId, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, processedBy, ownerId, manualPropertyAddress, manualTenantName, saleId } = req.body;
         // Validate required fields
         if (!amount || !paymentDate) {
             return { error: { status: 400, message: 'Missing required fields: amount and paymentDate' } };
@@ -306,9 +346,29 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             // Add manual entry fields
             manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
             manualTenantName: isManualTenant ? manualTenantName : undefined,
+            saleId: saleId ? new mongoose_1.default.Types.ObjectId(saleId) : undefined,
         });
         // Save and related updates (with or without session)
         yield payment.save(session ? { session } : undefined);
+        // If depositAmount > 0, record in rentaldeposits (ledger)
+        if (payment.depositAmount && payment.depositAmount > 0) {
+            const { RentalDeposit } = yield Promise.resolve().then(() => __importStar(require('../models/rentalDeposit')));
+            const deposit = new RentalDeposit({
+                propertyId: payment.propertyId,
+                agentId: payment.agentId,
+                companyId: payment.companyId,
+                tenantId: payment.tenantId,
+                depositAmount: payment.depositAmount,
+                depositDate: payment.paymentDate,
+                paymentId: payment._id,
+                type: 'payment',
+                referenceNumber: payment.referenceNumber,
+                notes: notes || '',
+                processedBy: payment.processedBy,
+                paymentMethod
+            });
+            yield deposit.save(session ? { session } : undefined);
+        }
         yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare } }, session ? { session } : undefined);
         yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
         if (paymentType === 'rental' && ownerId) {
@@ -441,7 +501,12 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const payments = yield Payment_1.Payment.find({ companyId: req.user.companyId })
+        const query = { companyId: req.user.companyId };
+        // Optional: filter for deposits only
+        if (req.query.onlyDeposits === 'true') {
+            query.depositAmount = { $gt: 0 };
+        }
+        const payments = yield Payment_1.Payment.find(query)
             .populate('propertyId', 'name')
             .populate('tenantId', 'firstName lastName')
             .populate('agentId', 'name')
@@ -688,7 +753,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
         }
         // Calculate commission based on property commission percentage
-        const publicCommissionDetails = calculateCommission(amount, property.commission || 0);
+        const publicCommissionDetails = yield calculateCommission(amount, property.commission || 0, new mongoose_1.default.Types.ObjectId(lease.companyId));
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,

@@ -259,6 +259,7 @@ export const apiService = {
 
   // Invoices
   createInvoice: async (invoice: any) => {
+    // Accountant invoices stored in accounting database under companyinvoices
     const res = await apiInstance.post('/invoices', invoice);
     return res.data;
   },

@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IFile extends Document {
   propertyId: mongoose.Types.ObjectId;
+  companyId: mongoose.Types.ObjectId;
   fileName: string;
   fileType: string;
   fileUrl: string;  // This will store the base64 string
@@ -15,6 +16,12 @@ const FileSchema: Schema = new Schema({
     type: Schema.Types.ObjectId,
     ref: 'Property',
     required: true
+  },
+  companyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Company',
+    required: true,
+    immutable: true
   },
   fileName: {
     type: String,
@@ -47,6 +54,7 @@ const FileSchema: Schema = new Schema({
 
 // Add index for faster queries
 FileSchema.index({ propertyId: 1 });
+FileSchema.index({ companyId: 1 });
 FileSchema.index({ uploadedBy: 1 });
 FileSchema.index({ ownerId: 1 });
 FileSchema.index({ fileType: 1 });

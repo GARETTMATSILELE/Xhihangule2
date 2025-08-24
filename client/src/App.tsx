@@ -22,13 +22,19 @@ const LeasesPage = lazy(() => import('./pages/LeasesPage'));
 const OwnerDashboard = lazy(() => import('./components/owner/OwnerDashboard'));
 const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
 const AccountantDashboard = lazy(() => import('./pages/AccountantDashboard'));
+const SalesDashboard = lazy(() => import('./pages/SalesDashboard'));
+const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })));
+const DashboardOverview = lazy(() => import('./pages/AccountantDashboard/DashboardOverview'));
 const AccountantPaymentsPage = lazy(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
+const SalesPaymentsPage = lazy(() => import('./pages/AccountantDashboard/SalesPaymentsPage'));
+const RevenuePage = lazy(() => import('./pages/AccountantDashboard/RevenuePage'));
 const CommissionsPage = lazy(() => import('./pages/AccountantDashboard/CommissionsPage'));
 const SettingsPage = lazy(() => import('./pages/AccountantDashboard/SettingsPage'));
 const ReportsPage = lazy(() => import('./pages/AccountantDashboard/ReportsPage'));
 const TestAuth = lazy(() => import('./pages/TestAuth'));
 const PropertyAccountsPage = lazy(() => import('./pages/AccountantDashboard/PropertyAccountsPage'));
 const PropertyAccountDetailPage = lazy(() => import('./pages/AccountantDashboard/PropertyAccountDetailPage'));
+const PropertyDepositLedgerPage = lazy(() => import('./pages/AccountantDashboard/PropertyDepositLedgerPage'));
 const AgentAccountsPage = lazy(() => import('./pages/AccountantDashboard/AgentAccountsPage'));
 const AgentAccountDetailPage = lazy(() => import('./pages/AccountantDashboard/AgentAccountDetailPage'));
 const WrittenInvoicesPage = lazy(() => import('./pages/AccountantDashboard/WrittenInvoicesPage'));
@@ -112,6 +118,15 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
+              <Route path="/sales-dashboard/*" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesDashboard />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
               <Route path="/accountant-dashboard/*" element={
                 <ProtectedRoute requiredRoles={['accountant']}>
                   <PropertyProvider>
@@ -121,10 +136,13 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               }>
-                <Route index element={<AccountantDashboard />} />
+                <Route index element={<DashboardOverview />} />
                 <Route path="payments" element={<AccountantPaymentsPage />} />
+                <Route path="sales" element={<SalesPaymentsPage />} />
+                <Route path="revenue" element={<RevenuePage />} />
                 <Route path="property-accounts" element={<PropertyAccountsPage />} />
                 <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
+                <Route path="property-accounts/:propertyId/deposits" element={<PropertyDepositLedgerPage />} />
                 <Route path="agent-accounts" element={<AgentAccountsPage />} />
                 <Route path="agent-accounts/:agentId" element={<AgentAccountDetailPage />} />
                 <Route path="commissions" element={<CommissionsPage />} />
@@ -167,6 +185,15 @@ const App: React.FC = () => {
                   <PropertyProvider>
                     <CompanyProvider>
                       <LeasesPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/settings" element={
+                <ProtectedRoute>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <Settings />
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>

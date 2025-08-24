@@ -89,6 +89,10 @@ const PaymentRequestSchema = new mongoose_1.Schema({
         type: String,
         required: true
     },
+    requestedByUser: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User'
+    },
     processedBy: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'User'

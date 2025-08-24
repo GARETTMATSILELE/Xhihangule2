@@ -49,6 +49,11 @@ const CommissionsPage: React.FC = () => {
   const [agencySearchTerm, setAgencySearchTerm] = useState<string>('');
   const [agentSearchTerm, setAgentSearchTerm] = useState<string>('');
   const [preaSearchTerm, setPREASearchTerm] = useState<string>('');
+  const [preaSelectedYear, setPREASelectedYear] = useState<number>(new Date().getFullYear());
+  const [preaSelectedMonth, setPREASelectedMonth] = useState<number | 'all'>(new Date().getMonth());
+  const [preaSelectedWeek, setPREASelectedWeek] = useState<number | 'all'>(1);
+  const [preaSelectedDay, setPREASelectedDay] = useState<number | 'all'>(new Date().getDate());
+  const [preaFilterType, setPREAFilterType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
 
   // Format currency helper function
   const formatCurrency = (amount: number) => {
@@ -208,7 +213,14 @@ const CommissionsPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { agentCommissions, agencyCommission, preaCommission } = await accountantService.getAllCommissions();
+        const filters = {
+          year: agencySelectedYear,
+          month: agencySelectedMonth === 'all' ? undefined : agencySelectedMonth,
+          week: agencySelectedWeek === 'all' ? undefined : agencySelectedWeek,
+          day: agencySelectedDay === 'all' ? undefined : agencySelectedDay,
+          filterType: agencyFilterType
+        };
+        const { agentCommissions, agencyCommission, preaCommission } = await accountantService.getAllCommissions(filters);
 
         setAgentCommissions(agentCommissions);
         setAgencyCommission(agencyCommission);
@@ -227,6 +239,7 @@ const CommissionsPage: React.FC = () => {
   // Set initial week value when component mounts
   useEffect(() => {
     setAgencySelectedWeek(getCurrentWeekOfYear());
+    setPREASelectedWeek(getCurrentWeekOfYear());
   }, []);
 
   // Effect to refresh agency commission data when filters change
@@ -259,6 +272,36 @@ const CommissionsPage: React.FC = () => {
       fetchAgencyCommissionData();
     }
   }, [agencySelectedYear, agencySelectedMonth, agencySelectedWeek, agencySelectedDay, agencyFilterType]);
+
+  // Effect to refresh PREA commission data when filters change
+  useEffect(() => {
+    const fetchPREACommissionData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const preaFilters = {
+          year: preaSelectedYear,
+          month: preaSelectedMonth === 'all' ? undefined : preaSelectedMonth,
+          week: preaSelectedWeek === 'all' ? undefined : preaSelectedWeek,
+          day: preaSelectedDay === 'all' ? undefined : preaSelectedDay,
+          filterType: preaFilterType
+        };
+
+        const preaData = await accountantService.getPREACommission(preaFilters);
+        setPREACommission(preaData);
+      } catch (err) {
+        console.error('Error fetching PREA commission data:', err);
+        setError(err instanceof Error ? err.message : 'An error occurred while fetching PREA commission data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (preaCommission) {
+      fetchPREACommissionData();
+    }
+  }, [preaSelectedYear, preaSelectedMonth, preaSelectedWeek, preaSelectedDay, preaFilterType]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
@@ -811,13 +854,28 @@ const CommissionsPage: React.FC = () => {
     if (activeTab === 2) {
       return (
         <Box>
-          {/* Search Controls for PREA Commission */}
+          {/* Filter Controls for PREA Commission */}
           <Box sx={{ mb: 3, p: 2, backgroundColor: 'background.paper', borderRadius: 1 }}>
             <Typography variant="h6" gutterBottom>
-              Search PREA Commission
+              Filter PREA Commission
             </Typography>
             <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={4}>
+              <Grid item xs={12} sm={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Filter Type</InputLabel>
+                  <Select
+                    value={preaFilterType}
+                    label="Filter Type"
+                    onChange={(e) => setPREAFilterType(e.target.value as 'daily' | 'weekly' | 'monthly' | 'yearly')}
+                  >
+                    <MenuItem value="daily">Daily</MenuItem>
+                    <MenuItem value="weekly">Weekly</MenuItem>
+                    <MenuItem value="monthly">Monthly</MenuItem>
+                    <MenuItem value="yearly">Yearly</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   size="small"
@@ -828,15 +886,114 @@ const CommissionsPage: React.FC = () => {
                   variant="outlined"
                 />
               </Grid>
+              <Grid item xs={12} sm={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Year</InputLabel>
+                  <Select
+                    value={preaSelectedYear}
+                    label="Year"
+                    onChange={(e) => setPREASelectedYear(e.target.value as number)}
+                  >
+                    {getYearOptions().map((year) => (
+                      <MenuItem key={year} value={year}>
+                        {year}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              {preaFilterType === 'monthly' && (
+                <Grid item xs={12} sm={2}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Month</InputLabel>
+                    <Select
+                      value={preaSelectedMonth}
+                      label="Month"
+                      onChange={(e) => setPREASelectedMonth(e.target.value as number | 'all')}
+                    >
+                      <MenuItem value="all">All Months</MenuItem>
+                      {getMonthOptions().map((month) => (
+                        <MenuItem key={month.value} value={month.value}>
+                          {month.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+              {preaFilterType === 'weekly' && (
+                <Grid item xs={12} sm={2}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Week</InputLabel>
+                    <Select
+                      value={preaSelectedWeek}
+                      label="Week"
+                      onChange={(e) => setPREASelectedWeek(e.target.value as number | 'all')}
+                    >
+                      <MenuItem value="all">All Weeks</MenuItem>
+                      {getWeekOptions().map((week) => (
+                        <MenuItem key={week.value} value={week.value}>
+                          {week.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+              {preaFilterType === 'daily' && (
+                <>
+                  <Grid item xs={12} sm={2}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>Month</InputLabel>
+                      <Select
+                        value={preaSelectedMonth}
+                        label="Month"
+                        onChange={(e) => setPREASelectedMonth(e.target.value as number | 'all')}
+                      >
+                        <MenuItem value="all">All Months</MenuItem>
+                        {getMonthOptions().map((month) => (
+                          <MenuItem key={month.value} value={month.value}>
+                            {month.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} sm={2}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>Day</InputLabel>
+                      <Select
+                        value={preaSelectedDay}
+                        label="Day"
+                        onChange={(e) => setPREASelectedDay(e.target.value as number | 'all')}
+                      >
+                        <MenuItem value="all">All Days</MenuItem>
+                        {getDayOptions().map((day) => (
+                          <MenuItem key={day.value} value={day.value}>
+                            {day.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </>
+              )}
             </Grid>
             
             {/* Summary */}
             <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
               <Typography variant="subtitle2" color="text.secondary">
+                Showing {preaFilterType} commissions for {preaSelectedYear}
+                {preaFilterType === 'monthly' && preaSelectedMonth !== 'all' && ` - ${getMonthName(preaSelectedMonth as number)}`}
+                {preaFilterType === 'weekly' && preaSelectedWeek !== 'all' && ` - Week ${preaSelectedWeek}`}
+                {preaFilterType === 'daily' && preaSelectedMonth !== 'all' && preaSelectedDay !== 'all' && 
+                  ` - ${getMonthName(preaSelectedMonth as number)} ${preaSelectedDay}`}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
                 Properties found: {getFilteredPREACommissions().length} / {data.details.length}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total commission: {formatCurrency(data.total)}
+                Total {preaFilterType} commission: {formatCurrency(data.total)}
               </Typography>
             </Box>
           </Box>
@@ -865,7 +1022,7 @@ const CommissionsPage: React.FC = () => {
                   <TableCell><strong>Total</strong></TableCell>
                   <TableCell align="right"><strong>{formatCurrency(data.monthly)}</strong></TableCell>
                   <TableCell align="right"><strong>{formatCurrency(data.yearly)}</strong></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(data.total)}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(getFilteredPREACommissions().reduce((sum, d: any) => sum + (d.commission || 0), 0))}</strong></TableCell>
                 </TableRow>
               </TableBody>
             </Table>

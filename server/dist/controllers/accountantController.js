@@ -8,13 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPREACommission = exports.getAgencyCommission = exports.getAgentCommissions = void 0;
+exports.createPropertyDepositPayout = exports.getPropertyDepositSummary = exports.getPropertyDepositLedger = exports.getPREACommission = exports.getAgencyCommission = exports.getAgentCommissions = void 0;
 const User_1 = require("../models/User");
 const Lease_1 = require("../models/Lease");
-const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
 const Payment_1 = require("../models/Payment"); // Added import for Payment
+const rentalDeposit_1 = require("../models/rentalDeposit");
+const mongoose_1 = __importDefault(require("mongoose"));
 // Helper function to get week of year
 const getWeekOfYear = (date) => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -235,12 +239,19 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.getAgencyCommission = getAgencyCommission;
 const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
+        // Get query parameters for filtering (align with agency filters)
+        const { year, month, week, day, filterType } = req.query;
+        const filterYear = year ? parseInt(year) : new Date().getFullYear();
+        const filterMonth = month !== undefined ? parseInt(month) : null;
+        const filterWeek = week !== undefined ? parseInt(week) : null;
+        const filterDay = day !== undefined ? parseInt(day) : null;
+        const filterPeriod = filterType || 'monthly';
         const preaCommission = {
             monthly: 0,
             yearly: 0,
@@ -250,34 +261,63 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const currentDate = new Date();
         const currentMonth = currentDate.getMonth();
         const currentYear = currentDate.getFullYear();
-        // Get all active leases for the company
-        const properties = yield Property_1.Property.find({ companyId });
-        const propertyIds = properties.map(p => p._id);
-        const leases = yield Lease_1.Lease.find({
-            propertyId: { $in: propertyIds },
-            status: 'active'
-        });
-        for (const lease of leases) {
-            const property = properties.find(p => p._id.toString() === lease.propertyId.toString());
-            if (!property)
+        // Get payments and compute PREA from commissionDetails.preaFee
+        const payments = yield Payment_1.Payment.find({
+            companyId,
+            status: 'completed'
+        }).populate('propertyId', 'name address');
+        // Aggregate PREA by property after applying filters
+        const propertyMap = new Map();
+        for (const payment of payments) {
+            const property = payment.propertyId;
+            const preaFee = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.preaFee) || 0;
+            if (preaFee <= 0)
                 continue;
-            const rent = lease.rentAmount;
-            const commission = rent * 0.01; // 1% PREA commission
-            preaCommission.details.push({
-                propertyId: property._id.toString(),
-                propertyName: property.name,
-                rent,
-                commission
-            });
-            // Add to monthly and yearly totals if lease is current
-            if (lease.startDate.getMonth() === currentMonth && lease.startDate.getFullYear() === currentYear) {
-                preaCommission.monthly += commission;
+            const paymentDate = new Date(payment.paymentDate);
+            const paymentYear = paymentDate.getFullYear();
+            const paymentMonth = paymentDate.getMonth();
+            const paymentWeek = getWeekOfYear(paymentDate);
+            const paymentDay = paymentDate.getDate();
+            // Apply filters
+            let shouldInclude = true;
+            if (filterPeriod === 'yearly') {
+                shouldInclude = paymentYear === filterYear;
             }
-            if (lease.startDate.getFullYear() === currentYear) {
-                preaCommission.yearly += commission;
+            else if (filterPeriod === 'monthly') {
+                shouldInclude = paymentYear === filterYear && (filterMonth === null || paymentMonth === filterMonth);
             }
-            preaCommission.total += commission;
+            else if (filterPeriod === 'weekly') {
+                shouldInclude = paymentYear === filterYear && (filterWeek === null || paymentWeek === filterWeek);
+            }
+            else if (filterPeriod === 'daily') {
+                shouldInclude = paymentYear === filterYear &&
+                    (filterMonth === null || paymentMonth === filterMonth) &&
+                    (filterDay === null || paymentDay === filterDay);
+            }
+            if (!shouldInclude)
+                continue;
+            const key = payment.propertyId.toString();
+            const name = (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property';
+            const rentAmount = typeof payment.amount === 'number' ? payment.amount : 0;
+            if (propertyMap.has(key)) {
+                const agg = propertyMap.get(key);
+                agg.commission += preaFee;
+                // Optionally update rent with latest payment amount
+                agg.rent = rentAmount || agg.rent;
+            }
+            else {
+                propertyMap.set(key, { propertyId: key, propertyName: name, rent: rentAmount, commission: preaFee });
+            }
+            // Monthly/Yearly/Total based on current period (to align with other sections)
+            if (paymentMonth === currentMonth && paymentYear === currentYear) {
+                preaCommission.monthly += preaFee;
+            }
+            if (paymentYear === currentYear) {
+                preaCommission.yearly += preaFee;
+            }
+            preaCommission.total += preaFee;
         }
+        preaCommission.details = Array.from(propertyMap.values());
         res.json(preaCommission);
     }
     catch (error) {
@@ -286,3 +326,101 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getPREACommission = getPREACommission;
+// Deposits: Get property deposit ledger (payments and payouts) with running balance
+const getPropertyDepositLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { propertyId } = req.params;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        const entries = yield rentalDeposit_1.RentalDeposit.find({ propertyId })
+            .sort({ depositDate: 1 })
+            .lean();
+        let balance = 0;
+        const ledger = entries.map((e) => {
+            if (e.type === 'payout') {
+                balance -= e.depositAmount;
+            }
+            else {
+                balance += e.depositAmount;
+            }
+            return Object.assign(Object.assign({}, e), { runningBalance: balance });
+        });
+        res.json({ success: true, data: { entries: ledger, balance } });
+    }
+    catch (error) {
+        console.error('Error getting deposit ledger:', error);
+        res.status(500).json({ success: false, message: 'Failed to get deposit ledger' });
+    }
+});
+exports.getPropertyDepositLedger = getPropertyDepositLedger;
+// Deposits: Get property deposit summary (currently held)
+const getPropertyDepositSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { propertyId } = req.params;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        const agg = yield rentalDeposit_1.RentalDeposit.aggregate([
+            { $match: { propertyId: new (require('mongoose').Types.ObjectId)(propertyId) } },
+            {
+                $group: {
+                    _id: '$type',
+                    total: { $sum: '$depositAmount' }
+                }
+            }
+        ]);
+        const totalPaid = ((_a = agg.find(a => a._id === 'payment')) === null || _a === void 0 ? void 0 : _a.total) || 0;
+        const totalPayout = ((_b = agg.find(a => a._id === 'payout')) === null || _b === void 0 ? void 0 : _b.total) || 0;
+        const held = totalPaid - totalPayout;
+        res.json({ success: true, data: { totalPaid, totalPayout, held } });
+    }
+    catch (error) {
+        console.error('Error getting deposit summary:', error);
+        res.status(500).json({ success: false, message: 'Failed to get deposit summary' });
+    }
+});
+exports.getPropertyDepositSummary = getPropertyDepositSummary;
+// Deposits: Create a deposit payout entry (reduces held balance)
+const createPropertyDepositPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { propertyId } = req.params;
+        const { amount, paymentMethod, notes, recipientName } = req.body;
+        if (!propertyId || !amount || amount <= 0) {
+            return res.status(400).json({ success: false, message: 'Property ID and valid amount are required' });
+        }
+        // Get current held amount
+        const agg = yield rentalDeposit_1.RentalDeposit.aggregate([
+            { $match: { propertyId: new mongoose_1.default.Types.ObjectId(propertyId) } },
+            { $group: { _id: '$type', total: { $sum: '$depositAmount' } } }
+        ]);
+        const totalPaid = ((_a = agg.find(a => a._id === 'payment')) === null || _a === void 0 ? void 0 : _a.total) || 0;
+        const totalPayout = ((_b = agg.find(a => a._id === 'payout')) === null || _b === void 0 ? void 0 : _b.total) || 0;
+        const held = totalPaid - totalPayout;
+        if (amount > held) {
+            return res.status(400).json({ success: false, message: 'Payout exceeds held deposit' });
+        }
+        const entry = yield rentalDeposit_1.RentalDeposit.create({
+            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+            agentId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            tenantId: new mongoose_1.default.Types.ObjectId(req.body.tenantId || req.user.userId),
+            depositAmount: amount,
+            depositDate: new Date(),
+            type: 'payout',
+            referenceNumber: `DEP-PAYOUT-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+            notes: notes || '',
+            processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            paymentMethod: paymentMethod || 'bank_transfer',
+            recipientName: recipientName || ''
+        });
+        res.json({ success: true, data: entry });
+    }
+    catch (error) {
+        console.error('Error creating deposit payout:', error);
+        res.status(500).json({ success: false, message: 'Failed to create deposit payout' });
+    }
+});
+exports.createPropertyDepositPayout = createPropertyDepositPayout;

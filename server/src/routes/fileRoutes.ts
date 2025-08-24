@@ -1,5 +1,5 @@
 import express from 'express';
-import { auth } from '../middleware/auth';
+import { authWithCompany } from '../middleware/auth';
 import { isAdmin, isAgent } from '../middleware/roles';
 import multer from 'multer';
 import { getFiles, uploadFile, downloadFile, deleteFile } from '../controllers/fileController';
@@ -31,16 +31,16 @@ const upload = multer({
   }
 });
 
-// Get all files
-router.get('/', getFiles);
+// Get all files (company-scoped)
+router.get('/', authWithCompany, getFiles);
 
 // Upload a file
-router.post('/upload', auth, upload.single('file'), uploadFile);
+router.post('/upload', authWithCompany, upload.single('file'), uploadFile);
 
-// Download a file
-router.get('/download/:id', downloadFile);
+// Download a file (company-scoped)
+router.get('/download/:id', authWithCompany, downloadFile);
 
 // Delete a file
-router.delete('/:id', auth, deleteFile);
+router.delete('/:id', authWithCompany, deleteFile);
 
 export default router; 

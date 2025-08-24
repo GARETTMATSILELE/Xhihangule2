@@ -149,6 +149,12 @@ class PropertyAccountService {
                     logger_1.logger.info(`Skipping income recording for payment ${paymentId} - status: ${payment.status}`);
                     return;
                 }
+                // Guard: exclude deposit-only payments from income
+                const deposit = payment.depositAmount || 0;
+                if (deposit > 0 && (payment.amount <= deposit)) {
+                    logger_1.logger.info(`Skipping income for deposit-only payment ${paymentId} (amount: ${payment.amount}, deposit: ${deposit})`);
+                    return;
+                }
                 // Get or create property account
                 const account = yield this.getOrCreatePropertyAccount(payment.propertyId.toString());
                 // Check if income already recorded for this payment
@@ -157,16 +163,20 @@ class PropertyAccountService {
                     logger_1.logger.info(`Income already recorded for payment: ${paymentId}`);
                     return;
                 }
-                // Calculate owner amount (income after commission)
+                // Calculate owner amount (income after commission) and exclude deposits
                 const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
-                if (ownerAmount <= 0) {
-                    logger_1.logger.warn(`Invalid owner amount for payment ${paymentId}: ${ownerAmount}`);
+                const totalPaid = payment.amount || 0;
+                const depositPortion = payment.depositAmount || 0;
+                const ownerFraction = totalPaid > 0 ? ownerAmount / totalPaid : 0;
+                const incomeAmount = Math.max(0, (totalPaid - depositPortion) * ownerFraction);
+                if (incomeAmount <= 0) {
+                    logger_1.logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
                     return;
                 }
                 // Create income transaction
                 const incomeTransaction = {
                     type: 'income',
-                    amount: ownerAmount,
+                    amount: incomeAmount,
                     date: payment.paymentDate || payment.createdAt,
                     paymentId: new mongoose_1.default.Types.ObjectId(paymentId),
                     description: `Rental income - ${payment.referenceNumber}`,
@@ -179,7 +189,7 @@ class PropertyAccountService {
                 };
                 account.transactions.push(incomeTransaction);
                 yield account.save({ session });
-                logger_1.logger.info(`Recorded income of ${ownerAmount} for property ${payment.propertyId} from payment ${paymentId}`);
+                logger_1.logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
                 yield session.commitTransaction();
             }
             catch (error) {

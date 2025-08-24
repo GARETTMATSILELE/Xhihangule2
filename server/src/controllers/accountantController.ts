@@ -4,6 +4,8 @@ import { Lease } from '../models/Lease';
 import { Property } from '../models/Property';
 import { AppError } from '../middleware/errorHandler';
 import { Payment } from '../models/Payment'; // Added import for Payment
+import { RentalDeposit } from '../models/rentalDeposit';
+import mongoose from 'mongoose';
 
 // Helper function to get week of year
 const getWeekOfYear = (date: Date): number => {
@@ -307,6 +309,14 @@ export const getPREACommission = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 404);
     }
 
+    // Get query parameters for filtering (align with agency filters)
+    const { year, month, week, day, filterType } = req.query;
+    const filterYear = year ? parseInt(year as string) : new Date().getFullYear();
+    const filterMonth = month !== undefined ? parseInt(month as string) : null;
+    const filterWeek = week !== undefined ? parseInt(week as string) : null;
+    const filterDay = day !== undefined ? parseInt(day as string) : null;
+    const filterPeriod = (filterType as string) || 'monthly';
+
     const preaCommission: PREACommission = {
       monthly: 0,
       yearly: 0,
@@ -318,38 +328,65 @@ export const getPREACommission = async (req: Request, res: Response) => {
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
 
-    // Get all active leases for the company
-    const properties = await Property.find({ companyId });
-    const propertyIds = properties.map(p => p._id);
+    // Get payments and compute PREA from commissionDetails.preaFee
+    const payments = await Payment.find({
+      companyId,
+      status: 'completed'
+    }).populate('propertyId', 'name address');
 
-    const leases = await Lease.find({
-      propertyId: { $in: propertyIds },
-      status: 'active'
-    });
+    // Aggregate PREA by property after applying filters
+    const propertyMap: Map<string, { propertyId: string; propertyName: string; rent: number; commission: number }> = new Map();
 
-    for (const lease of leases) {
-      const property = properties.find(p => p._id.toString() === lease.propertyId.toString());
-      if (!property) continue;
+    for (const payment of payments) {
+      const property = payment.propertyId as any;
+      const preaFee = payment.commissionDetails?.preaFee || 0;
+      if (preaFee <= 0) continue;
 
-      const rent = lease.rentAmount;
-      const commission = rent * 0.01; // 1% PREA commission
+      const paymentDate = new Date(payment.paymentDate);
+      const paymentYear = paymentDate.getFullYear();
+      const paymentMonth = paymentDate.getMonth();
+      const paymentWeek = getWeekOfYear(paymentDate);
+      const paymentDay = paymentDate.getDate();
 
-      preaCommission.details.push({
-        propertyId: property._id.toString(),
-        propertyName: property.name,
-        rent,
-        commission
-      });
-
-      // Add to monthly and yearly totals if lease is current
-      if (lease.startDate.getMonth() === currentMonth && lease.startDate.getFullYear() === currentYear) {
-        preaCommission.monthly += commission;
+      // Apply filters
+      let shouldInclude = true;
+      if (filterPeriod === 'yearly') {
+        shouldInclude = paymentYear === filterYear;
+      } else if (filterPeriod === 'monthly') {
+        shouldInclude = paymentYear === filterYear && (filterMonth === null || paymentMonth === filterMonth);
+      } else if (filterPeriod === 'weekly') {
+        shouldInclude = paymentYear === filterYear && (filterWeek === null || paymentWeek === filterWeek);
+      } else if (filterPeriod === 'daily') {
+        shouldInclude = paymentYear === filterYear &&
+                       (filterMonth === null || paymentMonth === filterMonth) &&
+                       (filterDay === null || paymentDay === filterDay);
       }
-      if (lease.startDate.getFullYear() === currentYear) {
-        preaCommission.yearly += commission;
+
+      if (!shouldInclude) continue;
+
+      const key = (payment.propertyId as any).toString();
+      const name = property?.name || 'Unknown Property';
+      const rentAmount = typeof (payment as any).amount === 'number' ? (payment as any).amount : 0;
+      if (propertyMap.has(key)) {
+        const agg = propertyMap.get(key)!;
+        agg.commission += preaFee;
+        // Optionally update rent with latest payment amount
+        agg.rent = rentAmount || agg.rent;
+      } else {
+        propertyMap.set(key, { propertyId: key, propertyName: name, rent: rentAmount, commission: preaFee });
       }
-      preaCommission.total += commission;
+
+      // Monthly/Yearly/Total based on current period (to align with other sections)
+      if (paymentMonth === currentMonth && paymentYear === currentYear) {
+        preaCommission.monthly += preaFee;
+      }
+      if (paymentYear === currentYear) {
+        preaCommission.yearly += preaFee;
+      }
+      preaCommission.total += preaFee;
     }
+
+    preaCommission.details = Array.from(propertyMap.values());
 
     res.json(preaCommission);
   } catch (error) {
@@ -357,3 +394,104 @@ export const getPREACommission = async (req: Request, res: Response) => {
     throw new AppError('Failed to get PREA commission', 500);
   }
 }; 
+
+// Deposits: Get property deposit ledger (payments and payouts) with running balance
+export const getPropertyDepositLedger = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    const entries = await RentalDeposit.find({ propertyId })
+      .sort({ depositDate: 1 })
+      .lean();
+
+    let balance = 0;
+    const ledger = entries.map((e) => {
+      if (e.type === 'payout') {
+        balance -= e.depositAmount;
+      } else {
+        balance += e.depositAmount;
+      }
+      return { ...e, runningBalance: balance };
+    });
+
+    res.json({ success: true, data: { entries: ledger, balance } });
+  } catch (error) {
+    console.error('Error getting deposit ledger:', error);
+    res.status(500).json({ success: false, message: 'Failed to get deposit ledger' });
+  }
+};
+
+// Deposits: Get property deposit summary (currently held)
+export const getPropertyDepositSummary = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    const agg = await RentalDeposit.aggregate([
+      { $match: { propertyId: new (require('mongoose').Types.ObjectId)(propertyId) } },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$depositAmount' }
+        }
+      }
+    ]);
+
+    const totalPaid = agg.find(a => a._id === 'payment')?.total || 0;
+    const totalPayout = agg.find(a => a._id === 'payout')?.total || 0;
+    const held = totalPaid - totalPayout;
+
+    res.json({ success: true, data: { totalPaid, totalPayout, held } });
+  } catch (error) {
+    console.error('Error getting deposit summary:', error);
+    res.status(500).json({ success: false, message: 'Failed to get deposit summary' });
+  }
+};
+
+// Deposits: Create a deposit payout entry (reduces held balance)
+export const createPropertyDepositPayout = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    const { amount, paymentMethod, notes, recipientName } = req.body;
+    if (!propertyId || !amount || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Property ID and valid amount are required' });
+    }
+
+    // Get current held amount
+    const agg = await RentalDeposit.aggregate([
+      { $match: { propertyId: new mongoose.Types.ObjectId(propertyId) } },
+      { $group: { _id: '$type', total: { $sum: '$depositAmount' } } }
+    ]);
+    const totalPaid = agg.find(a => a._id === 'payment')?.total || 0;
+    const totalPayout = agg.find(a => a._id === 'payout')?.total || 0;
+    const held = totalPaid - totalPayout;
+    if (amount > held) {
+      return res.status(400).json({ success: false, message: 'Payout exceeds held deposit' });
+    }
+
+    const entry = await RentalDeposit.create({
+      propertyId: new mongoose.Types.ObjectId(propertyId),
+      agentId: new mongoose.Types.ObjectId(req.user!.userId),
+      companyId: new mongoose.Types.ObjectId(req.user!.companyId),
+      tenantId: new mongoose.Types.ObjectId(req.body.tenantId || req.user!.userId),
+      depositAmount: amount,
+      depositDate: new Date(),
+      type: 'payout',
+      referenceNumber: `DEP-PAYOUT-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+      notes: notes || '',
+      processedBy: new mongoose.Types.ObjectId(req.user!.userId),
+      paymentMethod: paymentMethod || 'bank_transfer',
+      recipientName: recipientName || ''
+    });
+
+    res.json({ success: true, data: entry });
+  } catch (error) {
+    console.error('Error creating deposit payout:', error);
+    res.status(500).json({ success: false, message: 'Failed to create deposit payout' });
+  }
+};

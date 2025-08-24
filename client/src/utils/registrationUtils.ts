@@ -58,14 +58,14 @@ export const validateRegistrationForm = (data: SignUpData): string[] => {
   // Role validation
   if (!data.role) {
     errors.push('Role is required');
-  } else if (!['admin', 'agent', 'accountant', 'owner'].includes(data.role)) {
+  } else if (!['admin', 'agent', 'accountant', 'owner', 'sales'].includes(data.role)) {
     errors.push('Invalid role selected');
   }
 
   return errors;
 };
 
-export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant';
+export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant' | 'sales';
 
 export const getDashboardPath = (role: UserRole): string => {
   switch (role) {
@@ -77,6 +77,8 @@ export const getDashboardPath = (role: UserRole): string => {
       return '/owner-dashboard';
     case 'accountant':
       return '/accountant-dashboard';
+    case 'sales':
+      return '/sales-dashboard';
     default:
       return '/dashboard';
   }

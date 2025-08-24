@@ -9,7 +9,7 @@ const roles_1 = require("../middleware/roles");
 const invoiceController_1 = require("../controllers/invoiceController");
 const router = express_1.default.Router();
 // Apply authentication middleware to all routes
-router.use(auth_1.auth);
+router.use(auth_1.authWithCompany);
 // Invoice routes - require accountant role
 router.post('/', roles_1.isAccountant, invoiceController_1.createInvoice);
 router.get('/', roles_1.isAccountant, invoiceController_1.getInvoices);

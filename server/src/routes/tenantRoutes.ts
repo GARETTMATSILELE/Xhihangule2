@@ -1,5 +1,5 @@
 import express from 'express';
-import { auth } from '../middleware/auth';
+import { auth, authWithCompany } from '../middleware/auth';
 import {
   getTenants,
   getTenant,
@@ -16,8 +16,11 @@ const router = express.Router();
 // Public endpoint for admin dashboard
 router.get('/public', getTenantsPublic);
 
-// MVP: Comprehensive public endpoints for all tenant operations
+// MVP: Comprehensive public endpoints for all tenant operations (disabled in production)
 router.get('/public/all', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
   try {
     const tenants = await Tenant.find({})
       .select('firstName lastName email phone rentAmount leaseStartDate leaseEndDate status')
@@ -44,7 +47,7 @@ router.get('/public/:id', async (req, res) => {
 });
 
 // Protected routes
-router.use(auth);
+router.use(authWithCompany);
 
 // Routes
 router.get('/', getTenants);

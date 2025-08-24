@@ -75,6 +75,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
   const [loadingReceipt, setLoadingReceipt] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+  const [onlyDeposits, setOnlyDeposits] = useState<boolean>(false);
 
   const handleFilterChange = useCallback((key: keyof PaymentFilter, value: any) => {
     if (filters[key] !== value) {
@@ -150,25 +151,25 @@ const PaymentList: React.FC<PaymentListProps> = ({
     setSelectedReceipt(null);
   };
 
-  // Helper function to get property name
-  const getPropertyName = useCallback((propertyId: string | { _id: string; name: string; address: string } | null | undefined) => {
+  // Helper function to get property display (manual address for sales, else property name)
+  const getPropertyDisplay = useCallback((payment: Payment) => {
+    if ((payment as any).manualPropertyAddress) {
+      return (payment as any).manualPropertyAddress as string;
+    }
+    const propertyId = (payment as any).propertyId as any;
     if (!propertyId) return 'Unknown Property';
-    // If propertyId is already populated (an object with name)
     if (typeof propertyId === 'object' && propertyId.name) {
       return propertyId.name;
     }
-    // If propertyId is a string, look it up in the properties array
     if (typeof propertyId === 'string') {
       const property = properties.find(p => p._id === propertyId);
-      if (property) {
-        return property.name;
-      }
+      if (property) return property.name;
     }
     return 'Unknown Property';
   }, [properties]);
 
-  const renderMobilePaymentCard = (payment: Payment) => (
-    <Card key={payment._id} sx={{ mb: 2 }}>
+  const renderMobilePaymentCard = (payment: Payment, index?: number) => (
+    <Card key={`${payment._id || payment.referenceNumber || 'payment'}-${index ?? 0}`} sx={{ mb: 2 }}>
       <CardContent>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Typography variant="h6">
@@ -184,7 +185,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
           {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'No date'}
         </Typography>
         <Typography variant="body2" gutterBottom>
-          Property: {getPropertyName(payment.propertyId)}
+          Property: {getPropertyDisplay(payment)}
         </Typography>
         <Typography variant="body2" gutterBottom>
           Method: {(payment.paymentMethod || 'unknown').replace('_', ' ').toUpperCase()}
@@ -341,6 +342,28 @@ const PaymentList: React.FC<PaymentListProps> = ({
             </Select>
           </FormControl>
         </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <FormControl fullWidth size="small">
+            <InputLabel id="filter-label">Filter</InputLabel>
+            <Select
+              labelId="filter-label"
+              value={onlyDeposits ? 'deposits' : ''}
+              onChange={(e) => {
+                const val = e.target.value === 'deposits';
+                setOnlyDeposits(val);
+                if (onFilterChange) {
+                  const next: any = { ...filters };
+                  next.onlyDeposits = val ? 'true' : undefined;
+                  onFilterChange(next);
+                }
+              }}
+              label="Filter"
+            >
+              <MenuItem value="">All Payments</MenuItem>
+              <MenuItem value="deposits">Deposits Only</MenuItem>
+            </Select>
+          </FormControl>
+        </Grid>
       </Grid>
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -350,7 +373,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
           </Box>
         ) : isMobile ? (
           <Box sx={{ flex: 1, overflow: 'auto' }}>
-            {paginatedPayments.map(renderMobilePaymentCard)}
+            {paginatedPayments.map((payment, index) => renderMobilePaymentCard(payment, index))}
           </Box>
         ) : (
                     <TableContainer component={Paper} elevation={0} sx={{ flex: 1, overflow: 'auto' }}>
@@ -367,13 +390,13 @@ const PaymentList: React.FC<PaymentListProps> = ({
               </TableRow>
             </TableHead>
             <TableBody>
-              {paginatedPayments.map((payment) => (
-                <TableRow key={payment._id}>
+              {paginatedPayments.map((payment, index) => (
+                <TableRow key={`${payment._id || payment.referenceNumber || 'row'}-${index}`}>
                   <TableCell>
                     {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'No date'}
                   </TableCell>
                   <TableCell>
-                    {getPropertyName(payment.propertyId)}
+                    {getPropertyDisplay(payment)}
                   </TableCell>
                   <TableCell>
                     {payment.currency} {(payment.amount || 0).toFixed(2)}

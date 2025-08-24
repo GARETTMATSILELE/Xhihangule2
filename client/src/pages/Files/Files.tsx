@@ -36,6 +36,7 @@ import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyService } from '../../services/propertyService';
 import publicApi from '../../api/publicApi';
+import { useLocation } from 'react-router-dom';
 
 interface Property {
   _id: string;
@@ -72,6 +73,7 @@ type FileType = typeof FILE_TYPES[number];
 export const Files: React.FC = () => {
   const { user } = useAuth();
   const propertyService = usePropertyService();
+  const location = useLocation();
   const [properties, setProperties] = useState<Property[]>([]);
   const [files, setFiles] = useState<FileDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,9 +94,10 @@ export const Files: React.FC = () => {
         
         console.log('Files page: starting to load data');
         
+        const isAgentRoute = location.pathname.includes('/agent-dashboard');
         const [propertiesResponse, filesResponse] = await Promise.all([
-          propertyService.getPublicProperties(),
-          publicApi.get('/files')
+          isAgentRoute ? api.get('/agents/properties') : api.get('/properties'),
+          isAgentRoute ? api.get('/agents/files') : api.get('/files')
         ]);
         
         console.log('Properties response:', propertiesResponse);
@@ -105,13 +108,14 @@ export const Files: React.FC = () => {
           console.log('First file structure:', filesResponse.data[0]);
         }
         
-        setProperties(propertiesResponse);
+        setProperties(Array.isArray(propertiesResponse.data) ? propertiesResponse.data : propertiesResponse.data?.data || []);
         
         // Ensure files data is in the correct format
-        if (Array.isArray(filesResponse.data)) {
-          const formattedFiles = filesResponse.data.map((file: any) => ({
+        const filesArray = Array.isArray(filesResponse.data) ? filesResponse.data : filesResponse.data?.data;
+        if (Array.isArray(filesArray)) {
+          const formattedFiles = filesArray.map((file: any) => ({
             _id: file._id,
-            propertyId: file.propertyId,
+            propertyId: typeof file.propertyId === 'object' && file.propertyId?._id ? String(file.propertyId._id) : String(file.propertyId),
             propertyName: file.propertyName || 'N/A',
             fileName: file.fileName,
             fileType: file.fileType,
@@ -136,7 +140,7 @@ export const Files: React.FC = () => {
     };
 
     loadData();
-  }, []);
+  }, [location.pathname]);
 
   const handleFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -165,7 +169,8 @@ export const Files: React.FC = () => {
       formData.append('propertyId', selectedProperty);
       formData.append('fileType', selectedFileType);
 
-      await api.post('/files/upload', formData, {
+      const isAgentRoute = location.pathname.includes('/agent-dashboard');
+      await api.post(isAgentRoute ? '/agents/files' : '/files/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -178,11 +183,13 @@ export const Files: React.FC = () => {
       
       // Reload files data
       try {
-        const response = await publicApi.get('/files');
-        if (Array.isArray(response.data)) {
-          const formattedFiles = response.data.map((file: any) => ({
+        const isAgent = location.pathname.includes('/agent-dashboard');
+        const response = await api.get(isAgent ? '/agents/files' : '/files');
+        const filesArray = Array.isArray(response.data) ? response.data : response.data?.data;
+        if (Array.isArray(filesArray)) {
+          const formattedFiles = filesArray.map((file: any) => ({
             _id: file._id,
-            propertyId: file.propertyId,
+            propertyId: typeof file.propertyId === 'object' && file.propertyId?._id ? String(file.propertyId._id) : String(file.propertyId),
             propertyName: file.propertyName || 'N/A',
             fileName: file.fileName,
             fileType: file.fileType,
@@ -232,11 +239,12 @@ export const Files: React.FC = () => {
       
       // Reload files data
       try {
-        const response = await publicApi.get('/files');
+        const isAgent = location.pathname.includes('/agent-dashboard');
+        const response = await api.get(isAgent ? '/agents/files' : '/files');
         if (Array.isArray(response.data)) {
           const formattedFiles = response.data.map((file: any) => ({
             _id: file._id,
-            propertyId: file.propertyId,
+            propertyId: typeof file.propertyId === 'object' && file.propertyId?._id ? String(file.propertyId._id) : String(file.propertyId),
             propertyName: file.propertyName || 'N/A',
             fileName: file.fileName,
             fileType: file.fileType,
@@ -287,13 +295,15 @@ export const Files: React.FC = () => {
       formData.append('file', propertyUpload.file as Blob);
       formData.append('propertyId', propertyId);
       formData.append('fileType', propertyUpload.fileType);
-      await api.post('/files/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const isAgentRoute = location.pathname.includes('/agent-dashboard');
+      await api.post(isAgentRoute ? '/agents/files' : '/files/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       // Reload files data
-      const response = await publicApi.get('/files');
-      if (Array.isArray(response.data)) {
-        const formattedFiles = response.data.map((file: any) => ({
+      const response = await api.get(isAgentRoute ? '/agents/files' : '/files');
+      const filesArray = Array.isArray(response.data) ? response.data : response.data?.data;
+      if (Array.isArray(filesArray)) {
+        const formattedFiles = filesArray.map((file: any) => ({
           _id: file._id,
-          propertyId: file.propertyId,
+          propertyId: typeof file.propertyId === 'object' && file.propertyId?._id ? String(file.propertyId._id) : String(file.propertyId),
           propertyName: file.propertyName || 'N/A',
           fileName: file.fileName,
           fileType: file.fileType,

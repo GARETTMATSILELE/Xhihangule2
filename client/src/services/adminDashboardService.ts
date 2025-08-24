@@ -1,5 +1,5 @@
-import axios from 'axios';
 import { AxiosError } from 'axios';
+import api from '../api/axios';
 import { Property, PropertyFormData } from '../types/property';
 import { Tenant, TenantFormData } from '../types/tenant';
 import { useCallback } from 'react';
@@ -47,37 +47,14 @@ const handleApiError = (error: unknown): never => {
   throw error;
 };
 
-// Resolve API base URL consistently with other modules
-const isBrowser = typeof window !== 'undefined';
-const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
-const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
-const API_BASE = import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
-
-// Create a separate axios instance for unauthenticated requests
-// This instance does NOT have the request interceptor that adds Authorization headers
-const publicApi = axios.create({
-  baseURL: API_BASE,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
-
-// Create an authenticated axios instance for admin operations
-const authenticatedApi = axios.create({
-  baseURL: API_BASE,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
+// Use shared api instance which includes auth header + token refresh
 
 export const useAdminDashboardService = () => {
   const getAdminDashboardProperties = useCallback(async (): Promise<Property[]> => {
     try {
-      console.log('adminDashboardService: getAdminDashboardProperties called');
-      console.log('adminDashboardService: Using publicApi instance (no auth headers)');
-      
-      // Use the admin-dashboard endpoint specifically designed for admin dashboard without authentication
-      const response = await publicApi.get('/properties/admin-dashboard');
+      console.log('adminDashboardService: getAdminDashboardProperties called (authenticated)');
+      // Use authenticated, company-scoped endpoint
+      const response = await api.get('/properties');
       console.log('Admin Dashboard Properties API Response:', response.data);
 
       const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
@@ -117,15 +94,6 @@ export const useAdminDashboardService = () => {
         throw new Error('Access denied. Admin or Owner role required to create properties.');
       }
 
-      // Set up authentication headers
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      console.log('adminDashboardService: Token found:', token.substring(0, 20) + '...');
-      authenticatedApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
       // Prepare the property data with user and company details
       // Note: The server expects ownerId to match the userId from the JWT token
       const propertyToCreate = {
@@ -144,10 +112,8 @@ export const useAdminDashboardService = () => {
       };
 
       console.log('adminDashboardService: Creating property with data:', propertyToCreate);
-      console.log('adminDashboardService: Making API call to /properties');
-      console.log('adminDashboardService: Headers:', authenticatedApi.defaults.headers);
-
-      const response = await authenticatedApi.post('/properties', propertyToCreate);
+      console.log('adminDashboardService: Making API call to /properties (authenticated)');
+      const response = await api.post('/properties', propertyToCreate);
       console.log('adminDashboardService: Property created successfully:', response.data);
 
       const data = isApiResponse<Property>(response.data) ? response.data.data : response.data;
@@ -181,15 +147,7 @@ export const useAdminDashboardService = () => {
         throw new Error('Company ID not found. Please ensure you are associated with a company.');
       }
 
-      // Set up authentication headers
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      authenticatedApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-      const response = await authenticatedApi.put(`/properties/${propertyId}`, {
+      const response = await api.put(`/properties/${propertyId}`, {
         ...propertyData,
         companyId: user.companyId
       });
@@ -220,15 +178,7 @@ export const useAdminDashboardService = () => {
         throw new Error('Company ID not found. Please ensure you are associated with a company.');
       }
 
-      // Set up authentication headers
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      authenticatedApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-      await authenticatedApi.delete(`/properties/${propertyId}`);
+      await api.delete(`/properties/${propertyId}`);
       console.log('adminDashboardService: Property deleted successfully');
     } catch (error) {
       console.error('adminDashboardService: Error in deleteProperty:', error);
@@ -239,14 +189,20 @@ export const useAdminDashboardService = () => {
   // Tenant functions for admin dashboard
   const getAdminDashboardTenants = useCallback(async (): Promise<Tenant[]> => {
     try {
-      console.log('adminDashboardService: getAdminDashboardTenants called');
-      console.log('adminDashboardService: Using publicApi instance (no auth headers)');
-      
-      // Use the public endpoint for admin dashboard
-      const response = await publicApi.get('/tenants/public');
+      console.log('adminDashboardService: getAdminDashboardTenants called (authenticated)');
+      // Use authenticated, company-scoped endpoint
+      const response = await api.get('/tenants');
       console.log('Admin Dashboard Tenants API Response:', response.data);
 
-      const data = isApiResponse<Tenant[]>(response.data) ? response.data.data : response.data.tenants;
+      // Normalize data shape: support { data: [...] }, { tenants: [...] }, or direct array
+      const raw = response.data as any;
+      const data = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.data)
+          ? raw.data
+          : Array.isArray(raw?.tenants)
+            ? raw.tenants
+            : raw;
       
       if (!Array.isArray(data)) {
         throw new Error('Invalid tenants data received');
@@ -283,15 +239,6 @@ export const useAdminDashboardService = () => {
         throw new Error('Access denied. Admin or Owner role required to create tenants.');
       }
 
-      // Set up authentication headers
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      console.log('adminDashboardService: Token found:', token.substring(0, 20) + '...');
-      authenticatedApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
       // Prepare the tenant data
       // Note: The server will get companyId from the JWT token
       const tenantToCreate = {
@@ -301,10 +248,8 @@ export const useAdminDashboardService = () => {
       };
 
       console.log('adminDashboardService: Creating tenant with data:', tenantToCreate);
-      console.log('adminDashboardService: Making API call to /tenants');
-      console.log('adminDashboardService: Headers:', authenticatedApi.defaults.headers);
-
-      const response = await authenticatedApi.post('/tenants', tenantToCreate);
+      console.log('adminDashboardService: Making API call to /tenants (authenticated)');
+      const response = await api.post('/tenants', tenantToCreate);
       console.log('adminDashboardService: Tenant created successfully:', response.data);
 
       const data = isApiResponse<Tenant>(response.data) ? response.data.data : response.data;
@@ -338,15 +283,7 @@ export const useAdminDashboardService = () => {
         throw new Error('Company ID not found. Please ensure you are associated with a company.');
       }
 
-      // Set up authentication headers
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      authenticatedApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-      const response = await authenticatedApi.put(`/tenants/${tenantId}`, tenantData);
+      const response = await api.put(`/tenants/${tenantId}`, tenantData);
 
       const data = isApiResponse<Tenant>(response.data) ? response.data.data : response.data;
       
@@ -374,15 +311,7 @@ export const useAdminDashboardService = () => {
         throw new Error('Company ID not found. Please ensure you are associated with a company.');
       }
 
-      // Set up authentication headers
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        throw new Error('Authentication token not found. Please log in again.');
-      }
-
-      authenticatedApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-      await authenticatedApi.delete(`/tenants/${tenantId}`);
+      await api.delete(`/tenants/${tenantId}`);
       console.log('adminDashboardService: Tenant deleted successfully');
     } catch (error) {
       console.error('adminDashboardService: Error in deleteTenant:', error);

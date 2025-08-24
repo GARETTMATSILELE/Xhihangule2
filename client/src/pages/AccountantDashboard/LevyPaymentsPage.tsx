@@ -21,6 +21,7 @@ import {
   InputAdornment
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
+import { Print as PrintIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { 
   Search as SearchIcon, 
   FilterList as FilterIcon,
@@ -92,6 +93,110 @@ const columns: GridColDef[] = [
     field: 'currency', 
     headerName: 'Currency', 
     width: 100 
+  },
+  {
+    field: 'actions',
+    headerName: 'Actions',
+    width: 160,
+    sortable: false,
+    filterable: false,
+    renderCell: (params) => (
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <Tooltip title="Print Receipt (A4)">
+          <IconButton
+            color="primary"
+            size="small"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                const receipt = await paymentService.getPaymentReceipt(params.row._id);
+                const html = `<!DOCTYPE html>
+                  <html>
+                  <head>
+                    <meta charset=\"utf-8\" />
+                    <title>Receipt - ${receipt.receiptNumber}</title>
+                    <style>
+                      @page { size: A4; margin: 20mm; }
+                      body { font-family: Arial, sans-serif; color: #333; }
+                      .receipt { max-width: 700px; margin: 0 auto; }
+                      .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+                      .company-name { font-size: 22px; font-weight: bold; }
+                      .receipt-number { font-size: 16px; font-weight: bold; margin-top: 10px; }
+                      .amount { font-size: 26px; font-weight: bold; color: #2e7d32; text-align: center; margin: 20px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+                      .details { margin: 20px 0; }
+                      .row { display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+                      .label { font-weight: bold; color: #666; min-width: 140px; }
+                      .value { color: #333; text-align: right; }
+                      .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
+                      @media print { body { margin: 0; } .no-print { display: none; } }
+                    </style>
+                  </head>
+                  <body>
+                    <div class=\"receipt\">
+                      <div class=\"header\">
+                        <div class=\"company-name\">${receipt.type === 'levy' ? 'Levy Payment Receipt' : 'Payment Receipt'}</div>
+                        <div class=\"receipt-number\">Receipt #${receipt.receiptNumber}</div>
+                      </div>
+                      <div class=\"amount\">${receipt.currency || 'USD'} ${(receipt.amount || 0).toFixed(2)}</div>
+                      <div class=\"details\">
+                        <div class=\"row\"><div class=\"label\">Date:</div><div class=\"value\">${new Date(receipt.paymentDate).toLocaleDateString()}</div></div>
+                        <div class=\"row\"><div class=\"label\">Method:</div><div class=\"value\">${String(receipt.paymentMethod).replace('_',' ').toUpperCase()}</div></div>
+                        <div class=\"row\"><div class=\"label\">Status:</div><div class=\"value\">${String(receipt.status).toUpperCase()}</div></div>
+                        <div class=\"row\"><div class=\"label\">Property:</div><div class=\"value\">${receipt.property?.name || 'N/A'}</div></div>
+                        <div class=\"row\"><div class=\"label\">Address:</div><div class=\"value\">${receipt.property?.address || 'N/A'}</div></div>
+                        <div class=\"row\"><div class=\"label\">Processed By:</div><div class=\"value\">${(receipt.processedBy?.firstName || '')} ${(receipt.processedBy?.lastName || '')}</div></div>
+                        ${receipt.notes ? `<div class=\"row\"><div class=\"label\">Notes:</div><div class=\"value\">${receipt.notes}</div></div>` : ''}
+                      </div>
+                      <div class=\"footer\">
+                        <p>Generated on ${new Date().toLocaleString()}</p>
+                      </div>
+                      <div class=\"no-print\" style=\"text-align:center; margin-top:12px;\">
+                        <button onclick=\"window.print()\" style=\"padding:8px 16px; background:#1976d2; color:#fff; border:none; border-radius:4px; cursor:pointer;\">Print</button>
+                      </div>
+                    </div>
+                  </body>
+                  </html>`;
+                const win = window.open('', '_blank');
+                if (win) {
+                  win.document.write(html);
+                  win.document.close();
+                }
+              } catch (err) {
+                console.error('Failed to fetch/print receipt', err);
+                alert('Failed to fetch receipt');
+              }
+            }}
+          >
+            <PrintIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Download PDF/HTML">
+          <IconButton
+            color="secondary"
+            size="small"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                const blob = await paymentService.downloadReceiptPublic(params.row._id);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `receipt-${params.row.referenceNumber || params.row._id}.html`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+              } catch (err) {
+                console.error('Failed to download receipt', err);
+                alert('Failed to download receipt');
+              }
+            }}
+          >
+            <DownloadIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    )
   },
   { 
     field: 'processedBy', 

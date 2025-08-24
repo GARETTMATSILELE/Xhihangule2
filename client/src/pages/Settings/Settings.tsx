@@ -83,7 +83,7 @@ interface UserFormData {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'admin' | 'agent' | 'accountant' | 'owner';
+  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
   password: string;
 }
 
@@ -107,6 +107,11 @@ const ROLES = [
     id: 'owner',
     name: 'owner',
     description: 'Property owner with owner-specific access'
+  },
+  {
+    id: 'sales',
+    name: 'sales',
+    description: 'Sales agent with CRM and sales property management access'
   }
 ];
 

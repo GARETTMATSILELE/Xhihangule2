@@ -33,8 +33,9 @@ import PropertyAccountsPage from './AccountantDashboard/PropertyAccountsPage';
 import PropertyAccountDetailPage from './AccountantDashboard/PropertyAccountDetailPage';
 import { AccountantSidebar } from '../components/Layout/AccountantSidebar';
 import { useAuth } from '../contexts/AuthContext';
+import DashboardOverview from './AccountantDashboard/DashboardOverview';
 
-const DRAWER_WIDTH = 240;
+const DRAWER_WIDTH = 280;
 
 const AccountantDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
@@ -133,116 +134,9 @@ const AccountantDashboard: React.FC = () => {
   };
 
   const renderMainContent = () => {
-    // Only show loading states for the main dashboard
     if (location.pathname === '/accountant-dashboard') {
-      if (companyLoading) {
-        return (
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-            <CircularProgress />
-          </Box>
-        );
-      }
-
-      if (companyError) {
-        return (
-          <Box p={3}>
-            <Alert severity="error">{companyError}</Alert>
-          </Box>
-        );
-      }
-
-      if (!company) {
-        return (
-          <Box p={3}>
-            <Alert severity="warning">No company data available. Please ensure you are associated with a company.</Alert>
-          </Box>
-        );
-      }
-
-      if (loading) {
-        return (
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-            <CircularProgress />
-          </Box>
-        );
-      }
-
-      if (error) {
-        return (
-          <Box p={3}>
-            <Alert severity="error">{error}</Alert>
-          </Box>
-        );
-      }
-
-      return (
-        <>
-          <Box mb={3}>
-            <Typography variant="h4" gutterBottom>
-              Financial Dashboard
-            </Typography>
-          </Box>
-
-          <Tabs value={activeTab} onChange={handleTabChange}>
-            <Tab label="Payments" />
-            <Tab label="Commissions" />
-          </Tabs>
-
-          {activeTab === 0 && (
-            <Box mt={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>Payment Trends</Typography>
-                  {chartData?.payment?.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={chartData.payment}>
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="USD" stroke="#8884d8" />
-                        <Line type="monotone" dataKey="ZWL" stroke="#82ca9d" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <Typography variant="body1" color="textSecondary" align="center">
-                      No payment data available
-                    </Typography>
-                  )}
-                </CardContent>
-              </Card>
-            </Box>
-          )}
-
-          {activeTab === 1 && (
-            <Box mt={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>Agent Commissions</Typography>
-                  {chartData?.commission?.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={chartData.commission}>
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="commission" fill="#8884d8" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <Typography variant="body1" color="textSecondary" align="center">
-                      No commission data available
-                    </Typography>
-                  )}
-                </CardContent>
-              </Card>
-            </Box>
-          )}
-        </>
-      );
+      return <DashboardOverview />;
     }
-
-    // For other pages, render the child route content
     return <Outlet />;
   };
 
@@ -272,16 +166,22 @@ const AccountantDashboard: React.FC = () => {
         </Button>
       </Box>
       <Box sx={{ display: 'flex', flexGrow: 1, pt: 8 }}>
-        <AccountantSidebar
-          activeTab={activeTab}
-          onTabChange={handleSidebarTabChange}
-        />
+        {/* Sidebar fixed and visible across accountant routes */}
+        <Box sx={{ display: { xs: 'none', sm: 'block' }, position: 'fixed', zIndex: 1200 }}>
+          <AccountantSidebar
+            activeTab={activeTab}
+            onTabChange={handleSidebarTabChange}
+          />
+        </Box>
         {/* Main content */}
         <Box
           component="main"
           sx={{
             flexGrow: 1,
-            p: 3,
+            pt: 3,
+            pr: 3,
+            pb: 3,
+            pl: 0,
             width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
             ml: { sm: `${DRAWER_WIDTH}px` },
           }}

@@ -153,6 +153,13 @@ export class PropertyAccountService {
         return;
       }
 
+      // Guard: exclude deposit-only payments from income
+      const deposit = payment.depositAmount || 0;
+      if (deposit > 0 && (payment.amount <= deposit)) {
+        logger.info(`Skipping income for deposit-only payment ${paymentId} (amount: ${payment.amount}, deposit: ${deposit})`);
+        return;
+      }
+
       // Get or create property account
       const account = await this.getOrCreatePropertyAccount(payment.propertyId.toString());
       
@@ -166,18 +173,22 @@ export class PropertyAccountService {
         return;
       }
 
-      // Calculate owner amount (income after commission)
+      // Calculate owner amount (income after commission) and exclude deposits
       const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
-      
-      if (ownerAmount <= 0) {
-        logger.warn(`Invalid owner amount for payment ${paymentId}: ${ownerAmount}`);
+      const totalPaid = payment.amount || 0;
+      const depositPortion = payment.depositAmount || 0;
+      const ownerFraction = totalPaid > 0 ? ownerAmount / totalPaid : 0;
+      const incomeAmount = Math.max(0, (totalPaid - depositPortion) * ownerFraction);
+
+      if (incomeAmount <= 0) {
+        logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
         return;
       }
 
       // Create income transaction
       const incomeTransaction: Transaction = {
-      type: 'income',
-      amount: ownerAmount,
+        type: 'income',
+        amount: incomeAmount,
         date: payment.paymentDate || payment.createdAt,
         paymentId: new mongoose.Types.ObjectId(paymentId),
         description: `Rental income - ${payment.referenceNumber}`,
@@ -192,7 +203,7 @@ export class PropertyAccountService {
       account.transactions.push(incomeTransaction);
       await account.save({ session });
 
-      logger.info(`Recorded income of ${ownerAmount} for property ${payment.propertyId} from payment ${paymentId}`);
+      logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
       
       await session.commitTransaction();
     } catch (error) {

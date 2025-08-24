@@ -20,8 +20,11 @@ const Payment_1 = require("../models/Payment");
 const router = express_1.default.Router();
 // Public endpoints (must come before protected routes)
 router.get('/public', paymentController_1.getPaymentsPublic);
-// MVP: Comprehensive public endpoints for all payment operations
+// MVP: Comprehensive public endpoints for all payment operations (disabled in production)
 router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
     try {
         const payments = yield Payment_1.Payment.find({})
             .select('amount dueDate status tenantId propertyId paymentMethod')
@@ -41,11 +44,11 @@ router.get('/public/:id', paymentController_1.getPaymentByIdPublic);
 // Public endpoint for creating payments (for admin dashboard)
 router.post('/public', paymentController_1.createPaymentPublic);
 // Create a new payment
-router.post('/', auth_1.auth, roles_1.canManagePayments, paymentController_1.createPayment);
+router.post('/', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.createPayment);
 // Get all payments for a company
-router.get('/company', auth_1.auth, roles_1.canManagePayments, paymentController_1.getCompanyPayments);
+router.get('/company', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getCompanyPayments);
 // Get payment details
-router.get('/:id', auth_1.auth, roles_1.canManagePayments, paymentController_1.getPaymentDetails);
+router.get('/:id', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentDetails);
 // Update payment status
-router.patch('/:id/status', auth_1.auth, roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
+router.patch('/:id/status', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
 exports.default = router;

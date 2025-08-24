@@ -421,6 +421,7 @@ export class DatabaseSyncService extends EventEmitter {
   private async syncPaymentToAccounting(payment: any): Promise<void> {
     try {
       const PropertyAccount = accountingConnection.model('PropertyAccount');
+      const { CompanyAccount } = await import('../models/CompanyAccount');
       
       // Find or create property account
       let propertyAccount = await PropertyAccount.findOne({ propertyId: payment.propertyId });
@@ -494,6 +495,39 @@ export class DatabaseSyncService extends EventEmitter {
         logger.info(`Synced payment ${payment._id} to property account ${payment.propertyId}`);
         
         this.recordSyncSuccess();
+      }
+
+      // Record agency commission into company account as revenue
+      if (payment.companyId && payment.commissionDetails?.agencyShare) {
+        const companyId = payment.companyId;
+        let companyAccount = await CompanyAccount.findOne({ companyId });
+        if (!companyAccount) {
+          companyAccount = new CompanyAccount({ companyId, transactions: [], runningBalance: 0, totalIncome: 0, totalExpenses: 0 });
+        }
+
+        const alreadyLogged = companyAccount.transactions.some((t: any) => t.paymentId?.toString() === payment._id.toString() && t.type === 'income');
+        if (!alreadyLogged) {
+          const agencyShare = payment.commissionDetails.agencyShare;
+          const source = payment.paymentType === 'introduction' ? 'sales_commission' : 'rental_commission';
+          companyAccount.transactions.push({
+            type: 'income',
+            source,
+            amount: agencyShare,
+            date: payment.paymentDate || new Date(),
+            currency: payment.currency || 'USD',
+            paymentMethod: payment.paymentMethod,
+            paymentId: payment._id,
+            referenceNumber: payment.referenceNumber,
+            description: source === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+            processedBy: payment.processedBy,
+            notes: payment.notes
+          });
+          companyAccount.totalIncome += agencyShare;
+          companyAccount.runningBalance += agencyShare;
+          companyAccount.lastUpdated = new Date();
+          await companyAccount.save();
+          logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
+        }
       }
 
     } catch (error) {

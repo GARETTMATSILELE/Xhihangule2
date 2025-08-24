@@ -49,6 +49,7 @@ import { usePropertyService } from '../../services/propertyService';
 import { propertyAccountService, PropertyAccount, Transaction, OwnerPayout, ExpenseData, PayoutData } from '../../services/propertyAccountService';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyOwnerService, PropertyOwner } from '../../services/propertyOwnerService';
+import paymentService from '../../services/paymentService';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -84,6 +85,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [tabValue, setTabValue] = useState(0);
   const [ownerMap, setOwnerMap] = useState<Record<string, string>>({});
+  const [depositSummary, setDepositSummary] = useState<{ totalPaid: number; totalPayout: number; held: number } | null>(null);
   
   // Dialog states
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -123,18 +125,20 @@ const PropertyAccountDetailPage: React.FC = () => {
       setError(null);
       try {
         // Fetch property details, property account, and property owners in parallel
-        const [props, accountData, propertyOwners] = await Promise.all([
+        const [props, accountData, propertyOwners, depositSum] = await Promise.all([
           getProperties(),
           propertyAccountService.getPropertyAccount(propertyId),
           getAllPropertyOwners().catch(err => {
             console.error('Error fetching property owners:', err);
             return [];
-          })
+          }),
+          paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
         ]);
         
         const found = props.find((p: any) => p._id === propertyId);
         setProperty(found || null);
         setAccount(accountData);
+        if (depositSum) setDepositSummary(depositSum);
         
         // Map propertyId to owner name using owner.properties array (same as PropertyAccountsPage)
         const ownerMap: Record<string, string> = {};
@@ -670,6 +674,11 @@ const PropertyAccountDetailPage: React.FC = () => {
         <Typography variant="body1" color="text.secondary" gutterBottom>
           {property.address}
         </Typography>
+        <script dangerouslySetInnerHTML={{ __html: `
+          window.__CURRENT_PROPERTY_ADDRESS__ = ${JSON.stringify(property.address || '')};
+          window.__CURRENT_OWNER_NAME__ = ${JSON.stringify(ownerMap[propertyId!] || account.ownerName || '')};
+          window.__CURRENT_TENANT_NAME__ = '';
+        ` }} />
         <Typography variant="body2" color="text.secondary">
           Owner: {ownerMap[propertyId!] || account.ownerName || 'Unknown'}
         </Typography>
@@ -748,7 +757,7 @@ const PropertyAccountDetailPage: React.FC = () => {
         </Grid>
       </Grid>
 
-      {/* Owner Information Card */}
+      {/* Owner Information Card + Deposits Held (side by side) */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
           <Card>
@@ -766,6 +775,23 @@ const PropertyAccountDetailPage: React.FC = () => {
               )}
               <Typography variant="body2" color="text.secondary">
                 <strong>Property:</strong> {property.name}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => window.open(`/accountant-dashboard/property-accounts/${propertyId}/deposits`, '_self')}>
+            <CardContent>
+              <Box display="flex" alignItems="center">
+                <HistoryIcon color="info" sx={{ mr: 1 }} />
+                <Typography variant="h6">Deposits Held</Typography>
+              </Box>
+              <Typography variant="h4" color="info.main" sx={{ mt: 1 }}>
+                {propertyAccountService.formatCurrency(depositSummary?.held || 0)}
+              </Typography>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                Paid: {propertyAccountService.formatCurrency(depositSummary?.totalPaid || 0)} | Payouts: {propertyAccountService.formatCurrency(depositSummary?.totalPayout || 0)}
               </Typography>
             </CardContent>
           </Card>

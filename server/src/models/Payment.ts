@@ -39,6 +39,8 @@ export interface IPayment extends Document {
   // Manual entry fields for properties/tenants not in database
   manualPropertyAddress?: string;
   manualTenantName?: string;
+  // Sales contract linkage (for introduction payments)
+  saleId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -199,6 +201,11 @@ const PaymentSchema: Schema = new Schema({
     type: String,
     required: false,
   },
+  saleId: {
+    type: Schema.Types.ObjectId,
+    ref: 'SalesContract',
+    required: false
+  },
 }, {
   timestamps: true
 });
@@ -211,5 +218,6 @@ PaymentSchema.index({ agentId: 1 });
 PaymentSchema.index({ status: 1 });
 // Add compound index for agent commission queries
 PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
+PaymentSchema.index({ saleId: 1 });
 
 export const Payment = mongoose.model<IPayment>('Payment', PaymentSchema, COLLECTIONS.PAYMENTS); 

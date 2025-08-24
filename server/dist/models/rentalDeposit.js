@@ -42,6 +42,12 @@ const RentalDepositSchema = new mongoose_1.Schema({
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', required: true },
     depositAmount: { type: Number, required: true },
     depositDate: { type: Date, required: true },
-    paymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment', required: true },
+    paymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment', required: false },
+    type: { type: String, enum: ['payment', 'payout'], default: 'payment' },
+    referenceNumber: { type: String, default: '' },
+    notes: { type: String },
+    processedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    paymentMethod: { type: String, enum: ['cash', 'bank_transfer', 'credit_card', 'mobile_money'] },
+    recipientName: { type: String, required: false },
 }, { timestamps: true });
 exports.RentalDeposit = mongoose_1.default.model('RentalDeposit', RentalDepositSchema, 'rentaldeposits');

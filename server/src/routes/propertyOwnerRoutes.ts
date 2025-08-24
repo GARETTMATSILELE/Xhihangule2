@@ -1,5 +1,5 @@
 import express from 'express';
-import { auth } from '../middleware/auth';
+import { authWithCompany } from '../middleware/auth';
 import {
   createPropertyOwner,
   getPropertyOwners,
@@ -60,11 +60,11 @@ router.post('/public', createPropertyOwnerPublic);
 router.patch('/public/:id', updatePropertyOwnerPublic);
 router.delete('/public/:id', deletePropertyOwnerPublic);
 
-// CRUD routes for property owners
-router.post('/', auth, createPropertyOwner);
-router.get('/', auth, getPropertyOwners);
-router.get('/:id', auth, getPropertyOwnerById);
-router.patch('/:id', auth, updatePropertyOwner);
-router.delete('/:id', auth, deletePropertyOwner);
+// CRUD routes for property owners (company-scoped)
+router.post('/', authWithCompany, createPropertyOwner);
+router.get('/', authWithCompany, getPropertyOwners);
+router.get('/:id', authWithCompany, getPropertyOwnerById);
+router.patch('/:id', authWithCompany, updatePropertyOwner);
+router.delete('/:id', authWithCompany, deletePropertyOwner);
 
 export default router; 

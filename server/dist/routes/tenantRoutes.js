@@ -20,8 +20,11 @@ const Tenant_1 = require("../models/Tenant");
 const router = express_1.default.Router();
 // Public endpoint for admin dashboard
 router.get('/public', tenantController_1.getTenantsPublic);
-// MVP: Comprehensive public endpoints for all tenant operations
+// MVP: Comprehensive public endpoints for all tenant operations (disabled in production)
 router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
     try {
         const tenants = yield Tenant_1.Tenant.find({})
             .select('firstName lastName email phone rentAmount leaseStartDate leaseEndDate status')
@@ -48,7 +51,7 @@ router.get('/public/:id', (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 }));
 // Protected routes
-router.use(auth_1.auth);
+router.use(auth_1.authWithCompany);
 // Routes
 router.get('/', tenantController_1.getTenants);
 router.get('/:id', tenantController_1.getTenant);

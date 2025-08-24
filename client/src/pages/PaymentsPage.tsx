@@ -33,6 +33,7 @@ import PaymentRequestForm from '../components/payments/PaymentRequestForm';
 import { Header } from '../components/Layout/Header';
 import { AuthErrorReport } from '../components/AuthErrorReport';
 import { useNavigate, useLocation } from 'react-router-dom';
+import api from '../api/axios';
 
 const PaymentsPage: React.FC = () => {
   const theme = useTheme();
@@ -116,13 +117,13 @@ const PaymentsPage: React.FC = () => {
           [propertiesData, tenantsData, paymentsData] = await Promise.all([
             agentService.getProperties(),
             agentService.getTenants(),
-            paymentService.getAllPublic() // Keep using public endpoint for payments list
+            api.get('/agents/payments').then((r: any) => r.data)
           ]);
         } else {
           [propertiesData, tenantsData, paymentsData] = await Promise.all([
             propertyService.getPublicProperties(),
             tenantService.getAllPublic(),
-            paymentService.getAllPublic()
+            paymentService.getPayments()
           ]);
         }
 
@@ -140,7 +141,7 @@ const PaymentsPage: React.FC = () => {
         // Handle different response formats
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
-        const payments = Array.isArray(paymentsData) ? paymentsData : (paymentsData.data || []);
+        const payments = Array.isArray(paymentsData) ? paymentsData : [];
         const owners = Array.isArray(ownersData) ? ownersData : [];
 
         if (!Array.isArray(properties) || !Array.isArray(tenants) || !Array.isArray(payments)) {
@@ -242,21 +243,16 @@ const PaymentsPage: React.FC = () => {
           filterParams.propertyId = debouncedFilters.propertyId;
         }
         
-        // Use agent service if user is an agent, otherwise use regular payment service
-        let response: { data: Payment[] };
-        if (user?.role === 'agent') {
-          response = await paymentService.getAllPublic(user?.companyId, filterParams);
-        } else {
-          response = await paymentService.getAllPublic(user?.companyId, filterParams);
+        // Use agent-scoped endpoint if agent, otherwise company payments
+        const data = user?.role === 'agent'
+          ? await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data)
+          : await paymentService.getPayments(filterParams);
+        console.log('Payments data:', data);
+        if (data && data.length > 0) {
+          console.log('First payment propertyId:', data[0].propertyId);
+          console.log('First payment propertyId type:', typeof (data[0] as any).propertyId);
         }
-        
-        console.log('Payments response:', response);
-        console.log('Payments data:', response.data);
-        if (response.data && response.data.length > 0) {
-          console.log('First payment propertyId:', response.data[0].propertyId);
-          console.log('First payment propertyId type:', typeof response.data[0].propertyId);
-        }
-        setPayments(response.data);
+        setPayments(data);
       } catch (err: any) {
         console.error('Error loading payments:', err);
         if (err.response?.status === 401) {

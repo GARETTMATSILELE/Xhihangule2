@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
@@ -25,52 +26,144 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError('Email already registered', 400);
     }
 
-    // Create user
-    console.log('Creating new user...');
-    const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
-    const firstName = firstNameRaw || 'User';
-    const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
+    // Create user and company atomically in a transaction
+    const session = await mongoose.startSession();
+    let createdUser: any = null;
+    let companyData: any = null;
+    let companyId: any = undefined;
 
-    const user = await User.create({
-      email,
-      password,
-      firstName,
-      lastName,
-      role: 'admin',
-      isActive: true
-    });
-    console.log('User created successfully:', { id: user._id, email: user.email });
+    try {
+      await session.withTransaction(async () => {
+        // Create user
+        console.log('Creating new user...');
+        const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
+        const firstName = firstNameRaw || 'User';
+        const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
 
-    // Create company if provided
-    let companyId;
-    let companyData = null;
-    if (company) {
-      const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'] as const;
-      const missing = requiredCompanyFields.filter((f) => !company[f]);
-      if (missing.length > 0) {
-        throw new AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
-      }
-      console.log('Creating new company...');
-      const newCompany = await Company.create({
-        ...company,
-        ownerId: user._id
+        createdUser = await User.create([
+          {
+            email,
+            password,
+            firstName,
+            lastName,
+            role: 'admin',
+            isActive: true
+          }
+        ], { session }).then((docs) => docs[0]);
+        console.log('User created successfully:', { id: createdUser._id, email: createdUser.email });
+
+        // Create company if provided
+        if (company) {
+          const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'] as const;
+          const missing = requiredCompanyFields.filter((f) => !company[f]);
+          if (missing.length > 0) {
+            throw new AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
+          }
+          console.log('Creating new company...');
+          const newCompany = await Company.create([
+            {
+              ...company,
+              ownerId: createdUser._id
+            }
+          ], { session }).then((docs) => docs[0]);
+          companyId = newCompany._id;
+          companyData = newCompany;
+          console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
+
+          // Update user with company ID
+          console.log('Updating user with company ID...');
+          createdUser.companyId = companyId;
+          await createdUser.save({ session });
+          console.log('User updated with company ID');
+        }
       });
-      companyId = newCompany._id;
-      companyData = newCompany;
-      console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
+    } catch (txError: any) {
+      const msg = String(txError?.message || '');
+      const isTxnUnsupported = msg.includes('Transaction numbers are only allowed on a replica set member or mongos');
 
-      // Update user with company ID
-      console.log('Updating user with company ID...');
-      user.companyId = companyId;
-      await user.save();
-      console.log('User updated with company ID');
+      if (isTxnUnsupported) {
+        console.warn('MongoDB transactions unsupported. Falling back to non-transactional flow with compensation.');
+        try {
+          // Create user without session
+          console.log('Creating new user (fallback)...');
+          const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
+          const firstName = firstNameRaw || 'User';
+          const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
+
+          createdUser = await User.create({
+            email,
+            password,
+            firstName,
+            lastName,
+            role: 'admin',
+            isActive: true
+          });
+          console.log('User created successfully (fallback):', { id: createdUser._id, email: createdUser.email });
+
+          if (company) {
+            try {
+              console.log('Creating new company (fallback)...');
+              const newCompany = await Company.create({
+                ...company,
+                ownerId: createdUser._id
+              });
+              companyId = newCompany._id;
+              companyData = newCompany;
+              console.log('Company created successfully (fallback):', { id: newCompany._id, name: newCompany.name });
+
+              // Update user with companyId
+              createdUser.companyId = companyId;
+              await createdUser.save();
+              console.log('User updated with company ID (fallback)');
+            } catch (fallbackCompanyError: any) {
+              // Compensation: remove created user to maintain consistency
+              try {
+                await User.deleteOne({ _id: createdUser._id });
+                console.warn('Fallback compensation: created user removed due to company creation failure');
+              } catch (cleanupError) {
+                console.error('Failed to cleanup orphan user after company failure:', cleanupError);
+              }
+
+              if (fallbackCompanyError?.code === 11000) {
+                const dupMsg = String(fallbackCompanyError?.message || 'Duplicate key error');
+                if (dupMsg.includes('tinNumber') || dupMsg.includes('taxNumber')) {
+                  return next(new AppError('Company tax number already exists', 400, 'DUPLICATE_COMPANY_TIN'));
+                }
+                return next(new AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+              }
+              return next(fallbackCompanyError);
+            }
+          }
+        } catch (fallbackUserError: any) {
+          if (fallbackUserError?.code === 11000) {
+            const dupMsg = String(fallbackUserError?.message || 'Duplicate key error');
+            if (dupMsg.includes('email_1') || dupMsg.toLowerCase().includes('email')) {
+              return next(new AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+            }
+            return next(new AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+          }
+          return next(fallbackUserError);
+        }
+      } else if (txError?.code === 11000) {
+        if (msg.includes('email_1') || msg.toLowerCase().includes('email')) {
+          return next(new AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+        }
+        if (msg.includes('tinNumber') || msg.includes('taxNumber')) {
+          return next(new AppError('Company tax number already exists', 400, 'DUPLICATE_COMPANY_TIN'));
+        }
+        return next(new AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+      } else {
+        return next(txError);
+      }
+    } finally {
+      session.endSession();
     }
 
-    // Generate tokens using auth service
+    // Generate tokens using auth service (after successful transaction)
     const { token, refreshToken } = await authService.login(email, password);
 
     // Verify the user was saved
-    const savedUser = await User.findById(user._id);
+    const savedUser = await User.findById(createdUser._id);
     console.log('Verified saved user:', {
       id: savedUser?._id,
       email: savedUser?.email,
@@ -88,11 +181,11 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 
     res.status(201).json({
       user: {
-        _id: user._id,
-        email: user.email,
-        name: `${user.firstName} ${user.lastName}`,
-        role: user.role,
-        companyId
+        _id: savedUser!._id,
+        email: savedUser!.email,
+        name: `${savedUser!.firstName} ${savedUser!.lastName}`,
+        role: savedUser!.role,
+        companyId: savedUser!.companyId
       },
       company: companyData,
       token,
@@ -111,7 +204,14 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       return next(new AppError('Validation failed', 400, 'VALIDATION_ERROR', Object.values(error.errors || {}).map((e: any) => e.message)));
     }
     if (error?.code === 11000) {
-      return next(new AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+      const message: string = String(error?.message || 'Duplicate key error');
+      if (message.includes('email_1') || message.toLowerCase().includes('email')) {
+        return next(new AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+      }
+      if (message.includes('tinNumber') || message.includes('taxNumber')) {
+        return next(new AppError('Company tax number already exists', 400, 'DUPLICATE_COMPANY_TIN'));
+      }
+      return next(new AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
     }
     next(error);
   }
@@ -188,6 +288,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     });
   } catch (error) {
     console.error('Login error:', error);
+    // Normalize known auth errors to 401 with message
+    const message = (error as any)?.message || 'Authentication failed';
+    if (message === 'Invalid credentials' || message === 'Account is inactive') {
+      return res.status(message === 'Invalid credentials' ? 401 : 403).json({
+        status: 'error',
+        message,
+        code: message === 'Invalid credentials' ? 'AUTH_ERROR' : 'ACCOUNT_INACTIVE'
+      });
+    }
     next(error);
   }
 };

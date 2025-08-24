@@ -4,9 +4,8 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, Search as SearchIcon } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import agentService from '../../services/agentService';
 import { useLeaseService } from '../../services/leaseService';
-import { usePropertyService } from '../../services/propertyService';
-import { useTenantService } from '../../services/tenantService';
 import { Lease, LeaseStatus, LeaseFormData } from '../../types/lease';
 import { Property } from '../../types/property';
 import { Tenant } from '../../types/tenant';
@@ -17,16 +16,37 @@ import { useNotification } from '../../components/Layout/Header';
 function getId(id: any): string {
   if (!id) return '';
   if (typeof id === 'string') return id;
-  if (typeof id === 'object' && id.$oid) return id.$oid;
+  if (typeof id === 'object') {
+    if ((id as any).$oid) return (id as any).$oid as string;
+    if ((id as any)._id) return String((id as any)._id);
+  }
   return '';
+}
+
+function resolvePropertyFromLease(lease: any, properties: Property[]): Property | undefined {
+  // If populated document present
+  if (lease && lease.propertyId && typeof lease.propertyId === 'object' && (lease.propertyId as any).name) {
+    const obj = lease.propertyId as any;
+    return { ...(obj as any), _id: getId(obj) } as Property;
+  }
+  const pid = getId(lease?.propertyId);
+  return properties.find(p => getId(p._id) === pid);
+}
+
+function resolveTenantFromLease(lease: any, tenants: Tenant[]): Tenant | undefined {
+  if (lease && lease.tenantId && typeof lease.tenantId === 'object' && ((lease.tenantId as any).firstName || (lease.tenantId as any).email)) {
+    const obj = lease.tenantId as any;
+    return { ...(obj as any), _id: getId(obj) } as Tenant;
+  }
+  const tid = getId(lease?.tenantId);
+  return tenants.find(t => getId(t._id) === tid);
 }
 
 const AgentLeasesPage: React.FC = () => {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-  const leaseService = useLeaseService();
-  const propertyService = usePropertyService();
-  const tenantService = useTenantService();
+  // Use agent service to ensure data is scoped to the logged-in agent
   const { addNotification } = useNotification();
+  const leaseService = useLeaseService();
 
   const [leases, setLeases] = useState<Lease[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -47,15 +67,15 @@ const AgentLeasesPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      // Fetch only agent's properties and tenants
+      // Fetch only the agent's leases, properties, and tenants
       const [leasesRes, propertiesRes, tenantsRes] = await Promise.all([
-        leaseService.getAll(),
-        propertyService.getProperties(),
-        tenantService.getAll()
+        agentService.getLeases(),
+        agentService.getProperties(),
+        agentService.getTenants()
       ]);
-      setLeases(leasesRes || []);
-      setProperties(propertiesRes || []);
-      setTenants(tenantsRes?.tenants || []);
+      setLeases(Array.isArray(leasesRes) ? leasesRes : []);
+      setProperties(Array.isArray(propertiesRes) ? propertiesRes : []);
+      setTenants(Array.isArray(tenantsRes) ? tenantsRes : []);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to load lease data. Please try again later.');
     } finally {
@@ -80,7 +100,8 @@ const AgentLeasesPage: React.FC = () => {
       const end = new Date(lease.endDate);
       const diffMonths = (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth());
       const diffDays = Math.floor((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      const propertyName = properties.find(p => p._id === lease.propertyId)?.name || 'Property';
+      const property = resolvePropertyFromLease(lease, properties);
+      const propertyName = property?.name || 'Property';
       // 2 months
       if (diffMonths === 2 && !notified[lease._id + '-2mo']) {
         addNotification({
@@ -183,14 +204,16 @@ const AgentLeasesPage: React.FC = () => {
   };
 
   const filteredLeases = leases.filter(lease => {
-    const property = properties.find(p => p._id === lease.propertyId);
-    const tenant = tenants.find(t => t._id === lease.tenantId);
+    const property = resolvePropertyFromLease(lease, properties);
+    const tenant = resolveTenantFromLease(lease, tenants);
     const matchesStatus = filters.status === 'all' || lease.status === filters.status;
-    const matchesProperty = filters.property === 'all' || lease.propertyId === filters.property;
-    const matchesSearch = !filters.search || 
-      (property?.name?.toLowerCase().includes(filters.search.toLowerCase()) ||
-       tenant?.firstName?.toLowerCase().includes(filters.search.toLowerCase()) ||
-       tenant?.lastName?.toLowerCase().includes(filters.search.toLowerCase()));
+    const leasePropertyId = getId(lease.propertyId);
+    const matchesProperty = filters.property === 'all' || leasePropertyId === filters.property;
+    const search = (filters.search || '').toLowerCase();
+    const matchesSearch = !search ||
+      (property?.name?.toLowerCase().includes(search) ||
+       tenant?.firstName?.toLowerCase().includes(search) ||
+       tenant?.lastName?.toLowerCase().includes(search));
     return matchesStatus && matchesProperty && matchesSearch;
   });
 
@@ -322,10 +345,8 @@ const AgentLeasesPage: React.FC = () => {
                   </TableRow>
                 ) : (
                   filteredLeases.map((lease) => {
-                    const propertyId = getId(lease.propertyId);
-                    const property = properties.find(p => getId(p._id) === propertyId);
-                    const tenantId = getId(lease.tenantId);
-                    const tenant = tenants.find(t => getId(t._id) === tenantId);
+                    const property = resolvePropertyFromLease(lease, properties);
+                    const tenant = resolveTenantFromLease(lease, tenants);
                     return (
                       <TableRow key={lease._id}>
                         <TableCell>

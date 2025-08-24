@@ -121,12 +121,7 @@ const getInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         }).sort({ createdAt: -1 });
         console.log(`Found ${invoices.length} invoices with companyId ${req.user.companyId}`);
-        // If no invoices found with companyId, try to find all invoices (for backward compatibility)
-        if (invoices.length === 0) {
-            console.log('No invoices found with companyId, trying to fetch all invoices...');
-            invoices = yield Invoice_1.Invoice.find({}).sort({ createdAt: -1 });
-            console.log(`Found ${invoices.length} total invoices (no company filtering)`);
-        }
+        // Remove backward compatibility that leaked cross-company data
         console.log('Returning invoices:', invoices.length);
         res.json(invoices);
     }

@@ -3,8 +3,10 @@ import { Property, IProperty } from '../models/Property';
 import { Tenant } from '../models/Tenant';
 import { Lease } from '../models/Lease';
 import { Payment } from '../models/Payment';
+import { LevyPayment } from '../models/LevyPayment';
 import File, { IFile } from '../models/File';
 import { PropertyOwner } from '../models/PropertyOwner';
+import { User } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 
@@ -142,15 +144,34 @@ export const getAgentFiles = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 400);
     }
 
-    // Get files uploaded by this agent (using ownerId)
-    const files = await File.find({ 
-      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Filter by agent who uploaded the file
-    })
-    .populate('propertyId', 'name address')
-    .populate('uploadedBy', 'firstName lastName email')
-    .sort({ uploadedAt: -1 });
+    // Determine properties that belong to this agent within the company
+    const agentPropertyIds = await Property.find({
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+    }).distinct('_id');
 
-    res.json(files);
+    // Fetch files where propertyId is within the agent's properties and scoped to company
+    const files = await File.find({
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      propertyId: { $in: agentPropertyIds as any }
+    })
+      .populate('propertyId', 'name address')
+      .populate('uploadedBy', 'firstName lastName email')
+      .sort({ uploadedAt: -1 });
+
+    // Normalize/format for client
+    const formatted = files.map((f: any) => ({
+      _id: f._id,
+      propertyId: f.propertyId?._id || f.propertyId,
+      propertyName: f.propertyId?.name || 'N/A',
+      fileName: f.fileName,
+      fileType: f.fileType,
+      fileUrl: f.fileUrl,
+      uploadedAt: f.uploadedAt,
+      uploadedByName: f.uploadedBy ? `${f.uploadedBy.firstName || ''} ${f.uploadedBy.lastName || ''}`.trim() || 'Unknown' : 'Unknown'
+    }));
+
+    res.json(formatted);
   } catch (error) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ message: error.message });
@@ -436,6 +457,56 @@ export const createAgentLease = async (req: Request, res: Response) => {
   }
 };
 
+// Update a property owned by the agent
+export const updateAgentProperty = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('Authentication required', 401);
+    }
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    const propertyId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(propertyId)) {
+      return res.status(400).json({ message: 'Invalid property ID format.' });
+    }
+
+    // Ensure the property belongs to this agent and company
+    const existing = await Property.findOne({
+      _id: new mongoose.Types.ObjectId(propertyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+    });
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Property not found or you do not have permission to update it.' });
+    }
+
+    const allowedFields = [
+      'name','address','type','status','description','rent','bedrooms','bathrooms','area','images','amenities','rentalType','commission'
+    ] as const;
+    const updateData: any = { updatedAt: new Date() };
+    for (const key of allowedFields) {
+      if (key in req.body) updateData[key] = (req.body as any)[key];
+    }
+
+    const updated = await Property.findByIdAndUpdate(
+      new mongoose.Types.ObjectId(propertyId),
+      updateData,
+      { new: true }
+    );
+
+    return res.json(updated);
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error updating agent property:', error);
+    res.status(500).json({ message: 'Error updating property' });
+  }
+};
+
 // Create a new payment for the agent
 export const createAgentPayment = async (req: Request, res: Response) => {
   try {
@@ -681,6 +752,69 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
   }
 };
 
+// Get payments for properties owned by the agent
+export const getAgentPayments = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    if (!req.user?.companyId) {
+      return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
+    }
+
+    // Find agent's property IDs
+    const agentPropertyIds = await Property.find({
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+    }).distinct('_id');
+
+    // Fetch payments for those properties
+    const payments = await Payment.find({
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      propertyId: { $in: agentPropertyIds as any }
+    })
+      .populate('propertyId', 'name address')
+      .populate('tenantId', 'firstName lastName email')
+      .populate('agentId', 'firstName lastName')
+      .sort({ paymentDate: -1 });
+
+    return res.json(payments);
+  } catch (error) {
+    console.error('Error fetching agent payments:', error);
+    return res.status(500).json({ message: 'Error fetching payments' });
+  }
+};
+
+// Get levy payments for properties owned by the agent
+export const getAgentLevyPayments = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    if (!req.user?.companyId) {
+      return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
+    }
+
+    const agentPropertyIds = await Property.find({
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+    }).distinct('_id');
+
+    const levies = await LevyPayment.find({
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      propertyId: { $in: agentPropertyIds as any }
+    })
+      .populate('propertyId', 'name address')
+      .populate('processedBy', 'firstName lastName email')
+      .sort({ paymentDate: -1 });
+
+    return res.json(levies);
+  } catch (error) {
+    console.error('Error fetching agent levy payments:', error);
+    return res.status(500).json({ message: 'Error fetching levy payments' });
+  }
+};
+
 // Create a new file for the agent
 export const createAgentFile = async (req: Request, res: Response) => {
   try {
@@ -830,6 +964,29 @@ export const createAgentPropertyOwner = async (req: Request, res: Response) => {
 
     const owner = new PropertyOwner(ownerData);
     await owner.save();
+
+    // Also create a corresponding user with role 'owner' if not already present
+    try {
+      const existingUser = await User.findOne({ 
+        email: owner.email, 
+        companyId: new mongoose.Types.ObjectId(req.user.companyId) 
+      });
+      if (!existingUser) {
+        const newUser = new User({
+          email: owner.email,
+          password: password, // Will be hashed by User pre-save hook
+          firstName: owner.firstName,
+          lastName: owner.lastName,
+          role: 'owner',
+          companyId: new mongoose.Types.ObjectId(req.user.companyId),
+          isActive: true
+        });
+        await newUser.save();
+      }
+    } catch (userError) {
+      console.error('Error creating corresponding user for property owner:', userError);
+      // Do not fail the main request if user creation fails; property owner was created successfully
+    }
 
     // Update properties to assign them to the new owner
     if (propertyIds && propertyIds.length > 0) {

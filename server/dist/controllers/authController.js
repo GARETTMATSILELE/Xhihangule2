@@ -8,8 +8,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.refreshToken = exports.getCurrentUser = exports.logout = exports.login = exports.signup = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -20,42 +24,143 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
     try {
         const { email, password, name, company } = req.body;
         console.log('Signup attempt with data:', { email, name, hasCompany: !!company });
+        if (!email || !password || !name) {
+            throw new errorHandler_1.AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
+        }
         // Check if user already exists
         const existingUser = yield User_1.User.findOne({ email });
         if (existingUser) {
             console.log('Signup failed - Email already registered:', email);
             throw new errorHandler_1.AppError('Email already registered', 400);
         }
-        // Create user
-        console.log('Creating new user...');
-        const user = yield User_1.User.create({
-            email,
-            password,
-            firstName: name.split(' ')[0],
-            lastName: name.split(' ').slice(1).join(' '),
-            role: 'admin',
-            isActive: true
-        });
-        console.log('User created successfully:', { id: user._id, email: user.email });
-        // Create company if provided
-        let companyId;
+        // Create user and company atomically in a transaction
+        const session = yield mongoose_1.default.startSession();
+        let createdUser = null;
         let companyData = null;
-        if (company) {
-            console.log('Creating new company...');
-            const newCompany = yield Company_1.Company.create(Object.assign(Object.assign({}, company), { ownerId: user._id }));
-            companyId = newCompany._id;
-            companyData = newCompany;
-            console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
-            // Update user with company ID
-            console.log('Updating user with company ID...');
-            user.companyId = companyId;
-            yield user.save();
-            console.log('User updated with company ID');
+        let companyId = undefined;
+        try {
+            yield session.withTransaction(() => __awaiter(void 0, void 0, void 0, function* () {
+                // Create user
+                console.log('Creating new user...');
+                const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
+                const firstName = firstNameRaw || 'User';
+                const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
+                createdUser = yield User_1.User.create([
+                    {
+                        email,
+                        password,
+                        firstName,
+                        lastName,
+                        role: 'admin',
+                        isActive: true
+                    }
+                ], { session }).then((docs) => docs[0]);
+                console.log('User created successfully:', { id: createdUser._id, email: createdUser.email });
+                // Create company if provided
+                if (company) {
+                    const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'];
+                    const missing = requiredCompanyFields.filter((f) => !company[f]);
+                    if (missing.length > 0) {
+                        throw new errorHandler_1.AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
+                    }
+                    console.log('Creating new company...');
+                    const newCompany = yield Company_1.Company.create([
+                        Object.assign(Object.assign({}, company), { ownerId: createdUser._id })
+                    ], { session }).then((docs) => docs[0]);
+                    companyId = newCompany._id;
+                    companyData = newCompany;
+                    console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
+                    // Update user with company ID
+                    console.log('Updating user with company ID...');
+                    createdUser.companyId = companyId;
+                    yield createdUser.save({ session });
+                    console.log('User updated with company ID');
+                }
+            }));
         }
-        // Generate tokens using auth service
+        catch (txError) {
+            const msg = String((txError === null || txError === void 0 ? void 0 : txError.message) || '');
+            const isTxnUnsupported = msg.includes('Transaction numbers are only allowed on a replica set member or mongos');
+            if (isTxnUnsupported) {
+                console.warn('MongoDB transactions unsupported. Falling back to non-transactional flow with compensation.');
+                try {
+                    // Create user without session
+                    console.log('Creating new user (fallback)...');
+                    const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
+                    const firstName = firstNameRaw || 'User';
+                    const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
+                    createdUser = yield User_1.User.create({
+                        email,
+                        password,
+                        firstName,
+                        lastName,
+                        role: 'admin',
+                        isActive: true
+                    });
+                    console.log('User created successfully (fallback):', { id: createdUser._id, email: createdUser.email });
+                    if (company) {
+                        try {
+                            console.log('Creating new company (fallback)...');
+                            const newCompany = yield Company_1.Company.create(Object.assign(Object.assign({}, company), { ownerId: createdUser._id }));
+                            companyId = newCompany._id;
+                            companyData = newCompany;
+                            console.log('Company created successfully (fallback):', { id: newCompany._id, name: newCompany.name });
+                            // Update user with companyId
+                            createdUser.companyId = companyId;
+                            yield createdUser.save();
+                            console.log('User updated with company ID (fallback)');
+                        }
+                        catch (fallbackCompanyError) {
+                            // Compensation: remove created user to maintain consistency
+                            try {
+                                yield User_1.User.deleteOne({ _id: createdUser._id });
+                                console.warn('Fallback compensation: created user removed due to company creation failure');
+                            }
+                            catch (cleanupError) {
+                                console.error('Failed to cleanup orphan user after company failure:', cleanupError);
+                            }
+                            if ((fallbackCompanyError === null || fallbackCompanyError === void 0 ? void 0 : fallbackCompanyError.code) === 11000) {
+                                const dupMsg = String((fallbackCompanyError === null || fallbackCompanyError === void 0 ? void 0 : fallbackCompanyError.message) || 'Duplicate key error');
+                                if (dupMsg.includes('tinNumber') || dupMsg.includes('taxNumber')) {
+                                    return next(new errorHandler_1.AppError('Company tax number already exists', 400, 'DUPLICATE_COMPANY_TIN'));
+                                }
+                                return next(new errorHandler_1.AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+                            }
+                            return next(fallbackCompanyError);
+                        }
+                    }
+                }
+                catch (fallbackUserError) {
+                    if ((fallbackUserError === null || fallbackUserError === void 0 ? void 0 : fallbackUserError.code) === 11000) {
+                        const dupMsg = String((fallbackUserError === null || fallbackUserError === void 0 ? void 0 : fallbackUserError.message) || 'Duplicate key error');
+                        if (dupMsg.includes('email_1') || dupMsg.toLowerCase().includes('email')) {
+                            return next(new errorHandler_1.AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+                        }
+                        return next(new errorHandler_1.AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+                    }
+                    return next(fallbackUserError);
+                }
+            }
+            else if ((txError === null || txError === void 0 ? void 0 : txError.code) === 11000) {
+                if (msg.includes('email_1') || msg.toLowerCase().includes('email')) {
+                    return next(new errorHandler_1.AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+                }
+                if (msg.includes('tinNumber') || msg.includes('taxNumber')) {
+                    return next(new errorHandler_1.AppError('Company tax number already exists', 400, 'DUPLICATE_COMPANY_TIN'));
+                }
+                return next(new errorHandler_1.AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+            }
+            else {
+                return next(txError);
+            }
+        }
+        finally {
+            session.endSession();
+        }
+        // Generate tokens using auth service (after successful transaction)
         const { token, refreshToken } = yield authService.login(email, password);
         // Verify the user was saved
-        const savedUser = yield User_1.User.findById(user._id);
+        const savedUser = yield User_1.User.findById(createdUser._id);
         console.log('Verified saved user:', {
             id: savedUser === null || savedUser === void 0 ? void 0 : savedUser._id,
             email: savedUser === null || savedUser === void 0 ? void 0 : savedUser.email,
@@ -71,11 +176,11 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
         });
         res.status(201).json({
             user: {
-                _id: user._id,
-                email: user.email,
-                name: `${user.firstName} ${user.lastName}`,
-                role: user.role,
-                companyId
+                _id: savedUser._id,
+                email: savedUser.email,
+                name: `${savedUser.firstName} ${savedUser.lastName}`,
+                role: savedUser.role,
+                companyId: savedUser.companyId
             },
             company: companyData,
             token,
@@ -83,7 +188,27 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
         });
     }
     catch (error) {
-        console.error('Signup error:', error);
+        console.error('Signup error:', {
+            message: error === null || error === void 0 ? void 0 : error.message,
+            name: error === null || error === void 0 ? void 0 : error.name,
+            code: error === null || error === void 0 ? void 0 : error.code,
+            details: error === null || error === void 0 ? void 0 : error.details,
+            stack: error === null || error === void 0 ? void 0 : error.stack
+        });
+        // Normalize Mongoose validation and duplicate errors
+        if ((error === null || error === void 0 ? void 0 : error.name) === 'ValidationError') {
+            return next(new errorHandler_1.AppError('Validation failed', 400, 'VALIDATION_ERROR', Object.values(error.errors || {}).map((e) => e.message)));
+        }
+        if ((error === null || error === void 0 ? void 0 : error.code) === 11000) {
+            const message = String((error === null || error === void 0 ? void 0 : error.message) || 'Duplicate key error');
+            if (message.includes('email_1') || message.toLowerCase().includes('email')) {
+                return next(new errorHandler_1.AppError('Email already registered', 400, 'DUPLICATE_EMAIL'));
+            }
+            if (message.includes('tinNumber') || message.includes('taxNumber')) {
+                return next(new errorHandler_1.AppError('Company tax number already exists', 400, 'DUPLICATE_COMPANY_TIN'));
+            }
+            return next(new errorHandler_1.AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
+        }
         next(error);
     }
 });
@@ -154,6 +279,15 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
     }
     catch (error) {
         console.error('Login error:', error);
+        // Normalize known auth errors to 401 with message
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Authentication failed';
+        if (message === 'Invalid credentials' || message === 'Account is inactive') {
+            return res.status(message === 'Invalid credentials' ? 401 : 403).json({
+                status: 'error',
+                message,
+                code: message === 'Invalid credentials' ? 'AUTH_ERROR' : 'ACCOUNT_INACTIVE'
+            });
+        }
         next(error);
     }
 });

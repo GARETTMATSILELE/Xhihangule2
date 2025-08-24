@@ -1,10 +1,13 @@
 import express from 'express';
-import { createLevyPayment, getLevyPayments } from '../controllers/levyPaymentController';
+import { createLevyPayment, getLevyPayments, getLevyReceiptPublic, getLevyReceiptDownload } from '../controllers/levyPaymentController';
 import { auth } from '../middleware/auth';
 
 const router = express.Router();
 
 router.post('/', auth, createLevyPayment);
 router.get('/', getLevyPayments);
+// Public receipt endpoint to mirror payments/public/:id/receipt
+router.get('/public/:id/receipt', getLevyReceiptPublic);
+router.get('/public/:id/receipt/download', getLevyReceiptDownload);
 
 export default router; 

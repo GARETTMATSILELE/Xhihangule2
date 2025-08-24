@@ -10,7 +10,7 @@ import {
   getAdminDashboardProperties,
   getPublicProperties
 } from '../controllers/propertyController';
-import { auth } from '../middleware/auth';
+import { authWithCompany } from '../middleware/auth';
 import { isAdmin, isAgent, canCreateProperty } from '../middleware/roles';
 import { logger } from '../utils/logger';
 import { Property, IProperty } from '../models/Property';
@@ -28,8 +28,11 @@ router.use((req, res, next) => {
   next();
 });
 
-// Debug route to list all properties
+// Debug route to list all properties (disabled in production)
 router.get('/debug/all', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
   try {
     const properties = await Property.find({}).populate('ownerId', 'firstName lastName email');
     console.log('All properties in database:', {
@@ -69,8 +72,11 @@ router.post('/public', createPropertyPublic);
 // New public endpoint with user-based filtering (no auth required)
 router.get('/public-filtered', getPublicProperties);
 
-// MVP: Comprehensive public endpoints for all property operations
+// MVP: Comprehensive public endpoints for all property operations (disabled in production)
 router.get('/public/all', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
   try {
     const properties = await Property.find({})
       .select('name address type status rentAmount bedrooms bathrooms amenities')
@@ -96,15 +102,20 @@ router.get('/public/:id', async (req, res) => {
   }
 });
 
-// Admin dashboard route (no auth required)
-router.get('/admin-dashboard', getAdminDashboardProperties);
+// Admin dashboard route (disabled in production)
+router.get('/admin-dashboard', (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
+  return getAdminDashboardProperties(req, res);
+});
 
 // Protected routes (auth required)
-router.get('/', auth, getProperties);
-router.get('/vacant', auth, getVacantProperties);
-router.get('/:id', auth, getProperty);
-router.post('/', auth, canCreateProperty, createProperty);
-router.put('/:id', auth, isAdmin, updateProperty);
-router.delete('/:id', auth, isAdmin, deleteProperty);
+router.get('/', authWithCompany, getProperties);
+router.get('/vacant', authWithCompany, getVacantProperties);
+router.get('/:id', authWithCompany, getProperty);
+router.post('/', authWithCompany, canCreateProperty, createProperty);
+router.put('/:id', authWithCompany, isAdmin, updateProperty);
+router.delete('/:id', authWithCompany, isAdmin, deleteProperty);
 
 export default router; 

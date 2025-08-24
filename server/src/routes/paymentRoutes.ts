@@ -1,5 +1,5 @@
 import express from 'express';
-import { auth } from '../middleware/auth';
+import { authWithCompany } from '../middleware/auth';
 import { canManagePayments } from '../middleware/roles';
 import {
   createPayment,
@@ -19,8 +19,11 @@ const router = express.Router();
 // Public endpoints (must come before protected routes)
 router.get('/public', getPaymentsPublic);
 
-// MVP: Comprehensive public endpoints for all payment operations
+// MVP: Comprehensive public endpoints for all payment operations (disabled in production)
 router.get('/public/all', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
   try {
     const payments = await Payment.find({})
       .select('amount dueDate status tenantId propertyId paymentMethod')
@@ -44,15 +47,15 @@ router.get('/public/:id', getPaymentByIdPublic);
 router.post('/public', createPaymentPublic);
 
 // Create a new payment
-router.post('/', auth, canManagePayments, createPayment);
+router.post('/', authWithCompany, canManagePayments, createPayment);
 
 // Get all payments for a company
-router.get('/company', auth, canManagePayments, getCompanyPayments);
+router.get('/company', authWithCompany, canManagePayments, getCompanyPayments);
 
 // Get payment details
-router.get('/:id', auth, canManagePayments, getPaymentDetails);
+router.get('/:id', authWithCompany, canManagePayments, getPaymentDetails);
 
 // Update payment status
-router.patch('/:id/status', auth, canManagePayments, updatePaymentStatus);
+router.patch('/:id/status', authWithCompany, canManagePayments, updatePaymentStatus);
 
 export default router; 

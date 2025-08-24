@@ -10,9 +10,16 @@ const dotenv_1 = require("dotenv");
 const jwt_1 = require("./jwt");
 (0, dotenv_1.config)();
 const initializeSocket = (httpServer) => {
+    const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean);
+    const corsOrigin = allowedOriginsFromEnv.length > 0
+        ? allowedOriginsFromEnv
+        : (process.env.CLIENT_URL ? [process.env.CLIENT_URL] : true);
     const io = new socket_io_1.Server(httpServer, {
         cors: {
-            origin: process.env.CLIENT_URL || 'http://localhost:3000',
+            origin: corsOrigin,
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
             credentials: true,
             allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']

@@ -3,6 +3,7 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { User, IUser } from '../models/User';
 import { PropertyOwner, IPropertyOwner } from '../models/PropertyOwner';
 import { UserRole, JwtPayload } from '../types/auth';
+import { AppError } from '../middleware/errorHandler';
 import { isDatabaseAvailable } from '../config/database';
 import { JWT_CONFIG } from '../config/jwt';
 
@@ -58,46 +59,21 @@ export class AuthService {
 
   public async login(email: string, password: string): Promise<{ user: JwtUser; token: string; refreshToken: string }> {
     await this.initialize();
-
-    // First try to find in PropertyOwner collection
-    let propertyOwner = await PropertyOwner.findOne({ email });
-    if (propertyOwner) {
-      // Verify password for PropertyOwner
-      const isValidPassword = await propertyOwner.comparePassword(password);
-      if (!isValidPassword) {
-        throw new Error('Invalid credentials');
-      }
-
-      const token = this.generateAccessToken(propertyOwner, 'propertyOwner');
-      const refreshToken = this.generateRefreshToken(propertyOwner, 'propertyOwner');
-
-      return {
-        user: {
-          userId: propertyOwner._id.toString(),
-          email: propertyOwner.email,
-          role: 'owner',
-          companyId: propertyOwner.companyId ? propertyOwner.companyId.toString() : undefined
-        },
-        token,
-        refreshToken
-      };
-    }
-
-    // If not found in PropertyOwner collection, try User collection
+    // Check only the User collection
     let user = await User.findOne({ email });
     if (!user) {
-      throw new Error('Invalid credentials');
+      throw new AppError('Invalid credentials', 401, 'AUTH_ERROR');
     }
 
     // Check if user is active
     if (!user.isActive) {
-      throw new Error('Account is inactive');
+      throw new AppError('Account is inactive', 403, 'ACCOUNT_INACTIVE');
     }
 
     // Verify password for User
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      throw new Error('Invalid credentials');
+      throw new AppError('Invalid credentials', 401, 'AUTH_ERROR');
     }
 
     // Update last login

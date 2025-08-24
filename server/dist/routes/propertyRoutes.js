@@ -30,8 +30,11 @@ router.use((req, res, next) => {
     });
     next();
 });
-// Debug route to list all properties
+// Debug route to list all properties (disabled in production)
 router.get('/debug/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
     try {
         const properties = yield Property_1.Property.find({}).populate('ownerId', 'firstName lastName email');
         console.log('All properties in database:', {
@@ -69,8 +72,11 @@ router.get('/public', (req, res) => __awaiter(void 0, void 0, void 0, function* 
 router.post('/public', propertyController_1.createPropertyPublic);
 // New public endpoint with user-based filtering (no auth required)
 router.get('/public-filtered', propertyController_1.getPublicProperties);
-// MVP: Comprehensive public endpoints for all property operations
+// MVP: Comprehensive public endpoints for all property operations (disabled in production)
 router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
     try {
         const properties = yield Property_1.Property.find({})
             .select('name address type status rentAmount bedrooms bathrooms amenities')
@@ -96,13 +102,18 @@ router.get('/public/:id', (req, res) => __awaiter(void 0, void 0, void 0, functi
         res.status(500).json({ message: 'Error fetching property' });
     }
 }));
-// Admin dashboard route (no auth required)
-router.get('/admin-dashboard', propertyController_1.getAdminDashboardProperties);
+// Admin dashboard route (disabled in production)
+router.get('/admin-dashboard', (req, res, next) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
+    return (0, propertyController_1.getAdminDashboardProperties)(req, res);
+});
 // Protected routes (auth required)
-router.get('/', auth_1.auth, propertyController_1.getProperties);
-router.get('/vacant', auth_1.auth, propertyController_1.getVacantProperties);
-router.get('/:id', auth_1.auth, propertyController_1.getProperty);
-router.post('/', auth_1.auth, roles_1.canCreateProperty, propertyController_1.createProperty);
-router.put('/:id', auth_1.auth, roles_1.isAdmin, propertyController_1.updateProperty);
-router.delete('/:id', auth_1.auth, roles_1.isAdmin, propertyController_1.deleteProperty);
+router.get('/', auth_1.authWithCompany, propertyController_1.getProperties);
+router.get('/vacant', auth_1.authWithCompany, propertyController_1.getVacantProperties);
+router.get('/:id', auth_1.authWithCompany, propertyController_1.getProperty);
+router.post('/', auth_1.authWithCompany, roles_1.canCreateProperty, propertyController_1.createProperty);
+router.put('/:id', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.updateProperty);
+router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.deleteProperty);
 exports.default = router;

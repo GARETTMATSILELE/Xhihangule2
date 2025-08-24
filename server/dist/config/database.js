@@ -110,6 +110,25 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
                 // Don't throw error, continue without indexes
             }
         }
+        // Fix legacy indexes inconsistencies for companies collection
+        try {
+            const companies = mongoose_1.default.connection.collection('companies');
+            const existingIndexes = yield companies.indexes();
+            const hasLegacyTaxIndex = existingIndexes.some((idx) => idx.name === 'taxNumber_1');
+            if (hasLegacyTaxIndex) {
+                console.warn('Dropping legacy companies index taxNumber_1');
+                yield companies.dropIndex('taxNumber_1');
+            }
+            // Ensure a safe unique index on tinNumber when present (non-empty string)
+            const hasTinIndex = existingIndexes.some((idx) => idx.name === 'tinNumber_1');
+            if (!hasTinIndex) {
+                console.log('Creating partial unique index on companies.tinNumber');
+                yield companies.createIndex({ tinNumber: 1 }, { unique: true, partialFilterExpression: { tinNumber: { $type: 'string', $ne: '' } } });
+            }
+        }
+        catch (idxError) {
+            console.error('Company index migration error (non-fatal):', idxError);
+        }
         // Start health check
         startHealthCheck();
     }

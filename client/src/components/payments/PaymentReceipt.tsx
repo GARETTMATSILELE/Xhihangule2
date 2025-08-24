@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -10,6 +10,7 @@ import {
   Avatar,
 } from '@mui/material';
 import { Print as PrintIcon, Close as CloseIcon } from '@mui/icons-material';
+import paymentService from '../../services/paymentService';
 
 interface PaymentReceiptProps {
   receipt: any;
@@ -17,9 +18,53 @@ interface PaymentReceiptProps {
 }
 
 const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => {
+  const [paidToDate, setPaidToDate] = useState<number | null>(null);
+  const isSale = useMemo(() => (receipt?.paymentType || receipt?.type) === 'introduction', [receipt]);
+  const groupRef = useMemo(() => receipt?.saleId || receipt?.referenceNumber || receipt?.manualPropertyAddress || '', [receipt]);
+  const currency = receipt?.currency || 'USD';
+
+  // Parse total sale price from notes if present (from SalesPaymentForm notes)
+  const parsedTotalSale = useMemo(() => {
+    const text = String(receipt?.notes || '');
+    const match = text.match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+    if (match && match[1]) {
+      const n = Number(match[1].replace(/,/g, ''));
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }, [receipt?.notes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!isSale || !groupRef) return;
+      try {
+        const payments: any[] = await paymentService.getPayments();
+        const related = (Array.isArray(payments) ? payments : [])
+          .filter((p: any) => (p.paymentType === 'introduction'))
+          .filter((p: any) => (receipt.saleId ? (String(p.saleId) === String(receipt.saleId)) : ((p.referenceNumber && p.referenceNumber === receipt.referenceNumber) || (p.manualPropertyAddress && p.manualPropertyAddress === receipt.manualPropertyAddress))));
+        const totalPaid = related.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+        if (!cancelled) setPaidToDate(totalPaid);
+      } catch {
+        if (!cancelled) setPaidToDate(null);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [isSale, groupRef, receipt?.referenceNumber, receipt?.manualPropertyAddress]);
+
+  const outstanding = useMemo(() => {
+    if (parsedTotalSale == null || paidToDate == null) return null;
+    return Math.max(0, parsedTotalSale - paidToDate);
+  }, [parsedTotalSale, paidToDate]);
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
     if (printWindow) {
+      const saleTotalsHtml = (isSale && parsedTotalSale != null) ? `
+                <div class="detail-row"><span class="label">Total Sale Price:</span><span class="value">${currency} ${(parsedTotalSale || 0).toLocaleString()}</span></div>
+                <div class="detail-row"><span class="label">Paid To Date:</span><span class="value">${currency} ${(paidToDate || 0).toLocaleString()}</span></div>
+                <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${currency} ${((parsedTotalSale || 0) - (paidToDate || 0) > 0 ? ((parsedTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
+              ` : '';
       printWindow.document.write(`
         <!DOCTYPE html>
         <html>
@@ -138,6 +183,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                   <span class="label">Processed By:</span>
                   <span class="value">${receipt.processedBy?.firstName} ${receipt.processedBy?.lastName || 'N/A'}</span>
                 </div>
+                ${saleTotalsHtml}
                 ${receipt.notes ? `
                 <div class="detail-row">
                   <span class="label">Notes:</span>
@@ -273,7 +319,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
           </Typography>
         </Grid>
         <Grid item xs={6}>
-          <Typography variant="subtitle2" color="textSecondary">Tenant</Typography>
+          <Typography variant="subtitle2" color="textSecondary">{(receipt.paymentType || receipt.type) === 'introduction' ? 'Buyer' : 'Tenant'}</Typography>
           <Typography variant="body1">
             {receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : 'N/A')}
           </Typography>

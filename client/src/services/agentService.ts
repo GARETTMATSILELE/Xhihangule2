@@ -21,6 +21,12 @@ export const agentService = {
     return response.data;
   },
 
+  // Update an existing property (agent-owned)
+  updateProperty: async (id: string, propertyData: Partial<PropertyFormData>): Promise<Property> => {
+    const response = await api.put(`/agents/properties/${id}`, propertyData);
+    return response.data;
+  },
+
   // Get tenants managed by the agent
   getTenants: async () => {
     const response = await api.get('/agents/tenants');

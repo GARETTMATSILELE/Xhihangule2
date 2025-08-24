@@ -123,12 +123,7 @@ export const getInvoices = async (req: Request, res: Response) => {
 
     console.log(`Found ${invoices.length} invoices with companyId ${req.user.companyId}`);
 
-    // If no invoices found with companyId, try to find all invoices (for backward compatibility)
-    if (invoices.length === 0) {
-      console.log('No invoices found with companyId, trying to fetch all invoices...');
-      invoices = await Invoice.find({}).sort({ createdAt: -1 });
-      console.log(`Found ${invoices.length} total invoices (no company filtering)`);
-    }
+    // Remove backward compatibility that leaked cross-company data
 
     console.log('Returning invoices:', invoices.length);
     res.json(invoices);

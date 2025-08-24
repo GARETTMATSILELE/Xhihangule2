@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import paymentService from '../../services/paymentService';
+import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
   Box, 
@@ -198,8 +198,9 @@ const LevyPaymentsPage: React.FC = () => {
       return;
     }
 
-    paymentService.getLevyPayments(user.companyId)
-      .then((data) => {
+    api.get('/agents/levy-payments')
+      .then((res) => {
+        const data = Array.isArray(res.data) ? res.data : [];
         setRows(data.map((row: any, idx: number) => ({ id: row._id || idx, ...row })));
         setLoading(false);
       })

@@ -41,13 +41,13 @@ interface User {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'admin' | 'agent' | 'accountant' | 'owner';
+  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
   status: 'active' | 'inactive';
 }
 
 interface Role {
   id: string;
-  name: 'admin' | 'agent' | 'accountant' | 'owner';
+  name: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
   description: string;
 }
 
@@ -55,7 +55,7 @@ interface UserFormData {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'admin' | 'agent' | 'accountant' | 'owner';
+  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
   password: string;
 }
 
@@ -79,6 +79,11 @@ const ROLES: Role[] = [
     id: 'owner',
     name: 'owner',
     description: 'Property owner with owner-specific access'
+  },
+  {
+    id: 'sales',
+    name: 'sales',
+    description: 'Sales agent with CRM and sales property management access'
   }
 ];
 
@@ -112,7 +117,15 @@ export const UserManagement: React.FC = () => {
     try {
       // Use authenticated API for user management
       const response = await api.get('/users');
-      setUsers(response.data);
+      const mapped: User[] = (Array.isArray(response.data) ? response.data : []).map((u: any): User => ({
+        id: String(u._id || u.id),
+        firstName: String(u.firstName || ''),
+        lastName: String(u.lastName || ''),
+        email: String(u.email || ''),
+        role: (u.role || 'agent') as User['role'],
+        status: (u.isActive ? 'active' : 'inactive') as User['status'],
+      }));
+      setUsers(mapped);
     } catch (error) {
       console.error('Error fetching users:', error);
       setMessage({
@@ -180,15 +193,23 @@ export const UserManagement: React.FC = () => {
       console.log('Submitting form data:', formData);
       
       if (selectedUser) {
-        await api.put('/users/me', formData);
+        await api.put(`/users/${selectedUser.id}`, formData);
         setMessage({
           type: 'success',
           text: 'User updated successfully',
         });
       } else {
         const response = await api.post('/users', formData);
-        console.log('User creation response:', response);
-        setUsers(prevUsers => [...prevUsers, response.data]);
+        const createdRaw = response.data?.data || response.data;
+        const created: User = {
+          id: createdRaw._id || createdRaw.id,
+          firstName: createdRaw.firstName,
+          lastName: createdRaw.lastName,
+          email: createdRaw.email,
+          role: createdRaw.role,
+          status: createdRaw.isActive ? 'active' : 'inactive',
+        };
+        setUsers(prevUsers => [...prevUsers, created]);
         setMessage({
           type: 'success',
           text: 'User created successfully',
@@ -307,7 +328,7 @@ export const UserManagement: React.FC = () => {
               </TableHead>
               <TableBody>
                 {users.map((user) => (
-                  <TableRow key={user.id}>
+                  <TableRow key={user.id || user.email}>
                     <TableCell>{`${user.firstName} ${user.lastName}`}</TableCell>
                     <TableCell>{user.email}</TableCell>
                     <TableCell>{user.role}</TableCell>

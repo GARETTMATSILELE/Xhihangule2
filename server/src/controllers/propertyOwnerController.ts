@@ -6,17 +6,15 @@ import { Property } from '../models/Property';
 
 export const createPropertyOwner = async (req: Request, res: Response) => {
   try {
-    // For admin users, allow creation without companyId requirement
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
     }
-
-    // Only require companyId for non-admin users
-    if (req.user.role !== 'admin' && !req.user.companyId) {
+    // Always require company scope
+    if (!req.user.companyId) {
       return res.status(401).json({ message: 'Company ID not found' });
     }
 
-    const { email, password, firstName, lastName, phone, companyId } = req.body;
+    const { email, password, firstName, lastName, phone } = req.body;
 
     // Validate required fields
     if (!email || !password || !firstName || !lastName || !phone) {
@@ -24,7 +22,7 @@ export const createPropertyOwner = async (req: Request, res: Response) => {
     }
 
     // Check if owner already exists
-    const existingOwner = await PropertyOwner.findOne({ email });
+    const existingOwner = await PropertyOwner.findOne({ email, companyId: req.user.companyId });
     if (existingOwner) {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
@@ -35,7 +33,7 @@ export const createPropertyOwner = async (req: Request, res: Response) => {
       firstName,
       lastName,
       phone,
-      companyId: req.user.role === 'admin' ? companyId : req.user.companyId
+      companyId: req.user.companyId
     };
 
     const owner = new PropertyOwner(ownerData);
@@ -59,16 +57,11 @@ export const getPropertyOwners = async (req: Request, res: Response) => {
       companyId: req.user.companyId
     });
 
-    // For admin users, return all property owners
-    // For other users, filter by companyId
-    let query = {};
-    if (req.user.role !== 'admin') {
-      if (!req.user.companyId) {
-        console.log('getPropertyOwners - Company ID not found for non-admin user');
-        throw new AppError('Company ID not found', 401);
-      }
-      query = { companyId: req.user.companyId };
+    if (!req.user.companyId) {
+      console.log('getPropertyOwners - Company ID not found');
+      throw new AppError('Company ID not found', 401);
     }
+    const query: any = { companyId: req.user.companyId };
 
     console.log('getPropertyOwners - Query:', query);
 
@@ -90,15 +83,10 @@ export const getPropertyOwnerById = async (req: Request, res: Response) => {
 
     const { id } = req.params;
     
-    // For admin users, allow access to any property owner
-    // For other users, filter by companyId
-    let query: any = { _id: id };
-    if (req.user.role !== 'admin') {
-      if (!req.user.companyId) {
-        throw new AppError('Company ID not found', 401);
-      }
-      query.companyId = req.user.companyId;
+    if (!req.user.companyId) {
+      throw new AppError('Company ID not found', 401);
     }
+    const query: any = { _id: id, companyId: req.user.companyId };
     
     const owner = await PropertyOwner.findOne(query);
     
@@ -122,24 +110,19 @@ export const updatePropertyOwner = async (req: Request, res: Response) => {
     }
 
     const { id } = req.params;
-    const { email, ...updates } = req.body;
+    const { email, companyId: _ignoredCompanyId, ...updates } = req.body; // ignore companyId changes
 
-    // For admin users, allow access to any property owner
-    // For other users, filter by companyId
-    let query: any = { _id: id };
-    if (req.user.role !== 'admin') {
-      if (!req.user.companyId) {
-        throw new AppError('Company ID not found', 401);
-      }
-      query.companyId = req.user.companyId;
+    if (!req.user.companyId) {
+      throw new AppError('Company ID not found', 401);
     }
+    const query: any = { _id: id, companyId: req.user.companyId };
 
     // If email is being updated, check if it's already in use
     if (email) {
       const existingOwner = await PropertyOwner.findOne({
         email,
         _id: { $ne: id },
-        ...(req.user.role !== 'admin' && { companyId: req.user.companyId })
+        companyId: req.user.companyId
       });
 
       if (existingOwner) {
@@ -177,15 +160,10 @@ export const deletePropertyOwner = async (req: Request, res: Response) => {
 
     const { id } = req.params;
     
-    // For admin users, allow deletion of any property owner
-    // For other users, filter by companyId
-    let query: any = { _id: id };
-    if (req.user.role !== 'admin') {
-      if (!req.user.companyId) {
-        throw new AppError('Company ID not found', 401);
-      }
-      query.companyId = req.user.companyId;
+    if (!req.user.companyId) {
+      throw new AppError('Company ID not found', 401);
     }
+    const query: any = { _id: id, companyId: req.user.companyId };
     
     const owner = await PropertyOwner.findOneAndDelete(query);
     

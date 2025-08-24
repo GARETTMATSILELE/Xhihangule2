@@ -1,8 +1,8 @@
 import express from 'express';
-import { createUser, getCurrentUser } from '../controllers/userController';
+import { createUser, getCurrentUser, updateUserById } from '../controllers/userController';
 import { User } from '../models/User';
 import { Request, Response, NextFunction } from 'express';
-import { auth, authorize } from '../middleware/auth';
+import { authWithCompany, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = express.Router();
@@ -62,7 +62,7 @@ router.get('/public/agents', async (req: Request, res: Response) => {
 });
 
 // Apply auth middleware to all routes below this point
-router.use(auth);
+router.use(authWithCompany);
 
 // Test route to verify user routes are working
 router.get('/test', (req, res) => {
@@ -95,8 +95,8 @@ router.get('/', authorize(['admin']), async (req: Request, res, next) => {
     console.log('GET / route hit');
     console.log('Fetching users with filters:', req.query);
     
-    // Build query based on filters
-    const query: any = {};
+    // Build query based on filters and enforce company scoping
+    const query: any = { companyId: req.user?.companyId };
     if (req.query.role) {
       query.role = req.query.role;
     }
@@ -110,11 +110,26 @@ router.get('/', authorize(['admin']), async (req: Request, res, next) => {
   }
 });
 
+// Get agents for current company - Admin, Accountant, and Agent
+router.get('/agents', authorize(['admin', 'accountant', 'agent']), async (req: Request, res, next) => {
+  try {
+    console.log('GET /agents route hit');
+    const query: any = { companyId: req.user?.companyId, role: 'agent' };
+    const agents = await User.find(query).select('firstName lastName email role companyId');
+    console.log('Found agents:', agents.length);
+    res.json(agents);
+  } catch (error) {
+    console.error('Error in GET /agents:', error);
+    next(error);
+  }
+});
+
 // Create new user - Admin only
 router.post('/', authorize(['admin']), async (req: Request, res, next) => {
   console.log('POST / route hit');
   try {
-    const user = await createUser(req.body);
+    const payload = { ...req.body, companyId: req.user?.companyId };
+    const user = await createUser(payload);
     console.log('User created:', user);
     res.status(201).json({
       status: 'success',
@@ -122,6 +137,16 @@ router.post('/', authorize(['admin']), async (req: Request, res, next) => {
     });
   } catch (error) {
     console.error('Error in POST /:', error);
+    next(error);
+  }
+});
+
+// Update user by ID - Admin only
+router.put('/:id', authorize(['admin']), async (req: Request, res, next) => {
+  try {
+    const updated = await updateUserById(req.params.id, req.body, req.user?.companyId);
+    res.json({ status: 'success', data: updated });
+  } catch (error) {
     next(error);
   }
 });

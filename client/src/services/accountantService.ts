@@ -76,9 +76,21 @@ export const accountantService = {
     return response.data;
   },
 
-  // Get PREA commission
-  getPREACommission: async (): Promise<PREACommission> => {
-    const response = await api.get('/accountants/prea-commission');
+  // Get PREA commission with filters
+  getPREACommission: async (filters?: {
+    year?: number;
+    month?: number;
+    week?: number;
+    day?: number;
+    filterType?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  }): Promise<PREACommission> => {
+    const params = new URLSearchParams();
+    if (filters?.year) params.append('year', filters.year.toString());
+    if (filters?.month !== undefined) params.append('month', filters.month.toString());
+    if (filters?.week !== undefined) params.append('week', filters.week.toString());
+    if (filters?.day !== undefined) params.append('day', filters.day.toString());
+    if (filters?.filterType) params.append('filterType', filters.filterType);
+    const response = await api.get(`/accountants/prea-commission?${params.toString()}`);
     return response.data;
   },
 
@@ -93,7 +105,7 @@ export const accountantService = {
     const [agentData, agencyData, preaData] = await Promise.all([
       accountantService.getAgentCommissions(),
       accountantService.getAgencyCommission(agencyFilters),
-      accountantService.getPREACommission()
+      accountantService.getPREACommission(agencyFilters)
     ]);
 
     return {
@@ -105,3 +117,31 @@ export const accountantService = {
 };
 
 export default accountantService; 
+
+// Sales contracts API (accountant)
+export const salesContractService = {
+  async create(contract: {
+    propertyId?: string;
+    manualPropertyAddress?: string;
+    buyerName: string;
+    sellerName?: string;
+    currency?: string;
+    totalSalePrice: number;
+    commissionPercent?: number;
+    preaPercentOfCommission?: number;
+    agencyPercentRemaining?: number;
+    agentPercentRemaining?: number;
+    reference?: string;
+  }) {
+    const res = await api.post('/accountants/sales', contract);
+    return res.data?.data || res.data;
+  },
+  async list(params?: { reference?: string; status?: string }) {
+    const res = await api.get('/accountants/sales', { params });
+    return res.data?.data || res.data;
+  },
+  async get(id: string) {
+    const res = await api.get(`/accountants/sales/${id}`);
+    return res.data?.data || res.data;
+  }
+};

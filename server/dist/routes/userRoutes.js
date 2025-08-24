@@ -65,7 +65,7 @@ router.get('/public/agents', (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 }));
 // Apply auth middleware to all routes below this point
-router.use(auth_1.auth);
+router.use(auth_1.authWithCompany);
 // Test route to verify user routes are working
 router.get('/test', (req, res) => {
     console.log('Test route hit');
@@ -93,11 +93,12 @@ router.get('/me', (req, res, next) => __awaiter(void 0, void 0, void 0, function
 }));
 // Get all users - Admin only
 router.get('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         console.log('GET / route hit');
         console.log('Fetching users with filters:', req.query);
-        // Build query based on filters
-        const query = {};
+        // Build query based on filters and enforce company scoping
+        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId };
         if (req.query.role) {
             query.role = req.query.role;
         }
@@ -110,11 +111,28 @@ router.get('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(
         next(error);
     }
 }));
+// Get agents for current company - Admin, Accountant, and Agent
+router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        console.log('GET /agents route hit');
+        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId, role: 'agent' };
+        const agents = yield User_1.User.find(query).select('firstName lastName email role companyId');
+        console.log('Found agents:', agents.length);
+        res.json(agents);
+    }
+    catch (error) {
+        console.error('Error in GET /agents:', error);
+        next(error);
+    }
+}));
 // Create new user - Admin only
 router.post('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     console.log('POST / route hit');
     try {
-        const user = yield (0, userController_1.createUser)(req.body);
+        const payload = Object.assign(Object.assign({}, req.body), { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId });
+        const user = yield (0, userController_1.createUser)(payload);
         console.log('User created:', user);
         res.status(201).json({
             status: 'success',
@@ -123,6 +141,17 @@ router.post('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter
     }
     catch (error) {
         console.error('Error in POST /:', error);
+        next(error);
+    }
+}));
+// Update user by ID - Admin only
+router.put('/:id', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const updated = yield (0, userController_1.updateUserById)(req.params.id, req.body, (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        res.json({ status: 'success', data: updated });
+    }
+    catch (error) {
         next(error);
     }
 }));

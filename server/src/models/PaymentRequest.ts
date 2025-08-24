@@ -13,6 +13,7 @@ export interface IPaymentRequest extends Document {
   status: 'pending' | 'paid' | 'rejected';
   notes?: string;
   requestedBy: string;
+  requestedByUser?: mongoose.Types.ObjectId;
   processedBy?: mongoose.Types.ObjectId;
   processedDate?: Date;
   payTo: {
@@ -79,6 +80,10 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
   requestedBy: {
     type: String,
     required: true
+  },
+  requestedByUser: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
   processedBy: {
     type: mongoose.Schema.Types.ObjectId,

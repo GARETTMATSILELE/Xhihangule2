@@ -17,9 +17,13 @@ const File_1 = __importDefault(require("../models/File"));
 const Property_1 = require("../models/Property");
 // Get all files for a property
 const getFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        console.log('getFiles called: returning all files');
-        const files = yield File_1.default.find()
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        console.log('getFiles called: returning files for company', req.user.companyId);
+        const files = yield File_1.default.find({ companyId: req.user.companyId })
             .populate('propertyId', 'name')
             .populate('uploadedBy', 'firstName lastName');
         console.log('Database query completed, found files:', files.length);
@@ -41,7 +45,7 @@ const getFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 exports.getFiles = getFiles;
 // Upload a file
 const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         console.log('Upload request received:', {
             file: req.file,
@@ -53,20 +57,22 @@ const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         }
         const { propertyId, fileType } = req.body;
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
-        if (!propertyId || !fileType || !userId) {
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        if (!propertyId || !fileType || !userId || !companyId) {
             return res.status(400).json({
                 message: 'Missing required fields',
-                details: { propertyId, fileType, userId }
+                details: { propertyId, fileType, userId, companyId }
             });
         }
         // Check if property exists
-        const property = yield Property_1.Property.findById(propertyId);
+        const property = yield Property_1.Property.findOne({ _id: propertyId, companyId });
         if (!property) {
             return res.status(404).json({ message: 'Property not found' });
         }
         // Create file record
         const file = new File_1.default({
             propertyId,
+            companyId,
             fileName: req.file.originalname,
             fileType,
             fileUrl: req.file.buffer.toString('base64'),

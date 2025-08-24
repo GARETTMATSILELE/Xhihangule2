@@ -24,6 +24,11 @@ export interface Company {
   subscriptionStatus: 'active' | 'inactive' | 'trial';
   subscriptionEndDate?: Date;
   bankAccounts: BankAccount[];
+  commissionConfig?: {
+    preaPercentOfTotal: number;
+    agentPercentOfRemaining: number;
+    agencyPercentOfRemaining: number;
+  };
   createdAt: Date;
   updatedAt: Date;
 }

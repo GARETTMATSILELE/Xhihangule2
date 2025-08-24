@@ -14,7 +14,7 @@ const PaymentRequest_1 = require("../models/PaymentRequest");
 const Property_1 = require("../models/Property");
 // Create a new payment request
 const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     try {
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.body.companyId;
         if (!companyId) {
@@ -43,6 +43,7 @@ const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
             dueDate: dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
             notes,
             requestedBy: ((_b = req.user) === null || _b === void 0 ? void 0 : _b.firstName) + ' ' + ((_c = req.user) === null || _c === void 0 ? void 0 : _c.lastName) || 'Unknown',
+            requestedByUser: (_d = req.user) === null || _d === void 0 ? void 0 : _d._id,
             payTo
         });
         yield paymentRequest.save();
@@ -59,7 +60,7 @@ const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.createPaymentRequest = createPaymentRequest;
 // Get all payment requests for a company
 const getPaymentRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     try {
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.query.companyId;
         if (!companyId) {
@@ -67,8 +68,11 @@ const getPaymentRequests = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         const { status, page = 1, limit = 10 } = req.query;
         const skip = (Number(page) - 1) * Number(limit);
-        // Build query
+        // Build query - if agent, restrict to own requests
         const query = { companyId };
+        if (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) === 'agent') {
+            query.requestedByUser = (_c = req.user) === null || _c === void 0 ? void 0 : _c._id;
+        }
         if (status) {
             query.status = status;
         }

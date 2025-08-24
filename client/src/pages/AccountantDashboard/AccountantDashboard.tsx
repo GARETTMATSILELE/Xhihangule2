@@ -9,10 +9,13 @@ import DashboardOverview from './DashboardOverview';
 import AccountantPaymentsPage from './AccountantPaymentsPage';
 import PropertyAccountsPage from './PropertyAccountsPage';
 import PropertyAccountDetailPage from './PropertyAccountDetailPage';
+import { PropertyDepositLedgerPage } from './index';
 import AgentAccountsPage from './AgentAccountsPage';
 import AgentAccountDetailPage from './AgentAccountDetailPage';
 import CommissionsPage from './CommissionsPage';
 import WrittenInvoicesPage from './WrittenInvoicesPage';
+import SalesPaymentsPage from './SalesPaymentsPage';
+import RevenuePage from './RevenuePage';
 import SettingsPage from './SettingsPage';
 import ReportsPage from './ReportsPage';
 import DatabaseSyncDashboard from '../../components/admin/DatabaseSyncDashboard';
@@ -38,34 +41,40 @@ const AccountantDashboard: React.FC = () => {
   // Determine active tab based on current location
   useEffect(() => {
     const path = location.pathname;
-    if (path.includes('/data-sync')) {
-      setActiveTab(8); // Data Sync tab index
-    } else if (path.includes('/reports')) {
-      setActiveTab(7); // Reports tab index
-    } else if (path.includes('/commissions')) {
-      setActiveTab(6); // Commissions tab index
-    } else if (path.includes('/agent-accounts')) {
-      setActiveTab(5); // Agent Accounts tab index
-    } else if (path.includes('/property-accounts')) {
-      setActiveTab(4); // Property Accounts tab index
-    } else if (path.includes('/written-invoices')) {
-      setActiveTab(3); // Invoices tab index
-    } else if (path.includes('/levies')) {
-      setActiveTab(2); // Levies tab index
-    } else if (path.includes('/payments')) {
-      setActiveTab(1); // Payments tab index
+    if (path.includes('/settings')) {
+      setActiveTab(12);
     } else if (path.includes('/tasks')) {
-      setActiveTab(9); // Tasks tab index
-    } else if (path.includes('/settings')) {
-      setActiveTab(10); // Settings tab index
+      setActiveTab(11);
+    } else if (path.includes('/data-sync')) {
+      setActiveTab(10);
+    } else if (path.includes('/reports')) {
+      setActiveTab(9);
+    } else if (path.includes('/commissions')) {
+      setActiveTab(8);
+    } else if (path.includes('/agent-accounts')) {
+      setActiveTab(7);
+    } else if (path.includes('/property-accounts')) {
+      setActiveTab(6);
+    } else if (path.includes('/written-invoices')) {
+      setActiveTab(5);
+    } else if (path.includes('/levies')) {
+      setActiveTab(4);
+    } else if (path.includes('/revenue')) {
+      setActiveTab(3);
+    } else if (path.includes('/sales')) {
+      setActiveTab(2);
+    } else if (path.includes('/payments')) {
+      setActiveTab(1);
     } else {
-      setActiveTab(0); // Dashboard tab index
+      setActiveTab(0);
     }
   }, [location.pathname]);
 
   const menuItems: { label: string; path: string }[] = [
     { label: 'Dashboard', path: '/accountant-dashboard' },
     { label: 'Payments', path: '/accountant-dashboard/payments' },
+    { label: 'Sales', path: '/accountant-dashboard/sales' },
+    { label: 'Revenue', path: '/accountant-dashboard/revenue' },
     { label: 'Levies', path: '/accountant-dashboard/levies' },
     { label: 'Invoices', path: '/accountant-dashboard/written-invoices' },
     { label: 'Property Accounts', path: '/accountant-dashboard/property-accounts' },
@@ -122,10 +131,13 @@ const AccountantDashboard: React.FC = () => {
           <Routes>
             <Route path="" element={<DashboardOverview />} />
             <Route path="payments" element={<AccountantPaymentsPage />} />
+            <Route path="sales" element={<SalesPaymentsPage />} />
+            <Route path="revenue" element={<RevenuePage />} />
             <Route path="levies" element={<LevyPaymentsPage />} />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="property-accounts" element={<PropertyAccountsPage />} />
             <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
+            <Route path="property-accounts/:propertyId/deposits" element={<PropertyDepositLedgerPage />} />
             <Route path="agent-accounts" element={<AgentAccountsPage />} />
             <Route path="agent-accounts/:agentId" element={<AgentAccountDetailPage />} />
             <Route path="commissions" element={<CommissionsPage />} />

@@ -51,6 +51,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       dueDate: dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
       notes,
       requestedBy: (req.user as any)?.firstName + ' ' + (req.user as any)?.lastName || 'Unknown',
+      requestedByUser: (req.user as any)?._id,
       payTo
     });
 
@@ -78,8 +79,11 @@ export const getPaymentRequests = async (req: Request, res: Response) => {
     const { status, page = 1, limit = 10 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    // Build query
+    // Build query - if agent, restrict to own requests
     const query: any = { companyId };
+    if ((req.user as any)?.role === 'agent') {
+      query.requestedByUser = (req.user as any)?._id;
+    }
     if (status) {
       query.status = status;
     }

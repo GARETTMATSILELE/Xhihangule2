@@ -26,21 +26,20 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const Property_1 = require("../models/Property");
 const createPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        // For admin users, allow creation without companyId requirement
         if (!req.user) {
             return res.status(401).json({ message: 'Authentication required' });
         }
-        // Only require companyId for non-admin users
-        if (req.user.role !== 'admin' && !req.user.companyId) {
+        // Always require company scope
+        if (!req.user.companyId) {
             return res.status(401).json({ message: 'Company ID not found' });
         }
-        const { email, password, firstName, lastName, phone, companyId } = req.body;
+        const { email, password, firstName, lastName, phone } = req.body;
         // Validate required fields
         if (!email || !password || !firstName || !lastName || !phone) {
             return res.status(400).json({ message: 'All fields are required' });
         }
         // Check if owner already exists
-        const existingOwner = yield PropertyOwner_1.PropertyOwner.findOne({ email });
+        const existingOwner = yield PropertyOwner_1.PropertyOwner.findOne({ email, companyId: req.user.companyId });
         if (existingOwner) {
             return res.status(400).json({ message: 'Property owner with this email already exists' });
         }
@@ -50,7 +49,7 @@ const createPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, func
             firstName,
             lastName,
             phone,
-            companyId: req.user.role === 'admin' ? companyId : req.user.companyId
+            companyId: req.user.companyId
         };
         const owner = new PropertyOwner_1.PropertyOwner(ownerData);
         yield owner.save();
@@ -72,16 +71,11 @@ const getPropertyOwners = (req, res) => __awaiter(void 0, void 0, void 0, functi
             role: req.user.role,
             companyId: req.user.companyId
         });
-        // For admin users, return all property owners
-        // For other users, filter by companyId
-        let query = {};
-        if (req.user.role !== 'admin') {
-            if (!req.user.companyId) {
-                console.log('getPropertyOwners - Company ID not found for non-admin user');
-                throw new errorHandler_1.AppError('Company ID not found', 401);
-            }
-            query = { companyId: req.user.companyId };
+        if (!req.user.companyId) {
+            console.log('getPropertyOwners - Company ID not found');
+            throw new errorHandler_1.AppError('Company ID not found', 401);
         }
+        const query = { companyId: req.user.companyId };
         console.log('getPropertyOwners - Query:', query);
         const owners = yield PropertyOwner_1.PropertyOwner.find(query);
         res.json(owners);
@@ -100,15 +94,10 @@ const getPropertyOwnerById = (req, res) => __awaiter(void 0, void 0, void 0, fun
             throw new errorHandler_1.AppError('Authentication required', 401);
         }
         const { id } = req.params;
-        // For admin users, allow access to any property owner
-        // For other users, filter by companyId
-        let query = { _id: id };
-        if (req.user.role !== 'admin') {
-            if (!req.user.companyId) {
-                throw new errorHandler_1.AppError('Company ID not found', 401);
-            }
-            query.companyId = req.user.companyId;
+        if (!req.user.companyId) {
+            throw new errorHandler_1.AppError('Company ID not found', 401);
         }
+        const query = { _id: id, companyId: req.user.companyId };
         const owner = yield PropertyOwner_1.PropertyOwner.findOne(query);
         if (!owner) {
             throw new errorHandler_1.AppError('Property owner not found', 404);
@@ -129,19 +118,18 @@ const updatePropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, func
             throw new errorHandler_1.AppError('Authentication required', 401);
         }
         const { id } = req.params;
-        const _a = req.body, { email } = _a, updates = __rest(_a, ["email"]);
-        // For admin users, allow access to any property owner
-        // For other users, filter by companyId
-        let query = { _id: id };
-        if (req.user.role !== 'admin') {
-            if (!req.user.companyId) {
-                throw new errorHandler_1.AppError('Company ID not found', 401);
-            }
-            query.companyId = req.user.companyId;
+        const _a = req.body, { email, companyId: _ignoredCompanyId } = _a, updates = __rest(_a, ["email", "companyId"]); // ignore companyId changes
+        if (!req.user.companyId) {
+            throw new errorHandler_1.AppError('Company ID not found', 401);
         }
+        const query = { _id: id, companyId: req.user.companyId };
         // If email is being updated, check if it's already in use
         if (email) {
-            const existingOwner = yield PropertyOwner_1.PropertyOwner.findOne(Object.assign({ email, _id: { $ne: id } }, (req.user.role !== 'admin' && { companyId: req.user.companyId })));
+            const existingOwner = yield PropertyOwner_1.PropertyOwner.findOne({
+                email,
+                _id: { $ne: id },
+                companyId: req.user.companyId
+            });
             if (existingOwner) {
                 throw new errorHandler_1.AppError('Email already in use by another property owner', 400);
             }
@@ -166,15 +154,10 @@ const deletePropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, func
             throw new errorHandler_1.AppError('Authentication required', 401);
         }
         const { id } = req.params;
-        // For admin users, allow deletion of any property owner
-        // For other users, filter by companyId
-        let query = { _id: id };
-        if (req.user.role !== 'admin') {
-            if (!req.user.companyId) {
-                throw new errorHandler_1.AppError('Company ID not found', 401);
-            }
-            query.companyId = req.user.companyId;
+        if (!req.user.companyId) {
+            throw new errorHandler_1.AppError('Company ID not found', 401);
         }
+        const query = { _id: id, companyId: req.user.companyId };
         const owner = yield PropertyOwner_1.PropertyOwner.findOneAndDelete(query);
         if (!owner) {
             return res.status(404).json({ message: 'Property owner not found' });

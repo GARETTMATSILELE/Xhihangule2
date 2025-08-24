@@ -45,16 +45,24 @@ export const getPayment = async (req: Request, res: Response) => {
   }
 };
 
-// Helper function to calculate commission
-const calculateCommission = (
+// Helper function to calculate commission with company-specific splits
+const calculateCommission = async (
   amount: number,
-  commissionPercentage: number
+  commissionPercentage: number,
+  companyId: mongoose.Types.ObjectId
 ) => {
+  const { Company } = await import('../models/Company');
+  const company = await Company.findById(companyId).lean();
   const totalCommission = (amount * commissionPercentage) / 100;
-  const preaFee = totalCommission * 0.03;
+  const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
+  const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
+  const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
+
+  // PREA share comes off the top; handle 0% gracefully
+  const preaFee = totalCommission * preaPercentOfTotal;
   const remainingCommission = totalCommission - preaFee;
-  const agentShare = remainingCommission * 0.6;
-  const agencyShare = remainingCommission * 0.4;
+  const agentShare = remainingCommission * agentPercentOfRemaining;
+  const agencyShare = remainingCommission * agencyPercentOfRemaining;
   return {
     totalCommission,
     preaFee,
@@ -162,10 +170,11 @@ export const createPayment = async (req: Request, res: Response) => {
       }
     }
 
-    // Calculate commission based on property commission percentage
-    const paymentCommissionDetails = calculateCommission(
+    // Calculate commission based on property commission percentage and company config
+    const paymentCommissionDetails = await calculateCommission(
       amount,
-      property.commission || 0
+      property.commission || 0,
+      new mongoose.Types.ObjectId(req.user.companyId)
     );
 
     // Create payment record
@@ -296,7 +305,8 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       processedBy,
       ownerId,
       manualPropertyAddress,
-      manualTenantName
+      manualTenantName,
+      saleId
     } = req.body;
 
     // Validate required fields
@@ -368,9 +378,30 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       // Add manual entry fields
       manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
       manualTenantName: isManualTenant ? manualTenantName : undefined,
+      saleId: saleId ? new mongoose.Types.ObjectId(saleId) : undefined,
     });
     // Save and related updates (with or without session)
     await payment.save(session ? { session } : undefined);
+
+    // If depositAmount > 0, record in rentaldeposits (ledger)
+    if (payment.depositAmount && payment.depositAmount > 0) {
+      const { RentalDeposit } = await import('../models/rentalDeposit');
+      const deposit = new RentalDeposit({
+        propertyId: payment.propertyId,
+        agentId: payment.agentId,
+        companyId: payment.companyId,
+        tenantId: payment.tenantId,
+        depositAmount: payment.depositAmount,
+        depositDate: payment.paymentDate,
+        paymentId: payment._id,
+        type: 'payment',
+        referenceNumber: payment.referenceNumber,
+        notes: notes || '',
+        processedBy: payment.processedBy,
+        paymentMethod
+      } as any);
+      await deposit.save(session ? { session } : undefined);
+    }
 
     await Company.findByIdAndUpdate(
       new mongoose.Types.ObjectId(user.companyId),
@@ -519,7 +550,13 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
   }
 
   try {
-    const payments = await Payment.find({ companyId: req.user.companyId })
+    const query: any = { companyId: req.user.companyId };
+    // Optional: filter for deposits only
+    if (req.query.onlyDeposits === 'true') {
+      query.depositAmount = { $gt: 0 };
+    }
+
+    const payments = await Payment.find(query)
       .populate('propertyId', 'name')
       .populate('tenantId', 'firstName lastName')
       .populate('agentId', 'name')
@@ -809,7 +846,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       }
     }
     // Calculate commission based on property commission percentage
-    const publicCommissionDetails = calculateCommission(amount, property.commission || 0);
+    const publicCommissionDetails = await calculateCommission(amount, property.commission || 0, new mongoose.Types.ObjectId(lease.companyId));
 
     // Create payment record
     const payment = new Payment({

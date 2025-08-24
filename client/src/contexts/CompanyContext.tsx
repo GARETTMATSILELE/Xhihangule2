@@ -28,6 +28,11 @@ interface Company {
   subscriptionStatus: 'active' | 'inactive' | 'trial';
   subscriptionEndDate?: Date;
   bankAccounts: BankAccount[];
+  commissionConfig?: {
+    preaPercentOfTotal: number;
+    agentPercentOfRemaining: number;
+    agencyPercentOfRemaining: number;
+  };
   createdAt: string;
   updatedAt: string;
   __v: number;
@@ -155,6 +160,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         subscriptionStatus: companyData.subscriptionStatus ?? 'trial',
         subscriptionEndDate: companyData.subscriptionEndDate,
         bankAccounts: companyData.bankAccounts || [],
+        commissionConfig: companyData.commissionConfig,
         createdAt: companyData.createdAt,
         updatedAt: companyData.updatedAt,
         __v: companyData.__v || 0

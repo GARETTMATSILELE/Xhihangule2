@@ -32,12 +32,12 @@ const upload = (0, multer_1.default)({
         }
     }
 });
-// Get all files
-router.get('/', fileController_1.getFiles);
+// Get all files (company-scoped)
+router.get('/', auth_1.authWithCompany, fileController_1.getFiles);
 // Upload a file
-router.post('/upload', auth_1.auth, upload.single('file'), fileController_1.uploadFile);
-// Download a file
-router.get('/download/:id', fileController_1.downloadFile);
+router.post('/upload', auth_1.authWithCompany, upload.single('file'), fileController_1.uploadFile);
+// Download a file (company-scoped)
+router.get('/download/:id', auth_1.authWithCompany, fileController_1.downloadFile);
 // Delete a file
-router.delete('/:id', auth_1.auth, fileController_1.deleteFile);
+router.delete('/:id', auth_1.authWithCompany, fileController_1.deleteFile);
 exports.default = router;

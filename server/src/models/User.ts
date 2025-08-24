@@ -41,7 +41,7 @@ const userSchema = new Schema<IUser>({
   },
   role: {
     type: String,
-    enum: ['admin', 'agent', 'accountant', 'owner'] as UserRole[],
+    enum: ['admin', 'agent', 'accountant', 'owner', 'sales'] as UserRole[],
     default: 'agent'
   },
   companyId: {

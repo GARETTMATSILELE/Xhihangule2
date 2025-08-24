@@ -4,7 +4,10 @@ import { isAccountant, canManagePayments } from '../middleware/roles';
 import {
   getAgentCommissions,
   getAgencyCommission,
-  getPREACommission
+  getPREACommission,
+  getPropertyDepositLedger,
+  getPropertyDepositSummary,
+  createPropertyDepositPayout
 } from '../controllers/accountantController';
 import {
   createPayment,
@@ -25,6 +28,8 @@ import {
   getAcknowledgementDocument,
   getCompanyPropertyAccounts
 } from '../controllers/propertyAccountController';
+import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
+import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
 import {
   getAgentAccount,
   getCompanyAgentAccounts,
@@ -72,6 +77,11 @@ router.get('/prea-commission', isAccountant, (req, res) => {
   getPREACommission(req, res);
 });
 
+// Deposit ledger routes - require accountant role
+router.get('/property-accounts/:propertyId/deposits', isAccountant, getPropertyDepositLedger);
+router.get('/property-accounts/:propertyId/deposits/summary', isAccountant, getPropertyDepositSummary);
+router.post('/property-accounts/:propertyId/deposits/payout', isAccountant, createPropertyDepositPayout);
+
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', canManagePayments, getCompanyPayments);
 router.post('/payments', canManagePayments, createPaymentAccountant);
@@ -93,6 +103,16 @@ router.get('/property-accounts/:propertyId/payouts', isAccountant, getPayoutHist
 router.post('/property-accounts/sync', isAccountant, syncPropertyAccounts);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', isAccountant, getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', isAccountant, getAcknowledgementDocument);
+
+// Company account routes
+router.get('/company-account/summary', isAccountant, getCompanyAccountSummary);
+router.get('/company-account/transactions', isAccountant, getCompanyTransactions);
+router.post('/company-account/transactions', isAccountant, createCompanyTransaction);
+
+// Sales contracts
+router.post('/sales', isAccountant, createSalesContract);
+router.get('/sales', isAccountant, listSalesContracts);
+router.get('/sales/:id', isAccountant, getSalesContract);
 
 // Agent Account routes - require accountant role
 router.get('/agent-accounts', isAccountant, getCompanyAgentAccounts);

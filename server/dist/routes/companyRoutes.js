@@ -25,15 +25,15 @@ const upload = (0, multer_1.default)({
     },
 });
 // Protected routes
-router.get('/current', auth_1.auth, companyController_1.getCurrentCompany);
-router.put('/current', auth_1.auth, companyController_1.updateCurrentCompany);
+router.get('/current', auth_1.authWithCompany, companyController_1.getCurrentCompany);
+router.put('/current', auth_1.authWithCompany, companyController_1.updateCurrentCompany);
 // Public routes
 router.get('/', companyController_1.getCompanies);
 router.get('/:id', companyController_1.getCompany);
 // Protected routes
-router.post('/', auth_1.auth, companyController_1.createCompany);
-router.put('/:id', auth_1.auth, companyController_1.updateCompany);
-router.delete('/:id', auth_1.auth, companyController_1.deleteCompany);
+router.post('/', auth_1.authWithCompany, companyController_1.createCompany);
+router.put('/:id', auth_1.authWithCompany, companyController_1.updateCompany);
+router.delete('/:id', auth_1.authWithCompany, companyController_1.deleteCompany);
 // Logo upload route
-router.post('/:id/logo', auth_1.auth, upload.single('logo'), companyController_1.uploadCompanyLogo);
+router.post('/:id/logo', auth_1.authWithCompany, upload.single('logo'), companyController_1.uploadCompanyLogo);
 exports.default = router;

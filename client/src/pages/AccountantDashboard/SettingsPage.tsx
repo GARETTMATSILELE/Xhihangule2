@@ -117,6 +117,10 @@ const SettingsPage: React.FC = () => {
     taxRate: 0,
     invoiceFormat: 'INV-{year}-{number}',
     receiptFormat: 'REC-{year}-{number}',
+    // Commission Settings
+    preaPercentOfTotal: 0.03,
+    agentPercentOfRemaining: 0.6,
+    agencyPercentOfRemaining: 0.4,
     // Reporting Settings
     defaultReportPeriod: 'monthly',
     autoGenerateReports: false,
@@ -145,6 +149,10 @@ const SettingsPage: React.FC = () => {
         companyEmail: company.email || '',
         companyWebsite: company.website || '',
         bankAccounts: company.bankAccounts || [],
+        // Commission defaults
+        preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
+        agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
+        agencyPercentOfRemaining: company.commissionConfig?.agencyPercentOfRemaining ?? 0.4,
       }));
     }
   }, [company]);
@@ -280,6 +288,11 @@ const SettingsPage: React.FC = () => {
           email: settings.companyEmail,
           website: settings.companyWebsite,
           bankAccounts: settings.bankAccounts,
+          commissionConfig: {
+            preaPercentOfTotal: Number(settings.preaPercentOfTotal),
+            agentPercentOfRemaining: Number(settings.agentPercentOfRemaining),
+            agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining)
+          },
         };
 
         await apiService.updateCompany(companyUpdateData);
@@ -738,31 +751,47 @@ const SettingsPage: React.FC = () => {
                 margin="normal"
               />
             </Grid>
-
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>
-                Numbering Formats
+                Commission Splits
               </Typography>
               <TextField
                 fullWidth
-                label="Invoice Format"
-                name="invoiceFormat"
-                value={settings.invoiceFormat}
+                type="number"
+                label="PREA % of total commission (0-1)"
+                name="preaPercentOfTotal"
+                value={settings.preaPercentOfTotal}
                 onChange={handleInputChange}
                 margin="normal"
-                helperText="Use {year} and {number} as placeholders"
+                inputProps={{ step: 0.01, min: 0, max: 1 }}
+                helperText="Set to 0 for no PREA share"
               />
               <TextField
                 fullWidth
-                label="Receipt Format"
-                name="receiptFormat"
-                value={settings.receiptFormat}
+                type="number"
+                label="Agent % of remaining (0-1)"
+                name="agentPercentOfRemaining"
+                value={settings.agentPercentOfRemaining}
                 onChange={handleInputChange}
                 margin="normal"
-                helperText="Use {year} and {number} as placeholders"
+                inputProps={{ step: 0.01, min: 0, max: 1 }}
+              />
+              <TextField
+                fullWidth
+                type="number"
+                label="Agency % of remaining (0-1)"
+                name="agencyPercentOfRemaining"
+                value={settings.agencyPercentOfRemaining}
+                onChange={handleInputChange}
+                margin="normal"
+                inputProps={{ step: 0.01, min: 0, max: 1 }}
+                helperText="Agent + Agency of remaining must equal 1.0"
               />
             </Grid>
           </Grid>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Commission is computed as: Commission = amount * property.commission%. PREA share is taken off the top, then remaining is split between Agent and Agency. PREA can be 0.
+          </Alert>
         </TabPanel>
 
         {/* Reporting Settings */}

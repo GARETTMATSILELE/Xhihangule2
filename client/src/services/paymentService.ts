@@ -145,9 +145,7 @@ class PaymentService {
   async getAgents(): Promise<any[]> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.get('/users', {
-          params: { role: 'agent' }
-        });
+        const response = await api.get('/users/agents');
         return response.data;
       });
     } catch (error: any) {
@@ -240,8 +238,15 @@ class PaymentService {
         config.params = { companyId };
       }
       
-      const response = await publicApi.get(`/payments/public/${id}/receipt`, config);
-      return response.data.data;
+      // Try rental/standard payment first; if not found, try levy receipt endpoint
+      try {
+        const response = await publicApi.get(`/payments/public/${id}/receipt`, config);
+        return response.data.data;
+      } catch (err: any) {
+        // Fallback to levy route
+        const levyResp = await publicApi.get(`/levy-payments/public/${id}/receipt`, config);
+        return levyResp.data.data;
+      }
     } catch (error: any) {
       console.error('Error fetching payment receipt:', error);
       throw new Error(error.response?.data?.message || 'Failed to fetch receipt');
@@ -257,9 +262,13 @@ class PaymentService {
       if (companyId) {
         config.params = { companyId };
       }
-      
-      const response = await publicApi.get(`/payments/public/${id}/receipt/download`, config);
-      return response.data;
+      try {
+        const response = await publicApi.get(`/payments/public/${id}/receipt/download`, config);
+        return response.data;
+      } catch (err: any) {
+        const levyResp = await publicApi.get(`/levy-payments/public/${id}/receipt/download`, config);
+        return levyResp.data;
+      }
     } catch (error: any) {
       console.error('Error downloading payment receipt (public):', error);
       throw new Error(error.response?.data?.message || 'Failed to download receipt');
@@ -288,6 +297,24 @@ class PaymentService {
   async getAcknowledgementDocument(propertyId: string, paymentId: string) {
     const response = await api.get(`/api/property-accounts/${propertyId}/acknowledgement/${paymentId}`);
     return response.data;
+  }
+
+  // Deposits: get property deposit ledger
+  async getPropertyDepositLedger(propertyId: string): Promise<{ entries: any[]; balance: number }> {
+    const response = await api.get(`/accountants/property-accounts/${propertyId}/deposits`);
+    return response.data.data;
+  }
+
+  // Deposits: get property deposit summary (held amount)
+  async getPropertyDepositSummary(propertyId: string): Promise<{ totalPaid: number; totalPayout: number; held: number }> {
+    const response = await api.get(`/accountants/property-accounts/${propertyId}/deposits/summary`);
+    return response.data.data;
+  }
+
+  // Deposits: create payout
+  async createPropertyDepositPayout(propertyId: string, data: { amount: number; paymentMethod?: string; notes?: string; tenantId?: string; recipientName?: string }) {
+    const response = await api.post(`/accountants/property-accounts/${propertyId}/deposits/payout`, data);
+    return response.data.data;
   }
 
   async createLevyPayment(paymentData: any): Promise<any> {

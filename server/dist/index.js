@@ -46,6 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const compression_1 = __importDefault(require("compression"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
@@ -55,7 +56,7 @@ const tenantRoutes_1 = __importDefault(require("./routes/tenantRoutes"));
 const leaseRoutes_1 = __importDefault(require("./routes/leaseRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
 const chartRoutes_1 = __importDefault(require("./routes/chartRoutes"));
-const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
+const auth_1 = __importDefault(require("./routes/auth"));
 const companyRoutes_1 = __importDefault(require("./routes/companyRoutes"));
 const userRoutes_1 = __importDefault(require("./routes/userRoutes"));
 const agentRoutes_1 = __importDefault(require("./routes/agentRoutes"));
@@ -70,7 +71,12 @@ const municipalPaymentRoutes_1 = __importDefault(require("./routes/municipalPaym
 const paymentRequestRoutes_1 = __importDefault(require("./routes/paymentRequestRoutes"));
 const invoiceRoutes_1 = __importDefault(require("./routes/invoiceRoutes"));
 const syncRoutes_1 = __importDefault(require("./routes/syncRoutes"));
+const dealRoutes_1 = __importDefault(require("./routes/dealRoutes"));
+const buyerRoutes_1 = __importDefault(require("./routes/buyerRoutes"));
+const leadRoutes_1 = __importDefault(require("./routes/leadRoutes"));
+const viewingRoutes_1 = __importDefault(require("./routes/viewingRoutes"));
 const database_1 = require("./config/database");
+const errorHandler_1 = require("./middleware/errorHandler");
 const http_1 = require("http");
 const socket_1 = require("./config/socket");
 const startSyncServices_1 = require("./scripts/startSyncServices");
@@ -107,26 +113,30 @@ app.use((0, cors_1.default)({
 app.use((0, cookie_parser_1.default)());
 app.use(express_1.default.json({ limit: '50mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
-// Debug middleware
-app.use((req, res, next) => {
-    console.log('Incoming request:', {
-        method: req.method,
-        url: req.url,
-        path: req.path,
-        baseUrl: req.baseUrl,
-        originalUrl: req.originalUrl,
-        headers: req.headers,
-        body: req.body
+// Enable gzip compression
+app.use((0, compression_1.default)());
+// Debug middleware only in development
+if (process.env.NODE_ENV !== 'production') {
+    app.use((req, res, next) => {
+        console.log('Incoming request:', {
+            method: req.method,
+            url: req.url,
+            path: req.path,
+            baseUrl: req.baseUrl,
+            originalUrl: req.originalUrl,
+            headers: req.headers,
+            body: req.body
+        });
+        next();
     });
-    next();
-});
+}
 // Routes
 app.use('/api/properties', propertyRoutes_1.default);
 app.use('/api/tenants', tenantRoutes_1.default);
 app.use('/api/leases', leaseRoutes_1.default);
 app.use('/api/payments', paymentRoutes_1.default);
 app.use('/api/charts', chartRoutes_1.default);
-app.use('/api/auth', authRoutes_1.default);
+app.use('/api/auth', auth_1.default);
 app.use('/api/companies', companyRoutes_1.default);
 app.use('/api/users', userRoutes_1.default);
 app.use('/api/agents', agentRoutes_1.default);
@@ -136,6 +146,10 @@ app.use('/api/property-owners', propertyOwnerRoutes_1.default);
 app.use('/api/owners', ownerRoutes_1.default);
 app.use('/api/health', healthRoutes_1.default);
 app.use('/api/maintenance', maintenanceRequestRoutes_1.default);
+app.use('/api/deals', dealRoutes_1.default);
+app.use('/api/buyers', buyerRoutes_1.default);
+app.use('/api/leads', leadRoutes_1.default);
+app.use('/api/viewings', viewingRoutes_1.default);
 app.use('/api/levy-payments', levyPaymentRoutes_1.default);
 app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
@@ -144,9 +158,17 @@ app.use('/api/sync', syncRoutes_1.default);
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {
     const staticPath = path_1.default.join(__dirname, 'public');
+    // Set long-term caching for hashed static assets
+    app.use((req, res, next) => {
+        if (req.path.startsWith('/static/')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+        next();
+    });
     app.use(express_1.default.static(staticPath));
-    // SPA fallback
+    // SPA fallback with no-store to avoid caching HTML shell
     app.get('*', (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
         res.sendFile(path_1.default.join(staticPath, 'index.html'));
     });
 }
@@ -159,14 +181,8 @@ if (process.env.NODE_ENV === 'production') {
 app.get('/api/test', (req, res) => {
     res.json({ message: 'API is working' });
 });
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error('Error:', err);
-    res.status(err.status || 500).json({
-        status: 'error',
-        message: err.message || 'Internal server error'
-    });
-});
+// Centralized error handling middleware
+app.use(errorHandler_1.errorHandler);
 const PORT = process.env.PORT || 5000;
 const httpServer = (0, http_1.createServer)(app);
 // Initialize Socket.IO

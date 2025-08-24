@@ -142,6 +142,8 @@ export interface PaymentFilter {
   propertyId?: string;
   paymentMethod?: PaymentMethod;
   currency?: Currency;
+  // Custom filter to show only payments with a deposit portion
+  onlyDeposits?: string; // 'true' to enable
 }
 
 export interface PaymentSummary {

@@ -40,6 +40,12 @@ const FileSchema = new mongoose_1.Schema({
         ref: 'Property',
         required: true
     },
+    companyId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        immutable: true
+    },
     fileName: {
         type: String,
         required: true
@@ -70,6 +76,7 @@ const FileSchema = new mongoose_1.Schema({
 });
 // Add index for faster queries
 FileSchema.index({ propertyId: 1 });
+FileSchema.index({ companyId: 1 });
 FileSchema.index({ uploadedBy: 1 });
 FileSchema.index({ ownerId: 1 });
 FileSchema.index({ fileType: 1 });

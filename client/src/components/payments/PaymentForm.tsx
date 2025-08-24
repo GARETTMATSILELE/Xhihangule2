@@ -31,7 +31,6 @@ import { PaymentFormData } from '../../types/payment';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import publicApi from '../../api/publicApi';
 import { useAuth } from '../../contexts/AuthContext';
 
 export interface PaymentFormProps {
@@ -181,14 +180,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   }
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchAgents = async () => {
       try {
         setLoadingData(true);
         setError(null);
-        
-        // Only fetch agents since properties and tenants are passed as props
-        const agentsResponse = await publicApi.get('/users/public/agents');
-        setAgents(agentsResponse.data.data || []);
+        const agentsList = await paymentService.getAgents();
+        setAgents(Array.isArray(agentsList) ? agentsList : []);
       } catch (error) {
         setError('Failed to fetch agents. Please try again later.');
         console.error('Error fetching agents:', error);
@@ -197,7 +194,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       }
     };
 
-    fetchData();
+    fetchAgents();
   }, []); // Only run once on mount
 
   const handleSubmit = async (e: React.FormEvent) => {

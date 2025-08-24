@@ -73,14 +73,13 @@ const userSchema = new mongoose_1.Schema({
     },
     role: {
         type: String,
-        enum: ['admin', 'agent', 'accountant', 'owner'],
+        enum: ['admin', 'agent', 'accountant', 'owner', 'sales'],
         default: 'agent'
     },
     companyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
-        required: true,
-        immutable: true
+        required: false
     },
     isActive: {
         type: Boolean,

@@ -62,10 +62,10 @@ router.get('/by-property/:propertyId', (req, res) => __awaiter(void 0, void 0, v
 router.post('/public', propertyOwnerController_1.createPropertyOwnerPublic);
 router.patch('/public/:id', propertyOwnerController_1.updatePropertyOwnerPublic);
 router.delete('/public/:id', propertyOwnerController_1.deletePropertyOwnerPublic);
-// CRUD routes for property owners
-router.post('/', auth_1.auth, propertyOwnerController_1.createPropertyOwner);
-router.get('/', auth_1.auth, propertyOwnerController_1.getPropertyOwners);
-router.get('/:id', auth_1.auth, propertyOwnerController_1.getPropertyOwnerById);
-router.patch('/:id', auth_1.auth, propertyOwnerController_1.updatePropertyOwner);
-router.delete('/:id', auth_1.auth, propertyOwnerController_1.deletePropertyOwner);
+// CRUD routes for property owners (company-scoped)
+router.post('/', auth_1.authWithCompany, propertyOwnerController_1.createPropertyOwner);
+router.get('/', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwners);
+router.get('/:id', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwnerById);
+router.patch('/:id', auth_1.authWithCompany, propertyOwnerController_1.updatePropertyOwner);
+router.delete('/:id', auth_1.authWithCompany, propertyOwnerController_1.deletePropertyOwner);
 exports.default = router;

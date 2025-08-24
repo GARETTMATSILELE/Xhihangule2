@@ -67,14 +67,14 @@ const AccountantPaymentsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         const [propertiesData, tenantsData, paymentsData] = await Promise.all([
-          propertyService.getPublicProperties(),
-          tenantService.getAllPublic(),
-          paymentService.getAllPublic()
+          propertyService.getProperties(),
+          tenantService.getAll(),
+          paymentService.getPayments()
         ]);
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
-        const payments = Array.isArray(paymentsData) ? paymentsData : (paymentsData.data || []);
+        const payments = Array.isArray(paymentsData) ? paymentsData : [];
         setProperties(properties);
         setTenants(tenants);
         setPayments(payments);
@@ -110,8 +110,8 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
         if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
-        const response = await paymentService.getAllPublic(user?.companyId, filterParams);
-        setPayments(response.data);
+        const payments = await paymentService.getPayments(filterParams);
+        setPayments(payments);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {

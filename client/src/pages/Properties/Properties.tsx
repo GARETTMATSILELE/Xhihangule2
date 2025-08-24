@@ -232,8 +232,12 @@ export const Properties: React.FC = () => {
         
         // Update local state
         setAdminProperties(prev => prev.map(p => p._id === _id ? updatedProperty : p));
+      } else if (isAgentRoute) {
+        // Agent route: call agent endpoint to update own property
+        const updated = await agentService.updateProperty(_id, updateData);
+        setAgentProperties(prev => prev.map(p => p._id === _id ? (updated as any) : p));
       } else {
-        // Use context for non-admin routes
+        // Use context for non-admin/agent routes
         await contextUpdateProperty(_id, {
           ...updateData,
           companyId: user.companyId

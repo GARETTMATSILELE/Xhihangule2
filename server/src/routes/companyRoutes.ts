@@ -10,7 +10,7 @@ import {
   uploadCompanyLogo,
   updateCurrentCompany
 } from '../controllers/companyController';
-import { auth } from '../middleware/auth';
+import { authWithCompany } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -31,19 +31,19 @@ const upload = multer({
 });
 
 // Protected routes
-router.get('/current', auth, getCurrentCompany);
-router.put('/current', auth, updateCurrentCompany);
+router.get('/current', authWithCompany, getCurrentCompany);
+router.put('/current', authWithCompany, updateCurrentCompany);
 
 // Public routes
 router.get('/', getCompanies);
 router.get('/:id', getCompany);
 
 // Protected routes
-router.post('/', auth, createCompany);
-router.put('/:id', auth, updateCompany);
-router.delete('/:id', auth, deleteCompany);
+router.post('/', authWithCompany, createCompany);
+router.put('/:id', authWithCompany, updateCompany);
+router.delete('/:id', authWithCompany, deleteCompany);
 
 // Logo upload route
-router.post('/:id/logo', auth, upload.single('logo'), uploadCompanyLogo);
+router.post('/:id/logo', authWithCompany, upload.single('logo'), uploadCompanyLogo);
 
 export default router; 

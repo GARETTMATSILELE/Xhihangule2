@@ -23,9 +23,12 @@ interface PopulatedFile extends Omit<IFile, 'propertyId' | 'uploadedBy'> {
 // Get all files for a property
 export const getFiles = async (req: AuthRequest, res: Response) => {
   try {
-    console.log('getFiles called: returning all files');
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    console.log('getFiles called: returning files for company', req.user.companyId);
     
-    const files = await File.find()
+    const files = await File.find({ companyId: req.user.companyId })
       .populate<{ propertyId: PopulatedProperty }>('propertyId', 'name')
       .populate<{ uploadedBy: PopulatedUser }>('uploadedBy', 'firstName lastName');
     
@@ -65,16 +68,17 @@ export const uploadFile = async (req: AuthRequest, res: Response) => {
 
     const { propertyId, fileType } = req.body;
     const userId = req.user?.userId;
+    const companyId = req.user?.companyId;
 
-    if (!propertyId || !fileType || !userId) {
+    if (!propertyId || !fileType || !userId || !companyId) {
       return res.status(400).json({ 
         message: 'Missing required fields',
-        details: { propertyId, fileType, userId }
+        details: { propertyId, fileType, userId, companyId }
       });
     }
 
     // Check if property exists
-    const property = await Property.findById(propertyId);
+    const property = await Property.findOne({ _id: propertyId, companyId });
     if (!property) {
       return res.status(404).json({ message: 'Property not found' });
     }
@@ -82,6 +86,7 @@ export const uploadFile = async (req: AuthRequest, res: Response) => {
     // Create file record
     const file = new File({
       propertyId,
+      companyId,
       fileName: req.file.originalname,
       fileType,
       fileUrl: req.file.buffer.toString('base64'),

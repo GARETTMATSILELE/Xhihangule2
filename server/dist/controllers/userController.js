@@ -20,7 +20,7 @@ var __rest = (this && this.__rest) || function (s, e) {
     return t;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createUser = exports.getCurrentUser = void 0;
+exports.updateUserById = exports.createUser = exports.getCurrentUser = void 0;
 const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
 const getCurrentUser = (userId) => __awaiter(void 0, void 0, void 0, function* () {
@@ -45,7 +45,7 @@ exports.getCurrentUser = getCurrentUser;
 const createUser = (userData) => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Creating user with data:', userData);
     // Check if user already exists
-    const existingUser = yield User_1.User.findOne({ email: userData.email });
+    const existingUser = yield User_1.User.findOne({ email: userData.email, companyId: userData.companyId });
     if (existingUser) {
         throw new errorHandler_1.AppError('User already exists', 400);
     }
@@ -57,3 +57,33 @@ const createUser = (userData) => __awaiter(void 0, void 0, void 0, function* () 
     return userWithoutPassword;
 });
 exports.createUser = createUser;
+const updateUserById = (id, updates, currentCompanyId) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!id) {
+        throw new errorHandler_1.AppError('User ID is required', 400);
+    }
+    const user = yield User_1.User.findById(id);
+    if (!user) {
+        throw new errorHandler_1.AppError('User not found', 404);
+    }
+    // Enforce company scoping if provided
+    if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
+        throw new errorHandler_1.AppError('Forbidden: User does not belong to your company', 403);
+    }
+    // Apply allowed updates
+    if (typeof updates.firstName === 'string')
+        user.firstName = updates.firstName;
+    if (typeof updates.lastName === 'string')
+        user.lastName = updates.lastName;
+    if (typeof updates.email === 'string')
+        user.email = updates.email;
+    if (typeof updates.role === 'string')
+        user.role = updates.role;
+    // If password provided and non-empty, set it so pre-save hook re-hashes
+    if (typeof updates.password === 'string' && updates.password.trim().length > 0) {
+        user.password = updates.password;
+    }
+    yield user.save();
+    const _a = user.toObject(), { password } = _a, userWithoutPassword = __rest(_a, ["password"]);
+    return userWithoutPassword;
+});
+exports.updateUserById = updateUserById;

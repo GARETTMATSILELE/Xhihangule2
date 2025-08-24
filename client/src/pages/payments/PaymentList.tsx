@@ -31,7 +31,7 @@ import {
 } from '@mui/icons-material';
 import { useLeaseService } from '../../services/leaseService';
 import paymentService from '../../services/paymentService';
-import publicApi from '../../api/publicApi';
+import api from '../../api/axios';
 import { Payment, PaymentMethod } from '../../types/payment';
 import { Tenant } from '../../types/tenant';
 import { Lease } from '../../types/lease';
@@ -69,8 +69,8 @@ export const PaymentList: React.FC = () => {
 
   const fetchPayments = async () => {
     try {
-      const response = await publicApi.get('/payments/public');
-      setPayments(response.data.data || []);
+      const data = await paymentService.getPayments();
+      setPayments(data || []);
     } catch (error) {
       console.error('Error fetching payments:', error);
     }
@@ -78,8 +78,8 @@ export const PaymentList: React.FC = () => {
 
   const fetchTenants = async () => {
     try {
-      const response = await publicApi.get('/tenants/public');
-      setTenants(response.data.tenants || []);
+      const response = await api.get('/tenants');
+      setTenants(Array.isArray(response.data) ? response.data : response.data.data || []);
     } catch (error) {
       console.error('Error fetching tenants:', error);
     }
@@ -96,7 +96,7 @@ export const PaymentList: React.FC = () => {
 
   const fetchProperties = async () => {
     try {
-      const response = await publicApi.get('/properties/public-filtered');
+      const response = await api.get('/properties');
       setProperties(Array.isArray(response.data) ? response.data : response.data.data || []);
     } catch (error) {
       console.error('Error fetching properties:', error);
@@ -165,7 +165,7 @@ export const PaymentList: React.FC = () => {
           text: 'Payment updates are not currently supported'
         });
       } else {
-        await paymentService.createPaymentPublic(formData);
+        await paymentService.createPayment(formData as any);
         setMessage({
           type: 'success',
           text: 'Payment created successfully'

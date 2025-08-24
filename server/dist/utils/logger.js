@@ -14,8 +14,9 @@ const logger = winston_1.default.createLogger({
     ]
 });
 exports.logger = logger;
-if (process.env.NODE_ENV !== 'production') {
-    logger.add(new winston_1.default.transports.Console({
-        format: winston_1.default.format.combine(winston_1.default.format.colorize(), winston_1.default.format.simple())
-    }));
-}
+// Always log to console so platform log streams (e.g., Azure) capture output
+logger.add(new winston_1.default.transports.Console({
+    format: process.env.NODE_ENV === 'production'
+        ? winston_1.default.format.combine(winston_1.default.format.timestamp(), winston_1.default.format.json())
+        : winston_1.default.format.combine(winston_1.default.format.colorize(), winston_1.default.format.simple())
+}));

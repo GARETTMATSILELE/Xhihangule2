@@ -137,9 +137,45 @@ const companySchema = new mongoose_1.Schema({
             },
             message: 'Company can have a maximum of 2 bank accounts'
         }
+    },
+    commissionConfig: {
+        preaPercentOfTotal: {
+            type: Number,
+            min: 0,
+            max: 1,
+            default: 0.03
+        },
+        agentPercentOfRemaining: {
+            type: Number,
+            min: 0,
+            max: 1,
+            default: 0.6
+        },
+        agencyPercentOfRemaining: {
+            type: Number,
+            min: 0,
+            max: 1,
+            default: 0.4
+        }
     }
 }, {
     timestamps: true
+});
+// Ensure agent + agency percentages of remaining equal 1.0
+companySchema.pre('validate', function (next) {
+    // @ts-ignore
+    const cfg = this.commissionConfig;
+    if (cfg) {
+        const sum = Number(cfg.agentPercentOfRemaining || 0) + Number(cfg.agencyPercentOfRemaining || 0);
+        // allow small floating errors
+        if (Math.abs(sum - 1) > 1e-6) {
+            this.invalidate('commissionConfig.agencyPercentOfRemaining', 'Agent and Agency percentages of remaining must sum to 1.0');
+        }
+        if (cfg.preaPercentOfTotal < 0 || cfg.preaPercentOfTotal > 1) {
+            this.invalidate('commissionConfig.preaPercentOfTotal', 'PREA percent must be between 0 and 1');
+        }
+    }
+    next();
 });
 // Remove index definitions as they are now handled in indexes.ts
 exports.Company = mongoose_1.default.model('Company', companySchema, collections_1.COLLECTIONS.COMPANIES);
