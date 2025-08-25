@@ -40,16 +40,16 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
         const firstName = firstNameRaw || 'User';
         const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
 
-        createdUser = await User.create([
-          {
-            email,
-            password,
-            firstName,
-            lastName,
-            role: 'admin',
-            isActive: true
-          }
-        ], { session }).then((docs) => docs[0]);
+        const newUser = new User({
+          email,
+          password,
+          firstName,
+          lastName,
+          role: 'admin',
+          isActive: true
+        });
+        await newUser.save({ session });
+        createdUser = newUser;
         console.log('User created successfully:', { id: createdUser._id, email: createdUser.email });
 
         // Create company if provided
@@ -60,12 +60,10 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
             throw new AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
           }
           console.log('Creating new company...');
-          const newCompany = await Company.create([
-            {
-              ...company,
-              ownerId: createdUser._id
-            }
-          ], { session }).then((docs) => docs[0]);
+          const newCompany = await Company.create({
+            ...company,
+            ownerId: createdUser._id
+          }, { session });
           companyId = newCompany._id;
           companyData = newCompany;
           console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
