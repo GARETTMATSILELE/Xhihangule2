@@ -60,10 +60,11 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
             throw new AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
           }
           console.log('Creating new company...');
-          const newCompany = await Company.create({
+          const companyDoc = new Company({
             ...company,
             ownerId: createdUser._id
-          }, { session });
+          });
+          const newCompany = await companyDoc.save({ session });
           companyId = newCompany._id;
           companyData = newCompany;
           console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
