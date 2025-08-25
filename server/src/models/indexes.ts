@@ -10,27 +10,6 @@ import { User, IUser } from './User';
 import { PropertyOwner, IPropertyOwner } from './PropertyOwner';
 import File from './File';
 
-// Helper function to listen for indexes
-const listenForIndexes = (collection: mongoose.Collection, modelName: string) => {
-  collection.indexes().then(indexes => {
-    console.log(`${modelName} indexes:`, indexes);
-  }).catch(error => {
-    console.error(`Error getting ${modelName} indexes:`, error);
-  });
-};
-
-// Listen for indexes for all models
-listenForIndexes(Payment.collection, 'Payment');
-listenForIndexes(Property.collection, 'Property');
-listenForIndexes(Lease.collection, 'Lease');
-listenForIndexes(Tenant.collection, 'Tenant');
-listenForIndexes(Company.collection, 'Company');
-listenForIndexes(MaintenanceRequest.collection, 'MaintenanceRequest');
-listenForIndexes(ChartData.collection, 'ChartData');
-listenForIndexes(User.collection, 'User');
-listenForIndexes(PropertyOwner.collection, 'PropertyOwner');
-listenForIndexes(File.collection, 'File');
-
 // Query Optimization Functions
 export const optimizePaymentQueries = {
   getPaymentsByDateRange: async (startDate: Date, endDate: Date, companyId: string) => {
@@ -62,23 +41,43 @@ export const optimizePaymentQueries = {
 // Index Creation Function - Now only logs existing indexes
 export async function createIndexes() {
   try {
-    // Log existing indexes for all models
+    // Ensure collections exist, then log existing indexes for all models
     const models = [
-      { collection: User.collection, name: 'User' },
-      { collection: Company.collection, name: 'Company' },
-      { collection: Property.collection, name: 'Property' },
-      { collection: Tenant.collection, name: 'Tenant' },
-      { collection: Lease.collection, name: 'Lease' },
-      { collection: Payment.collection, name: 'Payment' },
-      { collection: MaintenanceRequest.collection, name: 'MaintenanceRequest' },
-      { collection: ChartData.collection, name: 'ChartData' },
-      { collection: PropertyOwner.collection, name: 'PropertyOwner' },
-      { collection: File.collection, name: 'File' }
+      { model: User, name: 'User' },
+      { model: Company, name: 'Company' },
+      { model: Property, name: 'Property' },
+      { model: Tenant, name: 'Tenant' },
+      { model: Lease, name: 'Lease' },
+      { model: Payment, name: 'Payment' },
+      { model: MaintenanceRequest, name: 'MaintenanceRequest' },
+      { model: ChartData, name: 'ChartData' },
+      { model: PropertyOwner, name: 'PropertyOwner' },
+      { model: File, name: 'File' }
     ];
 
-    for (const model of models) {
-      const indexes = await model.collection.indexes();
-      console.log(`${model.name} indexes:`, indexes);
+    for (const { model, name } of models) {
+      // Try to create the collection if it doesn't exist yet
+      try {
+        await model.createCollection();
+      } catch (createErr: any) {
+        // Ignore "namespace exists" errors (code 48) and proceed
+        if (createErr && createErr.code !== 48) {
+          console.warn(`Could not ensure collection for ${name}:`, createErr);
+        }
+      }
+
+      // Now attempt to read indexes, but ignore NamespaceNotFound (code 26)
+      try {
+        const indexes = await model.collection.indexes();
+        console.log(`${name} indexes:`, indexes);
+      } catch (error: any) {
+        if (error && error.code === 26) {
+          // Collection still does not exist; skip noisy error
+          console.log(`${name} collection not found yet; skipping index check`);
+        } else {
+          console.error(`Error getting ${name} indexes:`, error);
+        }
+      }
     }
 
     console.log('All indexes verified successfully');
