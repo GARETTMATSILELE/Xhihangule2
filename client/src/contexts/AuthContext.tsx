@@ -322,7 +322,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(null);
       setLoading(true);
       
-      const response = await api.post('/auth/signup', { email, password, name, company });
+      // Send company only if provided; signup no longer requires company
+      const payload: any = { email, password, name };
+      if (company && Object.keys(company).length > 0) {
+        payload.company = company;
+      }
+      const response = await api.post('/auth/signup', payload);
       const { user: userData, company: companyData, token, refreshToken: newRefreshToken } = response.data;
       
       if (!token) {

@@ -2593,3 +2593,40 @@
 {"level":"info","message":"Completed scheduled sync: hourly_sync in 154ms","timestamp":"2025-08-26T10:00:00.321Z"}
 {"level":"info","message":"Hourly synchronization completed","timestamp":"2025-08-26T10:00:00.322Z"}
 {"level":"info","message":"Completed scheduled sync: hourly_sync in 258ms","timestamp":"2025-08-26T10:00:00.324Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-08-26T11:00:00.247Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-08-26T11:00:00.342Z"}
+{"level":"info","message":"Syncing changes since 2025-08-26T10:00:00.343Z","timestamp":"2025-08-26T11:00:00.346Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-08-26T11:00:00.544Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-08-26T11:00:00.544Z"}
+{"level":"info","message":"Syncing changes since 2025-08-26T10:00:00.545Z","timestamp":"2025-08-26T11:00:00.545Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-08-26T11:00:00.823Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 285ms","timestamp":"2025-08-26T11:00:00.833Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-08-26T11:00:00.839Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 623ms","timestamp":"2025-08-26T11:00:00.843Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-08-26T12:00:00.215Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-08-26T12:00:00.325Z"}
+{"level":"info","message":"Syncing changes since 2025-08-26T11:00:00.331Z","timestamp":"2025-08-26T12:00:00.331Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-08-26T12:00:00.600Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-08-26T12:00:00.601Z"}
+{"level":"info","message":"Syncing changes since 2025-08-26T11:00:00.602Z","timestamp":"2025-08-26T12:00:00.602Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-08-26T12:00:01.343Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 1151ms","timestamp":"2025-08-26T12:00:01.347Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-08-26T12:00:01.359Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 761ms","timestamp":"2025-08-26T12:00:01.362Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-08-26T12:17:59.811Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Aug 27 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.321Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-08-26T12:18:00.345Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Aug 26 2025 15:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.370Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-08-26T12:18:00.390Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Aug 31 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.396Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-08-26T12:18:00.491Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Mon Sep 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.523Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-08-26T12:18:00.559Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-08-26T12:18:00.623Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Aug 27 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.676Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Aug 26 2025 15:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.727Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Aug 31 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.809Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Mon Sep 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-08-26T12:18:00.894Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-08-26T12:18:00.975Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-08-26T12:18:01.110Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-08-26T12:18:01.206Z"}

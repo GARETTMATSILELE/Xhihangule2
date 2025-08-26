@@ -26,7 +26,11 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError('Email already registered', 400);
     }
 
-    // Create user and company atomically in a transaction
+    // Determine role: first ever user becomes admin, others default to agent
+    const totalUsers = await User.countDocuments();
+    const assignedRole: UserRole = totalUsers === 0 ? 'admin' : 'agent';
+
+    // Create user and (optionally) company atomically in a transaction
     const session = await mongoose.startSession();
     let createdUser: any = null;
     let companyData: any = null;
@@ -45,14 +49,14 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
           password,
           firstName,
           lastName,
-          role: 'admin',
+          role: assignedRole,
           isActive: true
         });
         await newUser.save({ session });
         createdUser = newUser;
         console.log('User created successfully:', { id: createdUser._id, email: createdUser.email });
 
-        // Create company if provided
+        // Create company if provided (optional now)
         if (company) {
           const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'] as const;
           const missing = requiredCompanyFields.filter((f) => !company[f]);
@@ -94,7 +98,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
             password,
             firstName,
             lastName,
-            role: 'admin',
+            role: assignedRole,
             isActive: true
           });
           console.log('User created successfully (fallback):', { id: createdUser._id, email: createdUser.email });
@@ -115,14 +119,6 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
               await createdUser.save();
               console.log('User updated with company ID (fallback)');
             } catch (fallbackCompanyError: any) {
-              // Compensation: remove created user to maintain consistency
-              try {
-                await User.deleteOne({ _id: createdUser._id });
-                console.warn('Fallback compensation: created user removed due to company creation failure');
-              } catch (cleanupError) {
-                console.error('Failed to cleanup orphan user after company failure:', cleanupError);
-              }
-
               if (fallbackCompanyError?.code === 11000) {
                 const dupMsg = String(fallbackCompanyError?.message || 'Duplicate key error');
                 if (dupMsg.includes('tinNumber') || dupMsg.includes('taxNumber')) {
@@ -130,7 +126,8 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
                 }
                 return next(new AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
               }
-              return next(fallbackCompanyError);
+              // Do not rollback user creation if optional company creation fails
+              console.warn('Optional company creation failed; proceeding with user only');
             }
           }
         } catch (fallbackUserError: any) {

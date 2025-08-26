@@ -10,7 +10,7 @@ import {
   uploadCompanyLogo,
   updateCurrentCompany
 } from '../controllers/companyController';
-import { authWithCompany } from '../middleware/auth';
+import { auth, authWithCompany } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -31,7 +31,8 @@ const upload = multer({
 });
 
 // Protected routes
-router.get('/current', authWithCompany, getCurrentCompany);
+// Allow fetching current company even if none exists (returns 404 inside controller)
+router.get('/current', auth, getCurrentCompany);
 router.put('/current', authWithCompany, updateCurrentCompany);
 
 // Public routes
@@ -39,7 +40,8 @@ router.get('/', getCompanies);
 router.get('/:id', getCompany);
 
 // Protected routes
-router.post('/', authWithCompany, createCompany);
+// Allow creating a company even if user has no company yet
+router.post('/', auth, createCompany);
 router.put('/:id', authWithCompany, updateCompany);
 router.delete('/:id', authWithCompany, deleteCompany);
 

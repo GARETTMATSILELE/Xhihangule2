@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 
-const steps = ['Account Details', 'Company Information'];
+const steps = ['Account Details'];
 
 export interface AdminSignupProps {}
 
@@ -29,14 +29,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
     password: '',
     confirmPassword: '',
     name: '',
-    // Company Details
-    companyName: '',
-    companyAddress: '',
-    companyPhone: '',
-    companyEmail: '',
-    companyWebsite: '',
-    companyRegistration: '',
-    companyTinNumber: '',
+    // Company Details removed for initial signup
   });
   const [error, setError] = useState('');
 
@@ -72,30 +65,14 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
     e.preventDefault();
     setError('');
 
-    // Validate company details
-    if (!formData.companyName || !formData.companyAddress || !formData.companyPhone || 
-        !formData.companyEmail || !formData.companyRegistration || !formData.companyTinNumber) {
-      setError('Please fill in all required company fields');
-      return;
-    }
-
     try {
-      // Sign up with both user and company details
+      // Sign up with account details only
       await signup(
         formData.email,
         formData.password,
-        formData.name,
-        {
-          name: formData.companyName,
-          address: formData.companyAddress,
-          phone: formData.companyPhone,
-          email: formData.companyEmail,
-          website: formData.companyWebsite,
-          registrationNumber: formData.companyRegistration,
-          tinNumber: formData.companyTinNumber,
-        }
+        formData.name
       );
-      navigate('/login', { state: { message: 'Registration successful! Please log in.' } });
+      navigate('/settings', { state: { message: 'Account created. Please complete company setup.' } });
     } catch (err: any) {
       setError(err.message || 'An error occurred during registration');
     }
@@ -150,83 +127,6 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
               type="password"
               id="confirmPassword"
               value={formData.confirmPassword}
-              onChange={handleChange}
-            />
-          </>
-        );
-      case 1:
-        return (
-          <>
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="companyName"
-              label="Company Name"
-              name="companyName"
-              value={formData.companyName}
-              onChange={handleChange}
-            />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="companyAddress"
-              label="Company Address"
-              name="companyAddress"
-              multiline
-              rows={3}
-              value={formData.companyAddress}
-              onChange={handleChange}
-            />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="companyPhone"
-              label="Company Phone"
-              name="companyPhone"
-              value={formData.companyPhone}
-              onChange={handleChange}
-            />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="companyEmail"
-              label="Company Email"
-              name="companyEmail"
-              type="email"
-              value={formData.companyEmail}
-              onChange={handleChange}
-            />
-            <TextField
-              margin="normal"
-              fullWidth
-              id="companyWebsite"
-              label="Company Website"
-              name="companyWebsite"
-              value={formData.companyWebsite}
-              onChange={handleChange}
-            />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="companyRegistration"
-              label="Company Registration Number"
-              name="companyRegistration"
-              value={formData.companyRegistration}
-              onChange={handleChange}
-            />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="companyTinNumber"
-              label="Company Tax Number"
-              name="companyTinNumber"
-              value={formData.companyTinNumber}
               onChange={handleChange}
             />
           </>
