@@ -39,7 +39,8 @@ class AuthService {
                 return;
             const isAvailable = yield (0, database_1.isDatabaseAvailable)();
             if (!isAvailable) {
-                throw new Error('Database is not available');
+                // Return an operational error so the API surfaces 503 instead of 500
+                throw new errorHandler_1.AppError('Service temporarily unavailable', 503, 'SERVICE_UNAVAILABLE');
             }
             this.isInitialized = true;
         });

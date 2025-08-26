@@ -151,16 +151,15 @@ api.interceptors.response.use(
       }
     }
 
-    // If the error is 403 (forbidden), treat it as an auth failure and redirect to login
+    // If the error is 403 (forbidden), do NOT clear auth; surface to caller
     if (error.response?.status === 403) {
-      console.log('403 forbidden detected, redirecting to login');
-      setTokens(null, null);
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-      window.dispatchEvent(new CustomEvent('authError', { 
-        detail: 'Your session has expired or you do not have access. Please log in again.' 
-      }));
+      const code = (error.response?.data as any)?.code;
+      console.log('403 forbidden detected', { code, url: error.config?.url });
+      // Business-rule 403s: user may be authenticated but lacks company/permission
+      if (code === 'NO_COMPANY' || code === 'INSUFFICIENT_PERMISSIONS' || code === 'OWNER_ACCESS_REQUIRED') {
+        return Promise.reject(error);
+      }
+      // Default: surface error without clearing tokens
       return Promise.reject(error);
     }
 

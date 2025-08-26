@@ -18,6 +18,7 @@ const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const chartController_1 = require("./chartController");
+const User_1 = require("../models/User");
 const getCompanies = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companies = yield Company_1.Company.find().select('-__v');
@@ -58,7 +59,7 @@ const getCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.getCompany = getCompany;
-const createCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
         console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
@@ -88,6 +89,17 @@ const createCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         console.log('Saving new company:', company);
         yield company.save();
         console.log('Company saved successfully:', company);
+        // Link company to current user
+        const currentUserId = req.user.userId;
+        if (currentUserId) {
+            try {
+                yield User_1.User.findByIdAndUpdate(currentUserId, { companyId: company._id });
+                console.log('Linked companyId to user:', currentUserId);
+            }
+            catch (linkErr) {
+                console.warn('Failed to link companyId to user (non-fatal):', linkErr);
+            }
+        }
         // Initialize chart data for the new company
         console.log('Initializing chart data for company:', company._id);
         yield (0, chartController_1.updateChartMetrics)(company._id.toString());
@@ -99,10 +111,27 @@ const createCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
     catch (error) {
         console.error('Error in createCompany:', error);
-        if (error instanceof errorHandler_1.AppError) {
-            throw error;
+        // Handle duplicate key errors gracefully (e.g., registrationNumber/email/tinNumber)
+        if (error && (error.code === 11000 || error.name === 'MongoServerError')) {
+            const key = Object.keys(error.keyPattern || {})[0] || 'unique_field';
+            const value = error.keyValue ? error.keyValue[key] : undefined;
+            const message = key === 'registrationNumber'
+                ? 'Registration number already exists'
+                : key === 'email'
+                    ? 'Company email already exists'
+                    : key === 'tinNumber'
+                        ? 'TIN number already exists'
+                        : 'Duplicate value for a unique field';
+            return res.status(400).json({
+                status: 'error',
+                message,
+                code: 'DUPLICATE_KEY',
+                field: key,
+                value
+            });
         }
-        throw new errorHandler_1.AppError('Error creating company', 500);
+        // Fallback: pass to error handler without crashing
+        return next(new errorHandler_1.AppError('Error creating company', 500));
     }
 });
 exports.createCompany = createCompany;

@@ -187,27 +187,25 @@ const PORT = process.env.PORT || 5000;
 const httpServer = (0, http_1.createServer)(app);
 // Initialize Socket.IO
 const { io } = (0, socket_1.initializeSocket)(httpServer);
-// Connect to MongoDB
+// Start the server first so /api/health/live responds even if DB is down
+httpServer.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
+// Connect to MongoDB (non-fatal if it fails; readiness will report not ready)
 (0, database_1.connectDatabase)()
     .then(() => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Connected to MongoDB');
-    // Initialize sync services
     try {
         yield (0, startSyncServices_1.initializeSyncServices)();
         console.log('Database synchronization services initialized');
     }
     catch (error) {
         console.error('Failed to initialize sync services:', error);
-        // Don't exit, continue with server startup
     }
-    // Start the server
-    httpServer.listen(PORT, () => {
-        console.log(`Server is running on port ${PORT}`);
-    });
 }))
     .catch((error) => {
-    console.error('Failed to connect to MongoDB:', error);
-    process.exit(1);
+    console.error('Failed to connect to MongoDB (server remains up for /health/live):', error);
+    // Do not exit; /api/health/ready will be 503 until DB is healthy
 });
 // Handle graceful shutdown
 process.on('SIGTERM', () => {

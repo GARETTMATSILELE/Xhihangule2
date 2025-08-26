@@ -17,6 +17,26 @@ router.use((req, res, next) => {
     });
     next();
 });
+// Liveness probe: process is up
+router.get('/live', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+// Readiness probe: main DB connected and healthy. Accounting DB is ignored here to avoid false restarts
+router.get('/ready', (req, res) => {
+    try {
+        const dbHealth = (0, database_1.getDatabaseHealth)();
+        const uptime = process.uptime();
+        if (!dbHealth.isConnected || !dbHealth.isHealthy) {
+            return res.status(503).json({ status: 'error', reason: 'db_not_ready', database: dbHealth, uptime });
+        }
+        res.json({ status: 'ok', timestamp: new Date().toISOString(), database: dbHealth, uptime });
+    }
+    catch (error) {
+        console.error('Readiness check error:', error);
+        res.status(500).json({ status: 'error', message: 'Readiness check failed' });
+    }
+});
+// Comprehensive health (kept for dashboards). Do not cause orchestrator restarts because of accounting DB
 router.get('/', (req, res) => {
     try {
         const dbHealth = (0, database_1.getDatabaseHealth)();
@@ -28,11 +48,11 @@ router.get('/', (req, res) => {
             accountingDatabase: accountingDbHealth,
             uptime
         });
-        // If either database is not connected, return 503 Service Unavailable
-        if (!dbHealth.isConnected || !accountingDbHealth.isConnected) {
+        // Only fail if main DB is unhealthy; accounting DB is informational here
+        if (!dbHealth.isConnected || !dbHealth.isHealthy) {
             return res.status(503).json({
                 status: 'error',
-                message: 'One or more databases not connected',
+                message: 'Main database not connected or unhealthy',
                 database: dbHealth,
                 accountingDatabase: accountingDbHealth,
                 uptime

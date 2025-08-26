@@ -72,7 +72,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
         formData.password,
         formData.name
       );
-      navigate('/settings', { state: { message: 'Account created. Please complete company setup.' } });
+      // Navigation is handled by AuthContext.signup (company-setup for admins without a company)
     } catch (err: any) {
       setError(err.message || 'An error occurred during registration');
     }

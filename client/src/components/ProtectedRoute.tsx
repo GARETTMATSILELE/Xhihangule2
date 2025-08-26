@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Box, CircularProgress, Typography, Alert, Button } from '@mui/material';
 
@@ -64,6 +64,11 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
       const dashboardPath = `/${user.role}-dashboard`;
       return <Typography color="error">You do not have access to this page.</Typography>;
     }
+  }
+
+  // If admin is authenticated but has no companyId, route to company setup (except if already there)
+  if (user.role === 'admin' && isAuthenticated && !user.companyId && !location.pathname.startsWith('/admin/company-setup')) {
+    return <Navigate to="/admin/company-setup" replace />;
   }
 
   console.log('ProtectedRoute: Access granted');

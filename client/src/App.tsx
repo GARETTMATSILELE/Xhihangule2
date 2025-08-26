@@ -12,6 +12,7 @@ import { NotificationProvider } from './components/Layout/Header';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const CompanySetup = lazy(() => import('./pages/admin/CompanySetup'));
 const Login = lazy(() => import('./components/Login'));
 const Signup = lazy(() => import('./pages/Signup'));
 const AdminSignup = lazy(() => import('./pages/AdminSignup'));
@@ -91,12 +92,19 @@ const App: React.FC = () => {
               <Route path="/admin-signup" element={<AdminSignup />} />
               {/* Admin Dashboard Routes - Protected with authentication */}
               <Route path="/admin-dashboard/*" element={
-                <ProtectedRoute requiredRoles={['admin']}>
-                  <PropertyProvider>
-                    <CompanyProvider>
+                <PropertyProvider>
+                  <CompanyProvider>
+                    <ProtectedRoute requiredRoles={['admin']}>
                       <AdminDashboard />
-                    </CompanyProvider>
-                  </PropertyProvider>
+                    </ProtectedRoute>
+                  </CompanyProvider>
+                </PropertyProvider>
+              } />
+              <Route path="/admin/company-setup" element={
+                <ProtectedRoute requiredRoles={['admin']}>
+                  <CompanyProvider>
+                    <CompanySetup />
+                  </CompanyProvider>
                 </ProtectedRoute>
               } />
               <Route path="/owner-dashboard/*" element={

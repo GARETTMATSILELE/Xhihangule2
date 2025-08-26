@@ -24,25 +24,6 @@ const ChartData_1 = require("./ChartData");
 const User_1 = require("./User");
 const PropertyOwner_1 = require("./PropertyOwner");
 const File_1 = __importDefault(require("./File"));
-// Helper function to listen for indexes
-const listenForIndexes = (collection, modelName) => {
-    collection.indexes().then(indexes => {
-        console.log(`${modelName} indexes:`, indexes);
-    }).catch(error => {
-        console.error(`Error getting ${modelName} indexes:`, error);
-    });
-};
-// Listen for indexes for all models
-listenForIndexes(Payment_1.Payment.collection, 'Payment');
-listenForIndexes(Property_1.Property.collection, 'Property');
-listenForIndexes(Lease_1.Lease.collection, 'Lease');
-listenForIndexes(Tenant_1.Tenant.collection, 'Tenant');
-listenForIndexes(Company_1.Company.collection, 'Company');
-listenForIndexes(MaintenanceRequest_1.MaintenanceRequest.collection, 'MaintenanceRequest');
-listenForIndexes(ChartData_1.ChartData.collection, 'ChartData');
-listenForIndexes(User_1.User.collection, 'User');
-listenForIndexes(PropertyOwner_1.PropertyOwner.collection, 'PropertyOwner');
-listenForIndexes(File_1.default.collection, 'File');
 // Query Optimization Functions
 exports.optimizePaymentQueries = {
     getPaymentsByDateRange: (startDate, endDate, companyId) => __awaiter(void 0, void 0, void 0, function* () {
@@ -72,22 +53,44 @@ exports.optimizePaymentQueries = {
 function createIndexes() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            // Log existing indexes for all models
+            // Ensure collections exist, then log existing indexes for all models
             const models = [
-                { collection: User_1.User.collection, name: 'User' },
-                { collection: Company_1.Company.collection, name: 'Company' },
-                { collection: Property_1.Property.collection, name: 'Property' },
-                { collection: Tenant_1.Tenant.collection, name: 'Tenant' },
-                { collection: Lease_1.Lease.collection, name: 'Lease' },
-                { collection: Payment_1.Payment.collection, name: 'Payment' },
-                { collection: MaintenanceRequest_1.MaintenanceRequest.collection, name: 'MaintenanceRequest' },
-                { collection: ChartData_1.ChartData.collection, name: 'ChartData' },
-                { collection: PropertyOwner_1.PropertyOwner.collection, name: 'PropertyOwner' },
-                { collection: File_1.default.collection, name: 'File' }
+                { model: User_1.User, name: 'User' },
+                { model: Company_1.Company, name: 'Company' },
+                { model: Property_1.Property, name: 'Property' },
+                { model: Tenant_1.Tenant, name: 'Tenant' },
+                { model: Lease_1.Lease, name: 'Lease' },
+                { model: Payment_1.Payment, name: 'Payment' },
+                { model: MaintenanceRequest_1.MaintenanceRequest, name: 'MaintenanceRequest' },
+                { model: ChartData_1.ChartData, name: 'ChartData' },
+                { model: PropertyOwner_1.PropertyOwner, name: 'PropertyOwner' },
+                { model: File_1.default, name: 'File' }
             ];
-            for (const model of models) {
-                const indexes = yield model.collection.indexes();
-                console.log(`${model.name} indexes:`, indexes);
+            for (const { model, name } of models) {
+                // Try to create the collection if it doesn't exist yet
+                try {
+                    yield model.createCollection();
+                }
+                catch (createErr) {
+                    // Ignore "namespace exists" errors (code 48) and proceed
+                    if (createErr && createErr.code !== 48) {
+                        console.warn(`Could not ensure collection for ${name}:`, createErr);
+                    }
+                }
+                // Now attempt to read indexes, but ignore NamespaceNotFound (code 26)
+                try {
+                    const indexes = yield model.collection.indexes();
+                    console.log(`${name} indexes:`, indexes);
+                }
+                catch (error) {
+                    if (error && error.code === 26) {
+                        // Collection still does not exist; skip noisy error
+                        console.log(`${name} collection not found yet; skipping index check`);
+                    }
+                    else {
+                        console.error(`Error getting ${name} indexes:`, error);
+                    }
+                }
             }
             console.log('All indexes verified successfully');
         }

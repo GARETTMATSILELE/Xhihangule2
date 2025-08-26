@@ -112,6 +112,16 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
         }
         // Fix legacy indexes inconsistencies for companies collection
         try {
+            // Ensure the companies collection exists to avoid NamespaceNotFound (26)
+            try {
+                yield mongoose_1.default.connection.db.createCollection('companies');
+            }
+            catch (ensureErr) {
+                // Ignore "collection already exists" (48); rethrow others
+                if (ensureErr && ensureErr.code !== 48) {
+                    throw ensureErr;
+                }
+            }
             const companies = mongoose_1.default.connection.collection('companies');
             const existingIndexes = yield companies.indexes();
             const hasLegacyTaxIndex = existingIndexes.some((idx) => idx.name === 'taxNumber_1');
@@ -119,15 +129,27 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
                 console.warn('Dropping legacy companies index taxNumber_1');
                 yield companies.dropIndex('taxNumber_1');
             }
-            // Ensure a safe unique index on tinNumber when present (non-empty string)
+            // Cosmos DB (Mongo API) compatible unique index on tinNumber.
+            // Strategy:
+            // 1) Normalize documents where tinNumber is an empty string to null (or unset),
+            //    so a sparse unique index can enforce uniqueness only when present.
+            // 2) Create { unique: true, sparse: true } index (partialFilterExpression with $ne is not supported).
             const hasTinIndex = existingIndexes.some((idx) => idx.name === 'tinNumber_1');
             if (!hasTinIndex) {
-                console.log('Creating partial unique index on companies.tinNumber');
-                yield companies.createIndex({ tinNumber: 1 }, { unique: true, partialFilterExpression: { tinNumber: { $type: 'string', $ne: '' } } });
+                console.log('Normalizing companies.tinNumber empty strings to null for sparse unique index');
+                yield companies.updateMany({ tinNumber: '' }, { $set: { tinNumber: null } });
+                console.log('Creating sparse unique index on companies.tinNumber');
+                yield companies.createIndex({ tinNumber: 1 }, { unique: true, sparse: true });
             }
         }
         catch (idxError) {
-            console.error('Company index migration error (non-fatal):', idxError);
+            // Suppress noisy logs when collection truly does not exist yet
+            if (idxError && idxError.code === 26) {
+                console.log('Companies collection not found; skipping legacy index migration');
+            }
+            else {
+                console.error('Company index migration error (non-fatal):', idxError);
+            }
         }
         // Start health check
         startHealthCheck();

@@ -33,7 +33,9 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
             console.log('Signup failed - Email already registered:', email);
             throw new errorHandler_1.AppError('Email already registered', 400);
         }
-        // Create user and company atomically in a transaction
+        // Determine role: ALWAYS create admin accounts on signup
+        const assignedRole = 'admin';
+        // Create user and (optionally) company atomically in a transaction
         const session = yield mongoose_1.default.startSession();
         let createdUser = null;
         let companyData = null;
@@ -45,18 +47,18 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                 const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
                 const firstName = firstNameRaw || 'User';
                 const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
-                createdUser = yield User_1.User.create([
-                    {
-                        email,
-                        password,
-                        firstName,
-                        lastName,
-                        role: 'admin',
-                        isActive: true
-                    }
-                ], { session }).then((docs) => docs[0]);
+                const newUser = new User_1.User({
+                    email,
+                    password,
+                    firstName,
+                    lastName,
+                    role: assignedRole,
+                    isActive: true
+                });
+                yield newUser.save({ session });
+                createdUser = newUser;
                 console.log('User created successfully:', { id: createdUser._id, email: createdUser.email });
-                // Create company if provided
+                // Create company if provided (optional now)
                 if (company) {
                     const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'];
                     const missing = requiredCompanyFields.filter((f) => !company[f]);
@@ -64,9 +66,8 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                         throw new errorHandler_1.AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
                     }
                     console.log('Creating new company...');
-                    const newCompany = yield Company_1.Company.create([
-                        Object.assign(Object.assign({}, company), { ownerId: createdUser._id })
-                    ], { session }).then((docs) => docs[0]);
+                    const companyDoc = new Company_1.Company(Object.assign(Object.assign({}, company), { ownerId: createdUser._id }));
+                    const newCompany = yield companyDoc.save({ session });
                     companyId = newCompany._id;
                     companyData = newCompany;
                     console.log('Company created successfully:', { id: newCompany._id, name: newCompany.name });
@@ -94,7 +95,7 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                         password,
                         firstName,
                         lastName,
-                        role: 'admin',
+                        role: assignedRole,
                         isActive: true
                     });
                     console.log('User created successfully (fallback):', { id: createdUser._id, email: createdUser.email });
@@ -111,14 +112,6 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                             console.log('User updated with company ID (fallback)');
                         }
                         catch (fallbackCompanyError) {
-                            // Compensation: remove created user to maintain consistency
-                            try {
-                                yield User_1.User.deleteOne({ _id: createdUser._id });
-                                console.warn('Fallback compensation: created user removed due to company creation failure');
-                            }
-                            catch (cleanupError) {
-                                console.error('Failed to cleanup orphan user after company failure:', cleanupError);
-                            }
                             if ((fallbackCompanyError === null || fallbackCompanyError === void 0 ? void 0 : fallbackCompanyError.code) === 11000) {
                                 const dupMsg = String((fallbackCompanyError === null || fallbackCompanyError === void 0 ? void 0 : fallbackCompanyError.message) || 'Duplicate key error');
                                 if (dupMsg.includes('tinNumber') || dupMsg.includes('taxNumber')) {
@@ -126,7 +119,8 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                                 }
                                 return next(new errorHandler_1.AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
                             }
-                            return next(fallbackCompanyError);
+                            // Do not rollback user creation if optional company creation fails
+                            console.warn('Optional company creation failed; proceeding with user only');
                         }
                     }
                 }

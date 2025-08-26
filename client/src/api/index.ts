@@ -32,6 +32,7 @@ export const apiService = {
 
   // Companies
   getCurrentCompany: () => apiInstance.get('/companies/current'),
+  createCompany: (data: any) => apiInstance.post('/companies', data),
   updateCompany: (data: any) => apiInstance.put('/companies/current', data),
   uploadCompanyLogo: (companyId: string, formData: FormData) => {
     return apiInstance.post(`/companies/${companyId}/logo`, formData, {

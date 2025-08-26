@@ -1,10 +1,11 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { Company, ICompany } from '../models/Company';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { AppError } from '../middleware/errorHandler';
 import { JwtPayload } from '../types/auth';
 import mongoose from 'mongoose';
 import { updateChartMetrics } from './chartController';
+import { User } from '../models/User';
 
 export const getCompanies = async (req: Request, res: Response) => {
   try {
@@ -47,7 +48,7 @@ export const getCompany = async (req: Request, res: Response) => {
   }
 };
 
-export const createCompany = async (req: Request, res: Response) => {
+export const createCompany = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
     console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
@@ -82,6 +83,17 @@ export const createCompany = async (req: Request, res: Response) => {
     await company.save();
     console.log('Company saved successfully:', company);
 
+    // Link company to current user
+    const currentUserId = (req.user as JwtPayload).userId;
+    if (currentUserId) {
+      try {
+        await User.findByIdAndUpdate(currentUserId, { companyId: company._id });
+        console.log('Linked companyId to user:', currentUserId);
+      } catch (linkErr) {
+        console.warn('Failed to link companyId to user (non-fatal):', linkErr);
+      }
+    }
+
     // Initialize chart data for the new company
     console.log('Initializing chart data for company:', company._id);
     await updateChartMetrics(company._id.toString());
@@ -92,12 +104,29 @@ export const createCompany = async (req: Request, res: Response) => {
     console.log('Verified saved company:', savedCompany);
 
     res.status(201).json(company);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in createCompany:', error);
-    if (error instanceof AppError) {
-      throw error;
+    // Handle duplicate key errors gracefully (e.g., registrationNumber/email/tinNumber)
+    if (error && (error.code === 11000 || error.name === 'MongoServerError')) {
+      const key = Object.keys(error.keyPattern || {})[0] || 'unique_field';
+      const value = error.keyValue ? error.keyValue[key] : undefined;
+      const message = key === 'registrationNumber'
+        ? 'Registration number already exists'
+        : key === 'email'
+          ? 'Company email already exists'
+          : key === 'tinNumber'
+            ? 'TIN number already exists'
+            : 'Duplicate value for a unique field';
+      return res.status(400).json({
+        status: 'error',
+        message,
+        code: 'DUPLICATE_KEY',
+        field: key,
+        value
+      });
     }
-    throw new AppError('Error creating company', 500);
+    // Fallback: pass to error handler without crashing
+    return next(new AppError('Error creating company', 500));
   }
 };
 

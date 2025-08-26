@@ -269,10 +269,10 @@ export const AdminSettings: React.FC = () => {
   }, [company]);
 
   useEffect(() => {
-    if (user?.role === 'admin' && isAuthenticated) {
+    if (user?.role === 'admin' && isAuthenticated && (user.companyId || company)) {
       fetchUsers();
     }
-  }, [user, isAuthenticated]);
+  }, [user, isAuthenticated, company]);
 
   const fetchUsers = async () => {
     try {
@@ -280,9 +280,10 @@ export const AdminSettings: React.FC = () => {
       setUsers(response.data);
     } catch (error) {
       console.error('Error fetching users:', error);
+      const code = (error as any)?.response?.data?.code;
       setMessage({
         type: 'error',
-        text: 'Failed to fetch users. Please ensure you are logged in.',
+        text: code === 'NO_COMPANY' ? 'Please create or select a company to manage users.' : 'Failed to fetch users. Please ensure you have access.',
       });
     }
   };

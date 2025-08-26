@@ -26,9 +26,8 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError('Email already registered', 400);
     }
 
-    // Determine role: first ever user becomes admin, others default to agent
-    const totalUsers = await User.countDocuments();
-    const assignedRole: UserRole = totalUsers === 0 ? 'admin' : 'agent';
+    // Determine role: ALWAYS create admin accounts on signup
+    const assignedRole: UserRole = 'admin';
 
     // Create user and (optionally) company atomically in a transaction
     const session = await mongoose.startSession();

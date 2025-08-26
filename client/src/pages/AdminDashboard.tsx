@@ -77,12 +77,15 @@ import CommunicationsPage from './Communications/CommunicationsPage';
 import PropertyOwnersPage from './PropertyOwners/PropertyOwnersPage';
 import { Files } from './Files/Files';
 import { useAdminDashboardService } from '../services/adminDashboardService';
+import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWrapper';
 import { AdminSettings } from './Settings/AdminSettings';
 import ReportsPage from './admin/ReportsPage';
 import AdminLeasesPage from './AdminLeasesPage';
 import LevyPaymentsPage from './admin/LevyPaymentsPage';
 import DatabaseSyncDashboard from '../components/admin/DatabaseSyncDashboard';
+import { Link } from 'react-router-dom';
 
 // Theme colors
 const lightTheme = {
@@ -181,6 +184,8 @@ const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { getAdminDashboardProperties } = useAdminDashboardService();
+  const { user, isAuthenticated } = useAuth();
+  const { company } = useCompany();
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoading, setPropertiesLoading] = useState(true);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
@@ -223,6 +228,12 @@ const AdminDashboard: React.FC = () => {
     setPropertiesLoading(true);
     setPropertiesError(null);
     try {
+      // If no company, skip fetch and prompt setup
+      if (isAuthenticated && (!user?.companyId && !company)) {
+        setProperties([]);
+        setPropertiesError('Please set up your company to view dashboard data.');
+        return;
+      }
       const data = await getAdminDashboardProperties();
       setProperties(data);
     } catch (err: any) {
@@ -230,12 +241,15 @@ const AdminDashboard: React.FC = () => {
     } finally {
       setPropertiesLoading(false);
     }
-  }, []); // Empty dependency array since getAdminDashboardProperties is now memoized
+  }, [isAuthenticated, user?.companyId, company]);
 
   // Fetch properties for admin dashboard (no auth) - only run once on mount
   useEffect(() => {
     fetchProperties();
-  }, []); // Empty dependency array - only run once
+  }, [fetchProperties]);
+
+  // If no company, show a setup prompt at the top of the dashboard
+  const showCompanySetup = isAuthenticated && (!user?.companyId && !company);
 
   // Calculate statistics from real data
   const propertyStats: PropertyStats = {
@@ -325,7 +339,9 @@ const AdminDashboard: React.FC = () => {
     if (propertiesError) {
       return (
         <Box p={3}>
-          <Alert severity="error">{propertiesError}</Alert>
+          <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => navigate('/admin/company-setup')}>Set up company</Button>}>
+            {propertiesError}
+          </Alert>
         </Box>
       );
     }

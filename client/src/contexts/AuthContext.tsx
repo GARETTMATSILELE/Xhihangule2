@@ -327,6 +327,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (company && Object.keys(company).length > 0) {
         payload.company = company;
       }
+      // If this is the admin signup flow, mark it so the server assigns admin role
+      if (window.location.pathname.includes('/admin-signup')) {
+        payload.adminSignup = true;
+      }
       const response = await api.post('/auth/signup', payload);
       const { user: userData, company: companyData, token, refreshToken: newRefreshToken } = response.data;
       
@@ -348,7 +352,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCompany(companyData);
       setIsAuthenticated(true);
 
-      navigate('/dashboard');
+      // After signup, route admins without a company to setup; otherwise go to role dashboard
+      const isAdmin = userData.role === 'admin';
+      if (isAdmin && !userData.companyId) {
+        navigate('/admin/company-setup');
+      } else {
+        const path = getDashboardPath(userData.role);
+        navigate(path);
+      }
     } catch (err: any) {
       const message = err.response?.data?.message || 'Signup failed';
       setError(message);

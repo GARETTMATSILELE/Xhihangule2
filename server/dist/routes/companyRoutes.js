@@ -25,13 +25,15 @@ const upload = (0, multer_1.default)({
     },
 });
 // Protected routes
-router.get('/current', auth_1.authWithCompany, companyController_1.getCurrentCompany);
+// Allow fetching current company even if none exists (returns 404 inside controller)
+router.get('/current', auth_1.auth, companyController_1.getCurrentCompany);
 router.put('/current', auth_1.authWithCompany, companyController_1.updateCurrentCompany);
 // Public routes
 router.get('/', companyController_1.getCompanies);
 router.get('/:id', companyController_1.getCompany);
 // Protected routes
-router.post('/', auth_1.authWithCompany, companyController_1.createCompany);
+// Allow creating a company even if user has no company yet
+router.post('/', auth_1.auth, companyController_1.createCompany);
 router.put('/:id', auth_1.authWithCompany, companyController_1.updateCompany);
 router.delete('/:id', auth_1.authWithCompany, companyController_1.deleteCompany);
 // Logo upload route

@@ -93,6 +93,11 @@ class ScheduledSyncService {
      */
     startSyncJob(schedule) {
         try {
+            // Avoid starting the same job twice
+            if (this.syncJobs.has(schedule.name)) {
+                logger_1.logger.info(`Sync job already started: ${schedule.name} - skipping`);
+                return;
+            }
             const job = new cron_1.CronJob(schedule.cronExpression, () => __awaiter(this, void 0, void 0, function* () {
                 yield this.executeScheduledSync(schedule);
             }), null, false, 'UTC');
