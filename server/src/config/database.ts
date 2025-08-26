@@ -131,13 +131,23 @@ export const connectDatabase = async (): Promise<void> => {
         console.warn('Dropping legacy companies index taxNumber_1');
         await companies.dropIndex('taxNumber_1');
       }
-      // Ensure a safe unique index on tinNumber when present (non-empty string)
+      // Cosmos DB (Mongo API) compatible unique index on tinNumber.
+      // Strategy:
+      // 1) Normalize documents where tinNumber is an empty string to null (or unset),
+      //    so a sparse unique index can enforce uniqueness only when present.
+      // 2) Create { unique: true, sparse: true } index (partialFilterExpression with $ne is not supported).
       const hasTinIndex = existingIndexes.some((idx: any) => idx.name === 'tinNumber_1');
       if (!hasTinIndex) {
-        console.log('Creating partial unique index on companies.tinNumber');
+        console.log('Normalizing companies.tinNumber empty strings to null for sparse unique index');
+        await companies.updateMany(
+          { tinNumber: '' },
+          { $set: { tinNumber: null } }
+        );
+
+        console.log('Creating sparse unique index on companies.tinNumber');
         await companies.createIndex(
           { tinNumber: 1 },
-          { unique: true, partialFilterExpression: { tinNumber: { $type: 'string', $ne: '' } } }
+          { unique: true, sparse: true }
         );
       }
     } catch (idxError: any) {

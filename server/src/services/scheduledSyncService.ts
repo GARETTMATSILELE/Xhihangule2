@@ -103,6 +103,11 @@ export class ScheduledSyncService {
    */
   private startSyncJob(schedule: SyncSchedule): void {
     try {
+      // Avoid starting the same job twice
+      if (this.syncJobs.has(schedule.name)) {
+        logger.info(`Sync job already started: ${schedule.name} - skipping`);
+        return;
+      }
       const job = new CronJob(
         schedule.cronExpression,
         async () => {
