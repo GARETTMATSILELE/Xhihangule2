@@ -33,7 +33,8 @@ export class AuthService {
     
     const isAvailable = await isDatabaseAvailable();
     if (!isAvailable) {
-      throw new Error('Database is not available');
+      // Return an operational error so the API surfaces 503 instead of 500
+      throw new AppError('Service temporarily unavailable', 503, 'SERVICE_UNAVAILABLE');
     }
     
     this.isInitialized = true;
