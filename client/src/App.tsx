@@ -12,6 +12,7 @@ import { NotificationProvider } from './components/Layout/Header';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+// Ensure correct case to avoid case-sensitive filesystem chunk failures
 const CompanySetup = lazy(() => import('./pages/admin/CompanySetup'));
 const Login = lazy(() => import('./components/Login'));
 const Signup = lazy(() => import('./pages/Signup'));

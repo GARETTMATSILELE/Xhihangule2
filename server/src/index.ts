@@ -132,8 +132,14 @@ if (process.env.NODE_ENV === 'production') {
 
   app.use(express.static(staticPath));
 
-  // SPA fallback with no-store to avoid caching HTML shell
-  app.get('*', (req, res) => {
+  // SPA fallback only for HTML navigation requests; avoid intercepting static asset URLs
+  app.get('*', (req, res, next) => {
+    const acceptHeader = req.headers['accept'] || '';
+    const isHtmlRequest = typeof acceptHeader === 'string' && acceptHeader.includes('text/html');
+    const isAsset = req.path.startsWith('/static/') || req.path.includes('.') || req.path.startsWith('/assets/');
+    if (!isHtmlRequest || isAsset) {
+      return next();
+    }
     res.setHeader('Cache-Control', 'no-store');
     res.sendFile(path.join(staticPath, 'index.html'));
   });
