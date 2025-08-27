@@ -32,6 +32,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   signup: (email: string, password: string, name: string, company?: CreateCompany) => Promise<void>;
   clearError: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -55,21 +56,22 @@ const setTokens = (newAccessToken: string | null, newRefreshToken: string | null
 const getAccessToken = () => accessToken;
 const getRefreshToken = () => refreshToken;
 
-// Utility function to clear all tokens and force re-login
+// Utility function to clear all tokens and notify app to route to login
 const clearAllTokens = () => {
   setTokens(null, null);
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
-  localStorage.removeItem('token'); // Remove old token if it exists
-  localStorage.removeItem('refreshToken'); // Remove old refresh token if it exists
+  localStorage.removeItem('token');
   
   // Clear any cookies that might exist
   document.cookie.split(";").forEach(function(c) { 
     document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
   });
   
-  // Force redirect to login
-  window.location.href = '/login';
+  // Dispatch a central auth error instead of forcing a full reload
+  window.dispatchEvent(new CustomEvent('authError', { 
+    detail: 'Session expired. Please log in again.'
+  }));
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -369,6 +371,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshUser = async () => {
+    try {
+      const response = await api.get('/auth/me');
+      const userData = response.data.user;
+      localStorage.setItem('user', JSON.stringify(userData));
+      setUser(userData);
+      setIsAuthenticated(true);
+    } catch (err) {
+      console.error('Failed to refresh user profile:', err);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user,
@@ -379,7 +393,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       login,
       logout,
       signup,
-      clearError
+      clearError,
+      refreshUser
     }}>
       {children}
     </AuthContext.Provider>

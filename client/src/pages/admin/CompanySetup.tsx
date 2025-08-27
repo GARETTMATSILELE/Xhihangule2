@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Container, Paper, Typography, TextField, Button, Alert, CircularProgress, Grid } from '@mui/material';
+import { Box, Container, Paper, Typography, TextField, Button, Alert, CircularProgress, Grid, Snackbar } from '@mui/material';
 import { apiService } from '../../api';
 import { useCompany } from '../../contexts/CompanyContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CompanySetup: React.FC = () => {
   const navigate = useNavigate();
   const { refreshCompany } = useCompany();
+  const { refreshUser } = useAuth();
+  const [successOpen, setSuccessOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +35,9 @@ const CompanySetup: React.FC = () => {
     try {
       await apiService.createCompany(form);
       await refreshCompany();
-      navigate('/admin-dashboard');
+      await refreshUser();
+      setSuccessOpen(true);
+      setTimeout(() => navigate('/admin-dashboard', { replace: true }), 900);
     } catch (err: any) {
       const message = err?.response?.data?.message || err?.message || 'Failed to create company';
       setError(message);
@@ -89,11 +94,19 @@ const CompanySetup: React.FC = () => {
             <Button variant="text" onClick={() => navigate('/admin-dashboard')}>Back to Dashboard</Button>
           </Box>
         </Box>
+        <Snackbar
+          open={successOpen}
+          autoHideDuration={1200}
+          onClose={() => setSuccessOpen(false)}
+          message="Company created successfully"
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        />
       </Paper>
     </Container>
   );
 };
 
 export default CompanySetup;
+
 
 

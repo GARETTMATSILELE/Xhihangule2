@@ -42,18 +42,10 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
     );
   }
 
-  // Show error if not authenticated
+  // Redirect to login if not authenticated
   if (!isAuthenticated || !user) {
-    console.log('ProtectedRoute: Not authenticated, showing error');
-    return (
-      <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="100vh">
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error || 'Authentication required. Please log in.'}
-        </Alert>
-        {/* Optionally, you can add a login button here */}
-        {/* <Button variant="contained" href="/login">Go to Login</Button> */}
-      </Box>
-    );
+    console.log('ProtectedRoute: Not authenticated, redirecting to login');
+    return <Navigate to="/login" replace />;
   }
 
   // Check role-based access if required roles are specified
