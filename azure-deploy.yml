@@ -10,6 +10,7 @@ env:
   AZURE_WEBAPP_NAME: Xhihangule-Property-Management    # Change this to your app name
   AZURE_WEBAPP_PACKAGE_PATH: '.'
   NODE_VERSION: '18.x'
+  AZURE_ACR_NAME: ''  # e.g., myregistry (set via repo/environment variables or directly here)
 
 jobs:
   build-and-deploy:
@@ -50,22 +51,23 @@ jobs:
         docker build -t ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} .
         docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ env.AZURE_WEBAPP_NAME }}:latest
 
-    - name: Login to Azure Container Registry
-      uses: azure/docker-login@v1
-      with:
-        login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
-        username: ${{ secrets.REGISTRY_USERNAME }}
-        password: ${{ secrets.REGISTRY_PASSWORD }}
+    - name: Resolve ACR login server and login (OIDC)
+      run: |
+        if [ -z "$AZURE_ACR_NAME" ]; then echo "::error::AZURE_ACR_NAME is not set"; exit 1; fi
+        LOGIN_SERVER=$(az acr show -n "$AZURE_ACR_NAME" --query loginServer -o tsv)
+        if [ -z "$LOGIN_SERVER" ]; then echo "::error::Failed to resolve ACR login server"; exit 1; fi
+        echo "LOGIN_SERVER=$LOGIN_SERVER" >> $GITHUB_ENV
+        az acr login -n "$AZURE_ACR_NAME"
 
     - name: Push Docker image
       run: |
-        docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
-        docker tag ${{ env.AZURE_WEBAPP_NAME }}:latest ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
-        docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
-        docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
+        docker tag ${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} ${{ env.LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
+        docker tag ${{ env.AZURE_WEBAPP_NAME }}:latest ${{ env.LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
+        docker push ${{ env.LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
+        docker push ${{ env.LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:latest
 
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
-        images: ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }} 
+        images: ${{ env.LOGIN_SERVER }}/${{ env.AZURE_WEBAPP_NAME }}:${{ github.sha }}
