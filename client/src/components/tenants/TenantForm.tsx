@@ -60,8 +60,8 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     const loadProperties = async () => {
       try {
         setLoadingProperties(true);
-        // Use public API for admin dashboard access
-        const properties = await propertyService.getPublicProperties();
+        // Use authenticated API so agents/admins fetch with proper filtering
+        const properties = await propertyService.getProperties();
         // Filter for available properties on the client side
         const availableProperties = properties.filter((p: Property) => p.status === 'available');
         setProperties(availableProperties);
