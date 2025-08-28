@@ -8,16 +8,24 @@ export const agentService = {
   // Get properties managed by the agent
   getProperties: async (): Promise<Property[]> => {
     console.log('AgentService: Fetching properties for agent...');
-    const response = await api.get('/agents/properties');
-    console.log('AgentService: Response received:', response);
-    console.log('AgentService: Properties data:', response.data);
-    console.log('AgentService: Number of properties returned:', response.data.length);
-    return response.data;
+    // Use general authenticated properties endpoint to avoid agent-only role gate
+    const response = await api.get('/properties');
+    const raw = response.data as any;
+    const data: Property[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.data)
+        ? raw.data
+        : Array.isArray(raw?.properties)
+          ? raw.properties
+          : [];
+    console.log('AgentService: Response received:', response.status, Array.isArray(data) ? data.length : 'n/a');
+    return data;
   },
 
   // Create a new property
   createProperty: async (propertyData: PropertyFormData): Promise<Property> => {
-    const response = await api.post('/agents/properties', propertyData);
+    // Use general authenticated properties endpoint so agents can create via same flow as admins/owners
+    const response = await api.post('/properties', propertyData);
     return response.data;
   },
 

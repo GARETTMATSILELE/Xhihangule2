@@ -355,9 +355,9 @@ export const Properties: React.FC = () => {
             <button 
               className="add-button"
               onClick={() => setShowForm(true)}
-              disabled={!user?.companyId || !['admin', 'owner'].includes(user?.role || '')}
+              disabled={!user?.companyId || !['admin', 'owner', 'agent'].includes(user?.role || '')}
               title={!user?.companyId ? 'Company association required' : 
-                     !['admin', 'owner'].includes(user?.role || '') ? 'Admin or Owner role required' : 
+                     !['admin', 'owner', 'agent'].includes(user?.role || '') ? 'Admin, Owner, or Agent role required' : 
                      'Add new property'}
             >
               <FontAwesomeIcon icon={faPlus} />
