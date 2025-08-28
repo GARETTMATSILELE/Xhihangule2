@@ -127,6 +127,28 @@ export const usePropertyService = () => {
     }
   };
 
+  // Authenticated method for fetching only vacant properties for the current user
+  const getVacantProperties = async (): Promise<Property[]> => {
+    try {
+      console.log('propertyService: getVacantProperties called');
+      validateUserAndCompany(user);
+      const response = await api.get('/properties/vacant');
+      // Endpoint returns { properties: [...] }
+      const raw = response.data as any;
+      const data: Property[] = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.data)
+          ? raw.data
+          : Array.isArray(raw?.properties)
+            ? raw.properties
+            : [];
+      console.log('propertyService: Successfully fetched vacant properties:', data.length);
+      return data;
+    } catch (error) {
+      return handleApiError(error);
+    }
+  };
+
   const getProperty = async (id: string): Promise<Property> => {
     try {
       validateUserAndCompany(user);
@@ -289,6 +311,7 @@ export const usePropertyService = () => {
 
   return {
     getProperties,
+    getVacantProperties,
     getPublicProperties,
     getPropertiesForUser,
     getProperty,

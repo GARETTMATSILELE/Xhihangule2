@@ -60,10 +60,8 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     const loadProperties = async () => {
       try {
         setLoadingProperties(true);
-        // Use authenticated API so agents/admins fetch with proper filtering
-        const properties = await propertyService.getProperties();
-        // Filter for available properties on the client side
-        const availableProperties = properties.filter((p: Property) => p.status === 'available');
+        // Use authenticated vacant endpoint for accurate list
+        const availableProperties = await propertyService.getVacantProperties();
         setProperties(availableProperties);
       } catch (error) {
         console.error('Error loading properties:', error);

@@ -2878,3 +2878,4 @@
 {"level":"info","message":"Syncing changes since 2025-08-28T08:00:00.599Z","timestamp":"2025-08-28T09:00:00.599Z"}
 {"level":"info","message":"Hourly synchronization completed","timestamp":"2025-08-28T09:00:02.213Z"}
 {"level":"info","message":"Completed scheduled sync: hourly_sync in 2133ms","timestamp":"2025-08-28T09:00:02.336Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-08-28T10:00:00.185Z"}
