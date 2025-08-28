@@ -71,8 +71,10 @@ export const TenantForm: React.FC<TenantFormProps> = ({
       }
     };
 
-    loadProperties();
-  }, [propertyService]);
+    if (open) {
+      loadProperties();
+    }
+  }, [open]);
 
   // Update companyId when company changes
   React.useEffect(() => {
