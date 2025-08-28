@@ -30,8 +30,23 @@ const getPropertyOwnerContext = async (ownerId: string): Promise<{ _id: mongoose
   }
   
   console.log(`Found owner user in User collection: ${user.email}`);
+
+  // Additional fallback: try to find PropertyOwner by email (common when accounts are linked by email but have different IDs)
+  try {
+    const ownerByEmail = await PropertyOwner.findOne({ email: user.email });
+    if (ownerByEmail) {
+      console.log(`Matched PropertyOwner by email: ${ownerByEmail.email} with properties: ${(ownerByEmail.properties || []).length}`);
+      return {
+        _id: ownerByEmail._id,
+        properties: ownerByEmail.properties || [],
+        companyId: ownerByEmail.companyId
+      };
+    }
+  } catch (lookupErr) {
+    console.warn('Error during PropertyOwner email lookup (non-fatal):', lookupErr);
+  }
   
-  // Use the user as the property owner context
+  // Use the user as the property owner context if no PropertyOwner document exists
   return {
     _id: user._id,
     properties: [], // Will be populated from Property collection
