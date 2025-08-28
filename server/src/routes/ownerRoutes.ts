@@ -127,12 +127,16 @@ router.get('/financial-data', propertyOwnerAuth, async (req, res) => {
       }
     }
 
-    console.log(`[Owner Financial Data] PropertyOwner context:`, {
-      _id: propertyOwnerContext._id,
-      companyId: propertyOwnerContext.companyId,
-      propertiesCount: propertyOwnerContext.properties?.length || 0,
-      properties: propertyOwnerContext.properties
-    });
+    if (propertyOwnerContext) {
+      console.log(`[Owner Financial Data] PropertyOwner context:`, {
+        _id: propertyOwnerContext._id,
+        companyId: propertyOwnerContext.companyId,
+        propertiesCount: propertyOwnerContext.properties?.length || 0,
+        properties: propertyOwnerContext.properties
+      });
+    } else {
+      console.log('[Owner Financial Data] PropertyOwner context not found after fallbacks. Using Property collection fallback.');
+    }
 
     // Get the property IDs for this owner
     let ownerPropertyIds: any[] = [];
