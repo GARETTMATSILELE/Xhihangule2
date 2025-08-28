@@ -2,6 +2,7 @@ import express from 'express';
 import { auth, propertyOwnerAuth } from '../middleware/auth';
 import { Property } from '../models/Property';
 import { MaintenanceRequest } from '../models/MaintenanceRequest';
+import { User } from '../models/User';
 import PropertyAccount from '../models/PropertyAccount';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { accountingConnection } from '../config/database';
@@ -109,27 +110,21 @@ router.get('/financial-data', propertyOwnerAuth, async (req, res) => {
     console.log(`[Owner Financial Data] Processing request for ownerId: ${ownerId}`);
     console.log(`[Owner Financial Data] Company ID: ${req.user.companyId}`);
 
-    // Use the PropertyOwner collection to get the properties that belong to this owner
+    // Build owner context with robust fallbacks
     let propertyOwnerContext = await PropertyOwner.findById(ownerId);
-    
     if (!propertyOwnerContext) {
-      console.log(`[Owner Financial Data] PropertyOwner not found for ID: ${ownerId}`);
-      return res.json({
-        success: true,
-        data: {
-          properties: [],
-          summary: {
-            totalIncome: 0,
-            totalExpenses: 0,
-            totalOwnerPayouts: 0,
-            runningBalance: 0,
-            totalProperties: 0
-          },
-          recentTransactions: [],
-          monthlyData: [],
-          propertyBreakdown: []
+      // Fallback: try to match PropertyOwner by the user's email
+      try {
+        const ownerUser = await User.findById(ownerId);
+        if (ownerUser?.email) {
+          propertyOwnerContext = await PropertyOwner.findOne({ email: ownerUser.email });
+          if (propertyOwnerContext) {
+            console.log('[Owner Financial Data] Matched PropertyOwner by email:', ownerUser.email);
+          }
         }
-      });
+      } catch (lookupErr) {
+        console.warn('[Owner Financial Data] PropertyOwner email lookup failed (non-fatal):', lookupErr);
+      }
     }
 
     console.log(`[Owner Financial Data] PropertyOwner context:`, {
@@ -139,14 +134,25 @@ router.get('/financial-data', propertyOwnerAuth, async (req, res) => {
       properties: propertyOwnerContext.properties
     });
 
-    // Get the property IDs from PropertyOwner context (these are the actual properties owned by this user)
-    let ownerPropertyIds = [];
-    if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+    // Get the property IDs for this owner
+    let ownerPropertyIds: any[] = [];
+    if (propertyOwnerContext && propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
       ownerPropertyIds = propertyOwnerContext.properties;
       console.log(`[Owner Financial Data] Using properties from PropertyOwner context:`, ownerPropertyIds.length);
       console.log(`[Owner Financial Data] Property IDs:`, ownerPropertyIds);
     } else {
-      console.log(`[Owner Financial Data] No properties found in PropertyOwner context`);
+      console.log(`[Owner Financial Data] No properties in PropertyOwner context. Falling back to Property collection by ownerId: ${ownerId}`);
+      const propQuery: any = { ownerId: ownerId };
+      if (req.user.companyId) {
+        propQuery.companyId = req.user.companyId;
+      }
+      const fallbackProps = await Property.find(propQuery).select('_id');
+      ownerPropertyIds = fallbackProps.map((p) => p._id);
+      console.log('[Owner Financial Data] Fallback properties found:', ownerPropertyIds.length);
+    }
+
+    if (!ownerPropertyIds || ownerPropertyIds.length === 0) {
+      console.log(`[Owner Financial Data] No properties found for ownerId: ${ownerId}`);
       return res.json({
         success: true,
         data: {
