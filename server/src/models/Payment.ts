@@ -39,6 +39,13 @@ export interface IPayment extends Document {
   // Manual entry fields for properties/tenants not in database
   manualPropertyAddress?: string;
   manualTenantName?: string;
+  // Provisional workflow fields
+  isProvisional?: boolean;
+  isInSuspense?: boolean;
+  commissionFinalized?: boolean;
+  provisionalRelationshipType?: 'unknown' | 'management' | 'introduction';
+  finalizedAt?: Date;
+  finalizedBy?: mongoose.Types.ObjectId;
   // Sales contract linkage (for introduction payments)
   saleId?: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -201,6 +208,33 @@ const PaymentSchema: Schema = new Schema({
     type: String,
     required: false,
   },
+  // Provisional workflow fields
+  isProvisional: {
+    type: Boolean,
+    default: false
+  },
+  isInSuspense: {
+    type: Boolean,
+    default: false
+  },
+  commissionFinalized: {
+    type: Boolean,
+    default: true
+  },
+  provisionalRelationshipType: {
+    type: String,
+    enum: ['unknown', 'management', 'introduction'],
+    default: 'unknown'
+  },
+  finalizedAt: {
+    type: Date,
+    required: false
+  },
+  finalizedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
+  },
   saleId: {
     type: Schema.Types.ObjectId,
     ref: 'SalesContract',
@@ -219,5 +253,6 @@ PaymentSchema.index({ status: 1 });
 // Add compound index for agent commission queries
 PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
 PaymentSchema.index({ saleId: 1 });
+PaymentSchema.index({ isProvisional: 1 });
 
 export const Payment = mongoose.model<IPayment>('Payment', PaymentSchema, COLLECTIONS.PAYMENTS); 

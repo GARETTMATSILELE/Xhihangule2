@@ -50,6 +50,7 @@ router.get('/payments', roles_1.canManagePayments, paymentController_1.getCompan
 router.post('/payments', roles_1.canManagePayments, paymentController_1.createPaymentAccountant);
 router.get('/payments/:id', roles_1.canManagePayments, paymentController_1.getPaymentDetails);
 router.put('/payments/:id/status', roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
+router.post('/payments/:id/finalize', roles_1.canManagePayments, paymentController_1.finalizeProvisionalPayment);
 // Property Account routes - require accountant role
 router.get('/property-accounts', roles_1.isAccountant, propertyAccountController_1.getCompanyPropertyAccounts);
 router.get('/property-accounts/:propertyId', roles_1.isAccountant, (req, res) => {

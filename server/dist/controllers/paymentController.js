@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPaymentReceipt = exports.getPaymentReceiptDownload = exports.createPaymentPublic = exports.getPaymentByIdPublic = exports.getPaymentsPublic = exports.updatePaymentStatus = exports.getPaymentDetails = exports.getCompanyPayments = exports.deletePayment = exports.updatePayment = exports.createPaymentAccountant = exports.createPayment = exports.getPayment = exports.getPayments = void 0;
+exports.finalizeProvisionalPayment = exports.getPaymentReceipt = exports.getPaymentReceiptDownload = exports.createPaymentPublic = exports.getPaymentByIdPublic = exports.getPaymentsPublic = exports.updatePaymentStatus = exports.getPaymentDetails = exports.getCompanyPayments = exports.deletePayment = exports.updatePayment = exports.createPaymentAccountant = exports.createPayment = exports.getPayment = exports.getPayments = void 0;
 const Payment_1 = require("../models/Payment");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Lease_1 = require("../models/Lease");
@@ -288,13 +288,13 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             return { error: { status: 400, message: 'Missing required fields: amount and paymentDate' } };
         }
         // Check if using manual entries
-        const isManualProperty = propertyId && propertyId.startsWith('manual_');
-        const isManualTenant = tenantId && tenantId.startsWith('manual_');
+        const manualProperty = propertyId && propertyId.startsWith('manual_');
+        const manualTenant = tenantId && tenantId.startsWith('manual_');
         // Validate manual entries
-        if (isManualProperty && !manualPropertyAddress) {
+        if (manualProperty && !manualPropertyAddress) {
             return { error: { status: 400, message: 'Manual property address is required when using manual property entry' } };
         }
-        if (isManualTenant && !manualTenantName) {
+        if (manualTenant && !manualTenantName) {
             return { error: { status: 400, message: 'Manual tenant name is required when using manual tenant entry' } };
         }
         // Validate that either propertyId/tenantId are provided or manual entries are used
@@ -321,12 +321,14 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 ownerAmount: amount - totalCommission,
             };
         }
+        // Determine provisional flags
+        const markProvisional = Boolean(manualProperty || manualTenant);
         // Create payment record
         const payment = new Payment_1.Payment({
             paymentType: paymentType || 'rental',
             propertyType: propertyType || 'residential',
-            propertyId: isManualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(propertyId), // Generate new ID for manual entries
-            tenantId: isManualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(tenantId), // Generate new ID for manual entries
+            propertyId: manualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(propertyId), // Generate new ID for manual entries
+            tenantId: manualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(tenantId), // Generate new ID for manual entries
             agentId: new mongoose_1.default.Types.ObjectId(agentId || user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
             paymentDate: new Date(paymentDate),
@@ -344,8 +346,13 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             leaseId: leaseId ? new mongoose_1.default.Types.ObjectId(leaseId) : undefined,
             rentUsed,
             // Add manual entry fields
-            manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
-            manualTenantName: isManualTenant ? manualTenantName : undefined,
+            manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
+            manualTenantName: manualTenant ? manualTenantName : undefined,
+            // Provisional flags
+            isProvisional: markProvisional,
+            isInSuspense: markProvisional,
+            commissionFinalized: !markProvisional,
+            provisionalRelationshipType: markProvisional ? 'unknown' : undefined,
             saleId: saleId ? new mongoose_1.default.Types.ObjectId(saleId) : undefined,
         });
         // Save and related updates (with or without session)
@@ -369,13 +376,21 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             });
             yield deposit.save(session ? { session } : undefined);
         }
-        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare } }, session ? { session } : undefined);
-        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
-        if (paymentType === 'rental' && ownerId) {
-            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId), { $inc: { balance: finalCommissionDetails.ownerAmount } }, session ? { session } : undefined);
+        // Post company revenue and agent commission only if not provisional
+        if (!payment.isProvisional) {
+            yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare } }, session ? { session } : undefined);
+            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
+        }
+        if (!payment.isProvisional) {
+            if (paymentType === 'rental' && ownerId) {
+                yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId), { $inc: { balance: finalCommissionDetails.ownerAmount } }, session ? { session } : undefined);
+            }
         }
         try {
-            yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
+            // Skip recording income in property accounts until finalized if provisional
+            if (!payment.isProvisional) {
+                yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
+            }
         }
         catch (error) {
             console.error('Failed to record income in property account:', error);
@@ -1018,3 +1033,82 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getPaymentReceipt = getPaymentReceipt;
+// Finalize a provisional payment by linking to real property/tenant and posting commissions
+const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+    let session = null;
+    try {
+        session = yield mongoose_1.default.startSession();
+        session.startTransaction();
+        const { id } = req.params;
+        const { propertyId, tenantId, ownerId, relationshipType, // 'management' | 'introduction'
+        overrideCommissionPercent } = req.body;
+        if (!propertyId || !tenantId) {
+            yield session.abortTransaction();
+            return res.status(400).json({ message: 'propertyId and tenantId are required' });
+        }
+        const payment = yield Payment_1.Payment.findOne({ _id: id, companyId: req.user.companyId }).session(session);
+        if (!payment) {
+            yield session.abortTransaction();
+            return res.status(404).json({ message: 'Payment not found' });
+        }
+        if (!payment.isProvisional) {
+            yield session.abortTransaction();
+            return res.status(400).json({ message: 'Payment is not provisional' });
+        }
+        const property = yield Property_1.Property.findById(propertyId).session(session);
+        if (!property) {
+            yield session.abortTransaction();
+            return res.status(404).json({ message: 'Property not found' });
+        }
+        const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
+        const finalCommission = yield calculateCommission(payment.amount, commissionPercent, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        payment.propertyId = new mongoose_1.default.Types.ObjectId(propertyId);
+        payment.tenantId = new mongoose_1.default.Types.ObjectId(tenantId);
+        if (ownerId) {
+            payment.ownerId = new mongoose_1.default.Types.ObjectId(ownerId);
+        }
+        payment.commissionDetails = finalCommission;
+        payment.isProvisional = false;
+        payment.isInSuspense = false;
+        payment.commissionFinalized = true;
+        payment.provisionalRelationshipType = relationshipType || payment.provisionalRelationshipType || 'unknown';
+        payment.finalizedAt = new Date();
+        payment.finalizedBy = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        yield payment.save({ session });
+        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), { $inc: { revenue: finalCommission.agencyShare } }, { session });
+        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(payment.agentId), { $inc: { commission: finalCommission.agentShare } }, { session });
+        if (payment.paymentType === 'rental' && (ownerId || property.ownerId)) {
+            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId || (property.ownerId)), { $inc: { balance: finalCommission.ownerAmount } }, { session });
+        }
+        try {
+            yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
+        }
+        catch (err) {
+            console.error('Failed to record income in property account during finalize:', err);
+        }
+        yield session.commitTransaction();
+        return res.json({ message: 'Payment finalized successfully', payment });
+    }
+    catch (error) {
+        if (session) {
+            try {
+                yield session.abortTransaction();
+            }
+            catch (_a) { }
+        }
+        console.error('Error finalizing provisional payment:', error);
+        return res.status(500).json({ message: 'Failed to finalize payment', error: (error === null || error === void 0 ? void 0 : error.message) || 'Unknown error' });
+    }
+    finally {
+        if (session) {
+            try {
+                session.endSession();
+            }
+            catch (_b) { }
+        }
+    }
+});
+exports.finalizeProvisionalPayment = finalizeProvisionalPayment;

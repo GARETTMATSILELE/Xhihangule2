@@ -7,6 +7,7 @@ import { LevyPayment } from '../models/LevyPayment';
 import File, { IFile } from '../models/File';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
+import { Company } from '../models/Company';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 
@@ -559,13 +560,18 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
     }
 
-    // Calculate commission based on property type
-    const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
-    const totalCommission = (amount * baseCommissionRate) / 100;
-    const preaFee = totalCommission * 0.03;
+    // Calculate commission based on property's commission percentage and company-specific splits
+    const company = await Company.findById(new mongoose.Types.ObjectId(req.user.companyId)).lean();
+    const commissionPercentage = Number(property.commission || 0);
+    const totalCommission = (amount * commissionPercentage) / 100;
+    const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
+    const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
+    const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
+
+    const preaFee = totalCommission * preaPercentOfTotal;
     const remainingCommission = totalCommission - preaFee;
-    const agentShare = remainingCommission * 0.6;
-    const agencyShare = remainingCommission * 0.4;
+    const agentShare = remainingCommission * agentPercentOfRemaining;
+    const agencyShare = remainingCommission * agencyPercentOfRemaining;
 
     const commissionDetails = {
       totalCommission,
@@ -705,15 +711,20 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
       propertyType: payment.propertyType
     });
 
-    // If amount is being updated, recalculate commission
+    // If amount is being updated, recalculate commission using property's commission and company splits
     if (updateData.amount && updateData.amount !== payment.amount) {
-      const propertyType = updateData.propertyType || payment.propertyType || 'residential';
-      const baseCommissionRate = propertyType === 'residential' ? 15 : 10;
-      const totalCommission = (updateData.amount * baseCommissionRate) / 100;
-      const preaFee = totalCommission * 0.03;
+      const linkedProperty = await Property.findById(payment.propertyId);
+      const company = await Company.findById(new mongoose.Types.ObjectId(req.user.companyId)).lean();
+      const commissionPercentage = Number(linkedProperty?.commission || 0);
+      const totalCommission = (updateData.amount * commissionPercentage) / 100;
+      const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
+      const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
+      const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
+
+      const preaFee = totalCommission * preaPercentOfTotal;
       const remainingCommission = totalCommission - preaFee;
-      const agentShare = remainingCommission * 0.6;
-      const agencyShare = remainingCommission * 0.4;
+      const agentShare = remainingCommission * agentPercentOfRemaining;
+      const agencyShare = remainingCommission * agencyPercentOfRemaining;
 
       updateData.commissionDetails = {
         totalCommission,

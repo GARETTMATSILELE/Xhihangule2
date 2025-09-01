@@ -21,6 +21,7 @@ const LevyPayment_1 = require("../models/LevyPayment");
 const File_1 = __importDefault(require("../models/File"));
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const User_1 = require("../models/User");
+const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 // Get properties managed by the agent
@@ -473,7 +474,7 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.updateAgentProperty = updateAgentProperty;
 // Create a new payment for the agent
 const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'Authentication required' });
@@ -503,13 +504,17 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (!tenant) {
             return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
         }
-        // Calculate commission based on property type
-        const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
-        const totalCommission = (amount * baseCommissionRate) / 100;
-        const preaFee = totalCommission * 0.03;
+        // Calculate commission based on property's commission percentage and company-specific splits
+        const company = yield Company_1.Company.findById(new mongoose_1.default.Types.ObjectId(req.user.companyId)).lean();
+        const commissionPercentage = Number(property.commission || 0);
+        const totalCommission = (amount * commissionPercentage) / 100;
+        const preaPercentOfTotal = Math.max(0, Math.min(1, (_d = (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.preaPercentOfTotal) !== null && _d !== void 0 ? _d : 0.03));
+        const agentPercentOfRemaining = Math.max(0, Math.min(1, (_f = (_e = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _e === void 0 ? void 0 : _e.agentPercentOfRemaining) !== null && _f !== void 0 ? _f : 0.6));
+        const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_h = (_g = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _g === void 0 ? void 0 : _g.agencyPercentOfRemaining) !== null && _h !== void 0 ? _h : 0.4));
+        const preaFee = totalCommission * preaPercentOfTotal;
         const remainingCommission = totalCommission - preaFee;
-        const agentShare = remainingCommission * 0.6;
-        const agencyShare = remainingCommission * 0.4;
+        const agentShare = remainingCommission * agentPercentOfRemaining;
+        const agencyShare = remainingCommission * agencyPercentOfRemaining;
         const commissionDetails = {
             totalCommission,
             preaFee,
@@ -579,7 +584,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.createAgentPayment = createAgentPayment;
 // Update a payment for the agent
 const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     try {
         console.log('updateAgentPayment called with:', {
             paymentId: req.params.id,
@@ -625,15 +630,19 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             amount: payment.amount,
             propertyType: payment.propertyType
         });
-        // If amount is being updated, recalculate commission
+        // If amount is being updated, recalculate commission using property's commission and company splits
         if (updateData.amount && updateData.amount !== payment.amount) {
-            const propertyType = updateData.propertyType || payment.propertyType || 'residential';
-            const baseCommissionRate = propertyType === 'residential' ? 15 : 10;
-            const totalCommission = (updateData.amount * baseCommissionRate) / 100;
-            const preaFee = totalCommission * 0.03;
+            const linkedProperty = yield Property_1.Property.findById(payment.propertyId);
+            const company = yield Company_1.Company.findById(new mongoose_1.default.Types.ObjectId(req.user.companyId)).lean();
+            const commissionPercentage = Number((linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.commission) || 0);
+            const totalCommission = (updateData.amount * commissionPercentage) / 100;
+            const preaPercentOfTotal = Math.max(0, Math.min(1, (_g = (_f = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _f === void 0 ? void 0 : _f.preaPercentOfTotal) !== null && _g !== void 0 ? _g : 0.03));
+            const agentPercentOfRemaining = Math.max(0, Math.min(1, (_j = (_h = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _h === void 0 ? void 0 : _h.agentPercentOfRemaining) !== null && _j !== void 0 ? _j : 0.6));
+            const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_l = (_k = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _k === void 0 ? void 0 : _k.agencyPercentOfRemaining) !== null && _l !== void 0 ? _l : 0.4));
+            const preaFee = totalCommission * preaPercentOfTotal;
             const remainingCommission = totalCommission - preaFee;
-            const agentShare = remainingCommission * 0.6;
-            const agencyShare = remainingCommission * 0.4;
+            const agentShare = remainingCommission * agentPercentOfRemaining;
+            const agencyShare = remainingCommission * agencyPercentOfRemaining;
             updateData.commissionDetails = {
                 totalCommission,
                 preaFee,

@@ -315,14 +315,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
     
     // Check if using manual entries
-    const isManualProperty = propertyId && propertyId.startsWith('manual_');
-    const isManualTenant = tenantId && tenantId.startsWith('manual_');
+    const manualProperty = propertyId && propertyId.startsWith('manual_');
+    const manualTenant = tenantId && tenantId.startsWith('manual_');
     
     // Validate manual entries
-    if (isManualProperty && !manualPropertyAddress) {
+    if (manualProperty && !manualPropertyAddress) {
       return { error: { status: 400, message: 'Manual property address is required when using manual property entry' } };
     }
-    if (isManualTenant && !manualTenantName) {
+    if (manualTenant && !manualTenantName) {
       return { error: { status: 400, message: 'Manual tenant name is required when using manual tenant entry' } };
     }
     
@@ -353,12 +353,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       };
     }
 
+    // Determine provisional flags
+    const markProvisional = Boolean(manualProperty || manualTenant);
     // Create payment record
     const payment = new Payment({
       paymentType: paymentType || 'rental',
       propertyType: propertyType || 'residential',
-      propertyId: isManualProperty ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(propertyId), // Generate new ID for manual entries
-      tenantId: isManualTenant ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(tenantId), // Generate new ID for manual entries
+      propertyId: manualProperty ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(propertyId), // Generate new ID for manual entries
+      tenantId: manualTenant ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(tenantId), // Generate new ID for manual entries
       agentId: new mongoose.Types.ObjectId(agentId || user.userId),
       companyId: new mongoose.Types.ObjectId(user.companyId),
       paymentDate: new Date(paymentDate),
@@ -376,8 +378,13 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       leaseId: leaseId ? new mongoose.Types.ObjectId(leaseId) : undefined,
       rentUsed,
       // Add manual entry fields
-      manualPropertyAddress: isManualProperty ? manualPropertyAddress : undefined,
-      manualTenantName: isManualTenant ? manualTenantName : undefined,
+      manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
+      manualTenantName: manualTenant ? manualTenantName : undefined,
+      // Provisional flags
+      isProvisional: markProvisional,
+      isInSuspense: markProvisional,
+      commissionFinalized: !markProvisional,
+      provisionalRelationshipType: markProvisional ? 'unknown' : undefined,
       saleId: saleId ? new mongoose.Types.ObjectId(saleId) : undefined,
     });
     // Save and related updates (with or without session)
@@ -403,28 +410,36 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       await deposit.save(session ? { session } : undefined);
     }
 
-    await Company.findByIdAndUpdate(
-      new mongoose.Types.ObjectId(user.companyId),
-      { $inc: { revenue: finalCommissionDetails.agencyShare } },
-      session ? { session } : undefined
-    );
+    // Post company revenue and agent commission only if not provisional
+    if (!payment.isProvisional) {
+      await Company.findByIdAndUpdate(
+        new mongoose.Types.ObjectId(user.companyId),
+        { $inc: { revenue: finalCommissionDetails.agencyShare } },
+        session ? { session } : undefined
+      );
 
-    await User.findByIdAndUpdate(
-      new mongoose.Types.ObjectId(agentId || user.userId),
-      { $inc: { commission: finalCommissionDetails.agentShare } },
-      session ? { session } : undefined
-    );
-
-    if (paymentType === 'rental' && ownerId) {
       await User.findByIdAndUpdate(
-        new mongoose.Types.ObjectId(ownerId),
-        { $inc: { balance: finalCommissionDetails.ownerAmount } },
+        new mongoose.Types.ObjectId(agentId || user.userId),
+        { $inc: { commission: finalCommissionDetails.agentShare } },
         session ? { session } : undefined
       );
     }
 
+    if (!payment.isProvisional) {
+      if (paymentType === 'rental' && ownerId) {
+        await User.findByIdAndUpdate(
+          new mongoose.Types.ObjectId(ownerId),
+          { $inc: { balance: finalCommissionDetails.ownerAmount } },
+          session ? { session } : undefined
+        );
+      }
+    }
+
     try {
-      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+      // Skip recording income in property accounts until finalized if provisional
+      if (!payment.isProvisional) {
+        await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+      }
     } catch (error) {
       console.error('Failed to record income in property account:', error);
     }
@@ -1136,3 +1151,113 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
     });
   }
 }; 
+
+// Finalize a provisional payment by linking to real property/tenant and posting commissions
+export const finalizeProvisionalPayment = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  let session: mongoose.ClientSession | null = null;
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const { id } = req.params;
+    const {
+      propertyId,
+      tenantId,
+      ownerId,
+      relationshipType, // 'management' | 'introduction'
+      overrideCommissionPercent
+    } = req.body as {
+      propertyId: string;
+      tenantId: string;
+      ownerId?: string;
+      relationshipType?: 'management' | 'introduction';
+      overrideCommissionPercent?: number;
+    };
+
+    if (!propertyId || !tenantId) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'propertyId and tenantId are required' });
+    }
+
+    const payment = await Payment.findOne({ _id: id, companyId: req.user.companyId }).session(session);
+    if (!payment) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+    if (!payment.isProvisional) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Payment is not provisional' });
+    }
+
+    const property = await Property.findById(propertyId).session(session);
+    if (!property) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Property not found' });
+    }
+
+    const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
+    const finalCommission = await calculateCommission(
+      payment.amount,
+      commissionPercent,
+      new mongoose.Types.ObjectId(req.user.companyId)
+    );
+
+    payment.propertyId = new mongoose.Types.ObjectId(propertyId) as any;
+    payment.tenantId = new mongoose.Types.ObjectId(tenantId) as any;
+    if (ownerId) {
+      (payment as any).ownerId = new mongoose.Types.ObjectId(ownerId);
+    }
+    payment.commissionDetails = finalCommission as any;
+    payment.isProvisional = false;
+    payment.isInSuspense = false;
+    payment.commissionFinalized = true;
+    payment.provisionalRelationshipType = (relationshipType as any) || payment.provisionalRelationshipType || 'unknown';
+    (payment as any).finalizedAt = new Date();
+    (payment as any).finalizedBy = new mongoose.Types.ObjectId(req.user.userId);
+
+    await payment.save({ session });
+
+    await Company.findByIdAndUpdate(
+      new mongoose.Types.ObjectId(req.user.companyId),
+      { $inc: { revenue: finalCommission.agencyShare } },
+      { session }
+    );
+
+    await User.findByIdAndUpdate(
+      new mongoose.Types.ObjectId(payment.agentId),
+      { $inc: { commission: finalCommission.agentShare } },
+      { session }
+    );
+
+    if (payment.paymentType === 'rental' && (ownerId || (property as any).ownerId)) {
+      await User.findByIdAndUpdate(
+        new mongoose.Types.ObjectId(ownerId || ((property as any).ownerId)),
+        { $inc: { balance: finalCommission.ownerAmount } },
+        { session }
+      );
+    }
+
+    try {
+      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+    } catch (err) {
+      console.error('Failed to record income in property account during finalize:', err);
+    }
+
+    await session.commitTransaction();
+    return res.json({ message: 'Payment finalized successfully', payment });
+  } catch (error: any) {
+    if (session) {
+      try { await session.abortTransaction(); } catch {}
+    }
+    console.error('Error finalizing provisional payment:', error);
+    return res.status(500).json({ message: 'Failed to finalize payment', error: error?.message || 'Unknown error' });
+  } finally {
+    if (session) {
+      try { session.endSession(); } catch {}
+    }
+  }
+};

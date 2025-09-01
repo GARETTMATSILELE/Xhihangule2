@@ -68,25 +68,58 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 propertyId: { $in: propertyIds },
                 status: 'completed'
             }).populate('propertyId', 'name address');
-            // Create a map of payments by property and month/year for filtering
+            // Create a map of payments by property and month/year for filtering (using rental period)
             const paymentMap = new Map();
-            const agentCommissionMap = new Map(); // Track agent commissions by month/year
+            const agentCommissionMap = new Map(); // Track agent commissions by month/year (using rental period)
             payments.forEach(payment => {
                 var _a;
-                const paymentDate = new Date(payment.paymentDate);
-                const month = paymentDate.getMonth();
-                const year = paymentDate.getFullYear();
-                const key = `${payment.propertyId.toString()}-${year}-${month}`;
-                paymentMap.set(key, payment);
-                // Track agent commission by month/year
-                const commissionKey = `${year}-${month}`;
-                const agentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
-                if (agentCommissionMap.has(commissionKey)) {
-                    agentCommissionMap.set(commissionKey, agentCommissionMap.get(commissionKey) + agentShare);
+                // Determine rental months covered by this payment, including advance payments
+                const coveredMonths = [];
+                const advanceMonths = payment.advanceMonthsPaid;
+                const startPeriod = payment.advancePeriodStart;
+                const endPeriod = payment.advancePeriodEnd;
+                if (advanceMonths && advanceMonths > 1 && startPeriod && endPeriod) {
+                    // Expand range from start to end inclusive
+                    let y = startPeriod.year;
+                    let m0 = startPeriod.month - 1; // convert to 0-based
+                    const endY = endPeriod.year;
+                    const endM0 = endPeriod.month - 1;
+                    while (y < endY || (y === endY && m0 <= endM0)) {
+                        coveredMonths.push({ year: y, month: m0 });
+                        m0 += 1;
+                        if (m0 > 11) {
+                            m0 = 0;
+                            y += 1;
+                        }
+                    }
                 }
                 else {
-                    agentCommissionMap.set(commissionKey, agentShare);
+                    // Single rental period month/year
+                    const y = payment.rentalPeriodYear;
+                    const m0 = payment.rentalPeriodMonth - 1; // 0-based
+                    if (typeof y === 'number' && typeof m0 === 'number' && m0 >= 0 && m0 <= 11) {
+                        coveredMonths.push({ year: y, month: m0 });
+                    }
                 }
+                // Fallback to paymentDate month/year if rental period is not set (legacy records)
+                if (coveredMonths.length === 0) {
+                    const fallbackDate = new Date(payment.paymentDate);
+                    coveredMonths.push({ year: fallbackDate.getFullYear(), month: fallbackDate.getMonth() });
+                }
+                // Allocate agent share evenly across covered months
+                const totalAgentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
+                const perMonthAgentShare = coveredMonths.length > 0 ? totalAgentShare / coveredMonths.length : 0;
+                coveredMonths.forEach(({ year, month }) => {
+                    const key = `${payment.propertyId.toString()}-${year}-${month}`;
+                    paymentMap.set(key, true);
+                    const commissionKey = `${year}-${month}`;
+                    if (agentCommissionMap.has(commissionKey)) {
+                        agentCommissionMap.set(commissionKey, agentCommissionMap.get(commissionKey) + perMonthAgentShare);
+                    }
+                    else {
+                        agentCommissionMap.set(commissionKey, perMonthAgentShare);
+                    }
+                });
             });
             // Process each lease to build property details
             for (const lease of leases) {
@@ -183,49 +216,99 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
             const property = payment.propertyId; // Cast to access populated fields
             const agencyShare = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare) || 0;
             const rentalAmount = payment.amount;
-            // Only include payments with agency commission
-            if (agencyShare > 0) {
-                const paymentDate = new Date(payment.paymentDate);
-                const paymentYear = paymentDate.getFullYear();
-                const paymentMonth = paymentDate.getMonth();
-                const paymentWeek = getWeekOfYear(paymentDate);
-                const paymentDay = paymentDate.getDate();
-                // Apply filters based on filter type
-                let shouldInclude = true;
-                if (filterPeriod === 'yearly') {
-                    shouldInclude = paymentYear === filterYear;
-                }
-                else if (filterPeriod === 'monthly') {
-                    shouldInclude = paymentYear === filterYear && (filterMonth === null || paymentMonth === filterMonth);
-                }
-                else if (filterPeriod === 'weekly') {
-                    shouldInclude = paymentYear === filterYear && (filterWeek === null || paymentWeek === filterWeek);
-                }
-                else if (filterPeriod === 'daily') {
-                    shouldInclude = paymentYear === filterYear &&
-                        (filterMonth === null || paymentMonth === filterMonth) &&
-                        (filterDay === null || paymentDay === filterDay);
-                }
-                if (shouldInclude) {
-                    const commissionDetail = {
-                        paymentId: payment._id.toString(),
-                        paymentDate: payment.paymentDate,
-                        propertyId: payment.propertyId.toString(),
-                        propertyName: (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property',
-                        propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || 'Unknown Address',
-                        rentalAmount: rentalAmount,
-                        agencyShare: agencyShare
-                    };
-                    agencyCommission.details.push(commissionDetail);
-                    // Add to monthly and yearly totals if payment is in current period
-                    if (paymentMonth === currentMonth && paymentYear === currentYear) {
-                        agencyCommission.monthly += agencyShare;
+            if (agencyShare <= 0)
+                continue;
+            // Compute rental-period coverage (expand advances)
+            const coveredMonths = [];
+            const advanceMonths = payment.advanceMonthsPaid;
+            const startPeriod = payment.advancePeriodStart;
+            const endPeriod = payment.advancePeriodEnd;
+            if (advanceMonths && advanceMonths > 1 && startPeriod && endPeriod) {
+                let y = startPeriod.year;
+                let m0 = startPeriod.month - 1;
+                const endY = endPeriod.year;
+                const endM0 = endPeriod.month - 1;
+                while (y < endY || (y === endY && m0 <= endM0)) {
+                    coveredMonths.push({ year: y, month: m0 });
+                    m0 += 1;
+                    if (m0 > 11) {
+                        m0 = 0;
+                        y += 1;
                     }
-                    if (paymentYear === currentYear) {
-                        agencyCommission.yearly += agencyShare;
-                    }
-                    agencyCommission.total += agencyShare;
                 }
+            }
+            else {
+                const y = payment.rentalPeriodYear;
+                const m0 = payment.rentalPeriodMonth - 1;
+                if (typeof y === 'number' && typeof m0 === 'number' && m0 >= 0 && m0 <= 11) {
+                    coveredMonths.push({ year: y, month: m0 });
+                }
+            }
+            if (coveredMonths.length === 0) {
+                const d = new Date(payment.paymentDate);
+                coveredMonths.push({ year: d.getFullYear(), month: d.getMonth() });
+            }
+            const perMonthAgencyShare = agencyShare / coveredMonths.length;
+            // Payment-date components (for daily/weekly filtering only)
+            const paymentDate = new Date(payment.paymentDate);
+            const paymentYear = paymentDate.getFullYear();
+            const paymentMonth = paymentDate.getMonth();
+            const paymentWeek = getWeekOfYear(paymentDate);
+            const paymentDay = paymentDate.getDate();
+            // Apply filters
+            let shouldInclude = true;
+            if (filterPeriod === 'yearly') {
+                shouldInclude = coveredMonths.some(cm => cm.year === filterYear);
+            }
+            else if (filterPeriod === 'monthly') {
+                shouldInclude = coveredMonths.some(cm => cm.year === filterYear && (filterMonth === null || cm.month === filterMonth));
+            }
+            else if (filterPeriod === 'weekly') {
+                shouldInclude = paymentYear === filterYear && (filterWeek === null || paymentWeek === filterWeek);
+            }
+            else if (filterPeriod === 'daily') {
+                shouldInclude = paymentYear === filterYear &&
+                    (filterMonth === null || paymentMonth === filterMonth) &&
+                    (filterDay === null || paymentDay === filterDay);
+            }
+            if (!shouldInclude)
+                continue;
+            // Push detail row (single row per payment)
+            agencyCommission.details.push({
+                paymentId: payment._id.toString(),
+                paymentDate: payment.paymentDate,
+                propertyId: payment.propertyId.toString(),
+                propertyName: (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property',
+                propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || 'Unknown Address',
+                rentalAmount: rentalAmount,
+                agencyShare: agencyShare
+            });
+            // Totals:
+            // - Monthly/Yearly tracked for current period using rental period months
+            coveredMonths.forEach(({ year, month }) => {
+                if (year === currentYear) {
+                    agencyCommission.yearly += perMonthAgencyShare;
+                    if (month === currentMonth) {
+                        agencyCommission.monthly += perMonthAgencyShare;
+                    }
+                }
+            });
+            // - Filtered total: for monthly/yearly, sum only matching covered months; for daily/weekly, sum full payment share
+            if (filterPeriod === 'yearly') {
+                coveredMonths.forEach(({ year }) => {
+                    if (year === filterYear)
+                        agencyCommission.total += perMonthAgencyShare;
+                });
+            }
+            else if (filterPeriod === 'monthly') {
+                coveredMonths.forEach(({ year, month }) => {
+                    if (year === filterYear && (filterMonth === null || month === filterMonth)) {
+                        agencyCommission.total += perMonthAgencyShare;
+                    }
+                });
+            }
+            else {
+                agencyCommission.total += agencyShare;
             }
         }
         // Sort details by payment date (most recent first)
@@ -273,6 +356,38 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             const preaFee = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.preaFee) || 0;
             if (preaFee <= 0)
                 continue;
+            // Compute rental-period coverage (expand advances)
+            const coveredMonths = [];
+            const advanceMonths = payment.advanceMonthsPaid;
+            const startPeriod = payment.advancePeriodStart;
+            const endPeriod = payment.advancePeriodEnd;
+            if (advanceMonths && advanceMonths > 1 && startPeriod && endPeriod) {
+                let y = startPeriod.year;
+                let m0 = startPeriod.month - 1;
+                const endY = endPeriod.year;
+                const endM0 = endPeriod.month - 1;
+                while (y < endY || (y === endY && m0 <= endM0)) {
+                    coveredMonths.push({ year: y, month: m0 });
+                    m0 += 1;
+                    if (m0 > 11) {
+                        m0 = 0;
+                        y += 1;
+                    }
+                }
+            }
+            else {
+                const y = payment.rentalPeriodYear;
+                const m0 = payment.rentalPeriodMonth - 1;
+                if (typeof y === 'number' && typeof m0 === 'number' && m0 >= 0 && m0 <= 11) {
+                    coveredMonths.push({ year: y, month: m0 });
+                }
+            }
+            if (coveredMonths.length === 0) {
+                const d = new Date(payment.paymentDate);
+                coveredMonths.push({ year: d.getFullYear(), month: d.getMonth() });
+            }
+            const perMonthPreaFee = preaFee / coveredMonths.length;
+            // Payment-date components (for daily/weekly filtering only)
             const paymentDate = new Date(payment.paymentDate);
             const paymentYear = paymentDate.getFullYear();
             const paymentMonth = paymentDate.getMonth();
@@ -281,10 +396,10 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             // Apply filters
             let shouldInclude = true;
             if (filterPeriod === 'yearly') {
-                shouldInclude = paymentYear === filterYear;
+                shouldInclude = coveredMonths.some(cm => cm.year === filterYear);
             }
             else if (filterPeriod === 'monthly') {
-                shouldInclude = paymentYear === filterYear && (filterMonth === null || paymentMonth === filterMonth);
+                shouldInclude = coveredMonths.some(cm => cm.year === filterYear && (filterMonth === null || cm.month === filterMonth));
             }
             else if (filterPeriod === 'weekly') {
                 shouldInclude = paymentYear === filterYear && (filterWeek === null || paymentWeek === filterWeek);
@@ -302,20 +417,36 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             if (propertyMap.has(key)) {
                 const agg = propertyMap.get(key);
                 agg.commission += preaFee;
-                // Optionally update rent with latest payment amount
                 agg.rent = rentAmount || agg.rent;
             }
             else {
                 propertyMap.set(key, { propertyId: key, propertyName: name, rent: rentAmount, commission: preaFee });
             }
-            // Monthly/Yearly/Total based on current period (to align with other sections)
-            if (paymentMonth === currentMonth && paymentYear === currentYear) {
-                preaCommission.monthly += preaFee;
+            // Monthly/Yearly/Total using rental period months for current and filtered periods
+            coveredMonths.forEach(({ year, month }) => {
+                if (year === currentYear) {
+                    preaCommission.yearly += perMonthPreaFee;
+                    if (month === currentMonth) {
+                        preaCommission.monthly += perMonthPreaFee;
+                    }
+                }
+            });
+            if (filterPeriod === 'yearly') {
+                coveredMonths.forEach(({ year }) => {
+                    if (year === filterYear)
+                        preaCommission.total += perMonthPreaFee;
+                });
             }
-            if (paymentYear === currentYear) {
-                preaCommission.yearly += preaFee;
+            else if (filterPeriod === 'monthly') {
+                coveredMonths.forEach(({ year, month }) => {
+                    if (year === filterYear && (filterMonth === null || month === filterMonth)) {
+                        preaCommission.total += perMonthPreaFee;
+                    }
+                });
             }
-            preaCommission.total += preaFee;
+            else {
+                preaCommission.total += preaFee;
+            }
         }
         preaCommission.details = Array.from(propertyMap.values());
         res.json(preaCommission);

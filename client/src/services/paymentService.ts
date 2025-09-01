@@ -72,6 +72,24 @@ class PaymentService {
     }
   }
 
+  // Finalize a provisional payment
+  async finalizeProvisionalPayment(id: string, payload: {
+    propertyId: string;
+    tenantId: string;
+    ownerId?: string;
+    relationshipType?: 'management' | 'introduction';
+    overrideCommissionPercent?: number;
+  }): Promise<{ message: string; payment: Payment }> {
+    try {
+      return await this.db.executeWithRetry(async () => {
+        const response = await api.post(`/accountants/payments/${id}/finalize`, payload);
+        return response.data;
+      });
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
   // Accountant-specific payment fetching
   async getPaymentsAccountant(): Promise<Payment[]> {
     try {

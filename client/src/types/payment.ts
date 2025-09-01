@@ -89,6 +89,9 @@ export interface PaymentFormData {
   // Manual entry fields for properties/tenants not in database
   manualPropertyAddress?: string;
   manualTenantName?: string;
+  // Provisional workflow
+  isProvisional?: boolean;
+  provisionalRelationshipType?: 'unknown' | 'management' | 'introduction';
 }
 
 export interface Payment {
@@ -122,6 +125,11 @@ export interface Payment {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   rentUsed?: number;
+  // Provisional workflow
+  isProvisional?: boolean;
+  isInSuspense?: boolean;
+  commissionFinalized?: boolean;
+  provisionalRelationshipType?: 'unknown' | 'management' | 'introduction';
 }
 
 // Extended Payment interface for populated data from backend

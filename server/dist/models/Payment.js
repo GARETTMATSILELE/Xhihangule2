@@ -192,6 +192,33 @@ const PaymentSchema = new mongoose_1.Schema({
         type: String,
         required: false,
     },
+    // Provisional workflow fields
+    isProvisional: {
+        type: Boolean,
+        default: false
+    },
+    isInSuspense: {
+        type: Boolean,
+        default: false
+    },
+    commissionFinalized: {
+        type: Boolean,
+        default: true
+    },
+    provisionalRelationshipType: {
+        type: String,
+        enum: ['unknown', 'management', 'introduction'],
+        default: 'unknown'
+    },
+    finalizedAt: {
+        type: Date,
+        required: false
+    },
+    finalizedBy: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false
+    },
     saleId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'SalesContract',
@@ -209,4 +236,5 @@ PaymentSchema.index({ status: 1 });
 // Add compound index for agent commission queries
 PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
 PaymentSchema.index({ saleId: 1 });
+PaymentSchema.index({ isProvisional: 1 });
 exports.Payment = mongoose_1.default.model('Payment', PaymentSchema, collections_1.COLLECTIONS.PAYMENTS);

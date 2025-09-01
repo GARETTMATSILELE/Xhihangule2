@@ -14,7 +14,8 @@ import {
   createPaymentAccountant,
   getCompanyPayments,
   getPaymentDetails,
-  updatePaymentStatus
+  updatePaymentStatus,
+  finalizeProvisionalPayment
 } from '../controllers/paymentController';
 import {
   getPropertyTransactions,
@@ -87,6 +88,7 @@ router.get('/payments', canManagePayments, getCompanyPayments);
 router.post('/payments', canManagePayments, createPaymentAccountant);
 router.get('/payments/:id', canManagePayments, getPaymentDetails);
 router.put('/payments/:id/status', canManagePayments, updatePaymentStatus);
+router.post('/payments/:id/finalize', canManagePayments, finalizeProvisionalPayment);
 
 // Property Account routes - require accountant role
 router.get('/property-accounts', isAccountant, getCompanyPropertyAccounts);
