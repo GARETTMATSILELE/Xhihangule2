@@ -52,9 +52,8 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
   if (requiredRoles && requiredRoles.length > 0) {
     if (!requiredRoles.includes(user.role)) {
       console.log('ProtectedRoute: User role not authorized', { userRole: user.role, requiredRoles });
-      // Redirect to appropriate dashboard if user doesn't have required role
-      const dashboardPath = `/${user.role}-dashboard`;
-      return <Typography color="error">You do not have access to this page.</Typography>;
+      // Redirect to login on unauthorized access per requirement
+      return <Navigate to="/login" replace state={{ from: location }} />;
     }
   }
 
