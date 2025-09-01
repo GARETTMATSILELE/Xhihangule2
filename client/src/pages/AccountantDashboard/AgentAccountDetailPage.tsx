@@ -508,46 +508,43 @@ const AgentAccountDetailPage: React.FC = () => {
             </TableHead>
             <TableBody>
               {account.commissionData && account.commissionData.length > 0 ? (
-                account.commissionData.map((commission) => (
-                  <TableRow key={commission._id}>
-                    <TableCell>{new Date(commission.paymentDate).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {(commission as any)?.propertyId?.propertyName || (commission as any)?.manualPropertyAddress || 'N/A'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {(commission as any)?.propertyId?.address || ''}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      {((commission as any)?.tenantId?.firstName && (commission as any)?.tenantId?.lastName)
-                        ? `${(commission as any).tenantId.firstName} ${(commission as any).tenantId.lastName}`
-                        : ((commission as any)?.manualTenantName || 'N/A')}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={commission.paymentType === 'introduction' ? 'Introduction' : 'Rental'}
-                        color={commission.paymentType === 'introduction' ? 'primary' : 'secondary'}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {agentAccountService.formatCurrency(commission.amount)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="success.main" fontWeight="medium">
-                        {agentAccountService.formatCurrency(commission.commissionDetails.agentShare)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="caption" color="text.secondary">
-                        {commission.referenceNumber}
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ))
+                account.commissionData.map((commission) => {
+                  const propertyName = (commission as any)?.propertyId?.propertyName || (commission as any)?.manualPropertyAddress || 'N/A';
+                  const propertyAddress = (commission as any)?.propertyId?.address || '';
+                  const tenantFirst = (commission as any)?.tenantId?.firstName;
+                  const tenantLast = (commission as any)?.tenantId?.lastName;
+                  const tenantName = (tenantFirst && tenantLast) ? `${tenantFirst} ${tenantLast}` : ((commission as any)?.manualTenantName || 'N/A');
+                  return (
+                    <TableRow key={commission._id}>
+                      <TableCell>{new Date(commission.paymentDate).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="medium">{propertyName}</Typography>
+                        <Typography variant="caption" color="text.secondary">{propertyAddress}</Typography>
+                      </TableCell>
+                      <TableCell>{tenantName}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={commission.paymentType === 'introduction' ? 'Introduction' : 'Rental'}
+                          color={commission.paymentType === 'introduction' ? 'primary' : 'secondary'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="medium">
+                          {agentAccountService.formatCurrency(commission.amount)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="success.main" fontWeight="medium">
+                          {agentAccountService.formatCurrency(commission.commissionDetails.agentShare)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="caption" color="text.secondary">{commission.referenceNumber}</Typography>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               ) : (
                 <TableRow>
                   <TableCell colSpan={7} align="center">
@@ -571,7 +568,7 @@ const AgentAccountDetailPage: React.FC = () => {
                   <Grid item xs={12} sm={6} md={3}>
                     <Typography variant="body2" color="text.secondary">Total Properties</Typography>
                     <Typography variant="h6">
-                      {new Set(account.commissionData.map(c => c.propertyId._id)).size}
+                      {new Set(account.commissionData.map((c: any) => c?.propertyId?._id || c?.manualPropertyAddress || c?._id)).size}
                     </Typography>
                   </Grid>
                   <Grid item xs={12} sm={6} md={3}>
