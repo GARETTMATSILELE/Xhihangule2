@@ -14,6 +14,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
+const Property_1 = require("../models/Property");
+const User_1 = require("../models/User");
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const ownerController_1 = require("../controllers/ownerController");
@@ -102,42 +104,53 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
         const ownerId = req.user.userId;
         console.log(`[Owner Financial Data] Processing request for ownerId: ${ownerId}`);
         console.log(`[Owner Financial Data] Company ID: ${req.user.companyId}`);
-        // Use the PropertyOwner collection to get the properties that belong to this owner
+        // Build owner context with robust fallbacks
         let propertyOwnerContext = yield PropertyOwner_1.PropertyOwner.findById(ownerId);
         if (!propertyOwnerContext) {
-            console.log(`[Owner Financial Data] PropertyOwner not found for ID: ${ownerId}`);
-            return res.json({
-                success: true,
-                data: {
-                    properties: [],
-                    summary: {
-                        totalIncome: 0,
-                        totalExpenses: 0,
-                        totalOwnerPayouts: 0,
-                        runningBalance: 0,
-                        totalProperties: 0
-                    },
-                    recentTransactions: [],
-                    monthlyData: [],
-                    propertyBreakdown: []
+            // Fallback: try to match PropertyOwner by the user's email
+            try {
+                const ownerUser = yield User_1.User.findById(ownerId);
+                if (ownerUser === null || ownerUser === void 0 ? void 0 : ownerUser.email) {
+                    propertyOwnerContext = yield PropertyOwner_1.PropertyOwner.findOne({ email: ownerUser.email });
+                    if (propertyOwnerContext) {
+                        console.log('[Owner Financial Data] Matched PropertyOwner by email:', ownerUser.email);
+                    }
                 }
+            }
+            catch (lookupErr) {
+                console.warn('[Owner Financial Data] PropertyOwner email lookup failed (non-fatal):', lookupErr);
+            }
+        }
+        if (propertyOwnerContext) {
+            console.log(`[Owner Financial Data] PropertyOwner context:`, {
+                _id: propertyOwnerContext._id,
+                companyId: propertyOwnerContext.companyId,
+                propertiesCount: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) || 0,
+                properties: propertyOwnerContext.properties
             });
         }
-        console.log(`[Owner Financial Data] PropertyOwner context:`, {
-            _id: propertyOwnerContext._id,
-            companyId: propertyOwnerContext.companyId,
-            propertiesCount: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) || 0,
-            properties: propertyOwnerContext.properties
-        });
-        // Get the property IDs from PropertyOwner context (these are the actual properties owned by this user)
+        else {
+            console.log('[Owner Financial Data] PropertyOwner context not found after fallbacks. Using Property collection fallback.');
+        }
+        // Get the property IDs for this owner
         let ownerPropertyIds = [];
-        if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
+        if (propertyOwnerContext && propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
             ownerPropertyIds = propertyOwnerContext.properties;
             console.log(`[Owner Financial Data] Using properties from PropertyOwner context:`, ownerPropertyIds.length);
             console.log(`[Owner Financial Data] Property IDs:`, ownerPropertyIds);
         }
         else {
-            console.log(`[Owner Financial Data] No properties found in PropertyOwner context`);
+            console.log(`[Owner Financial Data] No properties in PropertyOwner context. Falling back to Property collection by ownerId: ${ownerId}`);
+            const propQuery = { ownerId: ownerId };
+            if (req.user.companyId) {
+                propQuery.companyId = req.user.companyId;
+            }
+            const fallbackProps = yield Property_1.Property.find(propQuery).select('_id');
+            ownerPropertyIds = fallbackProps.map((p) => p._id);
+            console.log('[Owner Financial Data] Fallback properties found:', ownerPropertyIds.length);
+        }
+        if (!ownerPropertyIds || ownerPropertyIds.length === 0) {
+            console.log(`[Owner Financial Data] No properties found for ownerId: ${ownerId}`);
             return res.json({
                 success: true,
                 data: {

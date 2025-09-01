@@ -142,7 +142,7 @@ const OwnerPayoutSchema = new Schema<OwnerPayout>({
   referenceNumber: { 
     type: String, 
     required: true,
-    unique: true 
+    // uniqueness is enforced via a compound index on the parent schema
   },
   status: { 
     type: String, 
@@ -246,6 +246,8 @@ PropertyAccountSchema.index({ ownerId: 1 });
 PropertyAccountSchema.index({ 'transactions.date': -1 });
 PropertyAccountSchema.index({ 'ownerPayouts.date': -1 });
 PropertyAccountSchema.index({ runningBalance: 1 });
+// Ensure reference numbers are unique per property across owner payouts
+PropertyAccountSchema.index({ propertyId: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, sparse: true });
 
 // Pre-save middleware to update totals
 PropertyAccountSchema.pre('save', function(next) {

@@ -110,6 +110,47 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
                 // Don't throw error, continue without indexes
             }
         }
+        // Migrate accounting PropertyAccount ownerPayouts.referenceNumber unique index to compound index
+        try {
+            // Ensure accounting collection exists to avoid NamespaceNotFound (26)
+            try {
+                yield exports.accountingConnection.db.createCollection('propertyaccounts');
+            }
+            catch (ensureErr) {
+                if (ensureErr && ensureErr.code !== 48) {
+                    throw ensureErr;
+                }
+            }
+            const acct = exports.accountingConnection.collection('propertyaccounts');
+            const idx = yield acct.indexes();
+            // Drop legacy subdocument unique index if present
+            const legacy = idx.find((i) => i.name === 'ownerPayouts.referenceNumber_1');
+            if (legacy) {
+                console.warn('Dropping legacy index ownerPayouts.referenceNumber_1 on propertyaccounts');
+                try {
+                    yield acct.dropIndex('ownerPayouts.referenceNumber_1');
+                }
+                catch (dropErr) {
+                    if (!dropErr || (dropErr.code !== 27 && dropErr.codeName !== 'IndexNotFound')) {
+                        throw dropErr;
+                    }
+                }
+            }
+            // Create compound unique index if missing
+            const hasCompound = idx.find((i) => i.name === 'propertyId_1_ownerPayouts.referenceNumber_1');
+            if (!hasCompound) {
+                console.log('Creating compound unique index on propertyaccounts: { propertyId: 1, ownerPayouts.referenceNumber: 1 }');
+                yield acct.createIndex({ propertyId: 1, 'ownerPayouts.referenceNumber': 1 }, { name: 'propertyId_1_ownerPayouts.referenceNumber_1', unique: true, sparse: true });
+            }
+        }
+        catch (acctIdxErr) {
+            if (acctIdxErr && acctIdxErr.code === 26) {
+                console.log('Accounting propertyaccounts collection not found; skipping compound index migration');
+            }
+            else {
+                console.error('Accounting index migration error (non-fatal):', acctIdxErr);
+            }
+        }
         // Fix legacy indexes inconsistencies for companies collection
         try {
             // Ensure the companies collection exists to avoid NamespaceNotFound (26)

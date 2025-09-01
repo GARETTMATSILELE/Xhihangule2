@@ -38,7 +38,22 @@ const getPropertyOwnerContext = (ownerId) => __awaiter(void 0, void 0, void 0, f
         throw new errorHandler_1.AppError('Property owner not found', 404);
     }
     console.log(`Found owner user in User collection: ${user.email}`);
-    // Use the user as the property owner context
+    // Additional fallback: try to find PropertyOwner by email (common when accounts are linked by email but have different IDs)
+    try {
+        const ownerByEmail = yield PropertyOwner_1.PropertyOwner.findOne({ email: user.email });
+        if (ownerByEmail) {
+            console.log(`Matched PropertyOwner by email: ${ownerByEmail.email} with properties: ${(ownerByEmail.properties || []).length}`);
+            return {
+                _id: ownerByEmail._id,
+                properties: ownerByEmail.properties || [],
+                companyId: ownerByEmail.companyId
+            };
+        }
+    }
+    catch (lookupErr) {
+        console.warn('Error during PropertyOwner email lookup (non-fatal):', lookupErr);
+    }
+    // Use the user as the property owner context if no PropertyOwner document exists
     return {
         _id: user._id,
         properties: [], // Will be populated from Property collection

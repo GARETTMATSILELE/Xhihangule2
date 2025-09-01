@@ -112,6 +112,49 @@ export const connectDatabase = async (): Promise<void> => {
       }
     }
 
+    // Migrate accounting PropertyAccount ownerPayouts.referenceNumber unique index to compound index
+    try {
+      // Ensure accounting collection exists to avoid NamespaceNotFound (26)
+      try {
+        await accountingConnection.db.createCollection('propertyaccounts');
+      } catch (ensureErr: any) {
+        if (ensureErr && ensureErr.code !== 48) {
+          throw ensureErr;
+        }
+      }
+
+      const acct = accountingConnection.collection('propertyaccounts');
+      const idx = await acct.indexes();
+      // Drop legacy subdocument unique index if present
+      const legacy = idx.find((i: any) => i.name === 'ownerPayouts.referenceNumber_1');
+      if (legacy) {
+        console.warn('Dropping legacy index ownerPayouts.referenceNumber_1 on propertyaccounts');
+        try {
+          await acct.dropIndex('ownerPayouts.referenceNumber_1');
+        } catch (dropErr: any) {
+          if (!dropErr || (dropErr.code !== 27 && dropErr.codeName !== 'IndexNotFound')) {
+            throw dropErr;
+          }
+        }
+      }
+
+      // Create compound unique index if missing
+      const hasCompound = idx.find((i: any) => i.name === 'propertyId_1_ownerPayouts.referenceNumber_1');
+      if (!hasCompound) {
+        console.log('Creating compound unique index on propertyaccounts: { propertyId: 1, ownerPayouts.referenceNumber: 1 }');
+        await acct.createIndex(
+          { propertyId: 1 as any, 'ownerPayouts.referenceNumber': 1 as any },
+          { name: 'propertyId_1_ownerPayouts.referenceNumber_1', unique: true, sparse: true }
+        );
+      }
+    } catch (acctIdxErr: any) {
+      if (acctIdxErr && acctIdxErr.code === 26) {
+        console.log('Accounting propertyaccounts collection not found; skipping compound index migration');
+      } else {
+        console.error('Accounting index migration error (non-fatal):', acctIdxErr);
+      }
+    }
+
     // Fix legacy indexes inconsistencies for companies collection
     try {
       // Ensure the companies collection exists to avoid NamespaceNotFound (26)
