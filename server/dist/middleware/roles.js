@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.canManagePayments = exports.canCreateProperty = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
+exports.canViewCommissions = exports.canManagePayments = exports.canCreateProperty = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
 const errorHandler_1 = require("./errorHandler");
 const isAgent = (req, res, next) => {
     if (!req.user) {
@@ -62,3 +62,14 @@ const canManagePayments = (req, res, next) => {
     next();
 };
 exports.canManagePayments = canManagePayments;
+// Allow viewing commission reports for Admins and Accountants
+const canViewCommissions = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    if (!['admin', 'accountant'].includes(req.user.role)) {
+        throw new errorHandler_1.AppError('Access denied. Admin or Accountant role required to view commissions.', 403);
+    }
+    next();
+};
+exports.canViewCommissions = canViewCommissions;

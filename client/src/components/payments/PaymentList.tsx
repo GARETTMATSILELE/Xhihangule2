@@ -44,6 +44,7 @@ export interface PaymentListProps {
   payments: Payment[];
   onEdit?: (payment: Payment) => void;
   onDownloadReceipt?: (payment: Payment) => Promise<void>;
+  onFinalize?: (payment: Payment) => void;
   onFilterChange?: (newFilters: PaymentFilter) => void;
   isMobile?: boolean;
   filters?: PaymentFilter;
@@ -57,6 +58,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
   payments,
   onEdit,
   onDownloadReceipt,
+  onFinalize,
   onFilterChange,
   isMobile = false,
   filters = {},
@@ -195,7 +197,12 @@ const PaymentList: React.FC<PaymentListProps> = ({
             Reference: {payment.referenceNumber}
           </Typography>
         )}
-        <Box display="flex" justifyContent="flex-end" mt={1}>
+        <Box display="flex" justifyContent="flex-end" mt={1} gap={1}>
+          {Boolean((payment as any).isProvisional) && onFinalize && (
+            <Button size="small" variant="contained" onClick={() => onFinalize(payment)}>
+              Finalize
+            </Button>
+          )}
           {onEdit && (
             <IconButton
               size="small"
@@ -413,6 +420,16 @@ const PaymentList: React.FC<PaymentListProps> = ({
                   </TableCell>
                   <TableCell>{payment.referenceNumber || '-'}</TableCell>
                   <TableCell>
+                    {Boolean((payment as any).isProvisional) && onFinalize && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        sx={{ mr: 1 }}
+                        onClick={() => onFinalize(payment)}
+                      >
+                        Finalize
+                      </Button>
+                    )}
                     {onEdit && (
                       <IconButton
                         size="small"

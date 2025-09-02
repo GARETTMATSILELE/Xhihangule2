@@ -6,7 +6,15 @@ import {
   CircularProgress,
   Alert,
   Paper,
-  Dialog
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
@@ -37,6 +45,14 @@ const AccountantPaymentsPage: React.FC = () => {
   const [debouncedFilters, setDebouncedFilters] = useState<PaymentFilter>({});
   const [showAuthError, setShowAuthError] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [finalizePayment, setFinalizePayment] = useState<Payment | null>(null);
+  const [finalizePropertyId, setFinalizePropertyId] = useState<string>('');
+  const [finalizeTenantId, setFinalizeTenantId] = useState<string>('');
+  const [finalizeOwnerId, setFinalizeOwnerId] = useState<string>('');
+  const [finalizeRelationship, setFinalizeRelationship] = useState<'management' | 'introduction' | ''>('');
+  const [finalizeCommissionPercent, setFinalizeCommissionPercent] = useState<string>('');
+  const [finalizing, setFinalizing] = useState(false);
 
   const summary = useMemo(() => {
     const totalIncome = payments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -74,10 +90,10 @@ const AccountantPaymentsPage: React.FC = () => {
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
-        const payments = Array.isArray(paymentsData) ? paymentsData : [];
+        const paymentsList = Array.isArray(paymentsData) ? paymentsData : [];
         setProperties(properties);
         setTenants(tenants);
-        setPayments(payments);
+        setPayments(paymentsList);
       } catch (err: any) {
         if (!isMounted) return;
         setError('Failed to load data. Please try again later.');
@@ -110,8 +126,9 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
         if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
-        const payments = await paymentService.getPayments(filterParams);
-        setPayments(payments);
+        // Include provisional payments on accountant view
+        const paymentsResult = await paymentService.getPayments({ ...filterParams, includeProvisional: 'true' } as any);
+        setPayments(paymentsResult);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {
@@ -215,6 +232,10 @@ const AccountantPaymentsPage: React.FC = () => {
             setSelectedPayment(payment);
             setShowForm(true);
           }}
+          onFinalize={(payment) => {
+            setFinalizePayment(payment);
+            setFinalizeOpen(true);
+          }}
           onDownloadReceipt={async () => {}}
           onFilterChange={setFilters}
           isMobile={false}
@@ -225,6 +246,107 @@ const AccountantPaymentsPage: React.FC = () => {
           tenants={tenants}
         />
       )}
+      <Dialog open={finalizeOpen} onClose={() => setFinalizeOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Finalize Manual Payment</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Property</InputLabel>
+              <Select
+                label="Property"
+                value={finalizePropertyId}
+                onChange={(e) => setFinalizePropertyId(e.target.value as string)}
+              >
+                {properties.map((p) => (
+                  <MenuItem key={p._id} value={p._id}>{p.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel>Tenant</InputLabel>
+              <Select
+                label="Tenant"
+                value={finalizeTenantId}
+                onChange={(e) => setFinalizeTenantId(e.target.value as string)}
+              >
+                {tenants.map((t) => (
+                  <MenuItem key={(t as any)._id} value={(t as any)._id}>
+                    {(t as any).firstName} {(t as any).lastName}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="Owner ID (optional)"
+              size="small"
+              fullWidth
+              value={finalizeOwnerId}
+              onChange={(e) => setFinalizeOwnerId(e.target.value)}
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel>Relationship (optional)</InputLabel>
+              <Select
+                label="Relationship (optional)"
+                value={finalizeRelationship}
+                onChange={(e) => setFinalizeRelationship(e.target.value as any)}
+              >
+                <MenuItem value="">None</MenuItem>
+                <MenuItem value="management">Management</MenuItem>
+                <MenuItem value="introduction">Introduction</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              label="Override Commission % (optional)"
+              size="small"
+              fullWidth
+              type="number"
+              value={finalizeCommissionPercent}
+              onChange={(e) => setFinalizeCommissionPercent(e.target.value)}
+              inputProps={{ min: 0, step: 0.1 }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFinalizeOpen(false)} disabled={finalizing}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={finalizing || !finalizePayment || !finalizePropertyId || !finalizeTenantId}
+            onClick={async () => {
+              if (!finalizePayment) return;
+              try {
+                setFinalizing(true);
+                setError(null);
+                const payload: any = {
+                  propertyId: finalizePropertyId,
+                  tenantId: finalizeTenantId,
+                };
+                if (finalizeOwnerId) payload.ownerId = finalizeOwnerId;
+                if (finalizeRelationship) payload.relationshipType = finalizeRelationship;
+                if (finalizeCommissionPercent) payload.overrideCommissionPercent = Number(finalizeCommissionPercent);
+                const resp = await paymentService.finalizeProvisionalPayment(finalizePayment._id, payload);
+                const updated = resp?.payment || null;
+                if (updated) {
+                  setPayments((prev) => prev.map((p) => (p._id === updated._id ? (updated as any) : p)));
+                }
+                setSuccessMessage('Payment finalized successfully');
+                setFinalizeOpen(false);
+                setFinalizePayment(null);
+                setFinalizePropertyId('');
+                setFinalizeTenantId('');
+                setFinalizeOwnerId('');
+                setFinalizeRelationship('');
+                setFinalizeCommissionPercent('');
+              } catch (err: any) {
+                setError(err?.message || 'Failed to finalize payment');
+              } finally {
+                setFinalizing(false);
+              }
+            }}
+          >
+            {finalizing ? 'Finalizing...' : 'Finalize'}
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Dialog
         open={showAuthError}
         onClose={() => setShowAuthError(false)}

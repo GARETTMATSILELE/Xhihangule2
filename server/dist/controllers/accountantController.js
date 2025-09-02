@@ -66,7 +66,8 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
             const propertyIds = leases.map(lease => lease.propertyId);
             const payments = yield Payment_1.Payment.find({
                 propertyId: { $in: propertyIds },
-                status: 'completed'
+                status: 'completed',
+                commissionFinalized: true
             }).populate('propertyId', 'name address');
             // Create a map of payments by property and month/year for filtering (using rental period)
             const paymentMap = new Map();
@@ -210,7 +211,8 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
         // Get all payments for the company with commission details
         const payments = yield Payment_1.Payment.find({
             companyId,
-            status: 'completed'
+            status: 'completed',
+            commissionFinalized: true
         }).populate('propertyId', 'name address');
         for (const payment of payments) {
             const property = payment.propertyId; // Cast to access populated fields
@@ -273,13 +275,13 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
             if (!shouldInclude)
                 continue;
-            // Push detail row (single row per payment)
+            // Push detail row (single row per payment) with manual entry fallbacks
             agencyCommission.details.push({
                 paymentId: payment._id.toString(),
                 paymentDate: payment.paymentDate,
                 propertyId: payment.propertyId.toString(),
-                propertyName: (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property',
-                propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || 'Unknown Address',
+                propertyName: (property === null || property === void 0 ? void 0 : property.name) || payment.manualPropertyAddress || 'Manual Entry',
+                propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || payment.manualPropertyAddress || 'Manual Entry',
                 rentalAmount: rentalAmount,
                 agencyShare: agencyShare
             });
@@ -347,7 +349,8 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Get payments and compute PREA from commissionDetails.preaFee
         const payments = yield Payment_1.Payment.find({
             companyId,
-            status: 'completed'
+            status: 'completed',
+            commissionFinalized: true
         }).populate('propertyId', 'name address');
         // Aggregate PREA by property after applying filters
         const propertyMap = new Map();
@@ -412,7 +415,7 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             if (!shouldInclude)
                 continue;
             const key = payment.propertyId.toString();
-            const name = (property === null || property === void 0 ? void 0 : property.name) || 'Unknown Property';
+            const name = (property === null || property === void 0 ? void 0 : property.name) || payment.manualPropertyAddress || 'Manual Entry';
             const rentAmount = typeof payment.amount === 'number' ? payment.amount : 0;
             if (propertyMap.has(key)) {
                 const agg = propertyMap.get(key);

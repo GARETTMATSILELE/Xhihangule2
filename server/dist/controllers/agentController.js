@@ -687,11 +687,37 @@ const getAgentPayments = (req, res) => __awaiter(void 0, void 0, void 0, functio
             ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         }).distinct('_id');
-        // Fetch payments for those properties
-        const payments = yield Payment_1.Payment.find({
+        // Build base query
+        const baseQuery = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            propertyId: { $in: agentPropertyIds }
-        })
+            $or: [
+                { propertyId: { $in: agentPropertyIds } },
+                // Include agent's own provisional manual entries (not yet tied to a real property)
+                { isProvisional: true, agentId: new mongoose_1.default.Types.ObjectId(req.user.userId) }
+            ]
+        };
+        // Optional filtering
+        if (req.query.provisionalOnly === 'true') {
+            baseQuery.isProvisional = true;
+        }
+        if (req.query.status) {
+            baseQuery.status = req.query.status;
+        }
+        if (req.query.paymentMethod) {
+            baseQuery.paymentMethod = req.query.paymentMethod;
+        }
+        if (req.query.propertyId) {
+            baseQuery.propertyId = new mongoose_1.default.Types.ObjectId(req.query.propertyId);
+        }
+        if (req.query.startDate || req.query.endDate) {
+            baseQuery.paymentDate = {};
+            if (req.query.startDate)
+                baseQuery.paymentDate.$gte = new Date(req.query.startDate);
+            if (req.query.endDate)
+                baseQuery.paymentDate.$lte = new Date(req.query.endDate);
+        }
+        // Fetch payments for those properties or agent's provisional ones
+        const payments = yield Payment_1.Payment.find(baseQuery)
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
             .populate('agentId', 'firstName lastName')

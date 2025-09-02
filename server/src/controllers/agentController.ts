@@ -779,11 +779,37 @@ export const getAgentPayments = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
     }).distinct('_id');
 
-    // Fetch payments for those properties
-    const payments = await Payment.find({
+    // Build base query
+    const baseQuery: any = {
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      propertyId: { $in: agentPropertyIds as any }
-    })
+      $or: [
+        { propertyId: { $in: agentPropertyIds as any } },
+        // Include agent's own provisional manual entries (not yet tied to a real property)
+        { isProvisional: true, agentId: new mongoose.Types.ObjectId(req.user.userId) }
+      ]
+    };
+
+    // Optional filtering
+    if (req.query.provisionalOnly === 'true') {
+      baseQuery.isProvisional = true;
+    }
+    if (req.query.status) {
+      baseQuery.status = req.query.status;
+    }
+    if (req.query.paymentMethod) {
+      baseQuery.paymentMethod = req.query.paymentMethod;
+    }
+    if (req.query.propertyId) {
+      baseQuery.propertyId = new mongoose.Types.ObjectId(req.query.propertyId as string);
+    }
+    if (req.query.startDate || req.query.endDate) {
+      baseQuery.paymentDate = {};
+      if (req.query.startDate) baseQuery.paymentDate.$gte = new Date(req.query.startDate as string);
+      if (req.query.endDate) baseQuery.paymentDate.$lte = new Date(req.query.endDate as string);
+    }
+
+    // Fetch payments for those properties or agent's provisional ones
+    const payments = await Payment.find(baseQuery)
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName email')
       .populate('agentId', 'firstName lastName')

@@ -140,10 +140,19 @@ export class PropertyAccountService {
    */
   async recordIncomeFromPayment(paymentId: string): Promise<void> {
     const session = await mongoose.startSession();
-    session.startTransaction();
+    let useTransaction = false;
+    try {
+      session.startTransaction();
+      useTransaction = true;
+    } catch (txnErr) {
+      console.warn('PropertyAccountService: transactions unsupported; proceeding without transaction:', txnErr);
+      useTransaction = false;
+    }
 
     try {
-      const payment = await Payment.findById(paymentId).session(session);
+      const payment = useTransaction
+        ? await Payment.findById(paymentId).session(session)
+        : await Payment.findById(paymentId);
       if (!payment) {
         throw new AppError('Payment not found', 404);
       }
@@ -201,13 +210,21 @@ export class PropertyAccountService {
       };
 
       account.transactions.push(incomeTransaction);
-      await account.save({ session });
+      if (useTransaction) {
+        await account.save({ session });
+      } else {
+        await account.save();
+      }
 
       logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
       
-      await session.commitTransaction();
+      if (useTransaction) {
+        await session.commitTransaction();
+      }
     } catch (error) {
-      await session.abortTransaction();
+      if (useTransaction) {
+        await session.abortTransaction();
+      }
       logger.error('Error recording income from payment:', error);
       throw error;
     } finally {

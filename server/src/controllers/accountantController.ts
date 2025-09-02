@@ -111,7 +111,8 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
       const propertyIds = leases.map(lease => lease.propertyId);
       const payments = await Payment.find({
         propertyId: { $in: propertyIds },
-        status: 'completed'
+        status: 'completed',
+        commissionFinalized: true
       }).populate('propertyId', 'name address');
 
       // Create a map of payments by property and month/year for filtering (using rental period)
@@ -269,7 +270,8 @@ export const getAgencyCommission = async (req: Request, res: Response) => {
     // Get all payments for the company with commission details
     const payments = await Payment.find({ 
       companyId,
-      status: 'completed'
+      status: 'completed',
+      commissionFinalized: true
     }).populate('propertyId', 'name address');
 
     for (const payment of payments) {
@@ -333,13 +335,13 @@ export const getAgencyCommission = async (req: Request, res: Response) => {
 
       if (!shouldInclude) continue;
 
-      // Push detail row (single row per payment)
+      // Push detail row (single row per payment) with manual entry fallbacks
       agencyCommission.details.push({
         paymentId: payment._id.toString(),
         paymentDate: payment.paymentDate,
         propertyId: payment.propertyId.toString(),
-        propertyName: property?.name || 'Unknown Property',
-        propertyAddress: property?.address || 'Unknown Address',
+        propertyName: property?.name || (payment as any).manualPropertyAddress || 'Manual Entry',
+        propertyAddress: property?.address || (payment as any).manualPropertyAddress || 'Manual Entry',
         rentalAmount: rentalAmount,
         agencyShare: agencyShare
       });
@@ -410,7 +412,8 @@ export const getPREACommission = async (req: Request, res: Response) => {
     // Get payments and compute PREA from commissionDetails.preaFee
     const payments = await Payment.find({
       companyId,
-      status: 'completed'
+      status: 'completed',
+      commissionFinalized: true
     }).populate('propertyId', 'name address');
 
     // Aggregate PREA by property after applying filters
@@ -476,7 +479,7 @@ export const getPREACommission = async (req: Request, res: Response) => {
       if (!shouldInclude) continue;
 
       const key = (payment.propertyId as any).toString();
-      const name = property?.name || 'Unknown Property';
+      const name = property?.name || (payment as any).manualPropertyAddress || 'Manual Entry';
       const rentAmount = typeof (payment as any).amount === 'number' ? (payment as any).amount : 0;
       if (propertyMap.has(key)) {
         const agg = propertyMap.get(key)!;

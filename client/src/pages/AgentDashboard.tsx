@@ -83,11 +83,24 @@ const StatCard = ({ title, value, icon, color, loading, onClick }: { title: stri
   </Card>
 );
 
-// Helper to normalize possible id shapes (string or {$oid})
+// Helper to normalize possible id shapes (string, {$oid}, {_id}, or embedded doc)
 function getId(id: any): string {
   if (!id) return '';
   if (typeof id === 'string') return id;
-  if (typeof id === 'object' && id.$oid) return id.$oid;
+  if (typeof id === 'object') {
+    // Direct {$oid}
+    if (id.$oid) return id.$oid;
+    // MongoDB doc reference with _id possibly as string or {$oid}
+    if (id._id) {
+      if (typeof id._id === 'string') return id._id;
+      if (typeof id._id === 'object' && id._id.$oid) return id._id.$oid;
+    }
+    // Common alternative key
+    if (id.id) {
+      if (typeof id.id === 'string') return id.id;
+      if (typeof id.id === 'object' && id.id.$oid) return id.id.$oid;
+    }
+  }
   return '';
 }
 
@@ -214,8 +227,10 @@ const AgentDashboard: React.FC = () => {
 
   // Helper resolvers
   const resolvePropertyForTenant = (tenant: any) => {
-    const explicitPropId = getId(tenant?.propertyId);
-    const fallbackPropId = tenantToActivePropertyId[getId(tenant?._id)];
+    // propertyId may be an id, an embedded object, or missing; fall back from active leases map
+    const explicitPropId = getId(tenant?.propertyId) || getId(tenant?.property);
+    const tenantKey = getId(tenant?._id) || getId(tenant?.id) || '';
+    const fallbackPropId = tenantKey ? tenantToActivePropertyId[tenantKey] : '';
     const propId = explicitPropId || fallbackPropId || '';
     return propertyById[propId];
   };
@@ -336,12 +351,27 @@ const AgentDashboard: React.FC = () => {
                                     ) : (
                                       <Grid container spacing={2}>
                                         {monthPayments.map((pay: any) => {
-                                          const propertyId = getId(pay.propertyId);
-                                          const tenantId = getId(pay.tenantId);
+                                          const propertyId =
+                                            getId(pay.propertyId) ||
+                                            getId(pay.property) ||
+                                            getId(pay?.property?._id) ||
+                                            getId(pay?.property?.id);
+                                          const tenantId =
+                                            getId(pay.tenantId) ||
+                                            getId(pay.tenant) ||
+                                            getId(pay?.tenant?._id) ||
+                                            getId(pay?.tenant?.id);
                                           const propertyObj = resolvePropertyById(propertyId);
-                                          const propertyName = propertyObj?.name || 'Unknown Property';
+                                          const propertyName =
+                                            propertyObj?.name ||
+                                            pay?.property?.name ||
+                                            pay?.property?.title ||
+                                            pay?.propertyName ||
+                                            'Unknown Property';
                                           const tenantObj = resolveTenantById(tenantId);
-                                          const tenantName = tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'Unknown Tenant' : 'Unknown Tenant';
+                                          const tenantName = tenantObj
+                                            ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || tenantObj.name || tenantObj.fullName || 'Unknown Tenant'
+                                            : (`${pay?.tenant?.firstName || ''} ${pay?.tenant?.lastName || ''}`.trim() || pay?.tenant?.name || pay?.tenant?.fullName || pay?.tenantName || 'Unknown Tenant');
                                           const paymentDate = pay.paymentDate ? new Date(pay.paymentDate) : null;
                                           const agentShare = pay.commissionDetails?.agentShare || 0;
                                           const totalCommission = pay.commissionDetails?.totalCommission || 0;
@@ -473,9 +503,11 @@ const AgentDashboard: React.FC = () => {
                                     const propertyId = getId(lease.propertyId);
                                     const tenantId = getId(lease.tenantId);
                                     const propertyObj = resolvePropertyById(propertyId);
-                                    const propertyName = propertyObj?.name || 'Unknown Property';
+                                    const propertyName = propertyObj?.name || lease?.property?.name || 'Unknown Property';
                                     const tenantObj = resolveTenantById(tenantId);
-                                    const tenantName = tenantObj ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'Unknown Tenant' : 'Unknown Tenant';
+                                    const tenantName = tenantObj
+                                      ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'Unknown Tenant'
+                                      : `${lease?.tenant?.firstName || ''} ${lease?.tenant?.lastName || ''}`.trim() || 'Unknown Tenant';
                                     const end = lease?.endDate ? new Date(lease.endDate) : null;
                                     const category = categorize(lease);
                                     const chip = category === 'expired'
@@ -531,8 +563,8 @@ const AgentDashboard: React.FC = () => {
                                   <Grid container spacing={2}>
                                     {activeTenants.map((tenant: any) => {
                                       const property = resolvePropertyForTenant(tenant);
-                                      const propertyName = property?.name || 'Unknown Property';
-                                      const propertyAddress = property?.address || '';
+                                      const propertyName = property?.name || tenant?.property?.name || 'Unknown Property';
+                                      const propertyAddress = property?.address || tenant?.property?.address || tenant?.propertyAddress || '';
                                       const fullName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || 'Unnamed Tenant';
                                       return (
                                         <Grid item xs={12} key={tenant._id}>

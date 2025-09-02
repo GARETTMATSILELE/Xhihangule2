@@ -72,3 +72,16 @@ export const canManagePayments = (req: Request, res: Response, next: NextFunctio
 
   next();
 }; 
+
+// Allow viewing commission reports for Admins and Accountants
+export const canViewCommissions = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+
+  if (!['admin', 'accountant'].includes(req.user.role)) {
+    throw new AppError('Access denied. Admin or Accountant role required to view commissions.', 403);
+  }
+
+  next();
+};

@@ -517,6 +517,10 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
     try {
         const query = { companyId: req.user.companyId };
+        // Exclude provisional from company payments by default (visible in accountant page via dedicated filters)
+        if (req.query.includeProvisional !== 'true') {
+            query.isProvisional = { $ne: true };
+        }
         // Optional: filter for deposits only
         if (req.query.onlyDeposits === 'true') {
             query.depositAmount = { $gt: 0 };
@@ -1038,29 +1042,38 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
-    let session = null;
     try {
-        session = yield mongoose_1.default.startSession();
-        session.startTransaction();
         const { id } = req.params;
         const { propertyId, tenantId, ownerId, relationshipType, // 'management' | 'introduction'
         overrideCommissionPercent } = req.body;
         if (!propertyId || !tenantId) {
-            yield session.abortTransaction();
             return res.status(400).json({ message: 'propertyId and tenantId are required' });
         }
-        const payment = yield Payment_1.Payment.findOne({ _id: id, companyId: req.user.companyId }).session(session);
+        // Validate ObjectId formats to prevent cast errors
+        try {
+            new mongoose_1.default.Types.ObjectId(propertyId);
+            new mongoose_1.default.Types.ObjectId(tenantId);
+            if (ownerId)
+                new mongoose_1.default.Types.ObjectId(ownerId);
+        }
+        catch (_a) {
+            return res.status(400).json({ message: 'Invalid id format supplied' });
+        }
+        const payment = yield Payment_1.Payment.findOne({ _id: id, companyId: req.user.companyId });
         if (!payment) {
-            yield session.abortTransaction();
             return res.status(404).json({ message: 'Payment not found' });
         }
         if (!payment.isProvisional) {
-            yield session.abortTransaction();
             return res.status(400).json({ message: 'Payment is not provisional' });
         }
-        const property = yield Property_1.Property.findById(propertyId).session(session);
+        // Agents can only finalize their own provisional manual payments
+        if (req.user.role === 'agent') {
+            if (String(payment.agentId) !== String(req.user.userId)) {
+                return res.status(403).json({ message: 'Agents may only finalize their own provisional payments' });
+            }
+        }
+        const property = yield Property_1.Property.findById(propertyId);
         if (!property) {
-            yield session.abortTransaction();
             return res.status(404).json({ message: 'Property not found' });
         }
         const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
@@ -1077,11 +1090,11 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
         payment.provisionalRelationshipType = relationshipType || payment.provisionalRelationshipType || 'unknown';
         payment.finalizedAt = new Date();
         payment.finalizedBy = new mongoose_1.default.Types.ObjectId(req.user.userId);
-        yield payment.save({ session });
-        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), { $inc: { revenue: finalCommission.agencyShare } }, { session });
-        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(payment.agentId), { $inc: { commission: finalCommission.agentShare } }, { session });
+        yield payment.save();
+        yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), { $inc: { revenue: finalCommission.agencyShare } }, {});
+        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(payment.agentId), { $inc: { commission: finalCommission.agentShare } }, {});
         if (payment.paymentType === 'rental' && (ownerId || property.ownerId)) {
-            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId || (property.ownerId)), { $inc: { balance: finalCommission.ownerAmount } }, { session });
+            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId || (property.ownerId)), { $inc: { balance: finalCommission.ownerAmount } }, {});
         }
         try {
             yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
@@ -1089,26 +1102,19 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
         catch (err) {
             console.error('Failed to record income in property account during finalize:', err);
         }
-        yield session.commitTransaction();
-        return res.json({ message: 'Payment finalized successfully', payment });
+        // Return populated payment so the UI can immediately show property/tenant details
+        const populated = yield Payment_1.Payment.findById(payment._id)
+            .populate('propertyId', 'name address')
+            .populate('tenantId', 'firstName lastName')
+            .populate('agentId', 'firstName lastName');
+        return res.json({ message: 'Payment finalized successfully', payment: populated || payment });
     }
     catch (error) {
-        if (session) {
-            try {
-                yield session.abortTransaction();
-            }
-            catch (_a) { }
-        }
         console.error('Error finalizing provisional payment:', error);
         return res.status(500).json({ message: 'Failed to finalize payment', error: (error === null || error === void 0 ? void 0 : error.message) || 'Unknown error' });
     }
     finally {
-        if (session) {
-            try {
-                session.endSession();
-            }
-            catch (_b) { }
-        }
+        // no-op
     }
 });
 exports.finalizeProvisionalPayment = finalizeProvisionalPayment;

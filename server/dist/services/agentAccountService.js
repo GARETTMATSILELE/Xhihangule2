@@ -270,7 +270,7 @@ class AgentAccountService {
                     status: 'completed'
                 }).populate('propertyId', 'address propertyName')
                     .populate('tenantId', 'firstName lastName')
-                    .select('paymentDate amount commissionDetails propertyId tenantId referenceNumber paymentType')
+                    .select('paymentDate amount commissionDetails propertyId tenantId referenceNumber paymentType manualPropertyAddress manualTenantName')
                     .sort({ paymentDate: -1 })
                     .lean(); // Use lean() for better performance since we don't need Mongoose documents
                 console.log('Found commission data:', commissionData.length, 'records');

@@ -566,6 +566,10 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
 
   try {
     const query: any = { companyId: req.user.companyId };
+    // Exclude provisional from company payments by default (visible in accountant page via dedicated filters)
+    if (req.query.includeProvisional !== 'true') {
+      query.isProvisional = { $ne: true };
+    }
     // Optional: filter for deposits only
     if (req.query.onlyDeposits === 'true') {
       query.depositAmount = { $gt: 0 };
@@ -1158,10 +1162,7 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  let session: mongoose.ClientSession | null = null;
   try {
-    session = await mongoose.startSession();
-    session.startTransaction();
 
     const { id } = req.params;
     const {
@@ -1179,23 +1180,35 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     };
 
     if (!propertyId || !tenantId) {
-      await session.abortTransaction();
       return res.status(400).json({ message: 'propertyId and tenantId are required' });
     }
 
-    const payment = await Payment.findOne({ _id: id, companyId: req.user.companyId }).session(session);
+    // Validate ObjectId formats to prevent cast errors
+    try {
+      new mongoose.Types.ObjectId(propertyId);
+      new mongoose.Types.ObjectId(tenantId);
+      if (ownerId) new mongoose.Types.ObjectId(ownerId);
+    } catch {
+      return res.status(400).json({ message: 'Invalid id format supplied' });
+    }
+
+    const payment = await Payment.findOne({ _id: id, companyId: req.user.companyId });
     if (!payment) {
-      await session.abortTransaction();
       return res.status(404).json({ message: 'Payment not found' });
     }
     if (!payment.isProvisional) {
-      await session.abortTransaction();
       return res.status(400).json({ message: 'Payment is not provisional' });
     }
 
-    const property = await Property.findById(propertyId).session(session);
+    // Agents can only finalize their own provisional manual payments
+    if ((req.user as any).role === 'agent') {
+      if (String(payment.agentId) !== String((req.user as any).userId)) {
+        return res.status(403).json({ message: 'Agents may only finalize their own provisional payments' });
+      }
+    }
+
+    const property = await Property.findById(propertyId);
     if (!property) {
-      await session.abortTransaction();
       return res.status(404).json({ message: 'Property not found' });
     }
 
@@ -1219,25 +1232,25 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     (payment as any).finalizedAt = new Date();
     (payment as any).finalizedBy = new mongoose.Types.ObjectId(req.user.userId);
 
-    await payment.save({ session });
+    await payment.save();
 
     await Company.findByIdAndUpdate(
       new mongoose.Types.ObjectId(req.user.companyId),
       { $inc: { revenue: finalCommission.agencyShare } },
-      { session }
+      {}
     );
 
     await User.findByIdAndUpdate(
       new mongoose.Types.ObjectId(payment.agentId),
       { $inc: { commission: finalCommission.agentShare } },
-      { session }
+      {}
     );
 
     if (payment.paymentType === 'rental' && (ownerId || (property as any).ownerId)) {
       await User.findByIdAndUpdate(
         new mongoose.Types.ObjectId(ownerId || ((property as any).ownerId)),
         { $inc: { balance: finalCommission.ownerAmount } },
-        { session }
+        {}
       );
     }
 
@@ -1247,17 +1260,17 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
       console.error('Failed to record income in property account during finalize:', err);
     }
 
-    await session.commitTransaction();
-    return res.json({ message: 'Payment finalized successfully', payment });
+    // Return populated payment so the UI can immediately show property/tenant details
+    const populated = await Payment.findById(payment._id)
+      .populate('propertyId', 'name address')
+      .populate('tenantId', 'firstName lastName')
+      .populate('agentId', 'firstName lastName');
+
+    return res.json({ message: 'Payment finalized successfully', payment: populated || payment });
   } catch (error: any) {
-    if (session) {
-      try { await session.abortTransaction(); } catch {}
-    }
     console.error('Error finalizing provisional payment:', error);
     return res.status(500).json({ message: 'Failed to finalize payment', error: error?.message || 'Unknown error' });
   } finally {
-    if (session) {
-      try { session.endSession(); } catch {}
-    }
+    // no-op
   }
 };

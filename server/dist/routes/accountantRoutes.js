@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -11,6 +20,8 @@ const paymentController_1 = require("../controllers/paymentController");
 const propertyAccountController_1 = require("../controllers/propertyAccountController");
 const companyAccountController_1 = require("../controllers/companyAccountController");
 const salesContractController_1 = require("../controllers/salesContractController");
+const Payment_1 = require("../models/Payment");
+const mongoose_1 = __importDefault(require("mongoose"));
 const agentAccountController_1 = require("../controllers/agentAccountController");
 const router = express_1.default.Router();
 // Debug middleware
@@ -28,16 +39,16 @@ router.get('/test', (req, res) => {
 });
 // Apply authentication middleware to all routes
 router.use(auth_1.auth);
-// Commission routes - require accountant role
-router.get('/agent-commissions', roles_1.isAccountant, (req, res) => {
+// Commission routes - allow admin and accountant to view
+router.get('/agent-commissions', roles_1.canViewCommissions, (req, res) => {
     console.log('Agent commissions route hit');
     (0, accountantController_1.getAgentCommissions)(req, res);
 });
-router.get('/agency-commission', roles_1.isAccountant, (req, res) => {
+router.get('/agency-commission', roles_1.canViewCommissions, (req, res) => {
     console.log('Agency commission route hit');
     (0, accountantController_1.getAgencyCommission)(req, res);
 });
-router.get('/prea-commission', roles_1.isAccountant, (req, res) => {
+router.get('/prea-commission', roles_1.canViewCommissions, (req, res) => {
     console.log('PREA commission route hit');
     (0, accountantController_1.getPREACommission)(req, res);
 });
@@ -51,6 +62,53 @@ router.post('/payments', roles_1.canManagePayments, paymentController_1.createPa
 router.get('/payments/:id', roles_1.canManagePayments, paymentController_1.getPaymentDetails);
 router.put('/payments/:id/status', roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
 router.post('/payments/:id/finalize', roles_1.canManagePayments, paymentController_1.finalizeProvisionalPayment);
+// Provisional auto-match suggestions (admin/accountant)
+router.get('/payments/provisional/suggestions', roles_1.isAccountant, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { q } = req.query;
+        const companyId = req.user.companyId;
+        const query = { companyId: new mongoose_1.default.Types.ObjectId(companyId), isProvisional: true };
+        if (q && q.trim()) {
+            const regex = new RegExp(q.trim(), 'i');
+            query.$or = [
+                { manualPropertyAddress: { $regex: regex } },
+                { manualTenantName: { $regex: regex } },
+                { referenceNumber: { $regex: regex } }
+            ];
+        }
+        const payments = yield Payment_1.Payment.find(query).sort({ createdAt: -1 }).limit(50);
+        res.json({ status: 'success', data: payments });
+    }
+    catch (err) {
+        console.error('Error fetching provisional suggestions:', err);
+        res.status(500).json({ status: 'error', message: 'Failed to fetch suggestions' });
+    }
+}));
+// Bulk finalize provisional payments
+router.post('/payments/finalize-bulk', roles_1.canManagePayments, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const items = (((_a = req.body) === null || _a === void 0 ? void 0 : _a.items) || []);
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ message: 'items array is required' });
+        }
+        const results = [];
+        for (const item of items) {
+            try {
+                const r = yield paymentController_1.finalizeProvisionalPayment(Object.assign(Object.assign({}, req), { params: { id: item.id }, body: Object.assign({}, item) }), { json: (o) => o });
+                results.push({ id: item.id, ok: true });
+            }
+            catch (e) {
+                results.push({ id: item.id, ok: false, error: (e === null || e === void 0 ? void 0 : e.message) || 'unknown' });
+            }
+        }
+        res.json({ status: 'success', results });
+    }
+    catch (err) {
+        console.error('Error bulk finalizing payments:', err);
+        res.status(500).json({ message: 'Failed to bulk finalize payments' });
+    }
+}));
 // Property Account routes - require accountant role
 router.get('/property-accounts', roles_1.isAccountant, propertyAccountController_1.getCompanyPropertyAccounts);
 router.get('/property-accounts/:propertyId', roles_1.isAccountant, (req, res) => {

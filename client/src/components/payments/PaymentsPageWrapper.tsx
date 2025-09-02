@@ -23,7 +23,7 @@ const PaymentsPageWrapper: React.FC<PaymentsPageWrapperProps> = ({ userRole }) =
       <SidebarComponent activeTab={activeTab} onTabChange={setActiveTab} />
       <Box sx={{ flexGrow: 1 }}>
         <Header />
-        <Box sx={{ p: 3, mt: 8 }}>
+        <Box sx={{ p: 0, mt: 8 }}>
           <PaymentsPage />
         </Box>
       </Box>

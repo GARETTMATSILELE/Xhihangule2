@@ -830,8 +830,8 @@ const CommissionsPage: React.FC = () => {
                 {getFilteredAgencyCommissions().map((detail: any) => (
                   <TableRow key={detail.paymentId}>
                     <TableCell>{formatDate(detail.paymentDate)}</TableCell>
-                    <TableCell>{detail.propertyName}</TableCell>
-                    <TableCell>{detail.propertyAddress}</TableCell>
+                    <TableCell>{detail.propertyName || 'Manual Entry'}</TableCell>
+                    <TableCell>{detail.propertyAddress || 'Manual Entry'}</TableCell>
                     <TableCell align="right">{formatCurrency(detail.rentalAmount)}</TableCell>
                     <TableCell align="right">{formatCurrency(detail.agencyShare)}</TableCell>
                   </TableRow>

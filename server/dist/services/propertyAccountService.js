@@ -139,9 +139,19 @@ class PropertyAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             var _a;
             const session = yield mongoose_1.default.startSession();
-            session.startTransaction();
+            let useTransaction = false;
             try {
-                const payment = yield Payment_1.Payment.findById(paymentId).session(session);
+                session.startTransaction();
+                useTransaction = true;
+            }
+            catch (txnErr) {
+                console.warn('PropertyAccountService: transactions unsupported; proceeding without transaction:', txnErr);
+                useTransaction = false;
+            }
+            try {
+                const payment = useTransaction
+                    ? yield Payment_1.Payment.findById(paymentId).session(session)
+                    : yield Payment_1.Payment.findById(paymentId);
                 if (!payment) {
                     throw new errorHandler_1.AppError('Payment not found', 404);
                 }
@@ -188,12 +198,21 @@ class PropertyAccountService {
                     updatedAt: new Date()
                 };
                 account.transactions.push(incomeTransaction);
-                yield account.save({ session });
+                if (useTransaction) {
+                    yield account.save({ session });
+                }
+                else {
+                    yield account.save();
+                }
                 logger_1.logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
-                yield session.commitTransaction();
+                if (useTransaction) {
+                    yield session.commitTransaction();
+                }
             }
             catch (error) {
-                yield session.abortTransaction();
+                if (useTransaction) {
+                    yield session.abortTransaction();
+                }
                 logger_1.logger.error('Error recording income from payment:', error);
                 throw error;
             }

@@ -1,6 +1,6 @@
 import express from 'express';
 import { auth } from '../middleware/auth';
-import { isAccountant, canManagePayments } from '../middleware/roles';
+import { isAccountant, canManagePayments, canViewCommissions } from '../middleware/roles';
 import {
   getAgentCommissions,
   getAgencyCommission,
@@ -31,6 +31,9 @@ import {
 } from '../controllers/propertyAccountController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
 import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
+import { Request, Response } from 'express';
+import { Payment } from '../models/Payment';
+import mongoose from 'mongoose';
 import {
   getAgentAccount,
   getCompanyAgentAccounts,
@@ -62,18 +65,18 @@ router.get('/test', (req, res) => {
 // Apply authentication middleware to all routes
 router.use(auth);
 
-// Commission routes - require accountant role
-router.get('/agent-commissions', isAccountant, (req, res) => {
+// Commission routes - allow admin and accountant to view
+router.get('/agent-commissions', canViewCommissions, (req, res) => {
   console.log('Agent commissions route hit');
   getAgentCommissions(req, res);
 });
 
-router.get('/agency-commission', isAccountant, (req, res) => {
+router.get('/agency-commission', canViewCommissions, (req, res) => {
   console.log('Agency commission route hit');
   getAgencyCommission(req, res);
 });
 
-router.get('/prea-commission', isAccountant, (req, res) => {
+router.get('/prea-commission', canViewCommissions, (req, res) => {
   console.log('PREA commission route hit');
   getPREACommission(req, res);
 });
@@ -89,6 +92,51 @@ router.post('/payments', canManagePayments, createPaymentAccountant);
 router.get('/payments/:id', canManagePayments, getPaymentDetails);
 router.put('/payments/:id/status', canManagePayments, updatePaymentStatus);
 router.post('/payments/:id/finalize', canManagePayments, finalizeProvisionalPayment);
+
+// Provisional auto-match suggestions (admin/accountant)
+router.get('/payments/provisional/suggestions', isAccountant, async (req: Request, res: Response) => {
+  try {
+    const { q } = req.query as { q?: string };
+    const companyId = req.user!.companyId as string;
+    const query: any = { companyId: new mongoose.Types.ObjectId(companyId), isProvisional: true };
+    if (q && q.trim()) {
+      const regex = new RegExp(q.trim(), 'i');
+      query.$or = [
+        { manualPropertyAddress: { $regex: regex } },
+        { manualTenantName: { $regex: regex } },
+        { referenceNumber: { $regex: regex } }
+      ];
+    }
+    const payments = await Payment.find(query).sort({ createdAt: -1 }).limit(50);
+    res.json({ status: 'success', data: payments });
+  } catch (err: any) {
+    console.error('Error fetching provisional suggestions:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch suggestions' });
+  }
+});
+
+// Bulk finalize provisional payments
+router.post('/payments/finalize-bulk', canManagePayments, async (req: Request, res: Response) => {
+  try {
+    const items = (req.body?.items || []) as Array<{ id: string; propertyId: string; tenantId: string; ownerId?: string; relationshipType?: 'management' | 'introduction'; overrideCommissionPercent?: number }>;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'items array is required' });
+    }
+    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    for (const item of items) {
+      try {
+        const r = await (finalizeProvisionalPayment as any)({ ...req, params: { id: item.id }, body: { ...item } }, { json: (o: any) => o });
+        results.push({ id: item.id, ok: true });
+      } catch (e: any) {
+        results.push({ id: item.id, ok: false, error: e?.message || 'unknown' });
+      }
+    }
+    res.json({ status: 'success', results });
+  } catch (err: any) {
+    console.error('Error bulk finalizing payments:', err);
+    res.status(500).json({ message: 'Failed to bulk finalize payments' });
+  }
+});
 
 // Property Account routes - require accountant role
 router.get('/property-accounts', isAccountant, getCompanyPropertyAccounts);

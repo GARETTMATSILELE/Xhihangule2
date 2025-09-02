@@ -9,7 +9,6 @@ import {
   Paper,
   useTheme,
   useMediaQuery,
-  Dialog,
   Tabs,
   Tab
 } from '@mui/material';
@@ -30,8 +29,7 @@ import PaymentForm from '../components/payments/PaymentForm';
 import PaymentSummary from '../components/payments/PaymentSummary';
 import PaymentRequests from '../components/payments/PaymentRequests';
 import PaymentRequestForm from '../components/payments/PaymentRequestForm';
-import { Header } from '../components/Layout/Header';
-import { AuthErrorReport } from '../components/AuthErrorReport';
+// Removed Header/AuthErrorReport; layout is provided by parent wrapper
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 
@@ -56,7 +54,7 @@ const PaymentsPage: React.FC = () => {
   const [selectedPayment, setSelectedPayment] = useState<Payment | undefined>(undefined);
   const [filters, setFilters] = useState<PaymentFilter>({});
   const [debouncedFilters, setDebouncedFilters] = useState<PaymentFilter>({});
-  const [showAuthError, setShowAuthError] = useState(false);
+  // Auth error dialog no longer used; we redirect instead
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -64,6 +62,12 @@ const PaymentsPage: React.FC = () => {
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [currentTab, setCurrentTab] = useState<'payments' | 'requests'>('payments');
   const [showPaymentRequestForm, setShowPaymentRequestForm] = useState(false);
+  const redirectToLogin = useCallback((msg?: string) => {
+    navigate('/login', {
+      state: { from: location.pathname, message: msg || 'Session expired. Please log in.' }
+    });
+  }, [navigate, location.pathname]);
+
 
   // Determine which sidebar to use based on user role
   const SidebarComponent = useMemo(() => {
@@ -165,8 +169,7 @@ const PaymentsPage: React.FC = () => {
         
         console.error('Error loading data:', err);
         if (err.response?.status === 401) {
-          setError('Authentication required. Please log in to continue.');
-          setShowAuthError(true);
+          redirectToLogin('Session expired. Please log in.');
         } else {
           setError('Failed to load data. Please try again later.');
         }
@@ -256,8 +259,7 @@ const PaymentsPage: React.FC = () => {
       } catch (err: any) {
         console.error('Error loading payments:', err);
         if (err.response?.status === 401) {
-          setError('Authentication required. Please log in to continue.');
-          setShowAuthError(true);
+          redirectToLogin('Session expired. Please log in.');
         } else {
           setError(err instanceof Error ? err.message : 'Failed to load payments');
         }
@@ -295,8 +297,7 @@ const PaymentsPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error creating payment:', err);
       if (err.response?.status === 401) {
-        setError('Authentication required. Please log in to continue.');
-        setShowAuthError(true);
+        redirectToLogin('Session expired. Please log in.');
       } else {
         setError(err.response?.data?.message || 'Failed to create payment');
       }
@@ -324,8 +325,7 @@ const PaymentsPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error updating payment:', err);
       if (err.response?.status === 401) {
-        setError('Authentication required. Please log in to continue.');
-        setShowAuthError(true);
+        redirectToLogin('Session expired. Please log in.');
       } else {
         setError(err.response?.data?.message || 'Failed to update payment');
       }
@@ -345,8 +345,7 @@ const PaymentsPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error deleting payment:', err);
       if (err.response?.status === 401) {
-        setError('Authentication required. Please log in to continue.');
-        setShowAuthError(true);
+        redirectToLogin('Session expired. Please log in.');
       } else {
         setError(err.response?.data?.message || 'Failed to delete payment');
       }
@@ -357,8 +356,7 @@ const PaymentsPage: React.FC = () => {
 
   const handleFormSubmit = useCallback(async (formData: PaymentFormData) => {
     if (!user?.companyId) {
-      setError('Please log in to create or update payments');
-      setShowAuthError(true);
+      redirectToLogin('Please log in to create or update payments');
       return;
     }
     try {
@@ -403,8 +401,7 @@ const PaymentsPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error saving payment:', err);
       if (err.response?.status === 401) {
-        setError('Authentication required. Please log in to continue.');
-        setShowAuthError(true);
+        redirectToLogin('Session expired. Please log in.');
       } else {
         setError(err.response?.data?.message || 'Failed to save payment. Please try again.');
       }
@@ -413,8 +410,7 @@ const PaymentsPage: React.FC = () => {
 
   const handlePaymentClick = useCallback((payment: Payment) => {
     if (!user?.companyId) {
-      setError('Please log in to edit payments');
-      setShowAuthError(true);
+      redirectToLogin('Please log in to edit payments');
       return;
     }
     setSelectedPayment(payment);
@@ -440,8 +436,7 @@ const PaymentsPage: React.FC = () => {
 
   const handlePaymentRequestSubmit = useCallback(async (formData: any) => {
     if (!user?.companyId) {
-      setError('Please log in to create payment requests');
-      setShowAuthError(true);
+      redirectToLogin('Please log in to create payment requests');
       return;
     }
     try {
@@ -477,12 +472,11 @@ const PaymentsPage: React.FC = () => {
   const handleAuthError = useCallback((error: any) => {
     console.error('Authentication error in PaymentsPage:', error);
     if (error.response?.status === 401) {
-      setError('Authentication required. Please log in to continue.');
-      setShowAuthError(true);
+      redirectToLogin('Session expired. Please log in.');
     } else {
       setError(error.message || 'An unexpected error occurred. Please try again.');
     }
-  }, []);
+  }, [redirectToLogin]);
 
   // Enhanced error handling for payment operations
   const handlePaymentOperation = useCallback(async (
@@ -506,216 +500,181 @@ const PaymentsPage: React.FC = () => {
 
   if (authLoading) {
     return (
-      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-        <Box sx={{ flexGrow: 1 }}>
-          <Header />
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-            <CircularProgress />
-          </Box>
-        </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 6 }}>
+        <CircularProgress />
       </Box>
     );
   }
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-        <Box sx={{ flexGrow: 1 }}>
-          <Header />
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-            <CircularProgress />
-          </Box>
-        </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 6 }}>
+        <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      <Box sx={{ flexGrow: 1 }}>
-        <Header />
-        <Box sx={{ 
-          height: 'calc(100vh - 64px)', 
-          display: 'flex', 
-          flexDirection: 'column',
-          bgcolor: 'background.paper'
-        }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-              <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-                Payments
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  startIcon={<AddIcon />}
-                  onClick={() => {
-                    if (!user?.companyId) {
-                      setError('Please log in to create payment requests');
-                      setShowAuthError(true);
-                      return;
-                    }
-                    setShowPaymentRequestForm(true);
-                  }}
-                  sx={{ borderRadius: 2 }}
-                >
-                  Add Payment Request
-                </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<AddIcon />}
-                  onClick={() => {
-                    if (!user?.companyId) {
-                      setError('Please log in to create payments');
-                      setShowAuthError(true);
-                      return;
-                    }
-                    setSelectedPayment(undefined);
-                    setShowForm(true);
-                  }}
-                  sx={{ borderRadius: 2 }}
-                >
-                  Add Payment
-                </Button>
-              </Box>
-            </Box>
-
-            {error && (
-              <Alert 
-                severity="error" 
-                sx={{ m: 2 }}
-                onClose={() => setError(null)}
-              >
-                {error}
-              </Alert>
-            )}
-
-            {successMessage && (
-              <Alert 
-                severity="success" 
-                sx={{ m: 2 }}
-                onClose={() => setSuccessMessage(null)}
-              >
-                {successMessage}
-              </Alert>
-            )}
-
-            <Box sx={{ px: 2, py: 1 }}>
-              <PaymentSummary summary={summary} />
-            </Box>
-
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <Tabs 
-                value={currentTab} 
-                onChange={(e, newValue) => setCurrentTab(newValue)}
-                sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}
-              >
-                <Tab label="Payments" value="payments" />
-                <Tab label="Payment Requests" value="requests" />
-              </Tabs>
-
-              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                {showPaymentRequestForm ? (
-                  <Box sx={{ p: 2, overflow: 'auto' }}>
-                    <PaymentRequestForm
-                      onSubmit={handlePaymentRequestSubmit}
-                      onCancel={() => setShowPaymentRequestForm(false)}
-                      properties={properties}
-                      owners={owners}
-                      tenants={tenants}
-                      loading={loading}
-                    />
-                  </Box>
-                ) : currentTab === 'payments' ? (
-                  showForm ? (
-                    <Box sx={{ p: 2, overflow: 'auto', height: '100%', minHeight: 0, flex: 1 }}>
-                      <PaymentForm
-                        onSubmit={handleFormSubmit}
-                        onCancel={() => {
-                          setShowForm(false);
-                          setSelectedPayment(undefined);
-                        }}
-                        initialData={selectedPayment}
-                        properties={properties}
-                        tenants={tenants}
-                      />
-                    </Box>
-                  ) : (
-                    <PaymentList
-                      payments={payments}
-                      onEdit={handlePaymentClick}
-                      onDownloadReceipt={handleDownloadReceipt}
-                      onFilterChange={handleFilterChange}
-                      isMobile={isMobile}
-                      filters={filters}
-                      loading={loading}
-                      error={error}
-                      properties={properties}
-                      tenants={tenants}
-                    />
-                  )
-                ) : (
-                  <PaymentRequests
-                    requests={paymentRequests}
-                    onApprove={async (requestId) => {
-                      try {
-                        await paymentRequestService.markAsPaid(requestId);
-                        await loadPaymentRequests(); // Reload the list
-                        setSuccessMessage('Payment request marked as paid');
-                      } catch (err: any) {
-                        setError(err.message || 'Failed to approve payment request');
-                      }
-                    }}
-                    onReject={async (requestId) => {
-                      try {
-                        await paymentRequestService.markAsRejected(requestId);
-                        await loadPaymentRequests(); // Reload the list
-                        setSuccessMessage('Payment request rejected');
-                      } catch (err: any) {
-                        setError(err.message || 'Failed to reject payment request');
-                      }
-                    }}
-                    onView={(request) => {
-                      // View functionality is now handled within the PaymentRequests component
-                      console.log('View request:', request);
-                    }}
-                    onEdit={(request) => {
-                      // TODO: Implement edit functionality
-                      console.log('Edit request:', request);
-                    }}
-                    loading={requestsLoading}
-                    error={null}
-                    isMobile={isMobile}
-                  />
-                )}
-              </Box>
-            </Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
+          Payments
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              if (!user?.companyId) {
+                redirectToLogin('Please log in to create payment requests');
+                return;
+              }
+              setShowPaymentRequestForm(true);
+            }}
+            sx={{ borderRadius: 2 }}
+          >
+            Add Payment Request
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              if (!user?.companyId) {
+                redirectToLogin('Please log in to create payments');
+                return;
+              }
+              setSelectedPayment(undefined);
+              setShowForm(true);
+            }}
+            sx={{ borderRadius: 2 }}
+          >
+            Add Payment
+          </Button>
         </Box>
       </Box>
 
-      <Dialog
-        open={showAuthError}
-        onClose={() => setShowAuthError(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <AuthErrorReport
-          error="Please log in to access payments"
-          onRetry={() => {
-            setShowAuthError(false);
-          }}
-          onLogin={() => {
-            setShowAuthError(false);
-            navigate('/login', {
-              state: {
-                from: location.pathname,
-                message: 'Please log in to access payments'
-              }
-            });
-          }}
-        />
-      </Dialog>
+      {error && (
+        <Alert 
+          severity="error" 
+          sx={{ m: 2 }}
+          onClose={() => setError(null)}
+        >
+          {error}
+        </Alert>
+      )}
+
+      {successMessage && (
+        <Alert 
+          severity="success" 
+          sx={{ m: 2 }}
+          onClose={() => setSuccessMessage(null)}
+        >
+          {successMessage}
+        </Alert>
+      )}
+
+      <Box sx={{ px: 2, py: 1 }}>
+        <PaymentSummary summary={summary} />
+      </Box>
+
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Tabs 
+          value={currentTab} 
+          onChange={(e, newValue) => setCurrentTab(newValue)}
+          sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}
+        >
+          <Tab label="Payments" value="payments" />
+          <Tab label="Payment Requests" value="requests" />
+        </Tabs>
+
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {showPaymentRequestForm ? (
+            <Box sx={{ p: 2, overflow: 'auto' }}>
+              <PaymentRequestForm
+                onSubmit={handlePaymentRequestSubmit}
+                onCancel={() => setShowPaymentRequestForm(false)}
+                properties={properties}
+                owners={owners}
+                tenants={tenants}
+                loading={loading}
+              />
+            </Box>
+          ) : currentTab === 'payments' ? (
+            showForm ? (
+              <Box sx={{ p: 2, overflow: 'auto', height: '100%', minHeight: 0, flex: 1 }}>
+                <PaymentForm
+                  onSubmit={handleFormSubmit}
+                  onCancel={() => {
+                    setShowForm(false);
+                    setSelectedPayment(undefined);
+                  }}
+                  initialData={selectedPayment}
+                  properties={properties}
+                  tenants={tenants}
+                />
+              </Box>
+            ) : (
+              <PaymentList
+                payments={payments}
+                onEdit={handlePaymentClick}
+                onFinalize={async (payment) => {
+                  try {
+                    if (user?.role === 'agent') {
+                      alert('Please contact accounting to finalize manual payments, or use the accountant dashboard.');
+                      return;
+                    }
+                    // Non-agent roles should finalize via accountant dashboard page
+                    navigate('/accountant/payments');
+                  } catch {}
+                }}
+                onDownloadReceipt={handleDownloadReceipt}
+                onFilterChange={handleFilterChange}
+                isMobile={isMobile}
+                filters={filters}
+                loading={loading}
+                error={error}
+                properties={properties}
+                tenants={tenants}
+              />
+            )
+          ) : (
+            <PaymentRequests
+              requests={paymentRequests}
+              onApprove={async (requestId) => {
+                try {
+                  await paymentRequestService.markAsPaid(requestId);
+                  await loadPaymentRequests(); // Reload the list
+                  setSuccessMessage('Payment request marked as paid');
+                } catch (err: any) {
+                  setError(err.message || 'Failed to approve payment request');
+                }
+              }}
+              onReject={async (requestId) => {
+                try {
+                  await paymentRequestService.markAsRejected(requestId);
+                  await loadPaymentRequests(); // Reload the list
+                  setSuccessMessage('Payment request rejected');
+                } catch (err: any) {
+                  setError(err.message || 'Failed to reject payment request');
+                }
+              }}
+              onView={(request) => {
+                // View functionality is now handled within the PaymentRequests component
+                console.log('View request:', request);
+              }}
+              onEdit={(request) => {
+                // TODO: Implement edit functionality
+                console.log('Edit request:', request);
+              }}
+              loading={requestsLoading}
+              error={null}
+              isMobile={isMobile}
+            />
+          )}
+        </Box>
+      </Box>
     </Box>
   );
 };
