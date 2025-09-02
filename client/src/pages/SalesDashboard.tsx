@@ -410,11 +410,11 @@ export default function CRM() {
         <aside className="w-60 shrink-0">
           <div className="rounded-2xl border border-slate-200 bg-white p-3 flex flex-col h-full min-h-[80vh]">
             <div className="px-3 py-2 text-xs uppercase tracking-wider text-slate-400">Main menu</div>
-            <button className={cls("mt-1 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='dashboard'?"bg-slate-900 text-white border-slate-900":"bg-white hover:bg-slate-50") } onClick={()=>{ setNav('dashboard'); navigate('/sales-dashboard'); }}>
+            <button className={cls("mt-1 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='dashboard'?"bg-transparent text-slate-900 border-slate-900":"bg-white hover:bg-slate-50") } onClick={()=>{ setNav('dashboard'); navigate('/sales-dashboard'); }}>
               <IconDashboard className="h-4 w-4" />
               <span>Dashboard</span>
             </button>
-            <button className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='files'?"bg-slate-900 text-white border-slate-900":"bg-white hover:bg-slate-50") } onClick={()=>setNav('files')}>
+            <button className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='files'?"bg-transparent text-slate-900 border-slate-900":"bg-white hover:bg-slate-50") } onClick={()=>setNav('files')}>
               <IconFolder className="h-4 w-4" />
               <span>Files</span>
             </button>
@@ -424,7 +424,7 @@ export default function CRM() {
                 <span className="flex items-center gap-3"><IconBell className="h-4 w-4"/> Notifications</span>
                 <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-xs bg-rose-100 text-rose-700 border border-rose-200">3</span>
               </button>
-              <button title="Settings" className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm", nav==='settings'?"bg-slate-900 text-white border-slate-900":"hover:bg-slate-50")} onClick={()=>{ setNav('settings'); navigate('/sales-dashboard/settings'); }}>
+              <button title="Settings" className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm", nav==='settings'?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50")} onClick={()=>{ setNav('settings'); navigate('/sales-dashboard/settings'); }}>
                 <IconCog className="h-4 w-4" />
                 <span>Settings</span>
               </button>
@@ -468,7 +468,7 @@ export default function CRM() {
           {[
             "Leads","Viewings","Buyers","Owners","Properties","Deals"
           ].map(t => (
-            <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-slate-900 text-white border-slate-900":"bg-white hover:bg-slate-50")}>{t}</Button>
+            <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-white hover:bg-slate-50")}>{t}</Button>
           ))}
           <div className="flex-1" />
           {/* Quick add menu */}
@@ -518,7 +518,7 @@ export default function CRM() {
                         <td className="py-2"><Badge className={leadColors[l.status]}>{l.status}</Badge></td>
                         <td className="py-2 flex gap-2">
                           {(["New","Contacted","Qualified","Viewing","Offer","Won","Lost"]).map(s=> (
-                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", l.status===s?"bg-slate-900 text-white border-slate-900":"hover:bg-slate-50")} onClick={async ()=>{ await leadService.update(l.id, { status: s }); await refreshLeads(); }}>{s}</button>
+                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", l.status===s?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50")} onClick={async ()=>{ await leadService.update(l.id, { status: s }); await refreshLeads(); }}>{s}</button>
                           ))}
                           <button className="text-xs px-2 py-1 rounded-lg border hover:bg-slate-50" onClick={()=>{
                             setShowViewingModal(true);
@@ -691,7 +691,7 @@ export default function CRM() {
                         <td className="py-2"><Badge className={propertyColors[p.status]}>{p.status}</Badge></td>
                         <td className="py-2 flex gap-2">
                           {(["Available","Under Offer","Sold"]).map(s => (
-                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", p.status===s?"bg-slate-900 text-white border-slate-900":"hover:bg-slate-50")} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
+                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", p.status===s?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50")} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
                           ))}
                         </td>
                       </tr>
@@ -740,7 +740,7 @@ export default function CRM() {
                         <td className="py-2">{d.closeDate ? new Date(d.closeDate).toLocaleDateString() : "—"}</td>
                         <td className="py-2 flex gap-2">
                           {(["Offer","Due Diligence","Contract","Closing"]).map(s => (
-                            <button key={s} disabled={d.won} className={cls("text-xs px-2 py-1 rounded-lg border", d.stage===s?"bg-slate-900 text-white border-slate-900":"hover:bg-slate-50", d.won && "opacity-50 cursor-not-allowed")} onClick={async ()=>{ await dealService.update(d.id, { stage: s }); await refreshDeals(); }}>{s}</button>
+                            <button key={s} disabled={d.won} className={cls("text-xs px-2 py-1 rounded-lg border", d.stage===s?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50", d.won && "opacity-50 cursor-not-allowed")} onClick={async ()=>{ await dealService.update(d.id, { stage: s }); await refreshDeals(); }}>{s}</button>
                           ))}
                           <button disabled={d.won} className={cls("text-xs px-2 py-1 rounded-lg border bg-emerald-600 text-white border-emerald-600", d.won && "opacity-50 cursor-not-allowed")} onClick={async ()=>{ await dealService.update(d.id, { won: true, closeDate: new Date().toISOString() }); await refreshDeals(); }}>Mark Won</button>
                         </td>

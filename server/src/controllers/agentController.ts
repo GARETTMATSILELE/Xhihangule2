@@ -192,27 +192,62 @@ export const getAgentCommission = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 400);
     }
 
-    // Get current month and year
+    // Current period (0-based month)
     const now = new Date();
-    const currentMonth = now.getMonth(); // 0-indexed
+    const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
-    // Find all payments for this agent in this company, for the current month and year
+    // Fetch completed payments for this agent in this company
     const payments = await Payment.find({
       agentId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      status: 'completed',
-      paymentDate: {
-        $gte: new Date(currentYear, currentMonth, 1),
-        $lt: new Date(currentYear, currentMonth + 1, 1)
-      }
-    });
+      status: 'completed'
+    }).select('commissionDetails paymentDate rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd');
 
-    // Sum agentShare from commissionDetails
-    const monthlyCommission = payments.reduce((sum, payment) => {
-      const agentShare = payment.commissionDetails?.agentShare || 0;
-      return sum + agentShare;
-    }, 0);
+    let monthlyCommission = 0;
+
+    for (const payment of payments as any[]) {
+      // Determine covered rental months for this payment
+      const coveredMonths: { year: number; month: number }[] = [];
+
+      const advanceMonths = payment.advanceMonthsPaid as number | undefined;
+      const startPeriod = payment.advancePeriodStart as { month: number; year: number } | undefined;
+      const endPeriod = payment.advancePeriodEnd as { month: number; year: number } | undefined;
+
+      if (advanceMonths && advanceMonths > 1 && startPeriod && endPeriod) {
+        let y = startPeriod.year;
+        let m0 = startPeriod.month - 1; // convert to 0-based
+        const endY = endPeriod.year;
+        const endM0 = endPeriod.month - 1;
+        while (y < endY || (y === endY && m0 <= endM0)) {
+          coveredMonths.push({ year: y, month: m0 });
+          m0 += 1;
+          if (m0 > 11) { m0 = 0; y += 1; }
+        }
+      } else if (typeof payment.rentalPeriodYear === 'number' && typeof payment.rentalPeriodMonth === 'number') {
+        const y = payment.rentalPeriodYear as number;
+        const m0 = (payment.rentalPeriodMonth as number) - 1;
+        if (m0 >= 0 && m0 <= 11) {
+          coveredMonths.push({ year: y, month: m0 });
+        }
+      }
+
+      // Fallback to paymentDate month/year if rental period is not set
+      if (coveredMonths.length === 0) {
+        const d = new Date(payment.paymentDate);
+        coveredMonths.push({ year: d.getFullYear(), month: d.getMonth() });
+      }
+
+      const totalAgentShare = payment.commissionDetails?.agentShare || 0;
+      const perMonthAgentShare = coveredMonths.length > 0 ? totalAgentShare / coveredMonths.length : 0;
+
+      // Sum only for the current month/year
+      coveredMonths.forEach(({ year, month }) => {
+        if (year === currentYear && month === currentMonth) {
+          monthlyCommission += perMonthAgentShare;
+        }
+      });
+    }
 
     res.json({ monthlyCommission });
   } catch (error) {

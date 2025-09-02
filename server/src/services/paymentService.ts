@@ -115,8 +115,22 @@ export const createPayment = async (req: Request, res: Response) => {
       throw new AppError('Agent not found', 404);
     }
 
-    // Calculate commission
-    const commissionDetails = calculateCommission(amount, propertyType);
+    // Calculate commission using property's current commission percent and company splits
+    const commissionPercent = typeof property.commission === 'number' ? property.commission : ((propertyType || 'residential') === 'residential' ? 15 : 10);
+    const totalCommission = (amount * commissionPercent) / 100;
+    const company = await Company.findById(req.user.companyId).session(session);
+    const preaPercentOfTotal = Math.max(0, Math.min(1, (company as any)?.commissionConfig?.preaPercentOfTotal ?? 0.03));
+    const agentPercentOfRemaining = Math.max(0, Math.min(1, (company as any)?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
+    const agencyPercentOfRemaining = Math.max(0, Math.min(1, (company as any)?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
+    const preaFee = totalCommission * preaPercentOfTotal;
+    const remainingCommission = totalCommission - preaFee;
+    const commissionDetails = {
+      totalCommission,
+      preaFee,
+      agentShare: remainingCommission * agentPercentOfRemaining,
+      agencyShare: remainingCommission * agencyPercentOfRemaining,
+      ownerAmount: amount - totalCommission
+    };
 
     // Create payment record
     const payment = new Payment({

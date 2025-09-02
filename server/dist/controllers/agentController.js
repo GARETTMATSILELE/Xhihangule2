@@ -199,7 +199,7 @@ const getAgentFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.getAgentFiles = getAgentFiles;
 // Get agent's monthly commission
 const getAgentCommission = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -207,26 +207,58 @@ const getAgentCommission = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found', 400);
         }
-        // Get current month and year
+        // Current period (0-based month)
         const now = new Date();
-        const currentMonth = now.getMonth(); // 0-indexed
+        const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
-        // Find all payments for this agent in this company, for the current month and year
+        // Fetch completed payments for this agent in this company
         const payments = yield Payment_1.Payment.find({
             agentId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            status: 'completed',
-            paymentDate: {
-                $gte: new Date(currentYear, currentMonth, 1),
-                $lt: new Date(currentYear, currentMonth + 1, 1)
+            status: 'completed'
+        }).select('commissionDetails paymentDate rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd');
+        let monthlyCommission = 0;
+        for (const payment of payments) {
+            // Determine covered rental months for this payment
+            const coveredMonths = [];
+            const advanceMonths = payment.advanceMonthsPaid;
+            const startPeriod = payment.advancePeriodStart;
+            const endPeriod = payment.advancePeriodEnd;
+            if (advanceMonths && advanceMonths > 1 && startPeriod && endPeriod) {
+                let y = startPeriod.year;
+                let m0 = startPeriod.month - 1; // convert to 0-based
+                const endY = endPeriod.year;
+                const endM0 = endPeriod.month - 1;
+                while (y < endY || (y === endY && m0 <= endM0)) {
+                    coveredMonths.push({ year: y, month: m0 });
+                    m0 += 1;
+                    if (m0 > 11) {
+                        m0 = 0;
+                        y += 1;
+                    }
+                }
             }
-        });
-        // Sum agentShare from commissionDetails
-        const monthlyCommission = payments.reduce((sum, payment) => {
-            var _a;
-            const agentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
-            return sum + agentShare;
-        }, 0);
+            else if (typeof payment.rentalPeriodYear === 'number' && typeof payment.rentalPeriodMonth === 'number') {
+                const y = payment.rentalPeriodYear;
+                const m0 = payment.rentalPeriodMonth - 1;
+                if (m0 >= 0 && m0 <= 11) {
+                    coveredMonths.push({ year: y, month: m0 });
+                }
+            }
+            // Fallback to paymentDate month/year if rental period is not set
+            if (coveredMonths.length === 0) {
+                const d = new Date(payment.paymentDate);
+                coveredMonths.push({ year: d.getFullYear(), month: d.getMonth() });
+            }
+            const totalAgentShare = ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.agentShare) || 0;
+            const perMonthAgentShare = coveredMonths.length > 0 ? totalAgentShare / coveredMonths.length : 0;
+            // Sum only for the current month/year
+            coveredMonths.forEach(({ year, month }) => {
+                if (year === currentYear && month === currentMonth) {
+                    monthlyCommission += perMonthAgentShare;
+                }
+            });
+        }
         res.json({ monthlyCommission });
     }
     catch (error) {

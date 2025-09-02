@@ -78,6 +78,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.getCompanyPayments = getCompanyPayments;
 // Create a new payment
 const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -102,8 +103,22 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!agent) {
             throw new errorHandler_1.AppError('Agent not found', 404);
         }
-        // Calculate commission
-        const commissionDetails = calculateCommission(amount, propertyType);
+        // Calculate commission using property's current commission percent and company splits
+        const commissionPercent = typeof property.commission === 'number' ? property.commission : ((propertyType || 'residential') === 'residential' ? 15 : 10);
+        const totalCommission = (amount * commissionPercent) / 100;
+        const company = yield Company_1.Company.findById(req.user.companyId).session(session);
+        const preaPercentOfTotal = Math.max(0, Math.min(1, (_b = (_a = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _a === void 0 ? void 0 : _a.preaPercentOfTotal) !== null && _b !== void 0 ? _b : 0.03));
+        const agentPercentOfRemaining = Math.max(0, Math.min(1, (_d = (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.agentPercentOfRemaining) !== null && _d !== void 0 ? _d : 0.6));
+        const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_f = (_e = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _e === void 0 ? void 0 : _e.agencyPercentOfRemaining) !== null && _f !== void 0 ? _f : 0.4));
+        const preaFee = totalCommission * preaPercentOfTotal;
+        const remainingCommission = totalCommission - preaFee;
+        const commissionDetails = {
+            totalCommission,
+            preaFee,
+            agentShare: remainingCommission * agentPercentOfRemaining,
+            agencyShare: remainingCommission * agencyPercentOfRemaining,
+            ownerAmount: amount - totalCommission
+        };
         // Create payment record
         const payment = new Payment_1.Payment({
             paymentType,

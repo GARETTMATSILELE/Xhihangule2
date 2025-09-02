@@ -9,10 +9,12 @@ import { AuthProvider } from './contexts/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/ProtectedRoute';
 import { NotificationProvider } from './components/Layout/Header';
+// Eagerly load API module to avoid lazy chunk timeouts for shared api chunk
+import './api';
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-// Ensure correct case to avoid case-sensitive filesystem chunk failures
+// Ensure correct case to match actual folder name on disk (windows is case-insensitive)
 const CompanySetup = lazy(() => import('./pages/admin/CompanySetup'));
 const Login = lazy(() => import('./components/Login'));
 const Signup = lazy(() => import('./pages/Signup'));

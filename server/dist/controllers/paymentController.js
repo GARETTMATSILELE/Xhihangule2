@@ -307,19 +307,37 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         // Calculate commission if not provided
         let finalCommissionDetails = commissionDetails;
         if (!finalCommissionDetails) {
-            const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
-            const totalCommission = (amount * baseCommissionRate) / 100;
-            const preaFee = totalCommission * 0.03;
-            const remainingCommission = totalCommission - preaFee;
-            const agentShare = remainingCommission * 0.6;
-            const agencyShare = remainingCommission * 0.4;
-            finalCommissionDetails = {
-                totalCommission,
-                preaFee,
-                agentShare,
-                agencyShare,
-                ownerAmount: amount - totalCommission,
-            };
+            try {
+                // Use property's current commission percent when a real property is provided
+                if (!manualProperty && propertyId) {
+                    const prop = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(propertyId));
+                    const commissionPercent = typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number'
+                        ? prop.commission
+                        : ((propertyType || 'residential') === 'residential' ? 15 : 10);
+                    finalCommissionDetails = (yield calculateCommission(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+                }
+                else {
+                    // Manual entries have no linked property; fall back to default base rates
+                    const commissionPercent = (propertyType || 'residential') === 'residential' ? 15 : 10;
+                    finalCommissionDetails = (yield calculateCommission(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+                }
+            }
+            catch (err) {
+                // As a safety net, fall back to default split if anything goes wrong
+                const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
+                const totalCommission = (amount * baseCommissionRate) / 100;
+                const preaFee = totalCommission * 0.03;
+                const remainingCommission = totalCommission - preaFee;
+                const agentShare = remainingCommission * 0.6;
+                const agencyShare = remainingCommission * 0.4;
+                finalCommissionDetails = {
+                    totalCommission,
+                    preaFee,
+                    agentShare,
+                    agencyShare,
+                    ownerAmount: amount - totalCommission,
+                };
+            }
         }
         // Determine provisional flags
         const markProvisional = Boolean(manualProperty || manualTenant);
