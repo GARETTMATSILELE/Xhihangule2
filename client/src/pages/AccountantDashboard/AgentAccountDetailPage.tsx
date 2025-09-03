@@ -509,7 +509,7 @@ const AgentAccountDetailPage: React.FC = () => {
             <TableBody>
               {account.commissionData && account.commissionData.length > 0 ? (
                 account.commissionData.map((commission) => {
-                  const propertyName = (commission as any)?.propertyId?.propertyName || (commission as any)?.manualPropertyAddress || 'N/A';
+                  const propertyName = (commission as any)?.propertyId?.propertyName || (commission as any)?.propertyId?.name || (commission as any)?.manualPropertyAddress || 'N/A';
                   const propertyAddress = (commission as any)?.propertyId?.address || '';
                   const tenantFirst = (commission as any)?.tenantId?.firstName;
                   const tenantLast = (commission as any)?.tenantId?.lastName;

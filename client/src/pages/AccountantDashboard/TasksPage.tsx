@@ -77,42 +77,8 @@ const TasksPage: React.FC<TasksPageProps> = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [detailsDialog, setDetailsDialog] = useState(false);
 
-  // Mock tasks for demonstration
-  const [tasks] = useState<Task[]>([
-    {
-      id: '1',
-      type: 'invoice_review',
-      title: 'Review Monthly Invoice',
-      description: 'Review and approve monthly invoice for property maintenance',
-      priority: 'high',
-      status: 'pending',
-      dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 2 days from now
-      createdAt: new Date(),
-      data: { invoiceId: 'INV-001', amount: 2500, property: 'Sunset Apartments' }
-    },
-    {
-      id: '2',
-      type: 'expense_approval',
-      title: 'Approve Emergency Repairs',
-      description: 'Emergency plumbing repairs at Downtown Loft',
-      priority: 'urgent',
-      status: 'pending',
-      dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day from now
-      createdAt: new Date(),
-      data: { expenseId: 'EXP-001', amount: 800, property: 'Downtown Loft' }
-    },
-    {
-      id: '3',
-      type: 'budget_review',
-      title: 'Q4 Budget Review',
-      description: 'Review and approve Q4 budget for all properties',
-      priority: 'medium',
-      status: 'pending',
-      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-      createdAt: new Date(),
-      data: { budgetId: 'BUD-001', totalAmount: 15000 }
-    }
-  ]);
+  // Remove demo tasks; only show real payment requests as tasks
+  const [tasks] = useState<Task[]>([]);
 
   useEffect(() => {
     if (user?.companyId) {
@@ -230,7 +196,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
     }));
 
     // Add other tasks
-    const otherTasks = tasks;
+    const otherTasks = tasks; // remains empty; no demo items
 
     // Combine and filter based on current tab
     const allTasks = [...paymentRequestTasks, ...otherTasks];

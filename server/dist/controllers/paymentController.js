@@ -659,6 +659,15 @@ const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (req.query.propertyId) {
             query.propertyId = new mongoose_1.default.Types.ObjectId(req.query.propertyId);
         }
+        // Filter by agentId when provided (ensure only that agent's payments are returned)
+        if (req.query.agentId) {
+            try {
+                query.agentId = new mongoose_1.default.Types.ObjectId(req.query.agentId);
+            }
+            catch (_a) {
+                // Ignore invalid ObjectId to avoid throwing on public endpoint
+            }
+        }
         // Date filtering
         if (req.query.startDate || req.query.endDate) {
             query.paymentDate = {};

@@ -12,6 +12,10 @@ import {
   Alert,
   Chip,
   Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
@@ -128,17 +132,30 @@ const AgentDashboard: React.FC = () => {
   const [commissionPayments, setCommissionPayments] = useState<any[]>([]);
   const [commissionLoading, setCommissionLoading] = useState(false);
   const [commissionError, setCommissionError] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // 1-12
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [showActiveTenants, setShowActiveTenants] = useState(false);
   const [showPropertiesList, setShowPropertiesList] = useState(false);
 
-  const loadCommissionPayments = async () => {
+  const filteredMonthlyAgentShare = React.useMemo(() => {
+    if (!commissionPayments || commissionPayments.length === 0) return null;
+    const total = commissionPayments
+      .filter((p: any) => {
+        const rentMonth = p.rentalPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
+        const rentYear = p.rentalPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
+        return rentMonth === selectedMonth && rentYear === selectedYear;
+      })
+      .reduce((sum: number, p: any) => sum + (p.commissionDetails?.agentShare || 0), 0);
+    return total;
+  }, [commissionPayments, selectedMonth, selectedYear]);
+
+  const fetchCommissionPaymentsForYear = async (year: number) => {
     if (!user) return;
     try {
       setCommissionLoading(true);
       setCommissionError(null);
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const start = new Date(year, 0, 1);
+      const end = new Date(year + 1, 0, 1);
       const filters: any = {
         startDate: start.toISOString(),
         endDate: end.toISOString(),
@@ -153,6 +170,12 @@ const AgentDashboard: React.FC = () => {
     } finally {
       setCommissionLoading(false);
     }
+  };
+
+  const loadCommissionPayments = async () => {
+    setSelectedMonth(new Date().getMonth() + 1);
+    setSelectedYear(new Date().getFullYear());
+    await fetchCommissionPaymentsForYear(new Date().getFullYear());
   };
 
   useEffect(() => {
@@ -305,7 +328,11 @@ const AgentDashboard: React.FC = () => {
                   <Grid item xs={12} md={6} lg={3}>
                     <StatCard
                       title="Monthly Commission"
-                      value={`$${dashboardData.monthlyCommission.toLocaleString()}`}
+                      value={`$${(
+                        (filteredMonthlyAgentShare != null
+                          ? filteredMonthlyAgentShare
+                          : dashboardData.monthlyCommission) || 0
+                      ).toLocaleString()}`}
                       icon={<PaymentIcon />}
                       color="#FB6340"
                       loading={loading}
@@ -324,8 +351,43 @@ const AgentDashboard: React.FC = () => {
                         {showCommissionDetails ? (
                           <>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                              <Typography variant="h6">Monthly Commission Payments</Typography>
+                              <Typography variant="h6">Commission Payments</Typography>
                               <Button size="small" onClick={() => setShowCommissionDetails(false)}>Hide</Button>
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+                              <FormControl size="small" sx={{ minWidth: 160 }}>
+                                <InputLabel id="commission-month-label">Month</InputLabel>
+                                <Select
+                                  labelId="commission-month-label"
+                                  value={selectedMonth}
+                                  label="Month"
+                                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                                >
+                                  {[
+                                    'January','February','March','April','May','June','July','August','September','October','November','December'
+                                  ].map((m, idx) => (
+                                    <MenuItem key={m} value={idx + 1}>{m}</MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                              <FormControl size="small" sx={{ minWidth: 120 }}>
+                                <InputLabel id="commission-year-label">Year</InputLabel>
+                                <Select
+                                  labelId="commission-year-label"
+                                  value={selectedYear}
+                                  label="Year"
+                                  onChange={async (e) => {
+                                    const y = Number(e.target.value);
+                                    setSelectedYear(y);
+                                    await fetchCommissionPaymentsForYear(y);
+                                  }}
+                                >
+                                  {Array.from({ length: 8 }).map((_, i) => {
+                                    const year = new Date().getFullYear() - 5 + i;
+                                    return <MenuItem key={year} value={year}>{year}</MenuItem>;
+                                  })}
+                                </Select>
+                              </FormControl>
                             </Box>
                             {commissionLoading ? (
                               <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
@@ -335,22 +397,22 @@ const AgentDashboard: React.FC = () => {
                               <Alert severity="error">{commissionError}</Alert>
                             ) : (
                               (() => {
-                                const now = new Date();
-                                const monthPayments = commissionPayments.filter((p: any) => {
-                                  const d = p.paymentDate ? new Date(p.paymentDate) : null;
-                                  return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                                const filteredPayments = commissionPayments.filter((p: any) => {
+                                  const rentMonth = p.rentalPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
+                                  const rentYear = p.rentalPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
+                                  return rentMonth === selectedMonth && rentYear === selectedYear;
                                 });
-                                const summedAgentShare = monthPayments.reduce((sum: number, p: any) => sum + (p.commissionDetails?.agentShare || 0), 0);
+                                const summedAgentShare = filteredPayments.reduce((sum: number, p: any) => sum + (p.commissionDetails?.agentShare || 0), 0);
                                 return (
                                   <>
                                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                                      Total agent share this month: ${summedAgentShare.toLocaleString()}
+                                      Total agent share for {new Date(selectedYear, selectedMonth - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' })}: ${summedAgentShare.toLocaleString()}
                                     </Typography>
-                                    {monthPayments.length === 0 ? (
-                                      <Typography color="text.secondary">No commission payments found for this month.</Typography>
+                                    {filteredPayments.length === 0 ? (
+                                      <Typography color="text.secondary">No commission payments found for the selected period.</Typography>
                                     ) : (
                                       <Grid container spacing={2}>
-                                        {monthPayments.map((pay: any) => {
+                                        {filteredPayments.map((pay: any) => {
                                           const propertyId =
                                             getId(pay.propertyId) ||
                                             getId(pay.property) ||

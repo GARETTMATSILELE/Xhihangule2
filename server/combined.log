@@ -3169,3 +3169,131 @@
 {"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-03T14:00:34.445Z"}
 {"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-03T14:00:34.446Z"}
 {"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-03T14:00:34.446Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-03T15:04:39.149Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-03T15:04:39.508Z"}
+{"level":"info","message":"Syncing changes since 2025-09-03T14:04:39.602Z","timestamp":"2025-09-03T15:04:39.602Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T15:04:43.805Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 4683ms","timestamp":"2025-09-03T15:04:43.834Z"}
+{"level":"info","message":"Created new property account for property: 68b73a06f62a980887e4772c","timestamp":"2025-09-03T15:26:56.144Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-03T16:00:00.035Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-03T16:00:00.037Z"}
+{"level":"info","message":"Syncing changes since 2025-09-03T15:00:00.038Z","timestamp":"2025-09-03T16:00:00.038Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T16:00:00.100Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 65ms","timestamp":"2025-09-03T16:00:00.102Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-03T16:35:56.243Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Thu Sep 04 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T16:35:56.423Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-03T16:35:56.424Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Wed Sep 03 2025 19:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T16:35:56.427Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-03T16:35:56.427Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 07 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T16:35:56.430Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-03T16:35:56.431Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T16:35:56.437Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-03T16:35:56.438Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-03T16:35:56.441Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-03T16:35:56.441Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-03T16:35:56.441Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-03T16:35:56.442Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-03T16:35:56.444Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-03T16:35:56.445Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-03T16:35:56.446Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-03T16:35:56.446Z"}
+{"level":"info","message":"Starting real-time database synchronization...","timestamp":"2025-09-03T16:58:36.251Z"}
+{"level":"warn","message":"Standalone MongoDB detected - change streams not supported","timestamp":"2025-09-03T16:58:36.285Z"}
+{"level":"warn","message":"Could not determine MongoDB configuration - assuming standalone","timestamp":"2025-09-03T16:58:36.287Z"}
+{"level":"error","message":"Failed to set up change streams: Change streams require replica set configuration","stack":"Error: Change streams require replica set configuration\n    at DatabaseSyncService.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:180:27)\n    at Generator.next (<anonymous>)\n    at fulfilled (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:38:58)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-09-03T16:58:36.299Z"}
+{"level":"warn","message":"Change streams setup failed, attempting polling fallback: Change streams require replica set configuration","stack":"Error: Change streams require replica set configuration\n    at DatabaseSyncService.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:180:27)\n    at Generator.next (<anonymous>)\n    at fulfilled (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:38:58)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-09-03T16:58:36.303Z"}
+{"level":"warn","message":"Change streams not supported on standalone MongoDB. Real-time sync will use polling instead.","timestamp":"2025-09-03T16:58:36.316Z"}
+{"level":"info","message":"Starting polling-based synchronization...","timestamp":"2025-09-03T16:58:36.321Z"}
+{"level":"info","message":"Polling-based synchronization started successfully","timestamp":"2025-09-03T16:58:36.332Z"}
+{"level":"info","message":"Real-time sync started successfully with polling fallback","timestamp":"2025-09-03T16:58:36.333Z"}
+{"level":"info","message":"Starting full database synchronization...","timestamp":"2025-09-03T16:58:41.050Z"}
+{"level":"info","message":"Syncing 8 properties...","timestamp":"2025-09-03T16:58:41.081Z"}
+{"level":"info","message":"Updated property account for property 68778f56a77a7624d898bde7","timestamp":"2025-09-03T16:58:41.130Z"}
+{"level":"info","message":"Updated property account for property 6881ecd8a15ae3f0afd218ff","timestamp":"2025-09-03T16:58:41.182Z"}
+{"level":"info","message":"Updated property account for property 6888a10c8ef6ae57ca36b653","timestamp":"2025-09-03T16:58:41.201Z"}
+{"level":"info","message":"Updated property account for property 68a705ad7a1f3f54b6cc93ec","timestamp":"2025-09-03T16:58:41.222Z"}
+{"level":"info","message":"Updated property account for property 68a8a10dc34416fb6e715184","timestamp":"2025-09-03T16:58:41.247Z"}
+{"level":"info","message":"Updated property account for property 68ab1b776c70c4a42cd2113a","timestamp":"2025-09-03T16:58:41.267Z"}
+{"level":"info","message":"Updated property account for property 68b73a06f62a980887e4772c","timestamp":"2025-09-03T16:58:41.286Z"}
+{"level":"info","message":"Created property account for property 68b861c3e65e778ef53508f1","timestamp":"2025-09-03T16:58:41.325Z"}
+{"level":"info","message":"Syncing 18 completed payments...","timestamp":"2025-09-03T16:58:41.349Z"}
+{"level":"info","message":"Payment 68b6df7b8d698c4282f98b15: Full amount: 1200, Owner amount (after commission): 1020","timestamp":"2025-09-03T16:58:41.499Z"}
+{"level":"info","message":"Synced payment 68b6df7b8d698c4282f98b15 to property account 68a8a10dc34416fb6e715184","timestamp":"2025-09-03T16:58:41.511Z"}
+{"level":"info","message":"Recorded company revenue 69.84 for company 683403ccf652d8cd543c6932 from payment 68b6df7b8d698c4282f98b15","timestamp":"2025-09-03T16:58:41.533Z"}
+{"level":"info","message":"Payment 68b6e0bb063a568420a8a6da: Full amount: 112, Owner amount (after commission): 95.2","timestamp":"2025-09-03T16:58:41.543Z"}
+{"level":"info","message":"Synced payment 68b6e0bb063a568420a8a6da to property account 68a8a10dc34416fb6e715184","timestamp":"2025-09-03T16:58:41.558Z"}
+{"level":"info","message":"Recorded company revenue 6.5184 for company 683403ccf652d8cd543c6932 from payment 68b6e0bb063a568420a8a6da","timestamp":"2025-09-03T16:58:41.581Z"}
+{"level":"info","message":"Payment 68b735c17a7d3319d465761d: Full amount: 2500, Owner amount (after commission): 2187.5","timestamp":"2025-09-03T16:58:41.594Z"}
+{"level":"info","message":"Synced payment 68b735c17a7d3319d465761d to property account 68a8a10dc34416fb6e715184","timestamp":"2025-09-03T16:58:41.612Z"}
+{"level":"info","message":"Recorded company revenue 121.25 for company 683403ccf652d8cd543c6932 from payment 68b735c17a7d3319d465761d","timestamp":"2025-09-03T16:58:41.650Z"}
+{"level":"info","message":"Payment 68b73cc7f62a980887e47856: Full amount: 1350, Owner amount (after commission): 1174.5","timestamp":"2025-09-03T16:58:41.662Z"}
+{"level":"info","message":"Synced payment 68b73cc7f62a980887e47856 to property account 68b73a06f62a980887e4772c","timestamp":"2025-09-03T16:58:41.680Z"}
+{"level":"info","message":"Recorded company revenue 68.09400000000001 for company 683403ccf652d8cd543c6932 from payment 68b73cc7f62a980887e47856","timestamp":"2025-09-03T16:58:41.698Z"}
+{"level":"info","message":"Payment 68b73cf3f62a980887e47868: Full amount: 1350, Owner amount (after commission): 1174.5","timestamp":"2025-09-03T16:58:41.730Z"}
+{"level":"info","message":"Synced payment 68b73cf3f62a980887e47868 to property account 68b73a06f62a980887e4772c","timestamp":"2025-09-03T16:58:41.777Z"}
+{"level":"info","message":"Recorded company revenue 68.09400000000001 for company 683403ccf652d8cd543c6932 from payment 68b73cf3f62a980887e47868","timestamp":"2025-09-03T16:58:41.886Z"}
+{"level":"info","message":"Payment 68b8629ce65e778ef53509b9: Full amount: 1350, Owner amount (after commission): 1147.5","timestamp":"2025-09-03T16:58:41.896Z"}
+{"level":"info","message":"Synced payment 68b8629ce65e778ef53509b9 to property account 68b861c3e65e778ef53508f1","timestamp":"2025-09-03T16:58:41.902Z"}
+{"level":"info","message":"Recorded company revenue 78.57000000000001 for company 683403ccf652d8cd543c6932 from payment 68b8629ce65e778ef53509b9","timestamp":"2025-09-03T16:58:41.929Z"}
+{"level":"info","message":"Payment 68b862b7e65e778ef53509cb: Full amount: 1350, Owner amount (after commission): 1147.5","timestamp":"2025-09-03T16:58:41.935Z"}
+{"level":"info","message":"Synced payment 68b862b7e65e778ef53509cb to property account 68b861c3e65e778ef53508f1","timestamp":"2025-09-03T16:58:41.966Z"}
+{"level":"info","message":"Recorded company revenue 78.57000000000001 for company 683403ccf652d8cd543c6932 from payment 68b862b7e65e778ef53509cb","timestamp":"2025-09-03T16:58:42.002Z"}
+{"level":"info","message":"Payment 68b862d1e65e778ef53509dd: Full amount: 1350, Owner amount (after commission): 1147.5","timestamp":"2025-09-03T16:58:42.020Z"}
+{"level":"info","message":"Synced payment 68b862d1e65e778ef53509dd to property account 68b861c3e65e778ef53508f1","timestamp":"2025-09-03T16:58:42.042Z"}
+{"level":"info","message":"Recorded company revenue 78.57000000000001 for company 683403ccf652d8cd543c6932 from payment 68b862d1e65e778ef53509dd","timestamp":"2025-09-03T16:58:42.076Z"}
+{"level":"info","message":"Syncing 16 users...","timestamp":"2025-09-03T16:58:42.084Z"}
+{"level":"info","message":"Updated owner name in 2 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-03T16:58:42.152Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a6f7dbbbfe5eb39dc89953","timestamp":"2025-09-03T16:58:42.245Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a87e730a904b150ddec26b","timestamp":"2025-09-03T16:58:42.269Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68aa70dbb9860b8f73836af8","timestamp":"2025-09-03T16:58:42.296Z"}
+{"level":"info","message":"Full sync completed in 1273ms. Success: 32, Errors: 0","timestamp":"2025-09-03T16:58:42.323Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-03T17:00:00.019Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-03T17:00:00.020Z"}
+{"level":"info","message":"Syncing changes since 2025-09-03T16:00:00.021Z","timestamp":"2025-09-03T17:00:00.021Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T17:00:00.100Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 81ms","timestamp":"2025-09-03T17:00:00.102Z"}
+{"code":20,"codeName":"IllegalOperation","level":"error","message":"Error recording income from payment: Transaction numbers are only allowed on a replica set member or mongos","ok":0,"stack":"MongoServerError: Transaction numbers are only allowed on a replica set member or mongos\n    at Connection.onMessage (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\mongodb\\lib\\cmap\\connection.js:202:26)\n    at MessageStream.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\mongodb\\lib\\cmap\\connection.js:61:60)\n    at MessageStream.emit (node:events:507:28)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\mongodb\\lib\\cmap\\message_stream.js:147:16\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-09-03T17:02:12.316Z"}
+{"level":"info","message":"Starting full database synchronization...","timestamp":"2025-09-03T17:02:29.636Z"}
+{"level":"info","message":"Syncing 8 properties...","timestamp":"2025-09-03T17:02:29.652Z"}
+{"level":"info","message":"Updated property account for property 68778f56a77a7624d898bde7","timestamp":"2025-09-03T17:02:29.688Z"}
+{"level":"info","message":"Updated property account for property 6881ecd8a15ae3f0afd218ff","timestamp":"2025-09-03T17:02:29.724Z"}
+{"level":"info","message":"Updated property account for property 6888a10c8ef6ae57ca36b653","timestamp":"2025-09-03T17:02:29.774Z"}
+{"level":"info","message":"Updated property account for property 68a705ad7a1f3f54b6cc93ec","timestamp":"2025-09-03T17:02:29.824Z"}
+{"level":"info","message":"Updated property account for property 68a8a10dc34416fb6e715184","timestamp":"2025-09-03T17:02:29.866Z"}
+{"level":"info","message":"Updated property account for property 68ab1b776c70c4a42cd2113a","timestamp":"2025-09-03T17:02:29.889Z"}
+{"level":"info","message":"Updated property account for property 68b73a06f62a980887e4772c","timestamp":"2025-09-03T17:02:29.920Z"}
+{"level":"info","message":"Updated property account for property 68b861c3e65e778ef53508f1","timestamp":"2025-09-03T17:02:29.943Z"}
+{"level":"info","message":"Syncing 19 completed payments...","timestamp":"2025-09-03T17:02:29.976Z"}
+{"level":"info","message":"Payment 68b87494c7f74daac5ba3fa3: Full amount: 1350, Owner amount (after commission): 1147.5","timestamp":"2025-09-03T17:02:30.132Z"}
+{"level":"info","message":"Synced payment 68b87494c7f74daac5ba3fa3 to property account 68b861c3e65e778ef53508f1","timestamp":"2025-09-03T17:02:30.138Z"}
+{"level":"info","message":"Recorded company revenue 78.57000000000001 for company 683403ccf652d8cd543c6932 from payment 68b87494c7f74daac5ba3fa3","timestamp":"2025-09-03T17:02:30.158Z"}
+{"level":"info","message":"Syncing 16 users...","timestamp":"2025-09-03T17:02:30.172Z"}
+{"level":"info","message":"Updated owner name in 2 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-03T17:02:30.203Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a6f7dbbbfe5eb39dc89953","timestamp":"2025-09-03T17:02:30.230Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a87e730a904b150ddec26b","timestamp":"2025-09-03T17:02:30.253Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68aa70dbb9860b8f73836af8","timestamp":"2025-09-03T17:02:30.284Z"}
+{"level":"info","message":"Full sync completed in 672ms. Success: 25, Errors: 0","timestamp":"2025-09-03T17:02:30.308Z"}
+{"level":"info","message":"Updated owner name in 2 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-03T17:02:36.463Z"}
+{"level":"info","message":"Updated owner name in 2 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-03T17:04:36.453Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-03T17:08:59.081Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Thu Sep 04 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T17:08:59.198Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-03T17:08:59.199Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Wed Sep 03 2025 20:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T17:08:59.204Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-03T17:08:59.205Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 07 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T17:08:59.209Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-03T17:08:59.209Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-03T17:08:59.215Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-03T17:08:59.218Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-03T17:08:59.220Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-03T17:08:59.221Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-03T17:08:59.221Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-03T17:08:59.222Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-03T17:08:59.223Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-03T17:08:59.223Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-03T17:08:59.224Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-03T17:08:59.224Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-03T18:00:00.031Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-03T18:00:00.035Z"}
+{"level":"info","message":"Syncing changes since 2025-09-03T17:00:00.036Z","timestamp":"2025-09-03T18:00:00.036Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T18:00:00.141Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 110ms","timestamp":"2025-09-03T18:00:00.145Z"}

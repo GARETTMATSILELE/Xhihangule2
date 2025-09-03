@@ -642,6 +642,31 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
     await payment.save();
 
+    // If depositAmount > 0, record in rentaldeposits (ledger)
+    if (payment.depositAmount && payment.depositAmount > 0) {
+      try {
+        const { RentalDeposit } = require('../models/rentalDeposit');
+        const deposit = new RentalDeposit({
+          propertyId: payment.propertyId,
+          agentId: payment.agentId,
+          companyId: payment.companyId,
+          tenantId: payment.tenantId,
+          depositAmount: payment.depositAmount,
+          depositDate: payment.paymentDate,
+          paymentId: payment._id,
+          type: 'payment',
+          referenceNumber: payment.referenceNumber,
+          notes: notes || '',
+          processedBy: payment.processedBy,
+          paymentMethod
+        } as any);
+        await deposit.save();
+      } catch (depositErr) {
+        console.error('Failed to record rental deposit for agent payment:', depositErr);
+        // Do not fail the payment creation if deposit ledger write fails
+      }
+    }
+
     // Update company revenue
     await mongoose.model('Company').findByIdAndUpdate(
       new mongoose.Types.ObjectId(req.user.companyId),

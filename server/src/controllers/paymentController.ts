@@ -731,6 +731,15 @@ export const getPaymentsPublic = async (req: Request, res: Response) => {
       query.propertyId = new mongoose.Types.ObjectId(req.query.propertyId as string);
     }
 
+    // Filter by agentId when provided (ensure only that agent's payments are returned)
+    if (req.query.agentId) {
+      try {
+        query.agentId = new mongoose.Types.ObjectId(req.query.agentId as string);
+      } catch {
+        // Ignore invalid ObjectId to avoid throwing on public endpoint
+      }
+    }
+
     // Date filtering
     if (req.query.startDate || req.query.endDate) {
       query.paymentDate = {};

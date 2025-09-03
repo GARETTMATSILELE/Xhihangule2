@@ -173,11 +173,11 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 </div>
                 <div class="detail-row">
                   <span class="label">Tenant:</span>
-                  <span class="value">${receipt.manualTenantName || (receipt.tenant ? receipt.tenant.firstName + ' ' + receipt.tenant.lastName : 'N/A')}</span>
+                  <span class="value">${receipt.manualTenantName || (receipt.tenant ? receipt.tenant.firstName + ' ' + receipt.tenant.lastName : (receipt.tenantName || 'N/A'))}</span>
                 </div>
                 <div class="detail-row">
                   <span class="label">Agent:</span>
-                  <span class="value">${receipt.agent?.firstName} ${receipt.agent?.lastName || 'N/A'}</span>
+                  <span class="value">${(receipt.agent?.firstName || receipt.processedBy?.firstName || '')} ${(receipt.agent?.lastName || receipt.processedBy?.lastName || '') || 'N/A'}</span>
                 </div>
                 <div class="detail-row">
                   <span class="label">Processed By:</span>
@@ -321,13 +321,13 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
         <Grid item xs={6}>
           <Typography variant="subtitle2" color="textSecondary">{(receipt.paymentType || receipt.type) === 'introduction' ? 'Buyer' : 'Tenant'}</Typography>
           <Typography variant="body1">
-            {receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : 'N/A')}
+            {receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : (receipt.tenantName || 'N/A'))}
           </Typography>
         </Grid>
         <Grid item xs={6}>
           <Typography variant="subtitle2" color="textSecondary">Agent</Typography>
           <Typography variant="body1">
-            {receipt.agent?.firstName} {receipt.agent?.lastName || 'N/A'}
+            {(receipt.agent?.firstName || receipt.processedBy?.firstName || '')} {(receipt.agent?.lastName || receipt.processedBy?.lastName || '') || 'N/A'}
           </Typography>
         </Grid>
         <Grid item xs={12}>
