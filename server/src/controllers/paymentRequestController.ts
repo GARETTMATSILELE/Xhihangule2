@@ -38,7 +38,21 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Property not found' });
     }
 
-    // Create payment request
+    // Resolve requester name safely from DB using authenticated user id
+    let requestedByName = 'Unknown';
+    try {
+      const requesterId = (req.user as any)?.userId;
+      if (requesterId) {
+        const requester = await User.findById(requesterId).select('firstName lastName').lean();
+        if (requester) {
+          const parts = [requester.firstName, requester.lastName].filter(Boolean);
+          requestedByName = parts.length ? parts.join(' ').trim() : 'Unknown';
+        }
+      }
+    } catch {
+      // keep default 'Unknown' if lookup fails
+    }
+
     const paymentRequest = new PaymentRequest({
       companyId,
       propertyId,
@@ -50,8 +64,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       requestDate: requestDate || new Date(),
       dueDate: dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
       notes,
-      requestedBy: (req.user as any)?.firstName + ' ' + (req.user as any)?.lastName || 'Unknown',
-      requestedByUser: (req.user as any)?._id,
+      requestedBy: requestedByName,
+      requestedByUser: (req.user as any)?.userId,
       payTo
     });
 
@@ -82,7 +96,7 @@ export const getPaymentRequests = async (req: Request, res: Response) => {
     // Build query - if agent, restrict to own requests
     const query: any = { companyId };
     if ((req.user as any)?.role === 'agent') {
-      query.requestedByUser = (req.user as any)?._id;
+      query.requestedByUser = (req.user as any)?.userId;
     }
     if (status) {
       query.status = status;
@@ -93,6 +107,7 @@ export const getPaymentRequests = async (req: Request, res: Response) => {
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName email')
       .populate('ownerId', 'firstName lastName email')
+      .populate('requestedByUser', 'firstName lastName email')
       .populate('processedBy', 'firstName lastName email')
       .sort({ requestDate: -1 })
       .skip(skip)
@@ -130,6 +145,7 @@ export const getPaymentRequest = async (req: Request, res: Response) => {
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName email')
       .populate('ownerId', 'firstName lastName email')
+      .populate('requestedByUser', 'firstName lastName email')
       .populate('processedBy', 'firstName lastName email');
 
     if (!paymentRequest) {
@@ -169,7 +185,7 @@ export const updatePaymentRequestStatus = async (req: Request, res: Response) =>
     paymentRequest.notes = notes || paymentRequest.notes;
     
     if (status === 'paid' || status === 'rejected') {
-      paymentRequest.processedBy = (req.user as any)?._id;
+      paymentRequest.processedBy = (req.user as any)?.userId;
       paymentRequest.processedDate = new Date();
     }
 
@@ -180,6 +196,7 @@ export const updatePaymentRequestStatus = async (req: Request, res: Response) =>
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName email')
       .populate('ownerId', 'firstName lastName email')
+      .populate('requestedByUser', 'firstName lastName email')
       .populate('processedBy', 'firstName lastName email');
 
     res.json({

@@ -386,7 +386,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
                 </ListItemIcon>
                 <ListItemText
                   primary="Property Name"
-                  secondary={request.property?.name || 'Unknown Property'}
+                  secondary={request.property?.name || (request as any).propertyId?.name || 'Unknown Property'}
                 />
               </ListItem>
               <ListItem>
@@ -395,7 +395,7 @@ const TasksPage: React.FC<TasksPageProps> = () => {
                 </ListItemIcon>
                 <ListItemText
                   primary="Property Address"
-                  secondary={request.property?.address || 'No address available'}
+                  secondary={request.property?.address || (request as any).propertyId?.address || 'No address available'}
                 />
               </ListItem>
             </List>

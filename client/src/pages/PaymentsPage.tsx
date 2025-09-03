@@ -201,7 +201,26 @@ const PaymentsPage: React.FC = () => {
     try {
       setRequestsLoading(true);
       const response = await paymentRequestService.getPaymentRequests();
-      setPaymentRequests(response.data);
+      // Enrich requests with property details so UI shows property name
+      const enriched = (response.data || []).map((req: any) => {
+        const rawId = (req?.propertyId as any);
+        const propertyId = typeof rawId === 'object' && rawId !== null && ('$oid' in rawId)
+          ? String((rawId as any).$oid)
+          : String(rawId);
+        const matchedProperty = properties.find(p => String(p._id) === propertyId);
+        if (matchedProperty) {
+          return {
+            ...req,
+            property: {
+              _id: matchedProperty._id,
+              name: matchedProperty.name,
+              address: (matchedProperty as any).address || ''
+            }
+          };
+        }
+        return req;
+      });
+      setPaymentRequests(enriched);
     } catch (err: any) {
       console.error('Error loading payment requests:', err);
       setError('Failed to load payment requests');
@@ -454,7 +473,26 @@ const PaymentsPage: React.FC = () => {
       };
       
       const response = await paymentRequestService.createPaymentRequest(newRequest);
-      setPaymentRequests(prev => [response, ...prev]);
+      // Enrich the created request with property details for immediate display
+      const created = (() => {
+        const rawId = (response as any)?.propertyId as any;
+        const propertyId = typeof rawId === 'object' && rawId !== null && ('$oid' in rawId)
+          ? String((rawId as any).$oid)
+          : String(rawId);
+        const matchedProperty = properties.find(p => String(p._id) === propertyId);
+        if (matchedProperty) {
+          return {
+            ...response,
+            property: {
+              _id: matchedProperty._id,
+              name: matchedProperty.name,
+              address: (matchedProperty as any).address || ''
+            }
+          };
+        }
+        return response;
+      })();
+      setPaymentRequests(prev => [created, ...prev]);
       setShowPaymentRequestForm(false);
       setSuccessMessage('Payment request created successfully');
     } catch (err: any) {

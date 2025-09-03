@@ -12,9 +12,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPaymentRequestStats = exports.deletePaymentRequest = exports.updatePaymentRequestStatus = exports.getPaymentRequest = exports.getPaymentRequests = exports.createPaymentRequest = void 0;
 const PaymentRequest_1 = require("../models/PaymentRequest");
 const Property_1 = require("../models/Property");
+const User_1 = require("../models/User");
 // Create a new payment request
 const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     try {
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.body.companyId;
         if (!companyId) {
@@ -30,7 +31,21 @@ const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!property) {
             return res.status(404).json({ message: 'Property not found' });
         }
-        // Create payment request
+        // Resolve requester name safely from DB using authenticated user id
+        let requestedByName = 'Unknown';
+        try {
+            const requesterId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId;
+            if (requesterId) {
+                const requester = yield User_1.User.findById(requesterId).select('firstName lastName').lean();
+                if (requester) {
+                    const parts = [requester.firstName, requester.lastName].filter(Boolean);
+                    requestedByName = parts.length ? parts.join(' ').trim() : 'Unknown';
+                }
+            }
+        }
+        catch (_d) {
+            // keep default 'Unknown' if lookup fails
+        }
         const paymentRequest = new PaymentRequest_1.PaymentRequest({
             companyId,
             propertyId,
@@ -42,8 +57,8 @@ const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
             requestDate: requestDate || new Date(),
             dueDate: dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
             notes,
-            requestedBy: ((_b = req.user) === null || _b === void 0 ? void 0 : _b.firstName) + ' ' + ((_c = req.user) === null || _c === void 0 ? void 0 : _c.lastName) || 'Unknown',
-            requestedByUser: (_d = req.user) === null || _d === void 0 ? void 0 : _d._id,
+            requestedBy: requestedByName,
+            requestedByUser: (_c = req.user) === null || _c === void 0 ? void 0 : _c.userId,
             payTo
         });
         yield paymentRequest.save();
@@ -71,7 +86,7 @@ const getPaymentRequests = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // Build query - if agent, restrict to own requests
         const query = { companyId };
         if (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) === 'agent') {
-            query.requestedByUser = (_c = req.user) === null || _c === void 0 ? void 0 : _c._id;
+            query.requestedByUser = (_c = req.user) === null || _c === void 0 ? void 0 : _c.userId;
         }
         if (status) {
             query.status = status;
@@ -81,6 +96,7 @@ const getPaymentRequests = (req, res) => __awaiter(void 0, void 0, void 0, funct
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
             .populate('ownerId', 'firstName lastName email')
+            .populate('requestedByUser', 'firstName lastName email')
             .populate('processedBy', 'firstName lastName email')
             .sort({ requestDate: -1 })
             .skip(skip)
@@ -116,6 +132,7 @@ const getPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, functi
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
             .populate('ownerId', 'firstName lastName email')
+            .populate('requestedByUser', 'firstName lastName email')
             .populate('processedBy', 'firstName lastName email');
         if (!paymentRequest) {
             return res.status(404).json({ message: 'Payment request not found' });
@@ -149,7 +166,7 @@ const updatePaymentRequestStatus = (req, res) => __awaiter(void 0, void 0, void 
         paymentRequest.status = status;
         paymentRequest.notes = notes || paymentRequest.notes;
         if (status === 'paid' || status === 'rejected') {
-            paymentRequest.processedBy = (_b = req.user) === null || _b === void 0 ? void 0 : _b._id;
+            paymentRequest.processedBy = (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId;
             paymentRequest.processedDate = new Date();
         }
         yield paymentRequest.save();
@@ -158,6 +175,7 @@ const updatePaymentRequestStatus = (req, res) => __awaiter(void 0, void 0, void 
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
             .populate('ownerId', 'firstName lastName email')
+            .populate('requestedByUser', 'firstName lastName email')
             .populate('processedBy', 'firstName lastName email');
         res.json({
             message: `Payment request ${status} successfully`,

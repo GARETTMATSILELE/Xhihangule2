@@ -14,6 +14,12 @@ export interface PaymentRequest {
   status: 'pending' | 'paid' | 'rejected';
   notes?: string;
   requestedBy: string;
+  requestedByUser?: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  };
   processedBy?: string;
   processedDate?: Date;
   payTo: {

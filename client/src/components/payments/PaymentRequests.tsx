@@ -239,7 +239,7 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
                 </ListItemIcon>
                 <ListItemText
                   primary="Property Name"
-                  secondary={request.property?.name || 'Unknown Property'}
+                  secondary={request.property?.name || (request as any).propertyId?.name || 'Unknown Property'}
                 />
               </ListItem>
               <ListItem>
@@ -248,7 +248,7 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
                 </ListItemIcon>
                 <ListItemText
                   primary="Property Address"
-                  secondary={request.property?.address || 'No address available'}
+                  secondary={request.property?.address || (request as any).propertyId?.address || 'No address available'}
                 />
               </ListItem>
             </List>
@@ -363,7 +363,7 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
             </Box>
             
             <Typography variant="body2" color="text.secondary" mb={1}>
-              {request.property?.name || 'Unknown Property'}
+              {request.property?.name || (request as any).propertyId?.name || 'Unknown Property'}
             </Typography>
             
             <Typography variant="body2" mb={1}>
@@ -441,10 +441,10 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
                 </TableCell>
                 <TableCell>
                   <Typography variant="body2">
-                    {request.property?.name || 'Unknown Property'}
+                    {request.property?.name || (request as any).propertyId?.name || 'Unknown Property'}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {request.property?.address}
+                    {request.property?.address || (request as any).propertyId?.address}
                   </Typography>
                 </TableCell>
                 <TableCell>
@@ -466,7 +466,11 @@ const PaymentRequests: React.FC<PaymentRequestsProps> = ({
                 </TableCell>
                 <TableCell>
                   <Typography variant="body2">
-                    {request.requestedBy}
+                    {request.requestedByUser
+                      ? `${request.requestedByUser.firstName} ${request.requestedByUser.lastName}`
+                      : (request as any).requestedByUser
+                        ? `${(request as any).requestedByUser?.firstName || ''} ${(request as any).requestedByUser?.lastName || ''}`.trim() || request.requestedBy
+                        : request.requestedBy}
                   </Typography>
                 </TableCell>
                 <TableCell>
