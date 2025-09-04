@@ -252,8 +252,9 @@ class PaymentService {
   async getPaymentReceipt(id: string, companyId?: string): Promise<any> {
     try {
       const config: any = {};
-      if (companyId) {
-        config.params = { companyId };
+      const defaultCompanyId = companyId || (typeof window !== 'undefined' ? localStorage.getItem('companyId') || undefined : undefined);
+      if (defaultCompanyId) {
+        config.params = { companyId: defaultCompanyId };
       }
       
       // Try rental/standard payment first; if not found, try levy receipt endpoint
@@ -277,8 +278,9 @@ class PaymentService {
       const config: any = {
         responseType: 'blob'
       };
-      if (companyId) {
-        config.params = { companyId };
+      const defaultCompanyId = companyId || (typeof window !== 'undefined' ? localStorage.getItem('companyId') || undefined : undefined);
+      if (defaultCompanyId) {
+        config.params = { companyId: defaultCompanyId };
       }
       try {
         const response = await publicApi.get(`/payments/public/${id}/receipt/download`, config);

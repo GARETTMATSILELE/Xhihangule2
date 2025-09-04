@@ -114,20 +114,22 @@ const PaymentsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         
-        let propertiesData, tenantsData, paymentsData;
+        let propertiesData, tenantsData, paymentsData, levyPaymentsData: any[] = [];
         
         // Use agent service if user is an agent, otherwise use regular services
         if (user?.role === 'agent') {
-          [propertiesData, tenantsData, paymentsData] = await Promise.all([
+          [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
             agentService.getProperties(),
             agentService.getTenants(),
-            api.get('/agents/payments').then((r: any) => r.data)
+            api.get('/agents/payments').then((r: any) => r.data),
+            api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
           ]);
         } else {
-          [propertiesData, tenantsData, paymentsData] = await Promise.all([
+          [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
             propertyService.getPublicProperties(),
             tenantService.getAllPublic(),
-            paymentService.getPayments()
+            paymentService.getPayments(),
+            paymentService.getLevyPayments(user.companyId)
           ]);
         }
 
@@ -146,6 +148,7 @@ const PaymentsPage: React.FC = () => {
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
         const payments = Array.isArray(paymentsData) ? paymentsData : [];
+        const levyPayments = Array.isArray(levyPaymentsData) ? levyPaymentsData : [];
         const owners = Array.isArray(ownersData) ? ownersData : [];
 
         if (!Array.isArray(properties) || !Array.isArray(tenants) || !Array.isArray(payments)) {
@@ -154,7 +157,8 @@ const PaymentsPage: React.FC = () => {
 
         setProperties(properties);
         setTenants(tenants);
-        setPayments(payments);
+        // Merge levy payments into main list
+        setPayments([...(payments as any[]), ...(levyPayments as any[])]);
         setOwners(owners);
         
         // Debug logging
@@ -266,15 +270,38 @@ const PaymentsPage: React.FC = () => {
         }
         
         // Use agent-scoped endpoint if agent, otherwise company payments
-        const data = user?.role === 'agent'
+        const basePayments: any[] = user?.role === 'agent'
           ? await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data)
           : await paymentService.getPayments(filterParams);
-        console.log('Payments data:', data);
-        if (data && data.length > 0) {
-          console.log('First payment propertyId:', data[0].propertyId);
-          console.log('First payment propertyId type:', typeof (data[0] as any).propertyId);
+
+        // Fetch levy payments and apply same filters client-side
+        let levy: any[] = [];
+        try {
+          levy = user?.role === 'agent'
+            ? await api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
+            : await paymentService.getLevyPayments(user?.companyId);
+        } catch {
+          levy = [];
         }
-        setPayments(data);
+
+        const applyClientFilters = (list: any[]): any[] => {
+          return list.filter((p: any) => {
+            const date = p.paymentDate ? new Date(p.paymentDate) : null;
+            if (debouncedFilters.startDate && date && date < debouncedFilters.startDate) return false;
+            if (debouncedFilters.endDate && date && date > debouncedFilters.endDate) return false;
+            if (debouncedFilters.status && p.status !== debouncedFilters.status) return false;
+            if (debouncedFilters.paymentMethod && p.paymentMethod !== debouncedFilters.paymentMethod) return false;
+            if (debouncedFilters.propertyId) {
+              const propId = typeof p.propertyId === 'object' && p.propertyId?._id ? p.propertyId._id : p.propertyId;
+              if (String(propId || '') !== String(debouncedFilters.propertyId)) return false;
+            }
+            return true;
+          });
+        };
+
+        const filteredLevy = applyClientFilters(levy);
+        const combined = [...(basePayments || []), ...filteredLevy];
+        setPayments(combined);
       } catch (err: any) {
         console.error('Error loading payments:', err);
         if (err.response?.status === 401) {

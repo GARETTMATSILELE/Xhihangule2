@@ -3297,3 +3297,92 @@
 {"level":"info","message":"Syncing changes since 2025-09-03T17:00:00.036Z","timestamp":"2025-09-03T18:00:00.036Z"}
 {"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T18:00:00.141Z"}
 {"level":"info","message":"Completed scheduled sync: hourly_sync in 110ms","timestamp":"2025-09-03T18:00:00.145Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-03T19:00:00.025Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-03T19:00:00.029Z"}
+{"level":"info","message":"Syncing changes since 2025-09-03T18:00:00.030Z","timestamp":"2025-09-03T19:00:00.030Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T19:00:00.124Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 100ms","timestamp":"2025-09-03T19:00:00.129Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-03T20:00:00.013Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-03T20:00:00.016Z"}
+{"level":"info","message":"Syncing changes since 2025-09-03T19:00:00.017Z","timestamp":"2025-09-03T20:00:00.017Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-03T20:00:00.099Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 86ms","timestamp":"2025-09-03T20:00:00.102Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T06:23:22.678Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T06:23:25.060Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T05:23:25.282Z","timestamp":"2025-09-04T06:23:25.282Z"}
+{"level":"info","message":"Executing scheduled sync: daily_sync","timestamp":"2025-09-04T06:23:25.815Z"}
+{"level":"info","message":"Starting daily synchronization...","timestamp":"2025-09-04T06:23:25.851Z"}
+{"level":"info","message":"Starting full database synchronization...","timestamp":"2025-09-04T06:23:26.304Z"}
+{"level":"info","message":"Syncing 8 properties...","timestamp":"2025-09-04T06:23:28.031Z"}
+{"level":"info","message":"Updated property account for property 68778f56a77a7624d898bde7","timestamp":"2025-09-04T06:23:28.357Z"}
+{"level":"info","message":"Updated property account for property 6881ecd8a15ae3f0afd218ff","timestamp":"2025-09-04T06:23:28.566Z"}
+{"level":"info","message":"Updated property account for property 6888a10c8ef6ae57ca36b653","timestamp":"2025-09-04T06:23:28.589Z"}
+{"level":"info","message":"Updated property account for property 68a705ad7a1f3f54b6cc93ec","timestamp":"2025-09-04T06:23:28.631Z"}
+{"level":"info","message":"Updated property account for property 68a8a10dc34416fb6e715184","timestamp":"2025-09-04T06:23:28.660Z"}
+{"level":"info","message":"Updated property account for property 68ab1b776c70c4a42cd2113a","timestamp":"2025-09-04T06:23:28.752Z"}
+{"level":"info","message":"Updated property account for property 68b73a06f62a980887e4772c","timestamp":"2025-09-04T06:23:28.823Z"}
+{"level":"info","message":"Updated property account for property 68b861c3e65e778ef53508f1","timestamp":"2025-09-04T06:23:29.041Z"}
+{"level":"info","message":"Syncing 20 completed payments...","timestamp":"2025-09-04T06:23:29.116Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T06:23:29.558Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 6910ms","timestamp":"2025-09-04T06:23:29.589Z"}
+{"level":"info","message":"Payment 68b87684d1431d1f6d18de17: Full amount: 1350, Owner amount (after commission): 1174.5","timestamp":"2025-09-04T06:23:30.378Z"}
+{"level":"info","message":"Synced payment 68b87684d1431d1f6d18de17 to property account 68b73a06f62a980887e4772c","timestamp":"2025-09-04T06:23:30.512Z"}
+{"level":"info","message":"Recorded company revenue 68.09400000000001 for company 683403ccf652d8cd543c6932 from payment 68b87684d1431d1f6d18de17","timestamp":"2025-09-04T06:23:30.580Z"}
+{"level":"info","message":"Syncing 16 users...","timestamp":"2025-09-04T06:23:30.631Z"}
+{"level":"info","message":"Updated owner name in 2 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-04T06:23:30.741Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a6f7dbbbfe5eb39dc89953","timestamp":"2025-09-04T06:23:30.775Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a87e730a904b150ddec26b","timestamp":"2025-09-04T06:23:30.829Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68aa70dbb9860b8f73836af8","timestamp":"2025-09-04T06:23:30.851Z"}
+{"level":"info","message":"Full sync completed in 4565ms. Success: 25, Errors: 0","timestamp":"2025-09-04T06:23:30.869Z"}
+{"level":"info","message":"Old sync errors cleanup completed","timestamp":"2025-09-04T06:23:30.871Z"}
+{"level":"info","message":"Daily synchronization completed","timestamp":"2025-09-04T06:23:30.872Z"}
+{"level":"info","message":"Completed scheduled sync: daily_sync in 5057ms","timestamp":"2025-09-04T06:23:30.873Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T07:00:00.011Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T07:00:00.016Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T06:00:00.017Z","timestamp":"2025-09-04T07:00:00.017Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T07:00:00.105Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 97ms","timestamp":"2025-09-04T07:00:00.111Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T08:00:00.015Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T08:00:00.018Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T07:00:00.019Z","timestamp":"2025-09-04T08:00:00.019Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T08:00:00.082Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 68ms","timestamp":"2025-09-04T08:00:00.084Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T09:00:00.009Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T09:00:00.016Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T08:00:00.019Z","timestamp":"2025-09-04T09:00:00.019Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T09:00:00.100Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 91ms","timestamp":"2025-09-04T09:00:00.102Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T10:00:00.004Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T10:00:00.007Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T09:00:00.009Z","timestamp":"2025-09-04T10:00:00.009Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T10:00:00.113Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 109ms","timestamp":"2025-09-04T10:00:00.115Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T11:00:00.025Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T11:00:00.037Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T10:00:00.040Z","timestamp":"2025-09-04T11:00:00.040Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T11:00:00.403Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 385ms","timestamp":"2025-09-04T11:00:00.412Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T12:00:00.009Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T12:00:00.011Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T11:00:00.013Z","timestamp":"2025-09-04T12:00:00.013Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T12:00:00.095Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 86ms","timestamp":"2025-09-04T12:00:00.097Z"}
+{"companyId":"683403ccf652d8cd543c6932","level":"info","message":"Updating tenant","propertyId":"68b96ed0d1431d1f6d18e8ec","tenantId":"68b96f05d1431d1f6d18e905","timestamp":"2025-09-04T12:33:24.950Z","updateFields":["firstName","lastName","phone","status","idNumber","emergencyContact","companyId"]}
+{"level":"info","message":"Tenant updated successfully","tenantId":"68b96f05d1431d1f6d18e905","timestamp":"2025-09-04T12:33:25.003Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-04T12:45:07.413Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Fri Sep 05 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-04T12:45:07.588Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-04T12:45:07.592Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Thu Sep 04 2025 15:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-04T12:45:07.596Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-04T12:45:07.602Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 07 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-04T12:45:07.628Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-04T12:45:07.660Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-04T12:45:07.695Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-04T12:45:07.699Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-04T12:45:07.701Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-04T12:45:07.715Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-04T12:45:07.716Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-04T12:45:07.718Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-04T12:45:07.729Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-04T12:45:07.731Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-04T12:45:07.733Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-04T12:45:07.734Z"}

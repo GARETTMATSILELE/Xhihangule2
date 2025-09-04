@@ -238,6 +238,7 @@ export const Tenants: React.FC = () => {
           email: selectedTenant.email,
           phone: selectedTenant.phone,
           status: selectedTenant.status,
+          propertyId: (selectedTenant as any)?.propertyId as any,
           idNumber: selectedTenant.idNumber,
           emergencyContact: selectedTenant.emergencyContact,
           companyId: selectedTenant.companyId

@@ -22,6 +22,21 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
   const isSale = useMemo(() => (receipt?.paymentType || receipt?.type) === 'introduction', [receipt]);
   const groupRef = useMemo(() => receipt?.saleId || receipt?.referenceNumber || receipt?.manualPropertyAddress || '', [receipt]);
   const currency = receipt?.currency || 'USD';
+  const isLevy = useMemo(() => (receipt?.paymentType || receipt?.type) === 'levy', [receipt]);
+  // Ensure company details presence for print even if backend omitted optional fields
+  const safeCompany = useMemo(() => {
+    const c = receipt?.company || {};
+    return {
+      name: c.name || 'Property Management',
+      address: c.address || 'Address not available',
+      phone: c.phone || 'Phone not available',
+      email: c.email || 'Email not available',
+      website: c.website,
+      registrationNumber: c.registrationNumber,
+      tinNumber: c.tinNumber,
+      logo: c.logo
+    };
+  }, [receipt?.company]);
 
   // Parse total sale price from notes if present (from SalesPaymentForm notes)
   const parsedTotalSale = useMemo(() => {
@@ -69,7 +84,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Payment Receipt - ${receipt.receiptNumber}</title>
+            <title>${isLevy ? 'Levy Payment Receipt' : 'Payment Receipt'} - ${receipt.receiptNumber}</title>
             <style>
               body {
                 font-family: Arial, sans-serif;
@@ -95,6 +110,11 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 display: block;
                 margin-left: auto;
                 margin-right: auto;
+              }
+              .receipt-title {
+                font-size: 16px;
+                font-weight: bold;
+                margin-top: 6px;
               }
               .receipt-number {
                 font-size: 18px;
@@ -140,13 +160,14 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
           <body>
             <div class="receipt">
               <div class="header">
-                ${receipt.company?.logo ? `<img src="data:image/png;base64,${receipt.company.logo}" alt="Company Logo" class="company-logo">` : ''}
-                <h1>${receipt.company?.name || 'Property Management'}</h1>
-                <p>${receipt.company?.address || 'Address not available'}</p>
-                <p>Phone: ${receipt.company?.phone || 'Phone not available'} | Email: ${receipt.company?.email || 'Email not available'}</p>
-                ${receipt.company?.website ? `<p>Website: ${receipt.company.website}</p>` : ''}
-                ${receipt.company?.registrationNumber ? `<p>Reg. No: ${receipt.company.registrationNumber}</p>` : ''}
-                ${receipt.company?.tinNumber ? `<p>Tax No: ${receipt.company.tinNumber}</p>` : ''}
+                ${safeCompany.logo ? `<img src="data:image/png;base64,${safeCompany.logo}" alt="Company Logo" class="company-logo">` : ''}
+                <h1>${safeCompany.name}</h1>
+                <p>${safeCompany.address}</p>
+                <p>Phone: ${safeCompany.phone} | Email: ${safeCompany.email}</p>
+                ${safeCompany.website ? `<p>Website: ${safeCompany.website}</p>` : ''}
+                ${safeCompany.registrationNumber ? `<p>Reg. No: ${safeCompany.registrationNumber}</p>` : ''}
+                ${safeCompany.tinNumber ? `<p>Tax No: ${safeCompany.tinNumber}</p>` : ''}
+                <div class="receipt-title">${isLevy ? 'Levy Payment Receipt' : 'Payment Receipt'}</div>
                 <div class="receipt-number">Receipt #${receipt.receiptNumber}</div>
               </div>
               

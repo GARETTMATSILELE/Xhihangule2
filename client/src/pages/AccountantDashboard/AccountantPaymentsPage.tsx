@@ -82,18 +82,20 @@ const AccountantPaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const [propertiesData, tenantsData, paymentsData] = await Promise.all([
+        const [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
           propertyService.getProperties(),
           tenantService.getAll(),
-          paymentService.getPayments()
+          paymentService.getPayments(),
+          paymentService.getLevyPayments(user?.companyId)
         ]);
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
         const paymentsList = Array.isArray(paymentsData) ? paymentsData : [];
+        const levyPayments = Array.isArray(levyPaymentsData) ? levyPaymentsData : [];
         setProperties(properties);
         setTenants(tenants);
-        setPayments(paymentsList);
+        setPayments([...(paymentsList as any[]), ...(levyPayments as any[])]);
       } catch (err: any) {
         if (!isMounted) return;
         setError('Failed to load data. Please try again later.');
@@ -128,7 +130,29 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
         // Include provisional payments on accountant view
         const paymentsResult = await paymentService.getPayments({ ...filterParams, includeProvisional: 'true' } as any);
-        setPayments(paymentsResult);
+        // Fetch levy payments and apply same filters client-side
+        let levy: any[] = [];
+        try {
+          levy = await paymentService.getLevyPayments(user?.companyId);
+        } catch {
+          levy = [];
+        }
+        const applyClientFilters = (list: any[]): any[] => {
+          return list.filter((p: any) => {
+            const date = p.paymentDate ? new Date(p.paymentDate) : null;
+            if (debouncedFilters.startDate && date && date < debouncedFilters.startDate) return false;
+            if (debouncedFilters.endDate && date && date > debouncedFilters.endDate) return false;
+            if (debouncedFilters.status && p.status !== debouncedFilters.status) return false;
+            if (debouncedFilters.paymentMethod && p.paymentMethod !== debouncedFilters.paymentMethod) return false;
+            if (debouncedFilters.propertyId) {
+              const propId = typeof p.propertyId === 'object' && p.propertyId?._id ? p.propertyId._id : p.propertyId;
+              if (String(propId || '') !== String(debouncedFilters.propertyId)) return false;
+            }
+            return true;
+          });
+        };
+        const filteredLevy = applyClientFilters(levy);
+        setPayments([...(paymentsResult as any[]), ...filteredLevy]);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {

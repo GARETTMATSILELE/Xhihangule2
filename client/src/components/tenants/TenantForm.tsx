@@ -55,13 +55,44 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     companyId: company?._id || ''
   }));
 
+  // Sync form state when initialData changes (e.g., when editing a tenant)
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      firstName: initialData?.firstName || '',
+      lastName: initialData?.lastName || '',
+      email: initialData?.email || '',
+      phone: initialData?.phone || '',
+      status: initialData?.status || 'Active',
+      propertyId: initialData?.propertyId || '',
+      idNumber: initialData?.idNumber || '',
+      emergencyContact: initialData?.emergencyContact || '',
+      companyId: company?._id || ''
+    }));
+  }, [initialData]);
+
   // Fetch vacant properties when the form opens
   useEffect(() => {
     const loadProperties = async () => {
       try {
         setLoadingProperties(true);
         // Use authenticated vacant endpoint for accurate list
-        const availableProperties = await propertyService.getVacantProperties();
+        let availableProperties = await propertyService.getVacantProperties();
+        // If editing and current propertyId is not in vacant list, include it so it can be shown
+        const currentPropertyId = initialData?.propertyId;
+        if (currentPropertyId) {
+          const exists = availableProperties.some(p => p._id === currentPropertyId);
+          if (!exists) {
+            try {
+              const current = await propertyService.getProperty(currentPropertyId);
+              if (current) {
+                availableProperties = [current, ...availableProperties];
+              }
+            } catch (e) {
+              // Ignore if fetch fails; just don't include
+            }
+          }
+        }
         setProperties(availableProperties);
       } catch (error) {
         console.error('Error loading properties:', error);
@@ -74,7 +105,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     if (open) {
       loadProperties();
     }
-  }, [open]);
+  }, [open, initialData?.propertyId]);
 
   // Update companyId when company changes
   React.useEffect(() => {
