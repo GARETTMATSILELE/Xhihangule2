@@ -42,6 +42,34 @@ function resolveTenantFromLease(lease: any, tenants: Tenant[]): Tenant | undefin
   return tenants.find(t => getId(t._id) === tid);
 }
 
+// Compute derived lease status based on endDate proximity
+function addMonths(date: Date, months: number): Date {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
+function startOfDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function getDerivedLeaseStatus(lease: any): 'active' | 'expired' | 'expiring' | 'terminated' {
+  try {
+    const end = lease?.endDate ? new Date(lease.endDate) : null;
+    if (end) {
+      const today = startOfDay(new Date());
+      if (end < today) return 'expired';
+      const threshold = addMonths(today, 2);
+      if (end <= threshold) return 'expiring';
+    }
+    return (lease?.status as any) || 'active';
+  } catch {
+    return (lease?.status as any) || 'active';
+  }
+}
+
 const AgentLeasesPage: React.FC = () => {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   // Use agent service to ensure data is scoped to the logged-in agent
@@ -206,7 +234,8 @@ const AgentLeasesPage: React.FC = () => {
   const filteredLeases = leases.filter(lease => {
     const property = resolvePropertyFromLease(lease, properties);
     const tenant = resolveTenantFromLease(lease, tenants);
-    const matchesStatus = filters.status === 'all' || lease.status === filters.status;
+    const derivedStatus = getDerivedLeaseStatus(lease);
+    const matchesStatus = filters.status === 'all' || derivedStatus === filters.status;
     const leasePropertyId = getId(lease.propertyId);
     const matchesProperty = filters.property === 'all' || leasePropertyId === filters.property;
     const search = (filters.search || '').toLowerCase();
@@ -278,6 +307,7 @@ const AgentLeasesPage: React.FC = () => {
                 >
                   <MenuItem value="all">All Statuses</MenuItem>
                   <MenuItem value="active">Active</MenuItem>
+                  <MenuItem value="expiring">Expiring</MenuItem>
                   <MenuItem value="expired">Expired</MenuItem>
                   <MenuItem value="terminated">Terminated</MenuItem>
                 </Select>
@@ -377,15 +407,17 @@ const AgentLeasesPage: React.FC = () => {
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <Chip 
-                            label={lease.status} 
-                            color={
-                              lease.status === 'active' ? 'success' : 
-                              lease.status === 'expired' ? 'warning' : 
-                              'default'
-                            } 
-                            size="small" 
-                          />
+                          {(() => {
+                            const status = getDerivedLeaseStatus(lease);
+                            const color = status === 'active' ? 'success' : status === 'expiring' ? 'warning' : status === 'expired' ? 'error' : 'default';
+                            return (
+                              <Chip 
+                                label={status}
+                                color={color as any}
+                                size="small" 
+                              />
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           <IconButton 
