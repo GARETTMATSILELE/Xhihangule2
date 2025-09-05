@@ -3386,3 +3386,30 @@
 {"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-04T12:45:07.731Z"}
 {"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-04T12:45:07.733Z"}
 {"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-04T12:45:07.734Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-04T13:00:00.023Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-04T13:00:00.027Z"}
+{"level":"info","message":"Syncing changes since 2025-09-04T12:00:00.030Z","timestamp":"2025-09-04T13:00:00.030Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-04T13:00:00.121Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 98ms","timestamp":"2025-09-04T13:00:00.125Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-05T09:39:04.715Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Sat Sep 06 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-05T09:39:05.003Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-05T09:39:05.081Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Fri Sep 05 2025 12:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-05T09:39:05.104Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-05T09:39:05.126Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 07 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-05T09:39:05.161Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-05T09:39:05.180Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-05T09:39:05.253Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-05T09:39:05.375Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-05T09:39:05.414Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-05T09:39:05.504Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-05T09:39:05.605Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-05T09:39:05.661Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-05T09:39:05.709Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-05T09:39:05.772Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-05T09:39:05.852Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-05T09:39:05.878Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-05T10:00:00.093Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-05T10:00:00.125Z"}
+{"level":"info","message":"Syncing changes since 2025-09-05T09:00:00.129Z","timestamp":"2025-09-05T10:00:00.129Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-05T10:00:00.428Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 342ms","timestamp":"2025-09-05T10:00:00.433Z"}

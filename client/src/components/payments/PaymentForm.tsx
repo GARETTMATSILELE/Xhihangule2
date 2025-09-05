@@ -21,6 +21,7 @@ import {
   FormControlLabel,
   Switch,
   Divider,
+  Autocomplete,
 } from '@mui/material';
 import paymentService from '../../services/paymentService';
 import { usePropertyService } from '../../services/propertyService';
@@ -373,23 +374,22 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </Grid>
           ) : (
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Property</InputLabel>
-                <Select
-                  name="propertyId"
-                  value={formData.propertyId}
-                  onChange={handleInputChange}
-                  label="Property"
-                  required
-                  disabled={loadingData}
-                >
-                  {properties.map((property) => (
-                    <MenuItem key={property._id} value={property._id}>
-                      {property.name} - {property.address}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Autocomplete
+                options={properties}
+                getOptionLabel={(option: Property) => `${option.name} - ${option.address}`}
+                value={properties.find((p) => String(p._id) === String(formData.propertyId)) || null}
+                onChange={(_, newValue: Property | null) => {
+                  setFormData((prev) => ({
+                    ...prev,
+                    propertyId: newValue ? String(newValue._id) : '',
+                  }));
+                }}
+                renderInput={(params) => (
+                  <TextField {...params} label="Property" required />
+                )}
+                disabled={loadingData}
+                fullWidth
+              />
             </Grid>
           )}
 
@@ -419,23 +419,22 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </Grid>
           ) : (
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Tenant</InputLabel>
-                <Select
-                  name="tenantId"
-                  value={formData.tenantId}
-                  onChange={handleInputChange}
-                  label="Tenant"
-                  required
-                  disabled={loadingData}
-                >
-                  {tenants.map((tenant) => (
-                    <MenuItem key={tenant._id} value={tenant._id}>
-                      {tenant.firstName} {tenant.lastName} - {tenant.email}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Autocomplete
+                options={tenants}
+                getOptionLabel={(option: Tenant) => `${option.firstName} ${option.lastName} - ${option.email}`}
+                value={tenants.find((t) => String(t._id) === String(formData.tenantId)) || null}
+                onChange={(_, newValue: Tenant | null) => {
+                  setFormData((prev) => ({
+                    ...prev,
+                    tenantId: newValue ? String(newValue._id) : '',
+                  }));
+                }}
+                renderInput={(params) => (
+                  <TextField {...params} label="Tenant" required />
+                )}
+                disabled={loadingData}
+                fullWidth
+              />
             </Grid>
           )}
 
