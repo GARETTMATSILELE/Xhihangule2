@@ -114,8 +114,13 @@ export const Tenants: React.FC = () => {
       setSelectedTenant(null);
       await loadTenants();
       console.log('Tenants component: Tenant operation completed successfully');
-    } catch (err) {
-      setError('Failed to save tenant');
+    } catch (err: any) {
+      const message = err?.response?.data?.message || err?.message || '';
+      if (message.includes('already in database') || message.includes('already exists')) {
+        setError('Tenant already in database');
+      } else {
+        setError('Failed to save tenant');
+      }
       console.error('Error saving tenant:', err);
     }
   };

@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAgentPropertyOwner = exports.updateAgentPropertyOwner = exports.createAgentPropertyOwner = exports.getAgentPropertyOwners = exports.createAgentFile = exports.getAgentLevyPayments = exports.getAgentPayments = exports.updateAgentPayment = exports.createAgentPayment = exports.updateAgentProperty = exports.createAgentLease = exports.createAgentTenant = exports.createAgentProperty = exports.getAgentCommission = exports.getAgentFiles = exports.getAgentLeases = exports.getAgentTenants = exports.getAgentProperties = void 0;
+exports.deleteAgentPropertyOwner = exports.updateAgentPropertyOwner = exports.createAgentPropertyOwner = exports.getAgentPropertyOwners = exports.createAgentFile = exports.getAgentLevyPayments = exports.getAgentPayments = exports.updateAgentPayment = exports.createAgentPayment = exports.updateAgentProperty = exports.createAgentLease = exports.createAgentTenant = exports.createAgentProperty = exports.getAgentCommission = exports.getAgentFiles = exports.getAgentLeases = exports.getAgentTenants = exports.getAgentPropertyOwnerById = exports.getAgentProperties = void 0;
 const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const Lease_1 = require("../models/Lease");
@@ -92,6 +92,38 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.getAgentProperties = getAgentProperties;
+// Get a single property owner by id within the agent's company
+const getAgentPropertyOwnerById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        const { id } = req.params;
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: 'Invalid owner ID format.' });
+        }
+        const owner = yield PropertyOwner_1.PropertyOwner.findOne({
+            _id: new mongoose_1.default.Types.ObjectId(id),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+        }).populate('properties', 'name address');
+        if (!owner) {
+            return res.status(404).json({ message: 'Property owner not found' });
+        }
+        res.json(owner);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error('Error fetching agent property owner by id:', error);
+        res.status(500).json({ message: 'Error fetching property owner' });
+    }
+});
+exports.getAgentPropertyOwnerById = getAgentPropertyOwnerById;
 // Get tenants managed by the agent
 const getAgentTenants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -351,6 +383,17 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (existingTenant) {
             return res.status(400).json({ message: 'Tenant with this email already exists' });
         }
+        // Additionally check for duplicate by company + idNumber + name (case-insensitive)
+        if (idNumber) {
+            const existingByIdNumber = yield Tenant_1.Tenant.findOne({ idNumber, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+            if (existingByIdNumber) {
+                const sameFirst = (existingByIdNumber.firstName || '').toLowerCase() === (firstName || '').toLowerCase();
+                const sameLast = (existingByIdNumber.lastName || '').toLowerCase() === (lastName || '').toLowerCase();
+                if (sameFirst && sameLast) {
+                    return res.status(409).json({ message: 'Tenant already in database' });
+                }
+            }
+        }
         const tenantData = {
             firstName,
             lastName,
@@ -518,7 +561,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (req.user.role !== 'agent') {
             return res.status(403).json({ message: 'Only agents can create payments via this endpoint.' });
         }
-        const { propertyId, tenantId, amount, paymentDate, paymentMethod, status, paymentType, propertyType, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, } = req.body;
+        const { propertyId, tenantId, amount, paymentDate, paymentMethod, status, paymentType, propertyType, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Validate required fields
         if (!propertyId || !tenantId || !amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({
@@ -574,6 +617,9 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             commissionDetails,
             status: status || 'completed',
             currency: currency || 'USD',
+            advanceMonthsPaid: advanceMonthsPaid || 1,
+            advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
+            advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
         });
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
@@ -929,15 +975,14 @@ const createAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
         if (existingOwner) {
             return res.status(400).json({ message: 'Property owner with this email already exists' });
         }
-        // Validate that all properties belong to this agent
+        // Validate that all properties belong to the same company
         if (propertyIds && propertyIds.length > 0) {
-            const agentProperties = yield Property_1.Property.find({
+            const companyProperties = yield Property_1.Property.find({
                 _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
-                ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
                 companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
             });
-            if (agentProperties.length !== propertyIds.length) {
-                return res.status(403).json({ message: 'You can only assign your own properties to property owners.' });
+            if (companyProperties.length !== propertyIds.length) {
+                return res.status(403).json({ message: 'All properties must belong to your company.' });
             }
         }
         const ownerData = {
@@ -974,10 +1019,8 @@ const createAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
             console.error('Error creating corresponding user for property owner:', userError);
             // Do not fail the main request if user creation fails; property owner was created successfully
         }
-        // Update properties to assign them to the new owner
-        if (propertyIds && propertyIds.length > 0) {
-            yield Property_1.Property.updateMany({ _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } }, { $set: { ownerId: owner._id } });
-        }
+        // Note: Do not modify Property.ownerId here. ownerId refers to the agent (User) who owns the property.
+        // The association between PropertyOwner and properties is maintained via PropertyOwner.properties only.
         res.status(201).json(owner);
     }
     catch (error) {
@@ -1010,15 +1053,14 @@ const updateAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
         if (!owner) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
-        // Validate that all properties belong to this agent
+        // Validate that all properties belong to the same company
         if (propertyIds && propertyIds.length > 0) {
-            const agentProperties = yield Property_1.Property.find({
+            const companyProperties = yield Property_1.Property.find({
                 _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
-                ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
                 companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
             });
-            if (agentProperties.length !== propertyIds.length) {
-                return res.status(403).json({ message: 'You can only assign your own properties to property owners.' });
+            if (companyProperties.length !== propertyIds.length) {
+                return res.status(403).json({ message: 'All properties must belong to your company.' });
             }
         }
         // Update owner data
@@ -1034,15 +1076,8 @@ const updateAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
         if (propertyIds)
             updateData.properties = propertyIds;
         const updatedOwner = yield PropertyOwner_1.PropertyOwner.findByIdAndUpdate(id, updateData, { new: true });
-        // Update property assignments
-        if (propertyIds) {
-            // Remove owner from all properties first
-            yield Property_1.Property.updateMany({ ownerId: new mongoose_1.default.Types.ObjectId(id) }, { $unset: { ownerId: 1 } });
-            // Assign new properties to the owner
-            if (propertyIds.length > 0) {
-                yield Property_1.Property.updateMany({ _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) } }, { $set: { ownerId: new mongoose_1.default.Types.ObjectId(id) } });
-            }
-        }
+        // Note: Do not modify Property.ownerId here. Keep property ownership with the agent (User).
+        // The owner-to-property linkage is handled by the PropertyOwner.properties field above.
         res.json(updatedOwner);
     }
     catch (error) {
@@ -1074,8 +1109,6 @@ const deleteAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
         if (!owner) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
-        // Remove owner from all properties
-        yield Property_1.Property.updateMany({ ownerId: new mongoose_1.default.Types.ObjectId(id) }, { $unset: { ownerId: 1 } });
         // Delete the property owner
         yield PropertyOwner_1.PropertyOwner.findByIdAndDelete(id);
         res.json({ message: 'Property owner deleted successfully' });

@@ -283,6 +283,8 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     // Helper to perform the actual create logic, with optional transaction session
     const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
         const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, leaseId, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, processedBy, ownerId, manualPropertyAddress, manualTenantName, saleId } = req.body;
+        // Extract optional advance fields
+        const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = req.body;
         // Validate required fields
         if (!amount || !paymentDate) {
             return { error: { status: 400, message: 'Missing required fields: amount and paymentDate' } };
@@ -363,6 +365,9 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             currency: currency || 'USD',
             leaseId: leaseId ? new mongoose_1.default.Types.ObjectId(leaseId) : undefined,
             rentUsed,
+            advanceMonthsPaid: advanceMonthsPaid || 1,
+            advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
+            advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
             // Add manual entry fields
             manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
             manualTenantName: manualTenant ? manualTenantName : undefined,

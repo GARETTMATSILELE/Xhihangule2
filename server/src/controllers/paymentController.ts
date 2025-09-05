@@ -307,7 +307,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       manualPropertyAddress,
       manualTenantName,
       saleId
-    } = req.body;
+    } = req.body as any;
+    // Extract optional advance fields
+    const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = (req.body as any);
 
     // Validate required fields
     if (!amount || !paymentDate) {
@@ -400,6 +402,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       currency: currency || 'USD',
       leaseId: leaseId ? new mongoose.Types.ObjectId(leaseId) : undefined,
       rentUsed,
+      advanceMonthsPaid: advanceMonthsPaid || 1,
+      advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
+      advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
       // Add manual entry fields
       manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
       manualTenantName: manualTenant ? manualTenantName : undefined,

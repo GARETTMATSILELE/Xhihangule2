@@ -327,14 +327,7 @@ export const createPropertyOwnerPublic = async (req: Request, res: Response) => 
     const owner = new PropertyOwner(ownerData);
     await owner.save();
 
-    // If propertyIds are provided, update the ownerId field of each property
-    if (Array.isArray(propertyIds) && propertyIds.length > 0) {
-      await Promise.all(
-        propertyIds.map((propertyId: string) =>
-          Property.findByIdAndUpdate(propertyId, { ownerId: owner._id })
-        )
-      );
-    }
+    // Do not modify Property.ownerId here; maintain linkage via PropertyOwner.properties only.
     
     // Return owner without password
     const ownerResponse = owner.toObject();
@@ -398,19 +391,7 @@ export const updatePropertyOwnerPublic = async (req: Request, res: Response) => 
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    // If properties are provided, update the ownerId field of each property
-    if (Array.isArray(properties)) {
-      // Remove ownerId from properties no longer owned
-      await Property.updateMany(
-        { ownerId: owner._id, _id: { $nin: properties } },
-        { $unset: { ownerId: "" } }
-      );
-      // Set ownerId for new properties
-      await Property.updateMany(
-        { _id: { $in: properties } },
-        { ownerId: owner._id }
-      );
-    }
+    // Do not modify Property.ownerId on public updates; linkage is via PropertyOwner.properties.
 
     console.log('Property owner updated successfully:', { id: owner._id, email: owner.email });
     res.json(owner);

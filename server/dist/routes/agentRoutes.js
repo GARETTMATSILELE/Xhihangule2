@@ -58,6 +58,7 @@ router.get('/levy-payments', agentController_1.getAgentLevyPayments);
 router.get('/commission', agentController_1.getAgentCommission);
 // Property owner routes
 router.get('/property-owners', agentController_1.getAgentPropertyOwners);
+router.get('/property-owners/:id', agentController_1.getAgentPropertyOwnerById);
 router.post('/property-owners', agentController_1.createAgentPropertyOwner);
 router.put('/property-owners/:id', agentController_1.updateAgentPropertyOwner);
 router.delete('/property-owners/:id', agentController_1.deleteAgentPropertyOwner);

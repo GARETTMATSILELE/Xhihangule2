@@ -137,17 +137,42 @@ const AgentDashboard: React.FC = () => {
   const [showActiveTenants, setShowActiveTenants] = useState(false);
   const [showPropertiesList, setShowPropertiesList] = useState(false);
 
+  // Expand advance payments across covered months for per-month filtering
+  const expandedCommissionPayments = React.useMemo(() => {
+    const out: any[] = [];
+    for (const p of commissionPayments || []) {
+      const agentShareTotal = p?.commissionDetails?.agentShare || 0;
+      const monthsPaid: number = Number(p?.advanceMonthsPaid || 1);
+      if (monthsPaid > 1 && p?.advancePeriodStart && p?.advancePeriodEnd) {
+        const perMonthShare = agentShareTotal / monthsPaid;
+        let y = Number(p.advancePeriodStart.year);
+        let m = Number(p.advancePeriodStart.month); // 1-12
+        const endY = Number(p.advancePeriodEnd.year);
+        const endM = Number(p.advancePeriodEnd.month);
+        while (y < endY || (y === endY && m <= endM)) {
+          out.push({ ...p, rentalPeriodYear: y, rentalPeriodMonth: m, _distributedAgentShare: perMonthShare });
+          m += 1;
+          if (m > 12) { m = 1; y += 1; }
+        }
+      } else {
+        // Single month entry
+        out.push({ ...p, _distributedAgentShare: agentShareTotal });
+      }
+    }
+    return out;
+  }, [commissionPayments]);
+
   const filteredMonthlyAgentShare = React.useMemo(() => {
-    if (!commissionPayments || commissionPayments.length === 0) return null;
-    const total = commissionPayments
+    if (!expandedCommissionPayments || expandedCommissionPayments.length === 0) return null;
+    const total = expandedCommissionPayments
       .filter((p: any) => {
         const rentMonth = p.rentalPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
         const rentYear = p.rentalPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
         return rentMonth === selectedMonth && rentYear === selectedYear;
       })
-      .reduce((sum: number, p: any) => sum + (p.commissionDetails?.agentShare || 0), 0);
+      .reduce((sum: number, p: any) => sum + (p._distributedAgentShare || p.commissionDetails?.agentShare || 0), 0);
     return total;
-  }, [commissionPayments, selectedMonth, selectedYear]);
+  }, [expandedCommissionPayments, selectedMonth, selectedYear]);
 
   const fetchCommissionPaymentsForYear = async (year: number) => {
     if (!user) return;
@@ -397,12 +422,12 @@ const AgentDashboard: React.FC = () => {
                               <Alert severity="error">{commissionError}</Alert>
                             ) : (
                               (() => {
-                                const filteredPayments = commissionPayments.filter((p: any) => {
+                                const filteredPayments = expandedCommissionPayments.filter((p: any) => {
                                   const rentMonth = p.rentalPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
                                   const rentYear = p.rentalPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
                                   return rentMonth === selectedMonth && rentYear === selectedYear;
                                 });
-                                const summedAgentShare = filteredPayments.reduce((sum: number, p: any) => sum + (p.commissionDetails?.agentShare || 0), 0);
+                                const summedAgentShare = filteredPayments.reduce((sum: number, p: any) => sum + (p._distributedAgentShare || p.commissionDetails?.agentShare || 0), 0);
                                 return (
                                   <>
                                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -435,7 +460,7 @@ const AgentDashboard: React.FC = () => {
                                             ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || tenantObj.name || tenantObj.fullName || 'Unknown Tenant'
                                             : (`${pay?.tenant?.firstName || ''} ${pay?.tenant?.lastName || ''}`.trim() || pay?.tenant?.name || pay?.tenant?.fullName || pay?.tenantName || 'Unknown Tenant');
                                           const paymentDate = pay.paymentDate ? new Date(pay.paymentDate) : null;
-                                          const agentShare = pay.commissionDetails?.agentShare || 0;
+                                          const agentShare = pay._distributedAgentShare || pay.commissionDetails?.agentShare || 0;
                                           const totalCommission = pay.commissionDetails?.totalCommission || 0;
                                           return (
                                             <Grid item xs={12} key={pay._id}>

@@ -17,6 +17,7 @@ import {
   getAgentLevyPayments,
   createAgentFile,
   getAgentPropertyOwners,
+  getAgentPropertyOwnerById,
   createAgentPropertyOwner,
   updateAgentPropertyOwner,
   deleteAgentPropertyOwner,
@@ -77,6 +78,7 @@ router.get('/commission', getAgentCommission);
 
 // Property owner routes
 router.get('/property-owners', getAgentPropertyOwners);
+router.get('/property-owners/:id', getAgentPropertyOwnerById);
 router.post('/property-owners', createAgentPropertyOwner);
 router.put('/property-owners/:id', updateAgentPropertyOwner);
 router.delete('/property-owners/:id', deleteAgentPropertyOwner);

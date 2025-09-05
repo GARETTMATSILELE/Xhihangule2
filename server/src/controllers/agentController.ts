@@ -78,6 +78,40 @@ export const getAgentProperties = async (req: Request, res: Response) => {
   }
 };
 
+// Get a single property owner by id within the agent's company
+export const getAgentPropertyOwnerById = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('Authentication required', 401);
+    }
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid owner ID format.' });
+    }
+
+    const owner = await PropertyOwner.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+    }).populate('properties', 'name address');
+
+    if (!owner) {
+      return res.status(404).json({ message: 'Property owner not found' });
+    }
+
+    res.json(owner);
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error fetching agent property owner by id:', error);
+    res.status(500).json({ message: 'Error fetching property owner' });
+  }
+};
+
 // Get tenants managed by the agent
 export const getAgentTenants = async (req: Request, res: Response) => {
   try {
@@ -369,6 +403,18 @@ export const createAgentTenant = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Tenant with this email already exists' });
     }
 
+    // Additionally check for duplicate by company + idNumber + name (case-insensitive)
+    if (idNumber) {
+      const existingByIdNumber = await Tenant.findOne({ idNumber, companyId: new mongoose.Types.ObjectId(req.user.companyId) });
+      if (existingByIdNumber) {
+        const sameFirst = (existingByIdNumber.firstName || '').toLowerCase() === (firstName || '').toLowerCase();
+        const sameLast = (existingByIdNumber.lastName || '').toLowerCase() === (lastName || '').toLowerCase();
+        if (sameFirst && sameLast) {
+          return res.status(409).json({ message: 'Tenant already in database' });
+        }
+      }
+    }
+
     const tenantData = {
       firstName,
       lastName,
@@ -573,6 +619,9 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       currency,
       rentalPeriodMonth,
       rentalPeriodYear,
+      advanceMonthsPaid,
+      advancePeriodStart,
+      advancePeriodEnd,
     } = req.body;
 
     // Validate required fields
@@ -636,6 +685,9 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       commissionDetails,
       status: status || 'completed',
       currency: currency || 'USD',
+      advanceMonthsPaid: advanceMonthsPaid || 1,
+      advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
+      advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
     });
 
     await payment.save();
@@ -1036,16 +1088,15 @@ export const createAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
 
-    // Validate that all properties belong to this agent
+    // Validate that all properties belong to the same company
     if (propertyIds && propertyIds.length > 0) {
-      const agentProperties = await Property.find({ 
+      const companyProperties = await Property.find({ 
         _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) },
-        ownerId: new mongoose.Types.ObjectId(req.user.userId),
         companyId: new mongoose.Types.ObjectId(req.user.companyId)
       });
       
-      if (agentProperties.length !== propertyIds.length) {
-        return res.status(403).json({ message: 'You can only assign your own properties to property owners.' });
+      if (companyProperties.length !== propertyIds.length) {
+        return res.status(403).json({ message: 'All properties must belong to your company.' });
       }
     }
 
@@ -1085,13 +1136,8 @@ export const createAgentPropertyOwner = async (req: Request, res: Response) => {
       // Do not fail the main request if user creation fails; property owner was created successfully
     }
 
-    // Update properties to assign them to the new owner
-    if (propertyIds && propertyIds.length > 0) {
-      await Property.updateMany(
-        { _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) } },
-        { $set: { ownerId: owner._id } }
-      );
-    }
+    // Note: Do not modify Property.ownerId here. ownerId refers to the agent (User) who owns the property.
+    // The association between PropertyOwner and properties is maintained via PropertyOwner.properties only.
 
     res.status(201).json(owner);
   } catch (error) {
@@ -1128,16 +1174,15 @@ export const updateAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    // Validate that all properties belong to this agent
+    // Validate that all properties belong to the same company
     if (propertyIds && propertyIds.length > 0) {
-      const agentProperties = await Property.find({ 
+      const companyProperties = await Property.find({ 
         _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) },
-        ownerId: new mongoose.Types.ObjectId(req.user.userId),
         companyId: new mongoose.Types.ObjectId(req.user.companyId)
       });
       
-      if (agentProperties.length !== propertyIds.length) {
-        return res.status(403).json({ message: 'You can only assign your own properties to property owners.' });
+      if (companyProperties.length !== propertyIds.length) {
+        return res.status(403).json({ message: 'All properties must belong to your company.' });
       }
     }
 
@@ -1155,22 +1200,8 @@ export const updateAgentPropertyOwner = async (req: Request, res: Response) => {
       { new: true }
     );
 
-    // Update property assignments
-    if (propertyIds) {
-      // Remove owner from all properties first
-      await Property.updateMany(
-        { ownerId: new mongoose.Types.ObjectId(id) },
-        { $unset: { ownerId: 1 } }
-      );
-
-      // Assign new properties to the owner
-      if (propertyIds.length > 0) {
-        await Property.updateMany(
-          { _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) } },
-          { $set: { ownerId: new mongoose.Types.ObjectId(id) } }
-        );
-      }
-    }
+    // Note: Do not modify Property.ownerId here. Keep property ownership with the agent (User).
+    // The owner-to-property linkage is handled by the PropertyOwner.properties field above.
 
     res.json(updatedOwner);
   } catch (error) {
@@ -1205,12 +1236,6 @@ export const deleteAgentPropertyOwner = async (req: Request, res: Response) => {
     if (!owner) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
-
-    // Remove owner from all properties
-    await Property.updateMany(
-      { ownerId: new mongoose.Types.ObjectId(id) },
-      { $unset: { ownerId: 1 } }
-    );
 
     // Delete the property owner
     await PropertyOwner.findByIdAndDelete(id);

@@ -23,7 +23,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deletePropertyOwnerPublic = exports.updatePropertyOwnerPublic = exports.createPropertyOwnerPublic = exports.getPropertyOwnerByIdPublic = exports.getPropertyOwnersPublic = exports.deletePropertyOwner = exports.updatePropertyOwner = exports.getPropertyOwnerById = exports.getPropertyOwners = exports.createPropertyOwner = void 0;
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
-const Property_1 = require("../models/Property");
 const createPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.user) {
@@ -296,10 +295,7 @@ const createPropertyOwnerPublic = (req, res) => __awaiter(void 0, void 0, void 0
         }
         const owner = new PropertyOwner_1.PropertyOwner(ownerData);
         yield owner.save();
-        // If propertyIds are provided, update the ownerId field of each property
-        if (Array.isArray(propertyIds) && propertyIds.length > 0) {
-            yield Promise.all(propertyIds.map((propertyId) => Property_1.Property.findByIdAndUpdate(propertyId, { ownerId: owner._id })));
-        }
+        // Do not modify Property.ownerId here; maintain linkage via PropertyOwner.properties only.
         // Return owner without password
         const ownerResponse = owner.toObject();
         delete ownerResponse.password;
@@ -349,13 +345,7 @@ const updatePropertyOwnerPublic = (req, res) => __awaiter(void 0, void 0, void 0
         if (!owner) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
-        // If properties are provided, update the ownerId field of each property
-        if (Array.isArray(properties)) {
-            // Remove ownerId from properties no longer owned
-            yield Property_1.Property.updateMany({ ownerId: owner._id, _id: { $nin: properties } }, { $unset: { ownerId: "" } });
-            // Set ownerId for new properties
-            yield Property_1.Property.updateMany({ _id: { $in: properties } }, { ownerId: owner._id });
-        }
+        // Do not modify Property.ownerId on public updates; linkage is via PropertyOwner.properties.
         console.log('Property owner updated successfully:', { id: owner._id, email: owner.email });
         res.json(owner);
     }
