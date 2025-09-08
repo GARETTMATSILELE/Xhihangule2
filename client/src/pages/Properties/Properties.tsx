@@ -12,6 +12,7 @@ import { useProperties } from '../../contexts/PropertyContext';
 import { useAdminDashboardService } from '../../services/adminDashboardService';
 import { useLocation } from 'react-router-dom';
 import agentService from '../../services/agentService';
+import { Tenant } from '../../types/tenant';
 
 export const Properties: React.FC = () => {
   const { user, company } = useAuth();
@@ -46,6 +47,7 @@ export const Properties: React.FC = () => {
   const [agentProperties, setAgentProperties] = useState<Property[]>([]);
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentTenants, setAgentTenants] = useState<Tenant[]>([]);
   
   // Use appropriate properties based on route
   let properties: Property[] = [];
@@ -98,7 +100,7 @@ export const Properties: React.FC = () => {
     }
   }, [isAdminRoute, getAdminDashboardProperties]);
 
-  // Fetch agent properties when on agent route
+  // Fetch agent properties and tenants when on agent route
   useEffect(() => {
     console.log('Properties component - Agent properties useEffect triggered:', {
       isAgentRoute,
@@ -111,9 +113,13 @@ export const Properties: React.FC = () => {
           setAgentLoading(true);
           setAgentError(null);
           console.log('Properties component - Fetching agent properties...');
-          const fetchedProperties = await agentService.getProperties();
+          const [fetchedProperties, fetchedTenants] = await Promise.all([
+            agentService.getProperties(),
+            agentService.getTenants()
+          ]);
           console.log('Properties component - Agent properties fetched:', fetchedProperties);
           setAgentProperties(fetchedProperties);
+          setAgentTenants(Array.isArray(fetchedTenants) ? fetchedTenants : []);
         } catch (err) {
           console.error('Error fetching agent properties:', err);
           setAgentError(err instanceof Error ? err.message : 'Failed to fetch properties');
@@ -125,6 +131,26 @@ export const Properties: React.FC = () => {
       fetchAgentProperties();
     }
   }, [isAgentRoute]);
+
+  function getId(id: any): string {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    if (typeof id === 'object') {
+      if ((id as any).$oid) return (id as any).$oid as string;
+      if ((id as any)._id) return String((id as any)._id);
+    }
+    return '';
+  }
+
+  function getPropertyDisplayStatus(property: Property): Property['status'] {
+    // If property indicates rented but has no active tenant, treat as available for display
+    const pid = getId(property._id);
+    if (property.status === 'rented') {
+      const hasActiveTenant = agentTenants.some(t => getId((t as any).propertyId) === pid && (t.status === 'Active'));
+      if (!hasActiveTenant) return 'available';
+    }
+    return property.status;
+  }
 
   const handleAddProperty = async (propertyData: PropertyFormData) => {
     try {
@@ -278,7 +304,8 @@ export const Properties: React.FC = () => {
   };
 
   const filteredProperties = properties?.filter(property => {
-    const matchesStatus = filters.status === 'all' || property.status === filters.status;
+    const displayStatus = getPropertyDisplayStatus(property);
+    const matchesStatus = filters.status === 'all' || displayStatus === filters.status;
     const matchesLocation = !filters.location || 
       property.address.toLowerCase().includes(filters.location.toLowerCase());
     const matchesRent = property.rent >= filters.rentRange.min && 
@@ -289,6 +316,9 @@ export const Properties: React.FC = () => {
 
     return matchesStatus && matchesLocation && matchesRent && matchesSearch;
   }) || [];
+
+  // Map properties to include display status for the list rendering
+  const propertiesForList = filteredProperties.map(p => ({ ...p, status: getPropertyDisplayStatus(p) }));
 
   if (loading) {
     return (
@@ -383,7 +413,7 @@ export const Properties: React.FC = () => {
         )}
 
         <PropertyList
-          properties={filteredProperties}
+          properties={propertiesForList}
           onPropertyClick={handleUpdateProperty}
           onDeleteProperty={handleDeleteProperty}
           onAddProperty={() => setShowForm(true)}

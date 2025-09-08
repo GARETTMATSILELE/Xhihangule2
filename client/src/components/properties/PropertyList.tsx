@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -42,6 +43,8 @@ const PropertyList: React.FC<PropertyListProps> = ({
 }) => {
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  const location = useLocation();
+  const isAgentRoute = location.pathname.includes('/agent-dashboard');
 
   const handleEditClick = (property: Property) => {
     setEditingProperty(property);
@@ -104,7 +107,15 @@ const PropertyList: React.FC<PropertyListProps> = ({
                   }
                 }}
               >
-                <TableCell>{property.name}</TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  {isAgentRoute ? (
+                    <Link to={`/agent-dashboard/properties/${property._id}`} style={{ textDecoration: 'none' }}>
+                      {property.name}
+                    </Link>
+                  ) : (
+                    property.name
+                  )}
+                </TableCell>
                 <TableCell>{property.address}</TableCell>
                 <TableCell>{property.type}</TableCell>
                 <TableCell>${property.rent}</TableCell>

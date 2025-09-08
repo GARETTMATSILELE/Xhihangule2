@@ -212,7 +212,17 @@ export const Tenants: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {tenants.map((tenant) => (
+              {tenants
+                .filter((t) => {
+                  const q = (search || '').trim().toLowerCase();
+                  if (!q) return true;
+                  const name = `${t.firstName || ''} ${t.lastName || ''}`.toLowerCase();
+                  const email = (t.email || '').toLowerCase();
+                  const phone = (t.phone || '').toLowerCase();
+                  const status = (t.status || '').toLowerCase();
+                  return name.includes(q) || email.includes(q) || phone.includes(q) || status.includes(q);
+                })
+                .map((tenant) => (
                 <TableRow key={tenant._id}>
                   <TableCell>{`${tenant.firstName} ${tenant.lastName}`}</TableCell>
                   <TableCell>{tenant.email}</TableCell>
@@ -228,6 +238,21 @@ export const Tenants: React.FC = () => {
                   </TableCell>
                 </TableRow>
               ))}
+              {(!tenants || tenants.length === 0 || tenants.filter((t) => {
+                const q = (search || '').trim().toLowerCase();
+                if (!q) return true;
+                const name = `${t.firstName || ''} ${t.lastName || ''}`.toLowerCase();
+                const email = (t.email || '').toLowerCase();
+                const phone = (t.phone || '').toLowerCase();
+                const status = (t.status || '').toLowerCase();
+                return name.includes(q) || email.includes(q) || phone.includes(q) || status.includes(q);
+              }).length === 0) && (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    <Typography variant="body2" color="text.secondary">No tenants match your search.</Typography>
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </TableContainer>

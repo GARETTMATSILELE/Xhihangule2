@@ -42,6 +42,7 @@ import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWra
 import LevyPaymentsPage from './agent/LevyPaymentsPage';
 import { SchedulePage } from './agent';
 import paymentService from '../services/paymentService';
+import PropertyDetailsPage from './agent/PropertyDetailsPage';
 
 const StatCard = ({ title, value, icon, color, loading, onClick }: { title: string; value: string; icon: React.ReactNode; color: string; loading?: boolean; onClick?: () => void }) => (
   <Card onClick={onClick} sx={{ cursor: onClick ? 'pointer' : 'default' }}>
@@ -746,6 +747,7 @@ const AgentDashboard: React.FC = () => {
               </>
             } />
             <Route path="properties" element={<Properties />} />
+            <Route path="properties/:propertyId" element={<PropertyDetailsPage />} />
             <Route path="tenants" element={<Tenants />} />
             <Route path="leases" element={<AgentLeasesPage />} />
             <Route path="property-owners" element={<AgentPropertyOwnersPage />} />

@@ -89,6 +89,7 @@ const AgentPropertyOwnersPage: React.FC = () => {
     message: '',
     severity: 'success'
   });
+  const [propertySelectOpen, setPropertySelectOpen] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -164,6 +165,8 @@ const AgentPropertyOwnersPage: React.FC = () => {
       ...prev,
       propertyIds
     }));
+    // After selecting, close the dropdown to return focus to the edit form
+    setPropertySelectOpen(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -432,6 +435,9 @@ const AgentPropertyOwnersPage: React.FC = () => {
                      value={formData.propertyIds}
                      onChange={handlePropertyChange}
                      label="Assign Properties"
+                     open={propertySelectOpen}
+                     onOpen={() => setPropertySelectOpen(true)}
+                     onClose={() => setPropertySelectOpen(false)}
                     renderValue={(selected) => (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                         {selected.map((value) => {

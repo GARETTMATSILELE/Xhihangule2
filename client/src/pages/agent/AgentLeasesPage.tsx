@@ -349,6 +349,44 @@ const AgentLeasesPage: React.FC = () => {
           </Grid>
         </CardContent>
       </Card>
+      {dialogOpen && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              {selectedLease ? 'Edit Lease' : 'Create Lease'}
+            </Typography>
+            <LeaseForm
+              key={selectedLease?._id || 'new-lease'}
+              onCancel={() => {
+                setDialogOpen(false);
+                setSelectedLease(null);
+              }}
+              onSubmit={handleFormSubmit}
+              properties={properties}
+              tenants={tenants}
+              initialData={selectedLease ? {
+                propertyId: selectedLease.propertyId,
+                tenantId: selectedLease.tenantId,
+                startDate: selectedLease.startDate,
+                endDate: selectedLease.endDate,
+                rentAmount: selectedLease.rentAmount,
+                depositAmount: selectedLease.depositAmount,
+                status: selectedLease.status,
+                monthlyRent: selectedLease.rentAmount,
+                securityDeposit: selectedLease.depositAmount,
+                petDeposit: 0,
+                isPetAllowed: false,
+                maxOccupants: 1,
+                isUtilitiesIncluded: false,
+                utilitiesDetails: '',
+                rentDueDay: 1,
+                lateFee: 0,
+                gracePeriod: 0
+              } : undefined}
+            />
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardContent>
           <TableContainer component={Paper} variant="outlined">
@@ -444,37 +482,6 @@ const AgentLeasesPage: React.FC = () => {
           </TableContainer>
         </CardContent>
       </Card>
-      {dialogOpen && (
-        <LeaseForm
-          key={selectedLease?._id || 'new-lease'}
-          onCancel={() => {
-            setDialogOpen(false);
-            setSelectedLease(null);
-          }}
-          onSubmit={handleFormSubmit}
-          properties={properties}
-          tenants={tenants}
-          initialData={selectedLease ? {
-            propertyId: selectedLease.propertyId,
-            tenantId: selectedLease.tenantId,
-            startDate: selectedLease.startDate,
-            endDate: selectedLease.endDate,
-            rentAmount: selectedLease.rentAmount,
-            depositAmount: selectedLease.depositAmount,
-            status: selectedLease.status,
-            monthlyRent: selectedLease.rentAmount,
-            securityDeposit: selectedLease.depositAmount,
-            petDeposit: 0,
-            isPetAllowed: false,
-            maxOccupants: 1,
-            isUtilitiesIncluded: false,
-            utilitiesDetails: '',
-            rentDueDay: 1,
-            lateFee: 0,
-            gracePeriod: 0
-          } : undefined}
-        />
-      )}
     </Container>
   );
 };
