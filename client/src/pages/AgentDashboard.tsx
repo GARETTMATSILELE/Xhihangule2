@@ -603,7 +603,7 @@ const AgentDashboard: React.FC = () => {
                                       : category === 'expiring'
                                       ? { label: 'Expiring ≤1 mo', color: 'warning' as const }
                                       : category === 'aboutToExpire'
-                                      ? { label: '≤3 mo', color: 'default' as const }
+                                      ? { label: 'aboutToExpire', color: 'default' as const }
                                       : { label: 'Active', color: 'success' as const };
                                     return (
                                       <Grid item xs={12} key={lease._id}>

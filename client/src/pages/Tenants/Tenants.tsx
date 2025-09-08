@@ -17,7 +17,8 @@ import {
   DialogActions,
   TextField,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Pagination
 } from '@mui/material';
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
@@ -42,6 +43,7 @@ export const Tenants: React.FC = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     loadTenants();
@@ -185,14 +187,17 @@ export const Tenants: React.FC = () => {
         </Alert>
       )}
 
-      <Box mb={2}>
+      <Box mb={2} display="flex" alignItems="center" gap={2}>
         <TextField
           fullWidth
           variant="outlined"
           placeholder="Search tenants..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
+        <Button variant="outlined" onClick={() => setShowAll(prev => !prev)}>
+          {showAll ? 'Paginate' : 'Show All'}
+        </Button>
       </Box>
 
       {isLoading ? (
@@ -212,17 +217,23 @@ export const Tenants: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {tenants
-                .filter((t) => {
-                  const q = (search || '').trim().toLowerCase();
+              {(() => {
+                const q = (search || '').trim().toLowerCase();
+                const filtered = tenants.filter((t) => {
                   if (!q) return true;
                   const name = `${t.firstName || ''} ${t.lastName || ''}`.toLowerCase();
                   const email = (t.email || '').toLowerCase();
                   const phone = (t.phone || '').toLowerCase();
                   const status = (t.status || '').toLowerCase();
                   return name.includes(q) || email.includes(q) || phone.includes(q) || status.includes(q);
-                })
-                .map((tenant) => (
+                });
+                const rowsPerPage = 10;
+                const total = filtered.length;
+                const pages = Math.max(1, Math.ceil(total / rowsPerPage));
+                if (!showAll && totalPages !== pages) setTotalPages(pages);
+                const start = (page - 1) * rowsPerPage;
+                const slice = showAll ? filtered : filtered.slice(start, start + rowsPerPage);
+                return slice.map((tenant) => (
                 <TableRow key={tenant._id}>
                   <TableCell>{`${tenant.firstName} ${tenant.lastName}`}</TableCell>
                   <TableCell>{tenant.email}</TableCell>
@@ -237,25 +248,40 @@ export const Tenants: React.FC = () => {
                     </IconButton>
                   </TableCell>
                 </TableRow>
-              ))}
-              {(!tenants || tenants.length === 0 || tenants.filter((t) => {
+                ));
+              })()}
+              {(() => {
                 const q = (search || '').trim().toLowerCase();
-                if (!q) return true;
-                const name = `${t.firstName || ''} ${t.lastName || ''}`.toLowerCase();
-                const email = (t.email || '').toLowerCase();
-                const phone = (t.phone || '').toLowerCase();
-                const status = (t.status || '').toLowerCase();
-                return name.includes(q) || email.includes(q) || phone.includes(q) || status.includes(q);
-              }).length === 0) && (
+                const hasAny = tenants.some((t) => {
+                  if (!q) return true;
+                  const name = `${t.firstName || ''} ${t.lastName || ''}`.toLowerCase();
+                  const email = (t.email || '').toLowerCase();
+                  const phone = (t.phone || '').toLowerCase();
+                  const status = (t.status || '').toLowerCase();
+                  return name.includes(q) || email.includes(q) || phone.includes(q) || status.includes(q);
+                });
+                return !hasAny ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center">
                     <Typography variant="body2" color="text.secondary">No tenants match your search.</Typography>
                   </TableCell>
                 </TableRow>
-              )}
+                ) : null;
+              })()}
             </TableBody>
           </Table>
         </TableContainer>
+      )}
+
+      {!showAll && totalPages > 1 && (
+        <Box display="flex" justifyContent="center" mt={2}>
+          <Pagination
+            count={totalPages}
+            page={page}
+            onChange={(_, value) => setPage(value)}
+            color="primary"
+          />
+        </Box>
       )}
 
       <TenantForm

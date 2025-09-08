@@ -3858,3 +3858,13 @@
 {"level":"info","message":"Syncing changes since 2025-09-08T10:00:00.036Z","timestamp":"2025-09-08T11:00:00.036Z"}
 {"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-08T11:00:00.155Z"}
 {"level":"info","message":"Completed scheduled sync: hourly_sync in 123ms","timestamp":"2025-09-08T11:00:00.160Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-08T12:00:00.034Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-08T12:00:00.038Z"}
+{"level":"info","message":"Syncing changes since 2025-09-08T11:00:00.039Z","timestamp":"2025-09-08T12:00:00.039Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-08T12:00:00.137Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 104ms","timestamp":"2025-09-08T12:00:00.139Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-08T13:00:00.022Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-08T13:00:00.026Z"}
+{"level":"info","message":"Syncing changes since 2025-09-08T12:00:00.028Z","timestamp":"2025-09-08T13:00:00.028Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-08T13:00:00.131Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 110ms","timestamp":"2025-09-08T13:00:00.137Z"}
