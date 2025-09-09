@@ -54,6 +54,44 @@ const AccountantPaymentsPage: React.FC = () => {
   const [finalizeCommissionPercent, setFinalizeCommissionPercent] = useState<string>('');
   const [finalizing, setFinalizing] = useState(false);
 
+  // Filter tenants to those linked to the selected property during finalize flow
+  const tenantsForSelectedProperty = useMemo(() => {
+    if (!finalizePropertyId) return tenants;
+    return tenants.filter((t) => String(t.propertyId || '') === String(finalizePropertyId));
+  }, [tenants, finalizePropertyId]);
+
+  // When a property is selected in finalize dialog, auto-pick the tenant if unambiguous
+  useEffect(() => {
+    if (!finalizePropertyId) {
+      setFinalizeTenantId('');
+      return;
+    }
+    const matches = tenants.filter((t) => String(t.propertyId || '') === String(finalizePropertyId));
+    const activeMatches = matches.filter((t) => t.status === 'Active');
+    let chosen: Tenant | undefined;
+    if (activeMatches.length === 1) {
+      chosen = activeMatches[0];
+    } else if (matches.length === 1) {
+      chosen = matches[0];
+    } else {
+      chosen = undefined;
+    }
+    setFinalizeTenantId(chosen ? chosen._id : '');
+  }, [finalizePropertyId, tenants]);
+
+  // Prefill finalize dialog from selected payment when opening, if data is present
+  useEffect(() => {
+    if (!finalizeOpen || !finalizePayment) return;
+    const propId = (finalizePayment as any).propertyId && typeof (finalizePayment as any).propertyId === 'object'
+      ? String((finalizePayment as any).propertyId._id)
+      : String((finalizePayment as any).propertyId || '');
+    const tId = (finalizePayment as any).tenantId && typeof (finalizePayment as any).tenantId === 'object'
+      ? String((finalizePayment as any).tenantId._id)
+      : String((finalizePayment as any).tenantId || '');
+    if (propId) setFinalizePropertyId(propId);
+    if (tId) setFinalizeTenantId(tId);
+  }, [finalizeOpen, finalizePayment]);
+
   const summary = useMemo(() => {
     const totalIncome = payments.reduce((sum, payment) => sum + payment.amount, 0);
     const totalPayments = payments.length;
@@ -293,9 +331,9 @@ const AccountantPaymentsPage: React.FC = () => {
                 value={finalizeTenantId}
                 onChange={(e) => setFinalizeTenantId(e.target.value as string)}
               >
-                {tenants.map((t) => (
-                  <MenuItem key={(t as any)._id} value={(t as any)._id}>
-                    {(t as any).firstName} {(t as any).lastName}
+                {tenantsForSelectedProperty.map((t) => (
+                  <MenuItem key={t._id} value={t._id}>
+                    {t.firstName} {t.lastName}
                   </MenuItem>
                 ))}
               </Select>
