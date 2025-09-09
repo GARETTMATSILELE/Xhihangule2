@@ -79,16 +79,17 @@ const PaymentsPage: React.FC = () => {
   }, [user?.role]);
 
   const summary = useMemo(() => {
-    const totalIncome = payments.reduce((sum, payment) => sum + payment.amount, 0);
-    const totalPayments = payments.length;
-    const overduePayments = payments.filter(p => p.status === 'failed').length;
-    const pendingAmount = payments
-      .filter(p => p.status === 'pending')
-      .reduce((sum, payment) => sum + payment.amount, 0);
+    const items = Array.isArray(payments) ? payments.filter((p) => !!p) : [];
 
-    const currencyBreakdown = payments.reduce((acc, payment) => {
-      const currency = payment.currency;
-      acc[currency] = (acc[currency] || 0) + payment.amount;
+    const totalIncome = items.reduce((sum: number, p: any) => sum + (Number(p?.amount) || 0), 0);
+    const totalPayments = items.length;
+    const overduePayments = items.reduce((count: number, p: any) => count + (p?.status === 'failed' ? 1 : 0), 0);
+    const pendingAmount = items.reduce((sum: number, p: any) => sum + (p?.status === 'pending' ? (Number(p?.amount) || 0) : 0), 0);
+
+    const currencyBreakdown = items.reduce((acc: { [key: string]: number }, p: any) => {
+      const currency = p?.currency || 'USD';
+      const amount = Number(p?.amount) || 0;
+      acc[currency] = (acc[currency] || 0) + amount;
       return acc;
     }, {} as { [key: string]: number });
 
@@ -300,7 +301,12 @@ const PaymentsPage: React.FC = () => {
         };
 
         const filteredLevy = applyClientFilters(levy);
-        const combined = [...(basePayments || []), ...filteredLevy];
+        // Normalize levy entries to carry explicit type so UI doesn't show them as rental
+        const normalizeType = (p: any) => ({ ...p, paymentType: p.paymentType || p.type || (p.isLevy ? 'levy' : undefined) });
+        const combined = [
+          ...((basePayments || []).map(normalizeType)),
+          ...((filteredLevy || []).map((p) => ({ ...p, paymentType: 'levy', type: 'levy' })))
+        ];
         setPayments(combined);
       } catch (err: any) {
         console.error('Error loading payments:', err);
@@ -337,7 +343,12 @@ const PaymentsPage: React.FC = () => {
       } else {
         response = await paymentService.createPayment(data);
       }
-      setPayments(prev => [...prev, response.data || response]);
+      {
+        const created = (response && (response.data ?? response)) as any;
+        if (created) {
+          setPayments(prev => [...prev, created]);
+        }
+      }
       setShowCreateDialog(false);
       setSuccessMessage('Payment created successfully');
     } catch (err: any) {
@@ -428,17 +439,21 @@ const PaymentsPage: React.FC = () => {
       } else {
         if (paymentData.paymentType === 'levy') {
           const response = await paymentService.createLevyPayment(paymentData);
-          setPayments(prev => [...prev, response.data || response]);
+          const created = (response && (response.data ?? response)) as any;
+          if (created) setPayments(prev => [...prev, created]);
         } else if (paymentData.paymentType === 'municipal') {
           const response = await paymentService.createMunicipalPayment(paymentData);
-          setPayments(prev => [...prev, response.data || response]);
+          const created = (response && (response.data ?? response)) as any;
+          if (created) setPayments(prev => [...prev, created]);
         } else if (user.role === 'agent') {
           const response = await agentService.createPayment(paymentData, properties, user?._id);
-          setPayments(prev => [...prev, response.data]);
+          const created = (response && (response.data ?? response)) as any;
+          if (created) setPayments(prev => [...prev, created]);
         } else {
           // Use accountant endpoint for admin dashboard payments
           const response = await paymentService.createPaymentAccountant(paymentData);
-          setPayments(prev => [...prev, response.data]);
+          const created = (response && (response.data ?? response)) as any;
+          if (created) setPayments(prev => [...prev, created]);
         }
       }
       setShowForm(false);

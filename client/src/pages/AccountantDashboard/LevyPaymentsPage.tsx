@@ -18,7 +18,9 @@ import {
   Chip,
   IconButton,
   Tooltip,
-  InputAdornment
+  InputAdornment,
+  Dialog,
+  DialogContent
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { Print as PrintIcon, Download as DownloadIcon } from '@mui/icons-material';
@@ -30,199 +32,17 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import PaymentReceipt from '../../components/payments/PaymentReceipt';
 
-const columns: GridColDef[] = [
-  { 
-    field: 'paymentDate', 
-    headerName: 'Date', 
-    width: 120, 
-    valueGetter: (params) => new Date(params.row.paymentDate).toLocaleDateString() 
-  },
-  { 
-    field: 'propertyId', 
-    headerName: 'Property', 
-    width: 200, 
-    valueGetter: (params) => {
-      if (params.row.propertyId && typeof params.row.propertyId === 'object') {
-        return params.row.propertyId.name || 'Unknown Property';
-      }
-      return 'Unknown Property';
-    }
-  },
-  { 
-    field: 'amount', 
-    headerName: 'Amount', 
-    width: 120,
-    valueGetter: (params) => {
-      const currency = params.row.currency || 'USD';
-      return `${currency} ${params.row.amount?.toLocaleString() || 0}`;
-    }
-  },
-  { 
-    field: 'paymentMethod', 
-    headerName: 'Method', 
-    width: 130,
-    valueGetter: (params) => {
-      const method = params.row.paymentMethod;
-      return method?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Unknown';
-    }
-  },
-  { 
-    field: 'referenceNumber', 
-    headerName: 'Reference', 
-    width: 140 
-  },
-  { 
-    field: 'status', 
-    headerName: 'Status', 
-    width: 100,
-    renderCell: (params) => {
-      const status = params.row.status;
-      const color = status === 'completed' ? 'success' : status === 'pending' ? 'warning' : 'error';
-      return (
-        <Chip
-          label={status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'}
-          color={color as any}
-          size="small"
-          variant="outlined"
-        />
-      );
-    }
-  },
-  { 
-    field: 'currency', 
-    headerName: 'Currency', 
-    width: 100 
-  },
-  {
-    field: 'actions',
-    headerName: 'Actions',
-    width: 160,
-    sortable: false,
-    filterable: false,
-    renderCell: (params) => (
-      <Box sx={{ display: 'flex', gap: 1 }}>
-        <Tooltip title="Print Receipt (A4)">
-          <IconButton
-            color="primary"
-            size="small"
-            onClick={async (e) => {
-              e.stopPropagation();
-              try {
-                const receipt = await paymentService.getPaymentReceipt(params.row._id);
-                const html = `<!DOCTYPE html>
-                  <html>
-                  <head>
-                    <meta charset=\"utf-8\" />
-                    <title>Receipt - ${receipt.receiptNumber}</title>
-                    <style>
-                      @page { size: A4; margin: 20mm; }
-                      body { font-family: Arial, sans-serif; color: #333; }
-                      .receipt { max-width: 700px; margin: 0 auto; }
-                      .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-                      .company-name { font-size: 22px; font-weight: bold; }
-                      .receipt-number { font-size: 16px; font-weight: bold; margin-top: 10px; }
-                      .amount { font-size: 26px; font-weight: bold; color: #2e7d32; text-align: center; margin: 20px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
-                      .details { margin: 20px 0; }
-                      .row { display: flex; justify-content: space-between; margin: 8px 0; border-bottom: 1px solid #eee; padding-bottom: 6px; }
-                      .label { font-weight: bold; color: #666; min-width: 140px; }
-                      .value { color: #333; text-align: right; }
-                      .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
-                      @media print { body { margin: 0; } .no-print { display: none; } }
-                    </style>
-                  </head>
-                  <body>
-                    <div class=\"receipt\">
-                      <div class=\"header\">
-                        <div class=\"company-name\">${receipt.type === 'levy' ? 'Levy Payment Receipt' : 'Payment Receipt'}</div>
-                        <div class=\"receipt-number\">Receipt #${receipt.receiptNumber}</div>
-                      </div>
-                      <div class=\"amount\">${receipt.currency || 'USD'} ${(receipt.amount || 0).toFixed(2)}</div>
-                      <div class=\"details\">
-                        <div class=\"row\"><div class=\"label\">Date:</div><div class=\"value\">${new Date(receipt.paymentDate).toLocaleDateString()}</div></div>
-                        <div class=\"row\"><div class=\"label\">Method:</div><div class=\"value\">${String(receipt.paymentMethod).replace('_',' ').toUpperCase()}</div></div>
-                        <div class=\"row\"><div class=\"label\">Status:</div><div class=\"value\">${String(receipt.status).toUpperCase()}</div></div>
-                        <div class=\"row\"><div class=\"label\">Property:</div><div class=\"value\">${receipt.property?.name || 'N/A'}</div></div>
-                        <div class=\"row\"><div class=\"label\">Address:</div><div class=\"value\">${receipt.property?.address || 'N/A'}</div></div>
-                        <div class=\"row\"><div class=\"label\">Processed By:</div><div class=\"value\">${(receipt.processedBy?.firstName || '')} ${(receipt.processedBy?.lastName || '')}</div></div>
-                        ${receipt.notes ? `<div class=\"row\"><div class=\"label\">Notes:</div><div class=\"value\">${receipt.notes}</div></div>` : ''}
-                      </div>
-                      <div class=\"footer\">
-                        <p>Generated on ${new Date().toLocaleString()}</p>
-                      </div>
-                      <div class=\"no-print\" style=\"text-align:center; margin-top:12px;\">
-                        <button onclick=\"window.print()\" style=\"padding:8px 16px; background:#1976d2; color:#fff; border:none; border-radius:4px; cursor:pointer;\">Print</button>
-                      </div>
-                    </div>
-                  </body>
-                  </html>`;
-                const win = window.open('', '_blank');
-                if (win) {
-                  win.document.write(html);
-                  win.document.close();
-                }
-              } catch (err) {
-                console.error('Failed to fetch/print receipt', err);
-                alert('Failed to fetch receipt');
-              }
-            }}
-          >
-            <PrintIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Download PDF/HTML">
-          <IconButton
-            color="secondary"
-            size="small"
-            onClick={async (e) => {
-              e.stopPropagation();
-              try {
-                const blob = await paymentService.downloadReceiptPublic(params.row._id);
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `receipt-${params.row.referenceNumber || params.row._id}.html`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-              } catch (err) {
-                console.error('Failed to download receipt', err);
-                alert('Failed to download receipt');
-              }
-            }}
-          >
-            <DownloadIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Box>
-    )
-  },
-  { 
-    field: 'processedBy', 
-    headerName: 'Processed By', 
-    width: 180,
-    valueGetter: (params) => {
-      if (params.row.processedBy && typeof params.row.processedBy === 'object') {
-        const user = params.row.processedBy;
-        return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown User';
-      }
-      return 'Unknown User';
-    }
-  },
-  { 
-    field: 'notes', 
-    headerName: 'Notes', 
-    width: 200,
-    valueGetter: (params) => params.row.notes || '-'
-  },
-];
+// columns moved inside component to access handlers/state
 
 const LevyPaymentsPage: React.FC = () => {
   const { user } = useAuth();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
   
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -313,6 +133,177 @@ const LevyPaymentsPage: React.FC = () => {
         setLoading(false);
       });
   }, [user?.companyId]);
+
+  const handlePrint = async (id: string) => {
+    try {
+      const receipt = await paymentService.getPaymentReceipt(id, user?.companyId);
+      setSelectedReceipt(receipt);
+      setPrintOpen(true);
+    } catch (err) {
+      console.error('Failed to fetch receipt', err);
+      alert('Failed to fetch receipt');
+    }
+  };
+
+  const handleDownload = async (id: string, reference?: string) => {
+    try {
+      const blob = await paymentService.downloadReceiptPublic(id, user?.companyId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `receipt-${reference || id}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download receipt', err);
+      alert('Failed to download receipt');
+    }
+  };
+
+  const columns: GridColDef[] = [
+    { 
+      field: 'paymentDate', 
+      headerName: 'Date', 
+      width: 120, 
+      valueGetter: (params) => new Date(params.row.paymentDate).toLocaleDateString() 
+    },
+    { 
+      field: 'propertyId', 
+      headerName: 'Property', 
+      width: 200, 
+      valueGetter: (params) => {
+        if (params.row.propertyId && typeof params.row.propertyId === 'object') {
+          return params.row.propertyId.name || 'Unknown Property';
+        }
+        return 'Unknown Property';
+      }
+    },
+    { 
+      field: 'amount', 
+      headerName: 'Amount', 
+      width: 120,
+      valueGetter: (params) => {
+        const currency = params.row.currency || 'USD';
+        return `${currency} ${params.row.amount?.toLocaleString() || 0}`;
+      }
+    },
+    { 
+      field: 'paymentMethod', 
+      headerName: 'Method', 
+      width: 130,
+      valueGetter: (params) => {
+        const method = params.row.paymentMethod;
+        return method?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Unknown';
+      }
+    },
+    { 
+      field: 'referenceNumber', 
+      headerName: 'Reference', 
+      width: 220,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, overflow: 'hidden' }}>
+          <Typography variant="body2" sx={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: 120 }}>
+            {params.row.referenceNumber || '-'}
+          </Typography>
+          <Tooltip title="Print Receipt">
+            <IconButton
+              color="primary"
+              size="small"
+              onClick={(e) => { e.stopPropagation(); handlePrint(params.row._id); }}
+            >
+              <PrintIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Download HTML Receipt">
+            <IconButton
+              color="secondary"
+              size="small"
+              onClick={(e) => { e.stopPropagation(); handleDownload(params.row._id, params.row.referenceNumber); }}
+            >
+              <DownloadIcon fontSize="inherit" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )
+    },
+    { 
+      field: 'status', 
+      headerName: 'Status', 
+      width: 100,
+      renderCell: (params) => {
+        const status = params.row.status;
+        const color = status === 'completed' ? 'success' : status === 'pending' ? 'warning' : 'error';
+        return (
+          <Chip
+            label={status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'}
+            color={color as any}
+            size="small"
+            variant="outlined"
+          />
+        );
+      }
+    },
+    { 
+      field: 'currency', 
+      headerName: 'Currency', 
+      width: 100 
+    },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 160,
+      sortable: false,
+      filterable: false,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="Print Receipt">
+            <IconButton
+              color="primary"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrint(params.row._id);
+              }}
+            >
+              <PrintIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Download HTML Receipt">
+            <IconButton
+              color="secondary"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownload(params.row._id, params.row.referenceNumber);
+              }}
+            >
+              <DownloadIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )
+    },
+    { 
+      field: 'processedBy', 
+      headerName: 'Processed By', 
+      width: 180,
+      valueGetter: (params) => {
+        if (params.row.processedBy && typeof params.row.processedBy === 'object') {
+          const user = params.row.processedBy;
+          return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown User';
+        }
+        return 'Unknown User';
+      }
+    },
+    { 
+      field: 'notes', 
+      headerName: 'Notes', 
+      width: 200,
+      valueGetter: (params) => params.row.notes || '-'
+    },
+  ];
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -474,6 +465,23 @@ const LevyPaymentsPage: React.FC = () => {
             </Paper>
           )}
         </Box>
+
+        {/* Print Dialog */}
+        <Dialog 
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogContent>
+            {selectedReceipt && (
+              <PaymentReceipt
+                receipt={selectedReceipt}
+                onClose={() => setPrintOpen(false)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </Box>
     </LocalizationProvider>
   );

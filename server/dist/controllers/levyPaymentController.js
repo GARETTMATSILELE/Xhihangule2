@@ -18,6 +18,7 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Lease_1 = require("../models/Lease");
 const Tenant_1 = require("../models/Tenant");
+const Company_1 = require("../models/Company");
 const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -109,6 +110,14 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
             }
         }
         catch (_a) { }
+        // Load company details for header/logo
+        let company = null;
+        try {
+            if (levy.companyId) {
+                company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
+            }
+        }
+        catch (_b) { }
         const receipt = {
             receiptNumber: levy.referenceNumber || String(levy._id),
             paymentDate: levy.paymentDate,
@@ -121,7 +130,17 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
             processedBy: levy.processedBy,
             notes: levy.notes,
             createdAt: levy.createdAt,
-            type: 'levy'
+            type: 'levy',
+            company: company ? {
+                name: company.name,
+                address: company.address,
+                phone: company.phone,
+                email: company.email,
+                website: company.website,
+                registrationNumber: company.registrationNumber,
+                tinNumber: company.tinNumber,
+                logo: company.logo
+            } : undefined
         };
         res.json({ status: 'success', data: receipt });
     }
@@ -162,6 +181,14 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
             }
         }
         catch (_d) { }
+        // Load company details for header/logo
+        let company = null;
+        try {
+            if (levy.companyId) {
+                company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
+            }
+        }
+        catch (_e) { }
         const html = `<!DOCTYPE html>
       <html>
       <head>
@@ -172,7 +199,9 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
           body { font-family: Arial, sans-serif; color: #333; }
           .receipt { max-width: 700px; margin: 0 auto; }
           .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+          .company-logo { max-width: 180px; max-height: 80px; display: block; margin: 0 auto 8px auto; object-fit: contain; }
           .company-name { font-size: 22px; font-weight: bold; }
+          .company-line { margin: 2px 0; font-size: 12px; color: #555; }
           .receipt-number { font-size: 16px; font-weight: bold; margin-top: 10px; }
           .amount { font-size: 26px; font-weight: bold; color: #2e7d32; text-align: center; margin: 20px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
           .details { margin: 20px 0; }
@@ -186,7 +215,12 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
       <body>
         <div class="receipt">
           <div class="header">
-            <div class="company-name">Levy Payment Receipt</div>
+            ${(company === null || company === void 0 ? void 0 : company.logo) ? `<img class=\"company-logo\" src=\"data:image/png;base64,${company.logo}\" alt=\"Company Logo\" />` : ''}
+            <div class="company-name">${(company === null || company === void 0 ? void 0 : company.name) || 'Levy Payment Receipt'}</div>
+            ${(company === null || company === void 0 ? void 0 : company.address) ? `<div class=\"company-line\">${company.address}</div>` : ''}
+            ${((company === null || company === void 0 ? void 0 : company.phone) || (company === null || company === void 0 ? void 0 : company.email)) ? `<div class=\"company-line\">${company.phone ? 'Phone: ' + company.phone : ''}${(company.phone && company.email) ? ' | ' : ''}${company.email ? 'Email: ' + company.email : ''}</div>` : ''}
+            ${(company === null || company === void 0 ? void 0 : company.website) ? `<div class=\"company-line\">Website: ${company.website}</div>` : ''}
+            ${((company === null || company === void 0 ? void 0 : company.registrationNumber) || (company === null || company === void 0 ? void 0 : company.tinNumber)) ? `<div class=\"company-line\">${company.registrationNumber ? 'Reg. No: ' + company.registrationNumber : ''}${(company.registrationNumber && company.tinNumber) ? ' | ' : ''}${company.tinNumber ? 'Tax No: ' + company.tinNumber : ''}</div>` : ''}
             <div class="receipt-number">Receipt #${levy.referenceNumber || levy._id}</div>
           </div>
           <div class="amount">${(levy.currency || 'USD')} ${(levy.amount || 0).toFixed(2)}</div>

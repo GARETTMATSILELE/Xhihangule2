@@ -39,6 +39,7 @@ import { Property } from '../../types/property';
 import { PaymentFormData } from '../../types/payment';
 import PaymentReceipt from './PaymentReceipt';
 import paymentService from '../../services/paymentService';
+import { useAuth } from '../../contexts/AuthContext';
 
 export interface PaymentListProps {
   payments: Payment[];
@@ -68,6 +69,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
   tenants = [],
 }) => {
   const theme = useTheme();
+  const { user } = useAuth();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [downloadingReceipt, setDownloadingReceipt] = useState<string | null>(null);
@@ -112,6 +114,21 @@ const PaymentList: React.FC<PaymentListProps> = ({
     }
   }, []);
 
+  const getTypeColor = useCallback((type: string | undefined) => {
+    switch (type) {
+      case 'levy':
+        return 'info';
+      case 'municipal':
+        return 'secondary';
+      case 'introduction':
+        return 'primary';
+      case 'rental':
+        return 'success';
+      default:
+        return 'default';
+    }
+  }, []);
+
   const paginatedPayments = useMemo(() => {
     return payments.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   }, [payments, page, rowsPerPage]);
@@ -134,7 +151,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
   const handlePrintReceipt = async (payment: Payment) => {
     try {
       setLoadingReceipt(true);
-      const receipt = await paymentService.getPaymentReceipt(payment._id);
+      const receipt = await paymentService.getPaymentReceipt(payment._id, user?.companyId);
       setSelectedReceipt(receipt);
       setPrintReceipt(true);
     } catch (error) {
@@ -177,11 +194,18 @@ const PaymentList: React.FC<PaymentListProps> = ({
           <Typography variant="h6">
             {payment.currency} {(payment.amount || 0).toFixed(2)}
           </Typography>
-          <Chip
-            label={payment.status || 'unknown'}
-            color={getStatusColor(payment.status || 'unknown')}
-            size="small"
-          />
+          <Box display="flex" gap={1}>
+            <Chip
+              label={(payment as any).paymentType || (payment as any).type || 'rental'}
+              color={getTypeColor((payment as any).paymentType || (payment as any).type)}
+              size="small"
+            />
+            <Chip
+              label={payment.status || 'unknown'}
+              color={getStatusColor(payment.status || 'unknown')}
+              size="small"
+            />
+          </Box>
         </Box>
         <Typography color="textSecondary" gutterBottom>
           {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'No date'}
@@ -388,6 +412,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
               <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
+                <TableCell>Type</TableCell>
                 <TableCell>Property</TableCell>
                 <TableCell>Amount</TableCell>
                 <TableCell>Method</TableCell>
@@ -401,6 +426,13 @@ const PaymentList: React.FC<PaymentListProps> = ({
                 <TableRow key={`${payment._id || payment.referenceNumber || 'row'}-${index}`}>
                   <TableCell>
                     {payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : 'No date'}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={(payment as any).paymentType || (payment as any).type || 'rental'}
+                      color={getTypeColor((payment as any).paymentType || (payment as any).type)}
+                      size="small"
+                    />
                   </TableCell>
                   <TableCell>
                     {getPropertyDisplay(payment)}

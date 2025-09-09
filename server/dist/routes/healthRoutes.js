@@ -21,6 +21,10 @@ router.use((req, res, next) => {
 router.get('/live', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+// Some platforms issue HEAD requests for health checks
+router.head('/live', (req, res) => {
+    res.status(200).end();
+});
 // Readiness probe: main DB connected and healthy. Accounting DB is ignored here to avoid false restarts
 router.get('/ready', (req, res) => {
     try {

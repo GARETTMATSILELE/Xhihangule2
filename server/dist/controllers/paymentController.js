@@ -282,16 +282,33 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     const currentUser = req.user;
     // Helper to perform the actual create logic, with optional transaction session
     const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
-        const { paymentType, propertyType, propertyId, tenantId, agentId, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, leaseId, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, processedBy, ownerId, manualPropertyAddress, manualTenantName, saleId } = req.body;
+        const { paymentType, propertyType, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, manualPropertyAddress, manualTenantName, } = req.body;
         // Extract optional advance fields
         const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = req.body;
+        // Safely extract ids (string or nested {_id})
+        const extractId = (v) => {
+            if (!v)
+                return undefined;
+            if (typeof v === 'string')
+                return v;
+            if (typeof v === 'object' && (v._id || v.id))
+                return v._id || v.id;
+            return undefined;
+        };
+        const rawPropertyId = extractId(req.body.propertyId);
+        const rawTenantId = extractId(req.body.tenantId);
+        const rawAgentId = extractId(req.body.agentId) || user.userId;
+        const rawProcessedBy = extractId(req.body.processedBy) || user.userId;
+        const rawLeaseId = extractId(req.body.leaseId);
+        const rawOwnerId = extractId(req.body.ownerId);
+        const rawSaleId = extractId(req.body.saleId);
         // Validate required fields
         if (!amount || !paymentDate) {
             return { error: { status: 400, message: 'Missing required fields: amount and paymentDate' } };
         }
         // Check if using manual entries
-        const manualProperty = propertyId && propertyId.startsWith('manual_');
-        const manualTenant = tenantId && tenantId.startsWith('manual_');
+        const manualProperty = typeof rawPropertyId === 'string' && rawPropertyId.startsWith('manual_');
+        const manualTenant = typeof rawTenantId === 'string' && rawTenantId.startsWith('manual_');
         // Validate manual entries
         if (manualProperty && !manualPropertyAddress) {
             return { error: { status: 400, message: 'Manual property address is required when using manual property entry' } };
@@ -300,19 +317,41 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             return { error: { status: 400, message: 'Manual tenant name is required when using manual tenant entry' } };
         }
         // Validate that either propertyId/tenantId are provided or manual entries are used
-        if (!propertyId && !manualPropertyAddress) {
+        if (!rawPropertyId && !manualPropertyAddress) {
             return { error: { status: 400, message: 'Either propertyId or manual property address is required' } };
         }
-        if (!tenantId && !manualTenantName) {
+        if (!rawTenantId && !manualTenantName) {
             return { error: { status: 400, message: 'Either tenantId or manual tenant name is required' } };
+        }
+        // Validate ObjectId formats when not manual
+        if (!manualProperty && rawPropertyId && !mongoose_1.default.Types.ObjectId.isValid(rawPropertyId)) {
+            return { error: { status: 400, message: 'Invalid propertyId format' } };
+        }
+        if (!manualTenant && rawTenantId && !mongoose_1.default.Types.ObjectId.isValid(rawTenantId)) {
+            return { error: { status: 400, message: 'Invalid tenantId format' } };
+        }
+        if (rawAgentId && !mongoose_1.default.Types.ObjectId.isValid(rawAgentId)) {
+            return { error: { status: 400, message: 'Invalid agentId format' } };
+        }
+        if (rawProcessedBy && !mongoose_1.default.Types.ObjectId.isValid(rawProcessedBy)) {
+            return { error: { status: 400, message: 'Invalid processedBy format' } };
+        }
+        if (rawLeaseId && !mongoose_1.default.Types.ObjectId.isValid(rawLeaseId)) {
+            return { error: { status: 400, message: 'Invalid leaseId format' } };
+        }
+        if (rawSaleId && !mongoose_1.default.Types.ObjectId.isValid(rawSaleId)) {
+            return { error: { status: 400, message: 'Invalid saleId format' } };
+        }
+        if (rawOwnerId && !mongoose_1.default.Types.ObjectId.isValid(rawOwnerId)) {
+            return { error: { status: 400, message: 'Invalid ownerId format' } };
         }
         // Calculate commission if not provided
         let finalCommissionDetails = commissionDetails;
         if (!finalCommissionDetails) {
             try {
                 // Use property's current commission percent when a real property is provided
-                if (!manualProperty && propertyId) {
-                    const prop = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(propertyId));
+                if (!manualProperty && rawPropertyId) {
+                    const prop = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(rawPropertyId));
                     const commissionPercent = typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number'
                         ? prop.commission
                         : ((propertyType || 'residential') === 'residential' ? 15 : 10);
@@ -347,9 +386,9 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         const payment = new Payment_1.Payment({
             paymentType: paymentType || 'rental',
             propertyType: propertyType || 'residential',
-            propertyId: manualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(propertyId), // Generate new ID for manual entries
-            tenantId: manualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(tenantId), // Generate new ID for manual entries
-            agentId: new mongoose_1.default.Types.ObjectId(agentId || user.userId),
+            propertyId: manualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(rawPropertyId), // Generate new ID for manual entries
+            tenantId: manualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(rawTenantId), // Generate new ID for manual entries
+            agentId: new mongoose_1.default.Types.ObjectId(rawAgentId),
             companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
             paymentDate: new Date(paymentDate),
             paymentMethod,
@@ -359,11 +398,11 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             rentalPeriodYear,
             referenceNumber: referenceNumber || `RCPT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             notes: notes || '',
-            processedBy: new mongoose_1.default.Types.ObjectId(processedBy || user.userId),
+            processedBy: new mongoose_1.default.Types.ObjectId(rawProcessedBy),
             commissionDetails: finalCommissionDetails,
             status: 'completed',
             currency: currency || 'USD',
-            leaseId: leaseId ? new mongoose_1.default.Types.ObjectId(leaseId) : undefined,
+            leaseId: rawLeaseId ? new mongoose_1.default.Types.ObjectId(rawLeaseId) : undefined,
             rentUsed,
             advanceMonthsPaid: advanceMonthsPaid || 1,
             advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
@@ -376,7 +415,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             isInSuspense: markProvisional,
             commissionFinalized: !markProvisional,
             provisionalRelationshipType: markProvisional ? 'unknown' : undefined,
-            saleId: saleId ? new mongoose_1.default.Types.ObjectId(saleId) : undefined,
+            saleId: rawSaleId ? new mongoose_1.default.Types.ObjectId(rawSaleId) : undefined,
         });
         // Save and related updates (with or without session)
         yield payment.save(session ? { session } : undefined);
@@ -402,11 +441,11 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         // Post company revenue and agent commission only if not provisional
         if (!payment.isProvisional) {
             yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare } }, session ? { session } : undefined);
-            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(agentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
+            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(rawAgentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
         }
         if (!payment.isProvisional) {
-            if (paymentType === 'rental' && ownerId) {
-                yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId), { $inc: { balance: finalCommissionDetails.ownerAmount } }, session ? { session } : undefined);
+            if (paymentType === 'rental' && rawOwnerId) {
+                yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(rawOwnerId), { $inc: { balance: finalCommissionDetails.ownerAmount } }, session ? { session } : undefined);
             }
         }
         try {

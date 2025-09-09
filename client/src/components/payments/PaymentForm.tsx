@@ -379,9 +379,25 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                 getOptionLabel={(option: Property) => `${option.name} - ${option.address}`}
                 value={properties.find((p) => String(p._id) === String(formData.propertyId)) || null}
                 onChange={(_, newValue: Property | null) => {
+                  const newPropertyId = newValue ? String(newValue._id) : '';
+                  // Find tenant linked to this property (prefer Active)
+                  let autoTenantId = '';
+                  let autoAgentId = '';
+                  if (newPropertyId) {
+                    const tenantsForProperty = tenants.filter((t) => String(t.propertyId || '') === newPropertyId);
+                    const selectedTenant = tenantsForProperty.find((t) => t.status === 'Active') || tenantsForProperty[0];
+                    if (selectedTenant) {
+                      autoTenantId = String(selectedTenant._id);
+                      if (selectedTenant.ownerId) {
+                        autoAgentId = String(selectedTenant.ownerId);
+                      }
+                    }
+                  }
                   setFormData((prev) => ({
                     ...prev,
-                    propertyId: newValue ? String(newValue._id) : '',
+                    propertyId: newPropertyId,
+                    tenantId: newPropertyId ? autoTenantId : '',
+                    agentId: newPropertyId ? (autoAgentId || prev.agentId || '') : '',
                   }));
                 }}
                 renderInput={(params) => (

@@ -33,7 +33,10 @@ export const useTenantService = () => {
     if (!user?.companyId) {
       throw new Error('Company ID is required');
       }
-    const response = await api.get('/tenants');
+    // Request a high limit to retrieve all tenants for the company (server enforces company scope)
+    const response = await api.get('/tenants', {
+      params: { page: 1, limit: 10000 }
+    });
       return response.data;
   };
 
