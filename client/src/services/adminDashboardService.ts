@@ -187,11 +187,13 @@ export const useAdminDashboardService = () => {
   }, []);
 
   // Tenant functions for admin dashboard
-  const getAdminDashboardTenants = useCallback(async (): Promise<Tenant[]> => {
+  const getAdminDashboardTenants = useCallback(async (search?: string): Promise<Tenant[]> => {
     try {
       console.log('adminDashboardService: getAdminDashboardTenants called (authenticated)');
       // Use authenticated, company-scoped endpoint
-      const response = await api.get('/tenants');
+      const params: any = { page: 1, limit: 10000 };
+      if (search && search.trim()) params.search = search.trim();
+      const response = await api.get('/tenants', { params });
       console.log('Admin Dashboard Tenants API Response:', response.data);
 
       // Normalize data shape: support { data: [...] }, { tenants: [...] }, or direct array

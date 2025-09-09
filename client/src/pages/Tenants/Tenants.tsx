@@ -49,6 +49,22 @@ export const Tenants: React.FC = () => {
     loadTenants();
   }, []);
 
+  // Debounced server-side search across all company tenants
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        setIsLoading(true);
+        const results = await adminDashboardService.getAdminDashboardTenants(search);
+        setTenants(results);
+      } catch (err) {
+        // Keep current list on error
+      } finally {
+        setIsLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const loadTenants = async () => {
     try {
       setIsLoading(true);
@@ -218,6 +234,7 @@ export const Tenants: React.FC = () => {
             </TableHead>
             <TableBody>
               {(() => {
+                // List already server-filtered by search; keep a light client filter for robustness
                 const q = (search || '').trim().toLowerCase();
                 const filtered = tenants.filter((t) => {
                   if (!q) return true;
