@@ -10,7 +10,16 @@ import {
   useTheme,
   useMediaQuery,
   Tabs,
-  Tab
+  Tab,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
@@ -62,6 +71,17 @@ const PaymentsPage: React.FC = () => {
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [currentTab, setCurrentTab] = useState<'payments' | 'requests'>('payments');
   const [showPaymentRequestForm, setShowPaymentRequestForm] = useState(false);
+  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [finalizeLoading, setFinalizeLoading] = useState(false);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [finalizePaymentTarget, setFinalizePaymentTarget] = useState<Payment | null>(null);
+  const [finalizeForm, setFinalizeForm] = useState<{
+    propertyId: string;
+    tenantId: string;
+    ownerId?: string;
+    relationshipType?: 'management' | 'introduction';
+    overrideCommissionPercent?: number;
+  }>({ propertyId: '', tenantId: '', ownerId: undefined, relationshipType: 'management' });
   const redirectToLogin = useCallback((msg?: string) => {
     navigate('/login', {
       state: { from: location.pathname, message: msg || 'Session expired. Please log in.' }
@@ -126,10 +146,11 @@ const PaymentsPage: React.FC = () => {
             api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
           ]);
         } else {
+          const includeParams: any = user?.role === 'admin' ? { includeProvisional: 'true' } : {};
           [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
             propertyService.getPublicProperties(),
             tenantService.getAllPublic(),
-            paymentService.getPayments(),
+            paymentService.getPayments(includeParams),
             paymentService.getLevyPayments(user.companyId)
           ]);
         }
@@ -273,7 +294,7 @@ const PaymentsPage: React.FC = () => {
         // Use agent-scoped endpoint if agent, otherwise company payments
         const basePayments: any[] = user?.role === 'agent'
           ? await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data)
-          : await paymentService.getPayments(filterParams);
+          : await paymentService.getPayments({ ...filterParams, ...(user?.role === 'admin' ? { includeProvisional: 'true' } : {}) });
 
         // Fetch levy payments and apply same filters client-side
         let levy: any[] = [];
@@ -495,6 +516,47 @@ const PaymentsPage: React.FC = () => {
     }
   }, [user?.companyId]);
 
+  const handleOpenFinalize = useCallback((payment: Payment) => {
+    setFinalizePaymentTarget(payment);
+    setFinalizeError(null);
+    setFinalizeForm({
+      propertyId: '',
+      tenantId: '',
+      ownerId: undefined,
+      relationshipType: 'management'
+    });
+    setFinalizeOpen(true);
+  }, []);
+
+  const handleConfirmFinalize = useCallback(async () => {
+    if (!finalizePaymentTarget) return;
+    if (!finalizeForm.propertyId || !finalizeForm.tenantId) {
+      setFinalizeError('Please select property and tenant to finalize.');
+      return;
+    }
+    try {
+      setFinalizeLoading(true);
+      setFinalizeError(null);
+      const resp = await paymentService.finalizeProvisionalPayment(finalizePaymentTarget._id, {
+        propertyId: finalizeForm.propertyId,
+        tenantId: finalizeForm.tenantId,
+        ownerId: finalizeForm.ownerId,
+        relationshipType: finalizeForm.relationshipType,
+        overrideCommissionPercent: finalizeForm.overrideCommissionPercent
+      });
+      const updated = (resp as any).payment || (resp as any).data || resp;
+      setPayments(prev => prev.map(p => p._id === (updated._id || finalizePaymentTarget._id) ? updated : p));
+      setSuccessMessage('Payment finalized successfully');
+      setFinalizeOpen(false);
+      setFinalizePaymentTarget(null);
+    } catch (err: any) {
+      console.error('Finalize payment failed:', err);
+      setFinalizeError(err.response?.data?.message || err.message || 'Failed to finalize payment');
+    } finally {
+      setFinalizeLoading(false);
+    }
+  }, [finalizePaymentTarget, finalizeForm]);
+
   const handlePaymentRequestSubmit = useCallback(async (formData: any) => {
     if (!user?.companyId) {
       redirectToLogin('Please log in to create payment requests');
@@ -699,15 +761,12 @@ const PaymentsPage: React.FC = () => {
               <PaymentList
                 payments={payments}
                 onEdit={handlePaymentClick}
-                onFinalize={async (payment) => {
-                  try {
-                    if (user?.role === 'agent') {
-                      alert('Please contact accounting to finalize manual payments, or use the accountant dashboard.');
-                      return;
-                    }
-                    // Non-agent roles should finalize via accountant dashboard page
-                    navigate('/accountant/payments');
-                  } catch {}
+                onFinalize={(payment) => {
+                  if (user?.role === 'agent') {
+                    alert('Please contact accounting to finalize manual payments, or use the accountant dashboard.');
+                    return;
+                  }
+                  handleOpenFinalize(payment);
                 }}
                 onDownloadReceipt={handleDownloadReceipt}
                 onFilterChange={handleFilterChange}
@@ -755,6 +814,72 @@ const PaymentsPage: React.FC = () => {
           )}
         </Box>
       </Box>
+      {/* Finalize Provisional Payment Dialog */}
+      {finalizeOpen && (
+        <Dialog open={finalizeOpen} onClose={() => setFinalizeOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Finalize Payment</DialogTitle>
+          <DialogContent>
+            {finalizeError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setFinalizeError(null)}>
+                {finalizeError}
+              </Alert>
+            )}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Property</InputLabel>
+                <Select
+                  value={finalizeForm.propertyId}
+                  label="Property"
+                  onChange={(e) => setFinalizeForm(prev => ({ ...prev, propertyId: String(e.target.value) }))}
+                >
+                  <MenuItem value="">Select property</MenuItem>
+                  {properties.map((p) => (
+                    <MenuItem key={p._id} value={p._id}>{p.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>Tenant</InputLabel>
+                <Select
+                  value={finalizeForm.tenantId}
+                  label="Tenant"
+                  onChange={(e) => setFinalizeForm(prev => ({ ...prev, tenantId: String(e.target.value) }))}
+                >
+                  <MenuItem value="">Select tenant</MenuItem>
+                  {tenants.map((t) => (
+                    <MenuItem key={t._id} value={t._id}>{(t as any).firstName || ''} {(t as any).lastName || ''}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>Relationship Type</InputLabel>
+                <Select
+                  value={finalizeForm.relationshipType || ''}
+                  label="Relationship Type"
+                  onChange={(e) => setFinalizeForm(prev => ({ ...prev, relationshipType: (e.target.value as any) }))}
+                >
+                  <MenuItem value="management">Management</MenuItem>
+                  <MenuItem value="introduction">Introduction</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField
+                size="small"
+                type="number"
+                label="Override Commission % (optional)"
+                value={finalizeForm.overrideCommissionPercent ?? ''}
+                onChange={(e) => setFinalizeForm(prev => ({ ...prev, overrideCommissionPercent: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                inputProps={{ min: 0, max: 100 }}
+              />
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setFinalizeOpen(false)} disabled={finalizeLoading}>Cancel</Button>
+            <Button variant="contained" onClick={handleConfirmFinalize} disabled={finalizeLoading}>
+              {finalizeLoading ? 'Finalizing...' : 'Finalize'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   );
 };

@@ -72,7 +72,7 @@ const CardContent = ({ className = "", children }) => (
   <div className={cls("p-4", className)}>{children}</div>
 );
 const Button = ({ children, className = "", onClick, type = "button" }) => (
-  <button type={type} onClick={onClick} className={cls("px-3 py-2 rounded-xl border text-sm font-medium hover:shadow-sm transition active:scale-[.99] border-slate-200 bg-white text-slate-700 hover:bg-slate-50", className)}>
+  <button type={type} onClick={onClick} className={cls("px-3 py-2 rounded-xl border text-sm font-medium hover:shadow-sm transition active:scale-[.99] border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200", className)}>
     {children}
   </button>
 );
@@ -109,7 +109,7 @@ const Modal = ({ open, onClose, title, children, width = "max-w-2xl" }) => {
       <div className={cls("relative w-full mx-4 bg-white rounded-2xl shadow-xl border", width)}>
         <div className="p-4 border-b flex items-center justify-between rounded-t-2xl">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100">✕</button>
+          <button onClick={onClose} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200">✕</button>
         </div>
         <div className="p-4">{children}</div>
       </div>
@@ -309,7 +309,7 @@ export default function CRM() {
         email: owner.email,
         phone: owner.phone,
         password: owner.password
-      });
+      }, { channel: 'sales' });
       await refreshOwners();
     } catch (e) {
       // no-op fallback
@@ -400,7 +400,7 @@ export default function CRM() {
           <div className="w-full max-w-md relative">
             <Input placeholder="Search leads, buyers, properties…" value={query} onChange={e=>setQuery(e.target.value)} />
             {query && (
-              <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" onClick={()=>setQuery("")}>Clear</button>
+              <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 bg-slate-100 px-2 py-1 rounded hover:bg-slate-200" onClick={()=>setQuery("")}>Clear</button>
             )}
           </div>
         </div>
@@ -410,21 +410,21 @@ export default function CRM() {
         <aside className="w-60 shrink-0">
           <div className="rounded-2xl border border-slate-200 bg-white p-3 flex flex-col h-full min-h-[80vh]">
             <div className="px-3 py-2 text-xs uppercase tracking-wider text-slate-400">Main menu</div>
-            <button className={cls("mt-1 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='dashboard'?"bg-transparent text-slate-900 border-slate-900":"bg-white hover:bg-slate-50") } onClick={()=>{ setNav('dashboard'); navigate('/sales-dashboard'); }}>
+            <button className={cls("mt-1 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='dashboard'?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200") } onClick={()=>{ setNav('dashboard'); navigate('/sales-dashboard'); }}>
               <IconDashboard className="h-4 w-4" />
               <span>Dashboard</span>
             </button>
-            <button className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='files'?"bg-transparent text-slate-900 border-slate-900":"bg-white hover:bg-slate-50") } onClick={()=>setNav('files')}>
+            <button className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='files'?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200") } onClick={()=>setNav('files')}>
               <IconFolder className="h-4 w-4" />
               <span>Files</span>
             </button>
             <div className="mt-auto">
               <div className="px-3 py-2 text-xs uppercase tracking-wider text-slate-400">Help & Support</div>
-              <button title="Notifications" className="flex items-center justify-between px-3 py-2 rounded-xl border text-sm hover:bg-slate-50">
+              <button title="Notifications" className="flex items-center justify-between px-3 py-2 rounded-xl border text-sm bg-slate-100 hover:bg-slate-200">
                 <span className="flex items-center gap-3"><IconBell className="h-4 w-4"/> Notifications</span>
                 <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-xs bg-rose-100 text-rose-700 border border-rose-200">3</span>
               </button>
-              <button title="Settings" className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm", nav==='settings'?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50")} onClick={()=>{ setNav('settings'); navigate('/sales-dashboard/settings'); }}>
+              <button title="Settings" className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm", nav==='settings'?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={()=>{ setNav('settings'); navigate('/sales-dashboard/settings'); }}>
                 <IconCog className="h-4 w-4" />
                 <span>Settings</span>
               </button>
@@ -468,7 +468,7 @@ export default function CRM() {
           {[
             "Leads","Viewings","Buyers","Owners","Properties","Deals"
           ].map(t => (
-            <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-white hover:bg-slate-50")}>{t}</Button>
+            <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
           ))}
           <div className="flex-1" />
           {/* Quick add menu */}
@@ -517,13 +517,13 @@ export default function CRM() {
                         <td className="py-2">{l.email}</td>
                         <td className="py-2"><Badge className={leadColors[l.status]}>{l.status}</Badge></td>
                         <td className="py-2 flex gap-2">
-                          {(["New","Contacted","Qualified","Viewing","Offer","Won","Lost"]).map(s=> (
-                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", l.status===s?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50")} onClick={async ()=>{ await leadService.update(l.id, { status: s }); await refreshLeads(); }}>{s}</button>
+                          {["New","Contacted","Qualified","Viewing","Offer","Won","Lost"].map(s=> (
+                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", l.status===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={async ()=>{ await leadService.update(l.id, { status: s }); await refreshLeads(); }}>{s}</button>
                           ))}
-                          <button className="text-xs px-2 py-1 rounded-lg border hover:bg-slate-50" onClick={()=>{
+                          <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>{
                             setShowViewingModal(true);
                           }}>Schedule Viewing</button>
-                          <button className="text-xs px-2 py-1 rounded-lg border hover:bg-slate-50" onClick={()=>{
+                          <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>{
                             setShowDealModal(true);
                           }}>Create Deal</button>
                         </td>
@@ -690,8 +690,8 @@ export default function CRM() {
                         <td className="py-2">{p.bedrooms} / {p.bathrooms}</td>
                         <td className="py-2"><Badge className={propertyColors[p.status]}>{p.status}</Badge></td>
                         <td className="py-2 flex gap-2">
-                          {(["Available","Under Offer","Sold"]).map(s => (
-                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", p.status===s?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50")} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
+                          {["Available","Under Offer","Sold"].map(s => (
+                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", p.status===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
                           ))}
                         </td>
                       </tr>
@@ -739,8 +739,8 @@ export default function CRM() {
                         <td className="py-2">{money(d.offerPrice)}</td>
                         <td className="py-2">{d.closeDate ? new Date(d.closeDate).toLocaleDateString() : "—"}</td>
                         <td className="py-2 flex gap-2">
-                          {(["Offer","Due Diligence","Contract","Closing"]).map(s => (
-                            <button key={s} disabled={d.won} className={cls("text-xs px-2 py-1 rounded-lg border", d.stage===s?"bg-transparent text-slate-900 border-slate-900":"hover:bg-slate-50", d.won && "opacity-50 cursor-not-allowed")} onClick={async ()=>{ await dealService.update(d.id, { stage: s }); await refreshDeals(); }}>{s}</button>
+                          {["Offer","Due Diligence","Contract","Closing"].map(s => (
+                            <button key={s} disabled={d.won} className={cls("text-xs px-2 py-1 rounded-lg border", d.stage===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200", d.won && "opacity-50 cursor-not-allowed")} onClick={async ()=>{ await dealService.update(d.id, { stage: s }); await refreshDeals(); }}>{s}</button>
                           ))}
                           <button disabled={d.won} className={cls("text-xs px-2 py-1 rounded-lg border bg-emerald-600 text-white border-emerald-600", d.won && "opacity-50 cursor-not-allowed")} onClick={async ()=>{ await dealService.update(d.id, { won: true, closeDate: new Date().toISOString() }); await refreshDeals(); }}>Mark Won</button>
                         </td>

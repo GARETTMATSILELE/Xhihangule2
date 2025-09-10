@@ -1,0 +1,64 @@
+"use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getSalesOwners = exports.createSalesOwner = void 0;
+const SalesOwner_1 = require("../models/SalesOwner");
+const createSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        if (!req.user.companyId) {
+            return res.status(401).json({ message: 'Company ID not found' });
+        }
+        const { email, password, firstName, lastName, phone } = req.body;
+        if (!email || !password || !firstName || !lastName || !phone) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+        const existing = yield SalesOwner_1.SalesOwner.findOne({ email, companyId: req.user.companyId });
+        if (existing) {
+            return res.status(400).json({ message: 'Sales owner with this email already exists' });
+        }
+        const owner = new SalesOwner_1.SalesOwner({
+            email,
+            password,
+            firstName,
+            lastName,
+            phone,
+            companyId: req.user.companyId,
+            creatorId: req.user.userId
+        });
+        yield owner.save();
+        const response = owner.toObject();
+        delete response.password;
+        res.status(201).json(response);
+    }
+    catch (error) {
+        console.error('Error creating sales owner:', error);
+        res.status(500).json({ message: 'Error creating sales owner' });
+    }
+});
+exports.createSalesOwner = createSalesOwner;
+const getSalesOwners = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Company ID not found' });
+        }
+        const owners = yield SalesOwner_1.SalesOwner.find({ companyId: req.user.companyId, creatorId: req.user.userId }).select('-password');
+        res.json({ owners });
+    }
+    catch (error) {
+        console.error('Error fetching sales owners:', error);
+        res.status(500).json({ message: 'Error fetching sales owners' });
+    }
+});
+exports.getSalesOwners = getSalesOwners;

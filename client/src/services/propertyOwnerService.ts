@@ -28,8 +28,8 @@ export const usePropertyOwnerService = () => {
       if (companyId) {
         config.params = { companyId };
       }
-      
-      const response = await api.get('/property-owners', config);
+      // Sales channel: fetch only owners created by this user from sales-owners
+      const response = await api.get('/sales-owners', config);
       return { owners: response.data.owners || response.data };
     } catch (error: any) {
       console.error('Error fetching property owners:', error);
@@ -69,7 +69,7 @@ export const usePropertyOwnerService = () => {
     }
   };
 
-  const create = async (ownerData: CreatePropertyOwnerData) => {
+  const create = async (ownerData: CreatePropertyOwnerData, opts?: { channel?: 'sales' | 'default' }) => {
     try {
       const companyId = getCompanyId();
       
@@ -77,8 +77,9 @@ export const usePropertyOwnerService = () => {
       if (!ownerData.companyId && companyId) {
         ownerData.companyId = companyId;
       }
-      
-      const response = await api.post('/property-owners', ownerData);
+      // Route to sales-owners endpoint when channel is 'sales'
+      const url = opts?.channel === 'sales' ? '/sales-owners' : '/property-owners';
+      const response = await api.post(url, ownerData);
       return response.data;
     } catch (error: any) {
       console.error('Error creating property owner:', error);
