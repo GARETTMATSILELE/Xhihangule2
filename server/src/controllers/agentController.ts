@@ -566,7 +566,22 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
     }
 
     const allowedFields = [
-      'name','address','type','status','description','rent','bedrooms','bathrooms','area','images','amenities','rentalType','commission'
+      'name',
+      'address',
+      'type',
+      'status',
+      'description',
+      'rent',
+      'bedrooms',
+      'bathrooms',
+      'area',
+      'images',
+      'amenities',
+      'rentalType',
+      'commission',
+      // Allow updating levy/municipal fields
+      'levyOrMunicipalType',
+      'levyOrMunicipalAmount'
     ] as const;
     const updateData: any = { updatedAt: new Date() };
     for (const key of allowedFields) {

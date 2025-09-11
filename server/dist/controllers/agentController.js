@@ -528,7 +528,22 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
             return res.status(404).json({ message: 'Property not found or you do not have permission to update it.' });
         }
         const allowedFields = [
-            'name', 'address', 'type', 'status', 'description', 'rent', 'bedrooms', 'bathrooms', 'area', 'images', 'amenities', 'rentalType', 'commission'
+            'name',
+            'address',
+            'type',
+            'status',
+            'description',
+            'rent',
+            'bedrooms',
+            'bathrooms',
+            'area',
+            'images',
+            'amenities',
+            'rentalType',
+            'commission',
+            // Allow updating levy/municipal fields
+            'levyOrMunicipalType',
+            'levyOrMunicipalAmount'
         ];
         const updateData = { updatedAt: new Date() };
         for (const key of allowedFields) {
