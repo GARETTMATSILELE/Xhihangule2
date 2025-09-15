@@ -1,5 +1,4 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { getAccessToken, getRefreshToken, setTokens } from '../contexts/AuthContext';
 
 // Default API URL with sensible defaults for dev and production
 const isBrowser = typeof window !== 'undefined';
@@ -14,6 +13,31 @@ const api = axios.create({
   },
   withCredentials: true // This ensures cookies are sent with requests
 });
+
+// Local token helpers to avoid circular dependency with AuthContext
+const getAccessToken = (): string | null => {
+  try {
+    return localStorage.getItem('accessToken');
+  } catch {
+    return null;
+  }
+};
+
+const setTokens = (newAccessToken: string | null, newRefreshToken: string | null) => {
+  if (newAccessToken) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
+    try { localStorage.setItem('accessToken', newAccessToken); } catch {}
+  } else {
+    delete api.defaults.headers.common['Authorization'];
+    try { localStorage.removeItem('accessToken'); } catch {}
+  }
+  if (newRefreshToken !== null) {
+    try {
+      if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
+      else localStorage.removeItem('refreshToken');
+    } catch {}
+  }
+};
 
 // Track if we're currently refreshing a token
 let isRefreshing = false;

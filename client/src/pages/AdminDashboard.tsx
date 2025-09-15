@@ -74,7 +74,7 @@ import { Maintenance } from './Maintenance/Maintenance';
 import { UserManagement } from '../pages/UserManagement/UserManagement';
 import { TooltipProps } from 'recharts';
 import CommunicationsPage from './Communications/CommunicationsPage';
-import PropertyOwnersPage from './PropertyOwners/PropertyOwnersPage';
+import AdminPropertyOwnersPage from './admin/AdminPropertyOwnersPage';
 import { Files } from './Files/Files';
 import { useAdminDashboardService } from '../services/adminDashboardService';
 import { useAuth } from '../contexts/AuthContext';
@@ -487,7 +487,7 @@ const AdminDashboard: React.FC = () => {
             <Route path="/users" element={<UserManagement />} />
             <Route path="/maintenance" element={<MaintenancePageWrapper userRole="admin" />} />
             <Route path="/properties" element={<Properties />} />
-            <Route path="/property-owners" element={<PropertyOwnersPage />} />
+            <Route path="/property-owners" element={<AdminPropertyOwnersPage />} />
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/leases" element={<AdminLeasesPage />} />
             <Route path="/payments" element={<PaymentsPageWrapper userRole="admin" />} />

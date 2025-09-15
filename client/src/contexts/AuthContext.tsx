@@ -26,6 +26,7 @@ interface AuthContextType {
   user: User | null;
   company: Company | null;
   isAuthenticated: boolean;
+  isImpersonating?: boolean;
   loading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<User>;
@@ -33,6 +34,8 @@ interface AuthContextType {
   signup: (email: string, password: string, name: string, company?: CreateCompany) => Promise<void>;
   clearError: () => void;
   refreshUser: () => Promise<void>;
+  impersonate: (userId: string) => Promise<void>;
+  stopImpersonation: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -82,6 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
+  const [isImpersonating, setIsImpersonating] = useState(false);
 
   const clearError = () => setError(null);
 
@@ -97,9 +101,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Check if we have tokens in localStorage (for persistence across page reloads)
         const storedAccessToken = localStorage.getItem('accessToken');
         const storedRefreshToken = localStorage.getItem('refreshToken');
+        const storedImpersonating = localStorage.getItem('impersonating') === 'true';
         
         if (storedAccessToken && storedRefreshToken) {
           setTokens(storedAccessToken, storedRefreshToken);
+          setIsImpersonating(storedImpersonating);
           
           try {
             // Validate the token by fetching user data
@@ -111,6 +117,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             setUser(userData);
             setIsAuthenticated(true);
+            if (storedImpersonating) {
+              // When impersonating, do not auto-redirect away; keep current path
+              console.log('Resuming impersonation session');
+            }
             
             // Fetch company data if available
             if (userData.companyId) {
@@ -314,6 +324,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
+      localStorage.removeItem('impersonating');
+      setIsImpersonating(false);
       setLoading(false);
       navigate('/login');
     }
@@ -383,18 +395,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const impersonate = async (userId: string) => {
+    try {
+      setLoading(true);
+      const response = await api.post('/auth/impersonate', { userId });
+      const { token: newAccessToken, refreshToken: newRefreshToken, user: impersonatedUser } = response.data;
+      if (!newAccessToken) {
+        throw new Error('No access token received for impersonation');
+      }
+      setTokens(newAccessToken, newRefreshToken);
+      localStorage.setItem('accessToken', newAccessToken);
+      if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
+      localStorage.setItem('user', JSON.stringify(impersonatedUser));
+      localStorage.setItem('impersonating', 'true');
+      setUser(impersonatedUser);
+      setIsAuthenticated(true);
+      setIsImpersonating(true);
+    } catch (err) {
+      console.error('Impersonation failed:', err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const stopImpersonation = async () => {
+    try {
+      setLoading(true);
+      const response = await api.post('/auth/impersonate/stop');
+      const { token: newAccessToken, refreshToken: newRefreshToken, user: originalUser } = response.data || {};
+      if (!newAccessToken) {
+        // Fallback: try refresh-token to restore original
+        try {
+          const refreshResponse = await api.post('/auth/refresh-token');
+          const { token, refreshToken } = refreshResponse.data;
+          setTokens(token, refreshToken);
+          localStorage.setItem('accessToken', token);
+          if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
+        } catch (e) {
+          console.warn('Failed to refresh token after stop impersonation');
+        }
+      } else {
+        setTokens(newAccessToken, newRefreshToken);
+        localStorage.setItem('accessToken', newAccessToken);
+        if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
+      }
+      // Reload /auth/me to get current user
+      await refreshUser();
+      localStorage.removeItem('impersonating');
+      setIsImpersonating(false);
+    } catch (err) {
+      console.error('Stop impersonation failed:', err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user,
       company,
       isAuthenticated,
+      isImpersonating,
       loading,
       error,
       login,
       logout,
       signup,
       clearError,
-      refreshUser
+      refreshUser,
+      impersonate,
+      stopImpersonation
     }}>
       {children}
     </AuthContext.Provider>

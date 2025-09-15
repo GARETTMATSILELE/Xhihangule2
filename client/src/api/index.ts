@@ -162,6 +162,9 @@ export const apiService = {
   updateTwoFactor: (enabled: boolean) => 
     apiInstance.put('/users/me/2fa', { enabled }),
 
+  // Impersonation
+  impersonateUser: (userId: string) => apiInstance.post('/auth/impersonate', { userId }),
+
   // Role Management
   getRoles: () => apiInstance.get('/roles'),
 
