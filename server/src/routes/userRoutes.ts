@@ -1,5 +1,6 @@
 import express from 'express';
 import { createUser, getCurrentUser, updateUserById } from '../controllers/userController';
+import { getUserCommissionSummary } from '../controllers/userController';
 import { User } from '../models/User';
 import { Request, Response, NextFunction } from 'express';
 import { authWithCompany, authorize } from '../middleware/auth';
@@ -29,8 +30,9 @@ router.get('/public/agents', async (req: Request, res: Response) => {
 
     // Get company ID from query params or headers (for admin dashboard)
     const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
+    const role = (req.query.role as string) || 'agent';
     
-    let query: any = { role: 'agent' };
+    let query: any = { role };
     
     // Filter by company ID if provided
     if (companyId) {
@@ -114,12 +116,23 @@ router.get('/', authorize(['admin']), async (req: Request, res, next) => {
 router.get('/agents', authorize(['admin', 'accountant', 'agent']), async (req: Request, res, next) => {
   try {
     console.log('GET /agents route hit');
-    const query: any = { companyId: req.user?.companyId, role: 'agent' };
+    const role = (req.query.role as string) || 'agent';
+    const query: any = { companyId: req.user?.companyId, role };
     const agents = await User.find(query).select('firstName lastName email role companyId');
     console.log('Found agents:', agents.length);
     res.json(agents);
   } catch (error) {
     console.error('Error in GET /agents:', error);
+    next(error);
+  }
+});
+
+// Commission summary for user (agent) - self, admin, accountant
+router.get('/:id/commission', async (req: Request, res, next) => {
+  try {
+    // authWithCompany is already applied above; just delegate to controller
+    await getUserCommissionSummary(req, res);
+  } catch (error) {
     next(error);
   }
 });

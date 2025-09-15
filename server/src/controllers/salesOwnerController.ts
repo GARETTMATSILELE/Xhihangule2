@@ -52,4 +52,24 @@ export const getSalesOwners = async (req: Request, res: Response) => {
   }
 };
 
+export const getSalesOwnerById = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Company ID not found' });
+    }
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({ message: 'Sales owner ID is required' });
+    }
+    const owner = await SalesOwner.findOne({ _id: id, companyId: req.user.companyId }).select('-password');
+    if (!owner) {
+      return res.status(404).json({ message: 'Sales owner not found' });
+    }
+    res.json(owner);
+  } catch (error) {
+    console.error('Error fetching sales owner by id:', error);
+    res.status(500).json({ message: 'Error fetching sales owner' });
+  }
+};
+
 

@@ -9,4 +9,5 @@ const salesOwnerController_1 = require("../controllers/salesOwnerController");
 const router = express_1.default.Router();
 router.post('/', auth_1.authWithCompany, salesOwnerController_1.createSalesOwner);
 router.get('/', auth_1.authWithCompany, salesOwnerController_1.getSalesOwners);
+router.get('/:id', auth_1.authWithCompany, salesOwnerController_1.getSalesOwnerById);
 exports.default = router;

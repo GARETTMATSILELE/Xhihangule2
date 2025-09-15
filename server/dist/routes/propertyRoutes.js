@@ -114,6 +114,10 @@ router.get('/', auth_1.authWithCompany, propertyController_1.getProperties);
 router.get('/vacant', auth_1.authWithCompany, propertyController_1.getVacantProperties);
 router.get('/:id', auth_1.authWithCompany, propertyController_1.getProperty);
 router.post('/', auth_1.authWithCompany, roles_1.canCreateProperty, propertyController_1.createProperty);
+// Sales route for creating property with sales fields
+router.post('/sales', auth_1.authWithCompany, propertyController_1.createSalesProperty);
+// Allow sales/agents to update their own sales properties (controller enforces ownership)
+router.put('/sales/:id', auth_1.authWithCompany, propertyController_1.updateProperty);
 router.put('/:id', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.updateProperty);
 router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.deleteProperty);
 exports.default = router;

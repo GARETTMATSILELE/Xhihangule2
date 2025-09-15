@@ -27,6 +27,12 @@ const OwnerDashboard = lazy(() => import('./components/owner/OwnerDashboard'));
 const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
 const AccountantDashboard = lazy(() => import('./pages/AccountantDashboard'));
 const SalesDashboard = lazy(() => import('./pages/SalesDashboard'));
+const SalesLeadsPage = lazy(() => import('./pages/SalesDashboard/LeadsPage'));
+const SalesViewingsPage = lazy(() => import('./pages/SalesDashboard/ViewingsPage'));
+const SalesBuyersPage = lazy(() => import('./pages/SalesDashboard/BuyersPage'));
+const SalesOwnersPage = lazy(() => import('./pages/SalesDashboard/OwnersPage'));
+const SalesPropertiesPage = lazy(() => import('./pages/SalesDashboard/PropertiesPage'));
+const SalesDealsPage = lazy(() => import('./pages/SalesDashboard/DealsPage'));
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })));
 const DashboardOverview = lazy(() => import('./pages/AccountantDashboard/DashboardOverview'));
 const AccountantPaymentsPage = lazy(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
@@ -78,6 +84,10 @@ const theme = createTheme({
     },
   },
 });
+
+// Temporary stub to satisfy builds if any stale references exist.
+// Safe to remove once caches are fully cleared and no references remain.
+const SalesFilesPage: React.FC = () => null;
 
 const App: React.FC = () => {
   return (
@@ -134,6 +144,60 @@ const App: React.FC = () => {
                   <PropertyProvider>
                     <CompanyProvider>
                       <SalesDashboard />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/leads" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesLeadsPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/viewings" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesViewingsPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/buyers" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesBuyersPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/owners" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesOwnersPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/properties" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesPropertiesPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/deals" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesDealsPage />
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>

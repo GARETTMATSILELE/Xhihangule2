@@ -19,7 +19,7 @@ interface PaymentReceiptProps {
 
 const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => {
   const [paidToDate, setPaidToDate] = useState<number | null>(null);
-  const isSale = useMemo(() => (receipt?.paymentType || receipt?.type) === 'introduction', [receipt]);
+  const isSale = useMemo(() => (receipt?.paymentType || receipt?.type) === 'sale', [receipt]);
   const groupRef = useMemo(() => receipt?.saleId || receipt?.referenceNumber || receipt?.manualPropertyAddress || '', [receipt]);
   const currency = receipt?.currency || 'USD';
   const isLevy = useMemo(() => (receipt?.paymentType || receipt?.type) === 'levy', [receipt]);
@@ -54,9 +54,9 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     const load = async () => {
       if (!isSale || !groupRef) return;
       try {
-        const payments: any[] = await paymentService.getPayments();
+        const payments: any[] = await paymentService.getSalesPayments();
         const related = (Array.isArray(payments) ? payments : [])
-          .filter((p: any) => (p.paymentType === 'introduction'))
+          .filter((p: any) => (p.paymentType === 'sale'))
           .filter((p: any) => (receipt.saleId ? (String(p.saleId) === String(receipt.saleId)) : ((p.referenceNumber && p.referenceNumber === receipt.referenceNumber) || (p.manualPropertyAddress && p.manualPropertyAddress === receipt.manualPropertyAddress))));
         const totalPaid = related.reduce((s: number, p: any) => s + (p.amount || 0), 0);
         if (!cancelled) setPaidToDate(totalPaid);
@@ -193,7 +193,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                   <span class="value">${receipt.manualPropertyAddress || receipt.property?.name || 'N/A'}</span>
                 </div>
                 <div class="detail-row">
-                  <span class="label">Tenant:</span>
+                  <span class="label">${isSale ? 'Buyer' : 'Tenant'}:</span>
                   <span class="value">${receipt.manualTenantName || (receipt.tenant ? receipt.tenant.firstName + ' ' + receipt.tenant.lastName : (receipt.tenantName || 'N/A'))}</span>
                 </div>
                 <div class="detail-row">
@@ -340,7 +340,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
           </Typography>
         </Grid>
         <Grid item xs={6}>
-          <Typography variant="subtitle2" color="textSecondary">{(receipt.paymentType || receipt.type) === 'introduction' ? 'Buyer' : 'Tenant'}</Typography>
+          <Typography variant="subtitle2" color="textSecondary">{(receipt.paymentType || receipt.type) === 'sale' ? 'Buyer' : 'Tenant'}</Typography>
           <Typography variant="body1">
             {receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : (receipt.tenantName || 'N/A'))}
           </Typography>

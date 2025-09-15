@@ -46,6 +46,7 @@ export const apiService = {
   getProperties: () => publicApi.get('/properties/public/all'),
   getProperty: (id: string) => publicApi.get(`/properties/public/${id}`),
   createProperty: (data: any) => publicApi.post('/properties/public', data),
+  createPropertySales: (data: any) => apiInstance.post('/properties/sales', data),
   updateProperty: (id: string, data: any) => publicApi.put(`/properties/${id}`, data),
   deleteProperty: (id: string) => publicApi.delete(`/properties/${id}`),
   getVacantProperties: () => publicApi.get('/properties/vacant'),

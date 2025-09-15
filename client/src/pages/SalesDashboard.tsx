@@ -4,11 +4,18 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useProperties } from "../contexts/PropertyContext";
 import { usePropertyOwnerService } from "../services/propertyOwnerService";
+import accountantService from "../services/accountantService";
+import api from "../api/axios";
+import { useNotification } from "../components/Layout/Header";
+import SalesSidebar from "../components/Layout/SalesSidebar";
+import SalesLeadsPage from "./SalesDashboard/LeadsPage";
 import { dealService } from "../services/dealService";
 import { buyerService } from "../services/buyerService";
 import { leadService } from "../services/leadService";
 import { viewingService } from "../services/viewingService";
 import { apiService } from "../api";
+import { usePropertyService } from "../services/propertyService";
+import paymentService from "../services/paymentService";
 
 // --- Lightweight helpers ---
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -86,6 +93,181 @@ const Badge = ({ children, className = "" }) => (
   <span className={cls("inline-flex items-center px-2 py-1 rounded-full text-xs border", className)}>{children}</span>
 );
 
+// --- Sales Documents component (inline for now) ---
+function SalesDocuments({ propertyId }: { propertyId: string }) {
+  const [files, setFiles] = React.useState<any[]>([]);
+  const [uploading, setUploading] = React.useState<boolean>(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [selectedType, setSelectedType] = React.useState<string>('Other');
+  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+
+  const TYPES = [
+    'Mandate Form',
+    'KYC Form',
+    'Agreement of Sale',
+    'Offer Form',
+    'Title Deeds',
+    'Sectional Title',
+    'Disbursement/Acknowledgment of Receipt',
+    'Other'
+  ];
+
+  const load = React.useCallback(async () => {
+    try {
+      setError(null);
+      // Try sales-files first
+      let res = await api.get(`/sales-files`, { params: { propertyId } });
+      let arr = Array.isArray(res.data?.files) ? res.data.files : (Array.isArray(res.data) ? res.data : []);
+      // Fallback to generic files if sales-files not found
+      if (!Array.isArray(arr) || arr.length === 0) {
+        try {
+          const alt = await api.get(`/files`);
+          const raw = Array.isArray(alt.data) ? alt.data : (Array.isArray(alt.data?.data) ? alt.data.data : []);
+          arr = raw.filter((f: any) => {
+            const pid = typeof f.propertyId === 'object' && f.propertyId?._id ? String(f.propertyId._id) : String(f.propertyId);
+            return pid === propertyId;
+          });
+        } catch {}
+      }
+      setFiles(Array.isArray(arr) ? arr : []);
+    } catch (e: any) {
+      // If 404 on sales-files, fallback to /files
+      try {
+        const alt = await api.get(`/files`);
+        const raw = Array.isArray(alt.data) ? alt.data : (Array.isArray(alt.data?.data) ? alt.data.data : []);
+        const arr = raw.filter((f: any) => {
+          const pid = typeof f.propertyId === 'object' && f.propertyId?._id ? String(f.propertyId._id) : String(f.propertyId);
+          return pid === propertyId;
+        });
+        setFiles(arr);
+        setError(null);
+      } catch (err: any) {
+        setError(err?.response?.data?.message || 'Failed to load documents');
+        setFiles([]);
+      }
+    }
+  }, [propertyId]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const onUpload = async () => {
+    if (!selectedFile) {
+      setError('Select a file first');
+      return;
+    }
+    try {
+      setUploading(true);
+      setError(null);
+      const fd = new FormData();
+      fd.append('file', selectedFile as Blob);
+      fd.append('propertyId', propertyId);
+      fd.append('docType', selectedType);
+      try {
+        await api.post('/sales-files/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          // Fallback to generic files upload schema
+          fd.delete('docType');
+          fd.delete('propertyId');
+          fd.append('fileType', selectedType);
+          fd.append('propertyId', propertyId);
+          await api.post('/files/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        } else {
+          throw err;
+        }
+      }
+      setSelectedFile(null);
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Failed to upload');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onDownload = async (id: string, fileName: string) => {
+    try {
+      let res;
+      try {
+        res = await api.get(`/sales-files/${id}/download`, { responseType: 'blob' });
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          res = await api.get(`/files/download/${id}`, { responseType: 'blob' });
+        } else {
+          throw err;
+        }
+      }
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'document';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setError('Failed to download file');
+    }
+  };
+
+  const onDelete = async (id: string) => {
+    try {
+      try {
+        await api.delete(`/sales-files/${id}`);
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          await api.delete(`/files/${id}`);
+        } else {
+          throw err;
+        }
+      }
+      await load();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Failed to delete file');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {error && <div className="text-sm text-rose-600">{error}</div>}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <select className="px-3 py-2 rounded-xl border" value={selectedType} onChange={e=>setSelectedType(e.target.value)}>
+          {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input type="file" onChange={e=>setSelectedFile((e.target.files || [])[0] || null)} className="px-3 py-2 rounded-xl border" />
+        <button onClick={onUpload} disabled={uploading} className="px-3 py-2 rounded-xl border bg-slate-900 text-white disabled:opacity-50">{uploading? 'Uploading…' : 'Upload'}</button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-slate-600">
+              <th className="py-2">File Name</th>
+              <th className="py-2">Type</th>
+              <th className="py-2">Uploaded</th>
+              <th className="py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {files.map((f: any) => (
+              <tr key={f._id} className="border-t">
+                <td className="py-2">{f.fileName}</td>
+                <td className="py-2">{f.docType || f.fileType}</td>
+                <td className="py-2">{new Date(f.uploadedAt || Date.now()).toLocaleString()}</td>
+                <td className="py-2 flex gap-3">
+                  <button className="text-xs underline" onClick={()=>onDownload(f._id, f.fileName)}>Download</button>
+                  <button className="text-xs underline text-rose-700" onClick={()=>onDelete(f._id)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+            {files.length === 0 && (
+              <tr><td className="py-2 text-slate-500" colSpan={4}>No documents uploaded yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // --- Minimal icons (inline SVGs) ---
 const IconDashboard = ({ className = "h-5 w-5" }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm10 0h8v5h-8V3zM3 13h5v8H3v-8zm7 0h11v8H10v-8z"/></svg>
@@ -140,14 +322,17 @@ const propertyColors = {
 
 // --- Main CRM component ---
 export default function CRM() {
-  const { user } = useAuth();
-  const { properties: backendProperties, addProperty: addBackendProperty, refreshProperties } = useProperties();
+  const { user, logout } = useAuth();
+  const { properties: backendProperties, refreshProperties } = useProperties();
+  const propertyService = usePropertyService();
   const propertyOwnerService = usePropertyOwnerService();
   const navigate = useNavigate();
   const location = useLocation();
+  const { notifications, addNotification, markAllRead } = useNotification();
   const [tab, setTab] = useState("Leads");
   const [query, setQuery] = useState("");
   const [nav, setNav] = useState<'dashboard' | 'files' | 'settings'>('dashboard');
+  const [editPropertyId, setEditPropertyId] = useState<string | null>(null);
   const displayName = (user ? `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email : "Property CRM");
   const userInitials = useMemo(() => {
     const fn = (user?.firstName || '').trim();
@@ -257,19 +442,63 @@ export default function CRM() {
     return String(maybe);
   };
 
-  const propertyIdToOwnerName = useMemo(() => {
-    const map: Record<string, string> = {};
+  const ownersById = useMemo(() => {
+    const map: Record<string, any> = {};
     (owners || []).forEach((o: any) => {
-      const full = `${o.firstName || ''} ${o.lastName || ''}`.trim();
-      if (Array.isArray(o.properties)) {
-        o.properties.forEach((pid: any) => {
-          const key = getId(pid);
-          if (key) map[key] = full;
-        });
-      }
+      const key = getId(o?._id);
+      if (key) map[key] = o;
     });
     return map;
   }, [owners]);
+
+  const propertyIdToOwnerDetails = useMemo(() => {
+    const map: Record<string, { name: string; phone?: string; email?: string }> = {};
+    (backendProperties || []).forEach((bp: any) => {
+      const propertyId = getId(bp?._id);
+      const ownerId = getId((bp as any)?.propertyOwnerId) || getId((bp as any)?.ownerId);
+      if (!propertyId || !ownerId) return;
+      const o = ownersById[ownerId];
+      if (!o) return;
+      const name = (`${o.firstName || ''} ${o.lastName || ''}`.trim()) || o.name || 'Unknown';
+      map[propertyId] = { name, phone: o.phone, email: o.email };
+    });
+    return map;
+  }, [backendProperties, ownersById]);
+
+  // --- Notifications: Viewings starting in 30 minutes ---
+  const viewingNotifiedRef = React.useRef<Set<string>>(new Set());
+
+  // --- Notifications: New commission paid (only for admin/accountant roles) ---
+  const commissionNotifiedRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const isAuthorized = user?.role === 'admin' || user?.role === 'accountant';
+    if (!isAuthorized) return;
+    let cancelled = false;
+    const fetchAndNotify = async () => {
+      try {
+        const data = await accountantService.getAgencyCommission({ filterType: 'daily' });
+        const details = Array.isArray(data?.details) ? data.details : [];
+        details.forEach((d: any) => {
+          const pid = String(d.paymentId || '');
+          if (!pid || commissionNotifiedRef.current.has(pid)) return;
+          commissionNotifiedRef.current.add(pid);
+          addNotification({
+            id: `commission-${pid}`,
+            title: 'Commission paid',
+            message: `${d.propertyName || 'Property'} · ${money(d.agencyShare || 0)}`,
+            link: '/accountant-dashboard/commissions',
+            read: false,
+            createdAt: new Date()
+          });
+        });
+      } catch (e) {
+        // silently ignore
+      }
+    };
+    fetchAndNotify();
+    const iv = setInterval(() => { if (!cancelled) fetchAndNotify(); }, 60000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [addNotification, user?.role]);
 
   // Add handlers
   const addLead = async (lead) => {
@@ -319,21 +548,38 @@ export default function CRM() {
   const addPropertyLocal = (_property) => {};
   const handleCreateProperty = async (property) => {
     try {
-      // Map CRM form fields to backend property fields
+      // Submit via sales-specific endpoint so it doesn't use rental routes
       const payload = {
         name: property.title,
         address: property.address,
-        // Map sales price to rent field for storage if provided
-        rent: Number(property.price || 0),
+        price: Number(property.price || 0),
         bedrooms: Number(property.bedrooms || 0),
         bathrooms: Number(property.bathrooms || 0),
         description: property.notes || "",
-        type: 'house',
-        status: 'available'
-      };
-      await addBackendProperty(payload);
+        status: (property.status || 'Available').toLowerCase().replace(' ', '_'),
+        builtArea: Number(property.builtArea || 0),
+        landArea: Number(property.landArea || 0),
+        saleType: property.saleType || 'cash',
+        commission: Number(property.commission || 0),
+        commissionPreaPercent: Number(property.commissionPreaPercent || 3),
+        commissionAgencyPercentRemaining: Number(property.commissionAgencyPercentRemaining || 50),
+        commissionAgentPercentRemaining: Number(property.commissionAgentPercentRemaining || 50),
+      } as any;
+      // Include property owner (from selection) and agent
+      if (property.ownerId) {
+        (payload as any).propertyOwnerId = property.ownerId;
+      }
+      if (user?._id) {
+        (payload as any).agentId = user._id;
+      }
+      // Prefer direct sales endpoint to avoid rental routes
+      await apiService.createPropertySales(payload);
       await refreshProperties();
     } catch (e) {}
+  };
+  const openEditProperty = (id: string) => {
+    setEditPropertyId(id);
+    setShowPropertyModal(true);
   };
   const [backendViewings, setBackendViewings] = useState<any[]>([]);
   const refreshViewings = async () => {
@@ -358,6 +604,33 @@ export default function CRM() {
       await refreshViewings();
     } catch (e) {}
   };
+
+  // Now that backendViewings exists, set up the reminder effect here
+  useEffect(() => {
+    try {
+      const now = Date.now();
+      const THIRTY_MIN = 30 * 60 * 1000;
+      (backendViewings || []).forEach((v: any) => {
+        const whenTs = new Date(v.when).getTime();
+        const timeUntil = whenTs - now;
+        if (timeUntil > 0 && timeUntil <= THIRTY_MIN && (v.status === 'Scheduled' || !v.status)) {
+          const id = String(v._id || whenTs);
+          if (!viewingNotifiedRef.current.has(id)) {
+            viewingNotifiedRef.current.add(id);
+            const propertyName = backendPropsById[v.propertyId]?.name || 'Property';
+            addNotification({
+              id: `viewing-${id}`,
+              title: 'Viewing starting soon',
+              message: `${propertyName} at ${new Date(v.when).toLocaleTimeString()}`,
+              link: '/sales-dashboard',
+              read: false,
+              createdAt: new Date()
+            });
+          }
+        }
+      });
+    } catch {}
+  }, [backendViewings, backendPropsById, addNotification]);
   const addDeal = async (deal) => {
     try {
       const propertyId = deal.propertyId;
@@ -403,34 +676,18 @@ export default function CRM() {
               <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 bg-slate-100 px-2 py-1 rounded hover:bg-slate-200" onClick={()=>setQuery("")}>Clear</button>
             )}
           </div>
+          <button
+            className="ml-3 px-3 py-2 rounded-xl border text-sm bg-slate-100 hover:bg-slate-200"
+            onClick={async ()=>{ try { await logout(); } catch {} finally { navigate('/login'); } }}
+            title="Logout"
+          >
+            Logout
+          </button>
         </div>
       </header>
 
       <div className="w-full pl-0 pr-6 py-4 flex gap-6">
-        <aside className="w-60 shrink-0">
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 flex flex-col h-full min-h-[80vh]">
-            <div className="px-3 py-2 text-xs uppercase tracking-wider text-slate-400">Main menu</div>
-            <button className={cls("mt-1 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='dashboard'?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200") } onClick={()=>{ setNav('dashboard'); navigate('/sales-dashboard'); }}>
-              <IconDashboard className="h-4 w-4" />
-              <span>Dashboard</span>
-            </button>
-            <button className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", nav==='files'?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200") } onClick={()=>setNav('files')}>
-              <IconFolder className="h-4 w-4" />
-              <span>Files</span>
-            </button>
-            <div className="mt-auto">
-              <div className="px-3 py-2 text-xs uppercase tracking-wider text-slate-400">Help & Support</div>
-              <button title="Notifications" className="flex items-center justify-between px-3 py-2 rounded-xl border text-sm bg-slate-100 hover:bg-slate-200">
-                <span className="flex items-center gap-3"><IconBell className="h-4 w-4"/> Notifications</span>
-                <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-xs bg-rose-100 text-rose-700 border border-rose-200">3</span>
-              </button>
-              <button title="Settings" className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm", nav==='settings'?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={()=>{ setNav('settings'); navigate('/sales-dashboard/settings'); }}>
-                <IconCog className="h-4 w-4" />
-                <span>Settings</span>
-              </button>
-            </div>
-          </div>
-        </aside>
+        <SalesSidebar />
         <main className="flex-1 space-y-6 max-w-5xl mx-auto">
         {/* KPI cards */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -463,24 +720,218 @@ export default function CRM() {
           </Card>
         </section>
 
-        {/* Tab bar */}
-        <nav className="flex flex-wrap gap-2">
-          {[
-            "Leads","Viewings","Buyers","Owners","Properties","Deals"
-          ].map(t => (
-            <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
-          ))}
-          <div className="flex-1" />
-          {/* Quick add menu */}
-          <div className="flex gap-2">
-            <Button className="bg-emerald-600 text-white border-emerald-600" onClick={()=>setShowLeadModal(true)}>+ Lead</Button>
-            <Button className="bg-amber-600 text-white border-amber-600" onClick={()=>setShowViewingModal(true)}>+ Viewing</Button>
-            <Button className="bg-sky-600 text-white border-sky-600" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
-          </div>
-        </nav>
+        {/* Commission card under KPI cards */}
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Commission</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommissionSummary />
+              <div className="mt-2">
+                <button className="text-sm underline" onClick={()=>window.dispatchEvent(new CustomEvent('open-commission-drilldown'))}>View details</button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* Tab bar (hidden on Files section) */}
+        {!location.pathname.includes('/sales-dashboard/files') && (
+          <nav className="flex flex-wrap gap-2">
+            {[
+              "Leads","Viewings","Buyers","Owners","Properties","Deals"
+            ].map(t => (
+              <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
+            ))}
+            <div className="flex-1" />
+            {/* Quick add menu */}
+            <div className="flex gap-2">
+              <Button className="bg-emerald-600 text-white border-emerald-600" onClick={()=>setShowLeadModal(true)}>+ Lead</Button>
+              <Button className="bg-amber-600 text-white border-amber-600" onClick={()=>setShowViewingModal(true)}>+ Viewing</Button>
+              <Button className="bg-sky-600 text-white border-sky-600" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
+            </div>
+          </nav>
+        )}
 
         {/* Tabs content */}
-        {tab === "Leads" && (
+        {location.pathname.endsWith('/sales-dashboard/leads') && (
+          <Card>
+            <CardHeader className="flex items-center justify-between">
+              <CardTitle>Leads</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SalesLeadsPage />
+            </CardContent>
+          </Card>
+        )}
+        {location.pathname.endsWith('/sales-dashboard/files') && (
+          <Card>
+            <CardHeader className="flex items-center justify-between">
+              <CardTitle>Properties</CardTitle>
+              <div className="flex items-center gap-2">
+                <Input placeholder="Search properties" value={query} onChange={e=>setQuery(e.target.value)} className="max-w-xs" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-600">
+                      <th className="py-2">Property</th>
+                      <th className="py-2">Address</th>
+                      <th className="py-2">Owner</th>
+                      <th className="py-2">Status</th>
+                      <th className="py-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered(
+                      (backendProperties || []).map((bp: any) => ({
+                        id: bp._id,
+                        title: bp.name,
+                        address: bp.address,
+                        owner: propertyIdToOwnerDetails[getId(bp._id)]?.name || '—',
+                        status: (bp.status || 'available') === 'under_offer' ? 'Under Offer' : (bp.status || 'available') === 'sold' ? 'Sold' : 'Available'
+                      })),
+                      ["title","address","owner"]
+                    ).map(p => (
+                      <tr key={p.id} className="border-t">
+                        <td className="py-2 font-medium">
+                          <button className="underline" onClick={()=>navigate(`/sales-dashboard/files/${p.id}`)}>{p.title}</button>
+                        </td>
+                        <td className="py-2">{p.address}</td>
+                        <td className="py-2">{p.owner}</td>
+                        <td className="py-2"><Badge className={propertyColors[p.status]}>{p.status}</Badge></td>
+                        <td className="py-2">
+                          <button className="text-xs underline" onClick={()=>navigate(`/sales-dashboard/files/${p.id}`)}>Open</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {(() => {
+          const m = location.pathname.match(/\/sales-dashboard\/files\/(?<id>[^/]+)$/);
+          if (!m) return null;
+          const id = m.groups?.id as string;
+          const bp = backendPropsById[id];
+          if (!bp) return (
+            <Card>
+              <CardHeader><CardTitle>Property</CardTitle></CardHeader>
+              <CardContent>Property not found.</CardContent>
+            </Card>
+          );
+          const owner = propertyIdToOwnerDetails[id];
+          const pastViewings = (backendViewings || []).filter(v => String(v.propertyId) === id && new Date(v.when) < new Date());
+          const upcomingViewings = (backendViewings || []).filter(v => String(v.propertyId) === id && new Date(v.when) >= new Date());
+          const leadsForProperty = (backendLeads || []).filter(l => (l.interest || '').toLowerCase().includes((bp.name || '').toLowerCase()));
+          return (
+            <Card>
+              <CardHeader className="flex items-center justify-between">
+                <CardTitle>{bp.name}</CardTitle>
+                <div className="text-sm text-slate-500">{bp.address}</div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <div className="text-sm font-semibold">Owner</div>
+                  <div className="text-sm text-slate-700">{owner ? `${owner.name}${owner.phone ? ' · ' + owner.phone : ''}` : '—'}</div>
+                </div>
+                {/* Leads section removed on Files detail page per request */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <div className="text-sm font-semibold mb-1">Upcoming Viewings</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-slate-600">
+                            <th className="py-2">When</th>
+                            <th className="py-2">Buyer</th>
+                            <th className="py-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {upcomingViewings.map((v: any) => (
+                            <tr key={v._id} className="border-t">
+                              <td className="py-2">{new Date(v.when).toLocaleString()}</td>
+                              <td className="py-2">{buyersById[v.buyerId || '']?.name || '—'}</td>
+                              <td className="py-2"><Badge className={viewingColors[v.status]}>{v.status}</Badge></td>
+                            </tr>
+                          ))}
+                          {upcomingViewings.length === 0 && (
+                            <tr><td className="py-2 text-slate-500" colSpan={3}>No upcoming viewings.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold mb-1">Past Viewings</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-slate-600">
+                            <th className="py-2">When</th>
+                            <th className="py-2">Buyer</th>
+                            <th className="py-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pastViewings.map((v: any) => (
+                            <tr key={v._id} className="border-t">
+                              <td className="py-2">{new Date(v.when).toLocaleString()}</td>
+                              <td className="py-2">{buyersById[v.buyerId || '']?.name || '—'}</td>
+                              <td className="py-2"><Badge className={viewingColors[v.status]}>{v.status}</Badge></td>
+                            </tr>
+                          ))}
+                          {pastViewings.length === 0 && (
+                            <tr><td className="py-2 text-slate-500" colSpan={3}>No past viewings.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold mb-1">Documents</div>
+                  <div className="text-xs text-slate-500 mb-2">Upload and download sales documents (stored in property-management files collection)</div>
+                  <SalesDocuments propertyId={id} />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
+        {location.pathname.endsWith('/sales-dashboard/notifications') && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Notifications</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {(notifications || []).length === 0 && (
+                  <div className="text-sm text-slate-500">No notifications</div>
+                )}
+                {(notifications || []).map(n => (
+                  <div key={n.id} className="flex items-start justify-between p-3 rounded-xl border">
+                    <div>
+                      <div className={cls("text-sm font-medium", !n.read && "text-slate-900")}>{n.title}</div>
+                      <div className="text-xs text-slate-600">{n.message}</div>
+                      {n.createdAt && (<div className="text-[11px] text-slate-400 mt-1">{new Date(n.createdAt).toLocaleString()}</div>)}
+                    </div>
+                    {n.link && (
+                      <button className="text-xs underline" onClick={()=>navigate(n.link!)}>View</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {!location.pathname.includes('/sales-dashboard/files') && tab === "Leads" && (
           <Card>
             <CardHeader>
               <CardTitle>Leads</CardTitle>
@@ -660,7 +1111,6 @@ export default function CRM() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-slate-600">
-                      <th className="py-2">Title</th>
                       <th className="py-2">Address</th>
                       <th className="py-2">Owner</th>
                       <th className="py-2">Price</th>
@@ -671,27 +1121,47 @@ export default function CRM() {
                   </thead>
                   <tbody>
                     {filtered(
-                      (backendProperties || []).map(bp => ({
-                        id: bp._id,
-                        title: bp.name,
-                        address: bp.address,
-                        price: bp.rent,
-                        bedrooms: bp.bedrooms || 0,
-                        bathrooms: bp.bathrooms || 0,
-                        status: (bp.status === 'available' ? 'Available' : (bp.status === 'rented' ? 'Sold' : 'Available'))
-                      })),
-                      ["title","address","notes"]
+                      (backendProperties || []).map(bp => {
+                        const raw = (bp.status || 'available');
+                        const human = raw === 'available'
+                          ? 'Available'
+                          : raw === 'under_offer'
+                            ? 'Under Offer'
+                            : raw === 'sold' || raw === 'rented'
+                              ? 'Sold'
+                              : 'Available';
+                        return ({
+                          id: bp._id,
+                          title: bp.name,
+                          address: bp.address,
+                          price: bp.price ?? bp.rent,
+                          bedrooms: bp.bedrooms || 0,
+                          bathrooms: bp.bathrooms || 0,
+                          status: human
+                        });
+                      }),
+                      ["address","notes"]
                     ).map(p => (
                       <tr key={p.id} className="border-t">
-                        <td className="py-2 font-medium">{p.title}</td>
                         <td className="py-2">{p.address}</td>
-                        <td className="py-2">{propertyIdToOwnerName[p.id] || "—"}</td>
+                        <td className="py-2">
+                          {(() => {
+                            const details = propertyIdToOwnerDetails[p.id];
+                            if (!details) return "—";
+                            const parts = [details.name, details.phone].filter(Boolean);
+                            return parts.join(" · ");
+                          })()}
+                        </td>
                         <td className="py-2">{money(p.price)}</td>
                         <td className="py-2">{p.bedrooms} / {p.bathrooms}</td>
                         <td className="py-2"><Badge className={propertyColors[p.status]}>{p.status}</Badge></td>
                         <td className="py-2 flex gap-2">
-                          {["Available","Under Offer","Sold"].map(s => (
-                            <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", p.status===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
+                          <button
+                            className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200"
+                            onClick={() => openEditProperty(p.id)}
+                          >Edit</button>
+                          {['Available','Under Offer','Sold'].map(s => (
+                            <button key={s} className={cls('text-xs px-2 py-1 rounded-lg border', p.status===s?'bg-transparent text-slate-900 border-slate-900':'bg-slate-100 hover:bg-slate-200')} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
                           ))}
                         </td>
                       </tr>
@@ -789,9 +1259,65 @@ export default function CRM() {
       <LeadModal open={showLeadModal} onClose={()=>setShowLeadModal(false)} onSubmit={addLead} />
       <BuyerModal open={showBuyerModal} onClose={()=>setShowBuyerModal(false)} onSubmit={addBuyer} />
       <OwnerModal open={showOwnerModal} onClose={()=>setShowOwnerModal(false)} onSubmit={addOwner} />
-      <PropertyModal open={showPropertyModal} onClose={()=>setShowPropertyModal(false)} onSubmit={handleCreateProperty} owners={(owners || []).map(o => ({ id: o._id, name: `${o.firstName || ''} ${o.lastName || ''}`.trim() }))} />
+      <PropertyModal
+        open={showPropertyModal}
+        onClose={() => { setShowPropertyModal(false); setEditPropertyId(null); }}
+        onSubmit={async (values) => {
+          if (editPropertyId) {
+            try {
+              const payload: any = {
+                name: values.title,
+                address: values.address,
+                price: Number(values.price || 0),
+                bedrooms: Number(values.bedrooms || 0),
+                bathrooms: Number(values.bathrooms || 0),
+                description: values.notes || '',
+                status: (values.status || 'Available').toLowerCase().replace(' ', '_'),
+                builtArea: Number(values.builtArea || 0),
+                landArea: Number(values.landArea || 0),
+                saleType: values.saleType || 'cash',
+                commission: Number(values.commission || 0),
+                commissionPreaPercent: Number(values.commissionPreaPercent || 3),
+                commissionAgencyPercentRemaining: Number(values.commissionAgencyPercentRemaining || 50),
+                commissionAgentPercentRemaining: Number(values.commissionAgentPercentRemaining || 50),
+              };
+              if (values.ownerId) payload.propertyOwnerId = values.ownerId;
+              await propertyService.updateProperty(editPropertyId, payload);
+              await refreshProperties();
+            } catch (e) {}
+          } else {
+            await handleCreateProperty(values);
+          }
+        }}
+        owners={(owners || []).map(o => ({ id: o._id, name: `${o.firstName || ''} ${o.lastName || ''}`.trim() }))}
+        editing={Boolean(editPropertyId)}
+        initial={(() => {
+          if (!editPropertyId) return undefined;
+          const bp = (backendProperties || []).find((x: any) => x._id === editPropertyId);
+          if (!bp) return undefined;
+          return {
+            title: bp.name,
+            address: bp.address,
+            price: bp.price ?? '',
+            bedrooms: bp.bedrooms ?? 0,
+            bathrooms: bp.bathrooms ?? 0,
+            status: (bp.status || 'available') === 'under_offer' ? 'Under Offer' : (bp.status || 'available') === 'sold' ? 'Sold' : 'Available',
+            ownerId: (bp as any).propertyOwnerId || undefined,
+            notes: bp.description || '',
+            builtArea: bp.builtArea || '',
+            landArea: bp.landArea || '',
+            saleType: (bp as any).saleType || 'cash',
+            commission: (bp as any).commission ?? 5,
+            commissionPreaPercent: (bp as any).commissionPreaPercent ?? 3,
+            commissionAgencyPercentRemaining: (bp as any).commissionAgencyPercentRemaining ?? 50,
+            commissionAgentPercentRemaining: (bp as any).commissionAgentPercentRemaining ?? 50,
+          };
+        })()}
+      />
       <ViewingModal open={showViewingModal} onClose={()=>setShowViewingModal(false)} onSubmit={addViewing} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
       <DealModal open={showDealModal} onClose={()=>setShowDealModal(false)} onSubmit={addDeal} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
+
+      <CommissionDrilldown />
 
       {/* Footer */}
       
@@ -978,11 +1504,15 @@ function OwnerModal({ open, onClose, onSubmit }) {
   );
 }
 
-function PropertyModal({ open, onClose, onSubmit, owners }) {
-  const [form, setForm] = useState({ title: "", address: "", price: "", bedrooms: 3, bathrooms: 2, status: "Available", ownerId: owners[0]?.id, notes: "" });
-  useEffect(()=>{ if(!open) setForm({ title: "", address: "", price: "", bedrooms: 3, bathrooms: 2, status: "Available", ownerId: owners[0]?.id, notes: "" }); }, [open, owners]);
+function PropertyModal({ open, onClose, onSubmit, owners, editing, initial }) {
+  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
+  useEffect(()=>{
+    if (open) {
+      setForm({ title: initial?.title || "", address: initial?.address || "", price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
+    }
+  }, [open, owners, initial]);
   return (
-    <Modal open={open} onClose={onClose} title="Add Property">
+    <Modal open={open} onClose={onClose} title={editing ? "Edit Property" : "Add Property"}>
       <form onSubmit={(e)=>{ e.preventDefault(); onSubmit({ ...form, price: Number(form.price||0) }); onClose(); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="text-sm">Title</label>
@@ -1011,18 +1541,51 @@ function PropertyModal({ open, onClose, onSubmit, owners }) {
           <Input type="number" value={form.bathrooms} onChange={e=>setForm({ ...form, bathrooms: Number(e.target.value) })} />
         </div>
         <div>
+          <label className="text-sm">Built Area (sqm)</label>
+          <Input type="number" value={form.builtArea} onChange={e=>setForm({ ...form, builtArea: e.target.value })} />
+        </div>
+        <div>
+          <label className="text-sm">Land Area (sqm)</label>
+          <Input type="number" value={form.landArea} onChange={e=>setForm({ ...form, landArea: e.target.value })} />
+        </div>
+        <div>
           <label className="text-sm">Status</label>
           <select className="w-full px-3 py-2 rounded-xl border" value={form.status} onChange={e=>setForm({ ...form, status: e.target.value })}>
             {Object.keys(propertyColors).map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-sm">Sale Type</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.saleType} onChange={e=>setForm({ ...form, saleType: e.target.value })}>
+            <option value="cash">Cash</option>
+            <option value="installment">Installment</option>
           </select>
         </div>
         <div className="md:col-span-2">
           <label className="text-sm">Notes</label>
           <Textarea rows={3} value={form.notes} onChange={e=>setForm({ ...form, notes: e.target.value })} />
         </div>
+        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="text-sm">Commission %</label>
+            <Input type="number" value={form.commission} onChange={e=>setForm({ ...form, commission: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-sm">PREA % of Commission</label>
+            <Input type="number" value={form.commissionPreaPercent} onChange={e=>setForm({ ...form, commissionPreaPercent: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-sm">Agency % of Remaining</label>
+            <Input type="number" value={form.commissionAgencyPercentRemaining} onChange={e=>setForm({ ...form, commissionAgencyPercentRemaining: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-sm">Agent % of Remaining</label>
+            <Input type="number" value={form.commissionAgentPercentRemaining} onChange={e=>setForm({ ...form, commissionAgentPercentRemaining: Number(e.target.value) })} />
+          </div>
+        </div>
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
-          <Button className="bg-slate-900 text-white border-slate-900" type="submit">Save Property</Button>
+          <Button className="bg-slate-900 text-white border-slate-900" type="submit">{editing ? 'Update Property' : 'Save Property'}</Button>
         </div>
       </form>
     </Modal>
@@ -1104,6 +1667,103 @@ function DealModal({ open, onClose, onSubmit, buyers, properties }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+function CommissionSummary() {
+  const { user } = useAuth();
+  const [total, setTotal] = React.useState(0);
+  React.useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        // Fetch sales payments for this company and this agent via public endpoint
+        const resp = await paymentService.getAllPublic(user?.companyId, { paymentType: 'sale', agentId: user?._id });
+        const data = Array.isArray(resp?.data) ? resp.data : [];
+        const sum = data
+          .filter((p: any) => (p.paymentType === 'sale'))
+          .reduce((s: number, p: any) => s + Number(p?.commissionDetails?.agentShare || 0), 0);
+        if (active) setTotal(sum);
+      } catch (e) {
+        if (active) setTotal(0);
+      }
+    })();
+    return () => { active = false; };
+  }, [user?.companyId]);
+  return (
+    <>
+      <div className="text-3xl font-bold">{money(total)}</div>
+      <div className="text-sm text-slate-500">Agent Share (all sales)</div>
+    </>
+  );
+}
+
+function CommissionDrilldown() {
+  const { user } = useAuth();
+  const [open, setOpen] = React.useState(false);
+  const [items, setItems] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  React.useEffect(() => {
+    const handler = async () => {
+      try {
+        setOpen(true);
+        setLoading(true);
+        const u = user?._id || '';
+        if (!u) return;
+        const resp = await fetch(`/api/users/${u}/commission?saleOnly=true&limit=10`, { credentials: 'include' });
+        const data = await resp.json();
+        const list = Array.isArray(data?.items) ? data.items : [];
+        setItems(list);
+      } catch {
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    const listener = () => { handler(); };
+    window.addEventListener('open-commission-drilldown', listener as any);
+    return () => window.removeEventListener('open-commission-drilldown', listener as any);
+  }, [user?._id]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30" onClick={()=>setOpen(false)} />
+      <div className="relative w-full mx-4 max-w-xl bg-white rounded-2xl shadow-xl border">
+        <div className="p-4 border-b flex items-center justify-between rounded-t-2xl">
+          <h3 className="text-lg font-semibold">Recent Sales Payments</h3>
+          <button onClick={()=>setOpen(false)} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200">✕</button>
+        </div>
+        <div className="p-4">
+          {loading ? (
+            <div className="text-sm text-slate-600">Loading…</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-600">
+                    <th className="py-2">Date</th>
+                    <th className="py-2">Reference</th>
+                    <th className="py-2">Agent Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.length === 0 ? (
+                    <tr><td className="py-4 text-center text-slate-500" colSpan={3}>No recent sales payments</td></tr>
+                  ) : items.map((it) => (
+                    <tr key={it.id} className="border-t">
+                      <td className="py-2 whitespace-nowrap">{new Date(it.date).toLocaleDateString()}</td>
+                      <td className="py-2">{it.referenceNumber || it.manualPropertyAddress || it.id}</td>
+                      <td className="py-2">${Number(it.agentShare || 0).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

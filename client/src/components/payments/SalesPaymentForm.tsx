@@ -10,12 +10,16 @@ import {
   Button,
   Typography,
   Paper,
-  Alert
+  Alert,
+  Autocomplete
 } from '@mui/material';
 import { PaymentFormData, PaymentMethod, Currency } from '../../types/payment';
 import paymentService from '../../services/paymentService';
 import { salesContractService } from '../../services/accountantService';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePropertyService } from '../../services/propertyService';
+import { Property } from '../../types/property';
+import api from '../../api/axios';
 
 type Props = {
   onSubmit: (data: PaymentFormData) => Promise<void> | void;
@@ -49,11 +53,15 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
   const [agentShare, setAgentShare] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const propertyService = usePropertyService();
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [loadingProperties, setLoadingProperties] = useState<boolean>(false);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
 
   useEffect(() => {
     const loadAgents = async () => {
       try {
-        const list = await paymentService.getAgentsPublic(user?.companyId);
+        const list = await paymentService.getAgentsPublic(user?.companyId, 'sales');
         setAgents(Array.isArray(list) ? list : []);
       } catch (err) {
         setAgents([]);
@@ -61,6 +69,28 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     };
     loadAgents();
   }, [user?.companyId]);
+
+  // Load properties for address/reference autocomplete
+  useEffect(() => {
+    let cancelled = false;
+    const loadProps = async () => {
+      try {
+        setLoadingProperties(true);
+        const list = await propertyService.getPublicProperties().catch(async () => {
+          // Fallback to authenticated list if public fails
+          try { return await propertyService.getProperties(); } catch { return []; }
+        });
+        const arr = Array.isArray(list) ? list : [];
+        if (!cancelled) setProperties(arr.filter((p: any) => (p as any).rentalType === 'sale'));
+      } catch {
+        if (!cancelled) setProperties([]);
+      } finally {
+        if (!cancelled) setLoadingProperties(false);
+      }
+    };
+    loadProps();
+    return () => { cancelled = true; };
+  }, [propertyService]);
 
   // Load existing sales contracts filtered by reference when user types
   useEffect(() => {
@@ -139,10 +169,11 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
       }
 
       const data: PaymentFormData = {
-        paymentType: 'introduction',
+        paymentType: 'sale',
+        saleMode: isInstallment ? 'installment' : 'quick',
         propertyType: 'residential',
-        // Use manual sentinel IDs so backend treats these as manual entries
-        propertyId: 'manual_sale',
+        // Prefer linked sale property when chosen
+        propertyId: selectedPropertyId || 'manual_sale',
         tenantId: 'manual_buyer',
         agentId: agentId || '',
         paymentDate: new Date(paymentDate),
@@ -196,8 +227,8 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         </Grid>
         <Grid item xs={12} md={6}>
           <FormControl fullWidth>
-            <InputLabel>Agent</InputLabel>
-            <Select value={agentId} label="Agent" onChange={(e) => setAgentId(e.target.value as string)}>
+            <InputLabel>Sales Agent</InputLabel>
+            <Select value={agentId} label="Sales Agent" onChange={(e) => setAgentId(e.target.value as string)}>
               <MenuItem value="">None</MenuItem>
               {agents.map((a: any) => (
                 <MenuItem key={a._id || a.id} value={a._id || a.id}>
@@ -208,7 +239,66 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
           </FormControl>
         </Grid>
         <Grid item xs={12} md={6}>
-          <TextField fullWidth label="Sale Reference / Address" value={saleReference} onChange={(e) => setSaleReference(e.target.value)} />
+          <Autocomplete
+            freeSolo
+            options={properties}
+            loading={loadingProperties}
+            getOptionLabel={(option: any) => {
+              if (typeof option === 'string') return option;
+              const name = option.name || option.propertyName || '';
+              const address = option.address || '';
+              const label = [name, address].filter(Boolean).join(' - ');
+              return label || option._id || '';
+            }}
+            filterOptions={(opts, state) => {
+              // Default filtering over combined label
+              const input = (state.inputValue || '').toLowerCase();
+              const filtered = (opts as any[]).filter(o => {
+                const label = (typeof o === 'string') ? o : `${o.name || o.propertyName || ''} ${o.address || ''}`;
+                return label.toLowerCase().includes(input);
+              });
+              // Also include raw input for manual entry
+              if (input && !filtered.some(o => (typeof o === 'string' ? o : `${o.name || ''} ${o.address || ''}`).toLowerCase() === input)) {
+                return [state.inputValue, ...filtered];
+              }
+              return filtered;
+            }}
+            value={saleReference}
+            onChange={(_, newValue) => {
+              if (typeof newValue === 'string') {
+                setSaleReference(newValue);
+                setSelectedPropertyId('');
+              } else if (newValue) {
+                const label = `${(newValue as any).name || (newValue as any).propertyName || ''} ${(newValue as any).address || ''}`.trim();
+                setSaleReference(label || (newValue as any)._id || '');
+                setSelectedPropertyId((newValue as any)._id || '');
+                // Auto-populate commission and price from selected property if present
+                const prop: any = newValue as any;
+                if (typeof prop?.commission === 'number') setCommissionPercent(Number(prop.commission));
+                if (typeof prop?.commissionPreaPercent === 'number') setPreaPercentOfCommission(Number(prop.commissionPreaPercent));
+                if (typeof prop?.commissionAgencyPercentRemaining === 'number') setAgencyPercent(Number(prop.commissionAgencyPercentRemaining));
+                if (typeof prop?.commissionAgentPercentRemaining === 'number') setAgentPercent(Number(prop.commissionAgentPercentRemaining));
+                if (typeof prop?.price === 'number' && !isNaN(prop.price)) setTotalSalePrice(String(prop.price));
+                // Auto-populate Seller from sales owner (propertyOwnerId from property -> GET /sales-owners/:id)
+                const ownerId = (prop as any).propertyOwnerId;
+                if (ownerId) {
+                  api.get(`/sales-owners/${ownerId}`).then((resp) => {
+                    const owner = resp.data as any;
+                    const name = [owner?.firstName, owner?.lastName].filter(Boolean).join(' ').trim();
+                    if (name) setSellerName(name);
+                  }).catch(() => {/* ignore */});
+                }
+              } else {
+                setSaleReference('');
+                setSelectedPropertyId('');
+              }
+            }}
+            inputValue={saleReference}
+            onInputChange={(_, newInput) => setSaleReference(newInput)}
+            renderInput={(params) => (
+              <TextField {...params} fullWidth label="Sale Reference / Address" placeholder="Start typing to search properties or enter manually" />
+            )}
+          />
         </Grid>
         <Grid item xs={12} md={6}>
           <FormControl fullWidth>

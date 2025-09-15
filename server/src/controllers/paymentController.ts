@@ -11,6 +11,25 @@ import { Company } from '../models/Company';
 import { Tenant } from '../models/Tenant';
 import propertyAccountService from '../services/propertyAccountService';
 
+// List sales-only payments for a company
+export const getCompanySalesPayments = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  try {
+    const query: any = { companyId: req.user.companyId, paymentType: 'sale' };
+    if (req.query.saleMode === 'quick' || req.query.saleMode === 'installment') {
+      query.saleMode = req.query.saleMode;
+    }
+    const payments = await Payment.find(query).sort({ paymentDate: -1 });
+    return res.json(payments);
+  } catch (error) {
+    console.error('Error fetching sales payments:', error);
+    return res.status(500).json({ message: 'Failed to fetch sales payments' });
+  }
+};
+
 export const getPayments = async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Unauthorized' });
@@ -574,6 +593,129 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
   }
 };
 
+// Create a sales payment explicitly (no rental validations, paymentType fixed to 'introduction')
+export const createSalesPaymentAccountant = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  try {
+    const user = req.user as JwtPayload;
+    const {
+      paymentDate,
+      paymentMethod,
+      amount,
+      referenceNumber,
+      notes,
+      currency,
+      commissionDetails,
+      manualPropertyAddress,
+      manualTenantName,
+      propertyId,
+      tenantId,
+      agentId,
+      processedBy,
+      saleId,
+      rentalPeriodMonth,
+      rentalPeriodYear,
+      saleMode
+    } = req.body as any;
+
+    if (!amount || !paymentDate || !paymentMethod) {
+      return res.status(400).json({ message: 'Missing required fields: amount, paymentDate, paymentMethod' });
+    }
+
+    const toObjectId = (v?: string) => (v && mongoose.Types.ObjectId.isValid(v) ? new mongoose.Types.ObjectId(v) : undefined);
+    const propId = toObjectId(propertyId);
+    const tenId = toObjectId(tenantId);
+    const agId = toObjectId(agentId) || new mongoose.Types.ObjectId(user.userId);
+    const procBy = toObjectId(processedBy) || new mongoose.Types.ObjectId(user.userId);
+    const saleObjId = toObjectId(saleId);
+
+    // Calculate commission if not provided
+    let finalCommissionDetails = commissionDetails;
+    if (!finalCommissionDetails) {
+      try {
+        let percent = 15;
+        if (propId) {
+          const prop = await Property.findById(propId);
+          percent = typeof prop?.commission === 'number' ? (prop as any).commission : 15;
+        }
+        finalCommissionDetails = await (async () => {
+          const c = await (async () => {
+            const { totalCommission, preaFee, agentShare, agencyShare, ownerAmount } = await (await calculateCommission(amount, percent, new mongoose.Types.ObjectId(user.companyId))) as any;
+            return { totalCommission, preaFee, agentShare, agencyShare, ownerAmount };
+          })();
+          return c;
+        })();
+      } catch {
+        const base = (amount * 0.15);
+        const prea = base * 0.03;
+        const remaining = base - prea;
+        finalCommissionDetails = {
+          totalCommission: base,
+          preaFee: prea,
+          agentShare: remaining * 0.6,
+          agencyShare: remaining * 0.4,
+          ownerAmount: amount - base,
+        } as any;
+      }
+    }
+
+    const manualProperty = !propId && manualPropertyAddress;
+    const manualTenant = !tenId && manualTenantName;
+
+    const jsDate = new Date(paymentDate);
+    const periodMonth = Number(rentalPeriodMonth ?? (jsDate.getMonth() + 1));
+    const periodYear = Number(rentalPeriodYear ?? jsDate.getFullYear());
+
+    const payment = new Payment({
+      paymentType: 'sale',
+      saleMode: (saleMode === 'installment' ? 'installment' : 'quick'),
+      propertyType: 'residential',
+      propertyId: propId || new mongoose.Types.ObjectId(),
+      tenantId: tenId || new mongoose.Types.ObjectId(),
+      agentId: agId,
+      companyId: new mongoose.Types.ObjectId(user.companyId),
+      paymentDate: new Date(paymentDate),
+      paymentMethod,
+      amount,
+      depositAmount: 0,
+      referenceNumber: referenceNumber || `SALE-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      notes: notes || '',
+      processedBy: procBy,
+      commissionDetails: finalCommissionDetails,
+      status: 'completed',
+      currency: currency || 'USD',
+      rentalPeriodMonth: periodMonth,
+      rentalPeriodYear: periodYear,
+      // Manual fields
+      manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
+      manualTenantName: manualTenant ? manualTenantName : undefined,
+      // Sales linkage
+      saleId: saleObjId,
+    });
+
+    await payment.save();
+
+    // Post company and agent shares
+    try {
+      await Company.findByIdAndUpdate(new mongoose.Types.ObjectId(user.companyId), { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } });
+      await User.findByIdAndUpdate(agId, { $inc: { commission: (finalCommissionDetails as any).agentShare || 0 } });
+    } catch (e) {
+      console.warn('Non-fatal: commission posting failed', e);
+    }
+
+    // Record income in property accounts
+    try { await propertyAccountService.recordIncomeFromPayment(payment._id.toString()); } catch (e) { console.warn('Non-fatal: property account record failed', e); }
+
+    return res.status(201).json({ message: 'Sales payment processed successfully', payment });
+  } catch (error: any) {
+    console.error('Error creating sales payment:', error);
+    return res.status(500).json({ message: 'Failed to process sales payment', error: error?.message || 'Unknown error' });
+  }
+};
+
 export const updatePayment = async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Unauthorized' });
@@ -634,14 +776,60 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     if (req.query.onlyDeposits === 'true') {
       query.depositAmount = { $gt: 0 };
     }
+    // Date filtering
+    if (req.query.startDate || req.query.endDate) {
+      query.paymentDate = {} as any;
+      if (req.query.startDate) {
+        (query.paymentDate as any).$gte = new Date(String(req.query.startDate));
+      }
+      if (req.query.endDate) {
+        (query.paymentDate as any).$lte = new Date(String(req.query.endDate));
+      }
+    }
+    // Status filter
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+    // Payment method filter
+    if (req.query.paymentMethod) {
+      query.paymentMethod = req.query.paymentMethod;
+    }
+    // Property filter
+    if (req.query.propertyId) {
+      try {
+        query.propertyId = new mongoose.Types.ObjectId(String(req.query.propertyId));
+      } catch {
+        // ignore invalid id
+      }
+    }
 
-    const payments = await Payment.find(query)
+    // Pagination controls
+    const paginate = String(req.query.paginate || 'false') === 'true';
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.max(1, Math.min(200, parseInt(String(req.query.limit || '25'), 10)));
+
+    const baseQuery = Payment.find(query).sort({ paymentDate: -1 });
+
+    if (paginate) {
+      const [items, total] = await Promise.all([
+        baseQuery
+          .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional')
+          .lean()
+          .skip((page - 1) * limit)
+          .limit(limit),
+        Payment.countDocuments(query),
+      ]);
+      const pages = Math.max(1, Math.ceil(total / limit));
+      return res.json({ items, total, page, pages });
+    }
+
+    // Non-paginated fallback (legacy)
+    const payments = await baseQuery
       .populate('propertyId', 'name')
       .populate('tenantId', 'firstName lastName')
-      .populate('agentId', 'name')
-      .sort({ paymentDate: -1 });
+      .populate('agentId', 'name');
 
-    res.json(payments);
+    return res.json(payments);
   } catch (error) {
     console.error('Error fetching payments:', error);
     res.status(500).json({

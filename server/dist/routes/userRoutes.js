@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const userController_1 = require("../controllers/userController");
+const userController_2 = require("../controllers/userController");
 const User_1 = require("../models/User");
 const auth_1 = require("../middleware/auth");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -38,7 +39,8 @@ router.get('/public/agents', (req, res) => __awaiter(void 0, void 0, void 0, fun
         });
         // Get company ID from query params or headers (for admin dashboard)
         const companyId = req.query.companyId || req.headers['x-company-id'];
-        let query = { role: 'agent' };
+        const role = req.query.role || 'agent';
+        let query = { role };
         // Filter by company ID if provided
         if (companyId) {
             query.companyId = companyId;
@@ -116,13 +118,24 @@ router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent']), (
     var _a;
     try {
         console.log('GET /agents route hit');
-        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId, role: 'agent' };
+        const role = req.query.role || 'agent';
+        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId, role };
         const agents = yield User_1.User.find(query).select('firstName lastName email role companyId');
         console.log('Found agents:', agents.length);
         res.json(agents);
     }
     catch (error) {
         console.error('Error in GET /agents:', error);
+        next(error);
+    }
+}));
+// Commission summary for user (agent) - self, admin, accountant
+router.get('/:id/commission', (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        // authWithCompany is already applied above; just delegate to controller
+        yield (0, userController_2.getUserCommissionSummary)(req, res);
+    }
+    catch (error) {
         next(error);
     }
 }));

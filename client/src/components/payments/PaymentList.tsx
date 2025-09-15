@@ -32,7 +32,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Download as DownloadIcon, Edit as EditIcon, Print as PrintIcon } from '@mui/icons-material';
-import { Payment, PaymentFilter, PAYMENT_METHODS, SUPPORTED_CURRENCIES, PopulatedPayment } from '../../types/payment';
+import { Payment, PaymentFilter, PAYMENT_METHODS } from '../../types/payment';
 import { Lease } from '../../types/lease';
 import { Tenant } from '../../types/tenant';
 import { Property } from '../../types/property';
@@ -53,25 +53,28 @@ export interface PaymentListProps {
   error?: string | null;
   properties?: Property[];
   tenants?: Tenant[];
+  totalCount?: number;
 }
 
-const PaymentList: React.FC<PaymentListProps> = ({
-  payments,
-  onEdit,
-  onDownloadReceipt,
-  onFinalize,
-  onFilterChange,
-  isMobile = false,
-  filters = {},
-  loading = false,
-  error = null,
-  properties = [],
-  tenants = [],
-}) => {
+const PaymentList: React.FC<PaymentListProps> = (props) => {
+  const {
+    payments,
+    onEdit,
+    onDownloadReceipt,
+    onFinalize,
+    onFilterChange,
+    isMobile = false,
+    filters = {},
+    loading = false,
+    error = null,
+    properties = [],
+    tenants = [],
+    totalCount,
+  } = props;
   const theme = useTheme();
   const { user } = useAuth();
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [downloadingReceipt, setDownloadingReceipt] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
@@ -80,6 +83,21 @@ const PaymentList: React.FC<PaymentListProps> = ({
   const [loadingReceipt, setLoadingReceipt] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [onlyDeposits, setOnlyDeposits] = useState<boolean>(false);
+  const [allSalesPayments, setAllSalesPayments] = useState<Payment[] | null>(null);
+
+  // Load all sales payments once to compute outstanding balances for installments
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await paymentService.getSalesPayments();
+        if (!cancelled) setAllSalesPayments(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setAllSalesPayments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleFilterChange = useCallback((key: keyof PaymentFilter, value: any) => {
     if (filters[key] !== value) {
@@ -92,12 +110,19 @@ const PaymentList: React.FC<PaymentListProps> = ({
 
   const handleChangePage = useCallback((event: unknown, newPage: number) => {
     setPage(newPage);
-  }, []);
+    if (onFilterChange) {
+      onFilterChange({ ...filters, page: newPage + 1, limit: rowsPerPage } as any);
+    }
+  }, [onFilterChange, filters, rowsPerPage]);
 
   const handleChangeRowsPerPage = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
+    const next = parseInt(event.target.value, 10);
+    setRowsPerPage(next);
     setPage(0);
-  }, []);
+    if (onFilterChange) {
+      onFilterChange({ ...filters, page: 1, limit: next } as any);
+    }
+  }, [onFilterChange, filters]);
 
   const getStatusColor = useCallback((status: string) => {
     switch (status) {
@@ -113,6 +138,25 @@ const PaymentList: React.FC<PaymentListProps> = ({
         return 'default';
     }
   }, []);
+
+  const computeOutstanding = useCallback((payment: Payment): number | null => {
+    try {
+      if (!payment || (payment as any).paymentType !== 'sale') return null;
+      // Parse total sale price from notes
+      const text = String((payment as any).notes || '');
+      const match = text.match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+      const total = match && match[1] ? Number(match[1].replace(/,/g, '')) : null;
+      if (!total || !allSalesPayments) return null;
+      const groupKey = (p: any) => (p.saleId ? String(p.saleId) : (p.referenceNumber || p.manualPropertyAddress || ''));
+      const key = groupKey(payment as any);
+      if (!key) return null;
+      const related = (allSalesPayments as any[]).filter(p => (p as any).paymentType === 'sale').filter(p => groupKey(p) === key);
+      const paidToDate = related.reduce((s, p: any) => s + (p.amount || 0), 0);
+      return Math.max(0, total - paidToDate);
+    } catch {
+      return null;
+    }
+  }, [allSalesPayments]);
 
   const getTypeColor = useCallback((type: string | undefined) => {
     switch (type) {
@@ -130,8 +174,9 @@ const PaymentList: React.FC<PaymentListProps> = ({
   }, []);
 
   const paginatedPayments = useMemo(() => {
-    return payments.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [payments, page, rowsPerPage]);
+    // When server-side pagination is used, `payments` is already the current page
+    return payments;
+  }, [payments]);
 
   const handleDownloadReceipt = async (payment: Payment) => {
     try {
@@ -415,6 +460,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
                 <TableCell>Type</TableCell>
                 <TableCell>Property</TableCell>
                 <TableCell>Amount</TableCell>
+                <TableCell>Outstanding</TableCell>
                 <TableCell>Method</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Reference</TableCell>
@@ -439,6 +485,21 @@ const PaymentList: React.FC<PaymentListProps> = ({
                   </TableCell>
                   <TableCell>
                     {payment.currency} {(payment.amount || 0).toFixed(2)}
+                  </TableCell>
+                  <TableCell>
+                    {(() => {
+                      const outstanding = computeOutstanding(payment);
+                      if (outstanding == null) return '-';
+                      const isZero = Math.abs(outstanding) < 0.01;
+                      return (
+                        <Chip
+                          label={`${payment.currency} ${outstanding.toFixed(2)}`}
+                          color={isZero ? 'success' : 'error'}
+                          size="small"
+                          variant={isZero ? 'filled' : 'outlined'}
+                        />
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>
                     {(payment.paymentMethod || 'unknown').replace('_', ' ').toUpperCase()}
@@ -494,7 +555,7 @@ const PaymentList: React.FC<PaymentListProps> = ({
           </Table>
           <TablePagination
             component="div"
-            count={payments.length}
+            count={typeof totalCount === 'number' ? totalCount : payments.length}
             page={page}
             onPageChange={handleChangePage}
             rowsPerPage={rowsPerPage}

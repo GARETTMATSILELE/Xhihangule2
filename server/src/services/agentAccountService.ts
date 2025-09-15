@@ -29,7 +29,7 @@ interface PopulatedCommissionData {
     lastName: string;
   };
   referenceNumber: string;
-  paymentType: 'introduction' | 'rental';
+  paymentType: 'introduction' | 'rental' | 'sale';
 }
 
 export class AgentAccountService {
@@ -306,21 +306,28 @@ export class AgentAccountService {
       // Get commission data from payments for display
       console.log('Fetching commission data for agentId:', agentId);
       
+      // Determine agent role to filter payment types
+      const agentUser = await User.findById(agentId).select('role');
+      const paymentTypeFilter = (agentUser?.role === 'sales') ? 'sale' : 'rental';
+
       // First check if there are any payments for this agent
       const totalPayments = await Payment.countDocuments({
-        agentId: new mongoose.Types.ObjectId(agentId)
+        agentId: new mongoose.Types.ObjectId(agentId),
+        paymentType: paymentTypeFilter
       });
       console.log('Total payments for agent:', totalPayments);
       
       const completedPayments = await Payment.countDocuments({
         agentId: new mongoose.Types.ObjectId(agentId),
-        status: 'completed'
+        status: 'completed',
+        paymentType: paymentTypeFilter
       });
       console.log('Completed payments for agent:', completedPayments);
       
       const commissionData = await Payment.find({
         agentId: new mongoose.Types.ObjectId(agentId),
-        status: 'completed'
+        status: 'completed',
+        paymentType: paymentTypeFilter
       }).populate('propertyId', 'address propertyName')
         .populate('tenantId', 'firstName lastName')
         .select('paymentDate amount commissionDetails propertyId tenantId referenceNumber paymentType manualPropertyAddress manualTenantName')
@@ -364,7 +371,7 @@ export class AgentAccountService {
   async getCompanyAgentAccounts(companyId: string): Promise<IAgentAccount[]> {
     try {
       // Get all agents for the company
-      const agents = await User.find({ companyId: new mongoose.Types.ObjectId(companyId), role: 'agent' });
+      const agents = await User.find({ companyId: new mongoose.Types.ObjectId(companyId), role: { $in: ['agent', 'sales'] } });
       const agentIds = agents.map(agent => agent._id);
       
       // Get or create accounts for all agents
@@ -386,11 +393,16 @@ export class AgentAccountService {
     try {
       console.log('Syncing commission transactions for agent:', agentId);
       
+      // Determine agent role to filter payment types
+      const agentUser = await User.findById(agentId).select('role');
+      const paymentTypeFilter = (agentUser?.role === 'sales') ? 'sale' : 'rental';
+
       // Get all completed payments for this agent
       const payments = await Payment.find({
         agentId: new mongoose.Types.ObjectId(agentId),
-        status: 'completed'
-      }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId');
+        status: 'completed',
+        paymentType: paymentTypeFilter
+      }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
 
       const account = await this.getOrCreateAgentAccount(agentId);
       let newTransactionsAdded = 0;

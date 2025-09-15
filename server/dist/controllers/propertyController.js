@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPropertyPublic = exports.getAdminDashboardProperties = exports.getVacantProperties = exports.deleteProperty = exports.updateProperty = exports.createProperty = exports.getProperty = exports.getProperties = exports.getPublicProperties = void 0;
+exports.createPropertyPublic = exports.getAdminDashboardProperties = exports.getVacantProperties = exports.deleteProperty = exports.updateProperty = exports.createSalesProperty = exports.createProperty = exports.getProperty = exports.getProperties = exports.getPublicProperties = void 0;
 const Property_1 = require("../models/Property");
 const chartController_1 = require("./chartController");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -364,6 +364,55 @@ const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.createProperty = createProperty;
+// Sales-specific property creation with commission split and area fields
+const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        const { name, address, price, bedrooms, bathrooms, status, builtArea, landArea, description, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
+        if (!name || !address) {
+            throw new errorHandler_1.AppError('Missing required fields: name and address', 400);
+        }
+        // Map status from UI labels to backend enums if necessary
+        const normalizedStatus = (status || 'available').toString().toLowerCase().replace(' ', '_');
+        const property = new Property_1.Property({
+            name,
+            address,
+            type: 'house',
+            status: normalizedStatus,
+            price: typeof price === 'number' ? price : Number(price || 0),
+            bedrooms: Number(bedrooms || 0),
+            bathrooms: Number(bathrooms || 0),
+            builtArea: Number(builtArea || 0),
+            landArea: Number(landArea || 0),
+            description: description || '',
+            ownerId: req.user.userId,
+            companyId: req.user.companyId,
+            agentId: agentId || req.user.userId,
+            propertyOwnerId: propertyOwnerId || undefined,
+            rentalType: 'sale',
+            saleType: (saleType === 'installment' ? 'installment' : 'cash'),
+            commission: typeof commission === 'number' ? commission : Number(commission || 0),
+            commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0),
+            commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0),
+            commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0),
+        });
+        const saved = yield property.save();
+        return res.status(201).json(saved);
+    }
+    catch (error) {
+        console.error('Error creating sales property:', error);
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error creating property';
+        return res.status(status).json({ message });
+    }
+});
+exports.createSalesProperty = createSalesProperty;
 const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {

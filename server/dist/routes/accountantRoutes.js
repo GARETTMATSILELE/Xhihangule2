@@ -58,6 +58,11 @@ router.get('/property-accounts/:propertyId/deposits/summary', roles_1.isAccounta
 router.post('/property-accounts/:propertyId/deposits/payout', roles_1.isAccountant, accountantController_1.createPropertyDepositPayout);
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', roles_1.canManagePayments, paymentController_1.getCompanyPayments);
+// Sales-specific payment endpoints
+router.get('/sales-payments', roles_1.canManagePayments, paymentController_1.getCompanySalesPayments);
+router.post('/sales-payments', roles_1.canManagePayments, paymentController_1.createSalesPaymentAccountant);
+router.put('/sales-payments/:id', roles_1.canManagePayments, paymentController_1.updatePayment);
+// Rental/general payments
 router.post('/payments', roles_1.canManagePayments, paymentController_1.createPaymentAccountant);
 router.get('/payments/:id', roles_1.canManagePayments, paymentController_1.getPaymentDetails);
 router.put('/payments/:id/status', roles_1.canManagePayments, paymentController_1.updatePaymentStatus);

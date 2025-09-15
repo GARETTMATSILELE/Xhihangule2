@@ -12,8 +12,11 @@ import {
 import {
   createPayment,
   createPaymentAccountant,
+  createSalesPaymentAccountant,
   getCompanyPayments,
+  getCompanySalesPayments,
   getPaymentDetails,
+  updatePayment,
   updatePaymentStatus,
   finalizeProvisionalPayment
 } from '../controllers/paymentController';
@@ -88,6 +91,11 @@ router.post('/property-accounts/:propertyId/deposits/payout', isAccountant, crea
 
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', canManagePayments, getCompanyPayments);
+// Sales-specific payment endpoints
+router.get('/sales-payments', canManagePayments, getCompanySalesPayments);
+router.post('/sales-payments', canManagePayments, createSalesPaymentAccountant);
+router.put('/sales-payments/:id', canManagePayments, updatePayment);
+// Rental/general payments
 router.post('/payments', canManagePayments, createPaymentAccountant);
 router.get('/payments/:id', canManagePayments, getPaymentDetails);
 router.put('/payments/:id/status', canManagePayments, updatePaymentStatus);

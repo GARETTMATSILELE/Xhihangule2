@@ -401,6 +401,75 @@ export const createProperty = async (req: Request, res: Response) => {
   }
 };
 
+// Sales-specific property creation with commission split and area fields
+export const createSalesProperty = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('Authentication required', 401);
+    }
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    const {
+      name,
+      address,
+      price,
+      bedrooms,
+      bathrooms,
+      status,
+      builtArea,
+      landArea,
+      description,
+      propertyOwnerId,
+      agentId,
+      commission,
+      saleType,
+      commissionPreaPercent,
+      commissionAgencyPercentRemaining,
+      commissionAgentPercentRemaining
+    } = req.body || {};
+
+    if (!name || !address) {
+      throw new AppError('Missing required fields: name and address', 400);
+    }
+
+    // Map status from UI labels to backend enums if necessary
+    const normalizedStatus = (status || 'available').toString().toLowerCase().replace(' ', '_');
+
+    const property = new Property({
+      name,
+      address,
+      type: 'house',
+      status: normalizedStatus,
+      price: typeof price === 'number' ? price : Number(price || 0),
+      bedrooms: Number(bedrooms || 0),
+      bathrooms: Number(bathrooms || 0),
+      builtArea: Number(builtArea || 0),
+      landArea: Number(landArea || 0),
+      description: description || '',
+      ownerId: req.user.userId,
+      companyId: req.user.companyId,
+      agentId: agentId || req.user.userId,
+      propertyOwnerId: propertyOwnerId || undefined,
+      rentalType: 'sale',
+      saleType: (saleType === 'installment' ? 'installment' : 'cash'),
+      commission: typeof commission === 'number' ? commission : Number(commission || 0),
+      commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0),
+      commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0),
+      commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0),
+    });
+
+    const saved = await property.save();
+    return res.status(201).json(saved);
+  } catch (error) {
+    console.error('Error creating sales property:', error);
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error creating property';
+    return res.status(status).json({ message });
+  }
+};
+
 export const updateProperty = async (req: Request, res: Response) => {
   try {
     if (!req.user?.userId) {

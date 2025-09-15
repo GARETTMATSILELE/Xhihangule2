@@ -19,10 +19,79 @@ var __rest = (this && this.__rest) || function (s, e) {
         }
     return t;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateUserById = exports.createUser = exports.getCurrentUser = void 0;
-const User_1 = require("../models/User");
+exports.updateUserById = exports.createUser = exports.getCurrentUser = exports.getUserCommissionSummary = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
+const Payment_1 = require("../models/Payment");
 const errorHandler_1 = require("../middleware/errorHandler");
+const getUserCommissionSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) || !((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        const targetUserId = req.params.id;
+        const { saleOnly, startDate, endDate, limit } = req.query;
+        // Authorization: allow self, admin, or accountant within same company
+        if (String(req.user.userId) !== String(targetUserId) && !['admin', 'accountant'].includes(String(req.user.role || ''))) {
+            throw new errorHandler_1.AppError('Forbidden', 403);
+        }
+        const q = {
+            agentId: new mongoose_1.default.Types.ObjectId(targetUserId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            status: 'completed'
+        };
+        if (String(saleOnly) === 'true') {
+            q.paymentType = 'sale';
+        }
+        if (startDate || endDate) {
+            q.paymentDate = {};
+            if (startDate)
+                q.paymentDate.$gte = new Date(String(startDate));
+            if (endDate)
+                q.paymentDate.$lte = new Date(String(endDate));
+        }
+        // Aggregate totals
+        const cursor = Payment_1.Payment.find(q)
+            .select('paymentDate commissionDetails referenceNumber manualPropertyAddress propertyId tenantId paymentType')
+            .sort({ paymentDate: -1 });
+        const docs = yield cursor.lean();
+        const totalAgentCommission = docs.reduce((s, d) => { var _a; return s + Number(((_a = d === null || d === void 0 ? void 0 : d.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0); }, 0);
+        const totalAgencyCommission = docs.reduce((s, d) => { var _a; return s + Number(((_a = d === null || d === void 0 ? void 0 : d.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare) || 0); }, 0);
+        const totalPrea = docs.reduce((s, d) => { var _a; return s + Number(((_a = d === null || d === void 0 ? void 0 : d.commissionDetails) === null || _a === void 0 ? void 0 : _a.preaFee) || 0); }, 0);
+        const lim = Math.max(0, Math.min(100, Number(limit || 10)));
+        const items = lim > 0 ? docs.slice(0, lim).map((d) => {
+            var _a, _b, _c;
+            return ({
+                id: String(d._id),
+                date: d.paymentDate,
+                amount: d.amount,
+                agentShare: ((_a = d === null || d === void 0 ? void 0 : d.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0,
+                agencyShare: ((_b = d === null || d === void 0 ? void 0 : d.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare) || 0,
+                preaFee: ((_c = d === null || d === void 0 ? void 0 : d.commissionDetails) === null || _c === void 0 ? void 0 : _c.preaFee) || 0,
+                referenceNumber: d.referenceNumber,
+                manualPropertyAddress: d.manualPropertyAddress,
+                paymentType: d.paymentType
+            });
+        }) : [];
+        return res.json({
+            totalAgentCommission,
+            totalAgencyCommission,
+            totalPrea,
+            count: docs.length,
+            items
+        });
+    }
+    catch (err) {
+        const status = (err === null || err === void 0 ? void 0 : err.statusCode) || 500;
+        return res.status(status).json({ message: (err === null || err === void 0 ? void 0 : err.message) || 'Failed to get commission summary' });
+    }
+});
+exports.getUserCommissionSummary = getUserCommissionSummary;
+const User_1 = require("../models/User");
 const getCurrentUser = (userId) => __awaiter(void 0, void 0, void 0, function* () {
     if (!userId) {
         throw new errorHandler_1.AppError('User ID is required', 400);

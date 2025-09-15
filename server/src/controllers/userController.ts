@@ -1,6 +1,76 @@
-import { Request, Response, NextFunction } from 'express';
-import { User } from '../models/User';
+import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import { Payment } from '../models/Payment';
 import { AppError } from '../middleware/errorHandler';
+
+export const getUserCommissionSummary = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId || !req.user?.companyId) {
+      throw new AppError('Authentication required', 401);
+    }
+
+    const targetUserId = req.params.id;
+    const { saleOnly, startDate, endDate, limit } = req.query as any;
+
+    // Authorization: allow self, admin, or accountant within same company
+    if (String(req.user.userId) !== String(targetUserId) && !['admin','accountant'].includes(String(req.user.role || ''))) {
+      throw new AppError('Forbidden', 403);
+    }
+
+    const q: any = {
+      agentId: new mongoose.Types.ObjectId(targetUserId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      status: 'completed'
+    };
+    if (String(saleOnly) === 'true') {
+      q.paymentType = 'sale';
+    }
+
+    if (startDate || endDate) {
+      q.paymentDate = {} as any;
+      if (startDate) q.paymentDate.$gte = new Date(String(startDate));
+      if (endDate) q.paymentDate.$lte = new Date(String(endDate));
+    }
+
+    // Aggregate totals
+    const cursor = Payment.find(q)
+      .select('paymentDate commissionDetails referenceNumber manualPropertyAddress propertyId tenantId paymentType')
+      .sort({ paymentDate: -1 });
+
+    const docs = await cursor.lean();
+
+    const totalAgentCommission = docs.reduce((s, d: any) => s + Number(d?.commissionDetails?.agentShare || 0), 0);
+    const totalAgencyCommission = docs.reduce((s, d: any) => s + Number(d?.commissionDetails?.agencyShare || 0), 0);
+    const totalPrea = docs.reduce((s, d: any) => s + Number(d?.commissionDetails?.preaFee || 0), 0);
+
+    const lim = Math.max(0, Math.min(100, Number(limit || 10)));
+    const items = lim > 0 ? docs.slice(0, lim).map((d: any) => ({
+      id: String(d._id),
+      date: d.paymentDate,
+      amount: d.amount,
+      agentShare: d?.commissionDetails?.agentShare || 0,
+      agencyShare: d?.commissionDetails?.agencyShare || 0,
+      preaFee: d?.commissionDetails?.preaFee || 0,
+      referenceNumber: d.referenceNumber,
+      manualPropertyAddress: d.manualPropertyAddress,
+      paymentType: d.paymentType
+    })) : [];
+
+    return res.json({
+      totalAgentCommission,
+      totalAgencyCommission,
+      totalPrea,
+      count: docs.length,
+      items
+    });
+  } catch (err: any) {
+    const status = err?.statusCode || 500;
+    return res.status(status).json({ message: err?.message || 'Failed to get commission summary' });
+  }
+};
+
+import { NextFunction } from 'express';
+import { User } from '../models/User';
 import { UserRole } from '../types/auth';
 
 export const getCurrentUser = async (userId: string) => {

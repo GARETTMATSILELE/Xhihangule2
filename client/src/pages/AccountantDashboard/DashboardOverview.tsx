@@ -175,7 +175,7 @@ const DashboardOverview: React.FC = () => {
     .filter(p => p.paymentType === 'rental')
     .reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), [periodFilteredPayments]);
   const salesRevenue = useMemo(() => periodFilteredPayments
-    .filter(p => p.paymentType === 'introduction')
+    .filter(p => p.paymentType === 'sale')
     .reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), [periodFilteredPayments]);
   const totalRevenue = useMemo(() => rentalRevenue + salesRevenue, [rentalRevenue, salesRevenue]);
 

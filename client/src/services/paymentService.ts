@@ -49,6 +49,36 @@ class PaymentService {
     }
   }
 
+  // Server-side pagination + filtering over full dataset
+  async getPaymentsPage(filters?: PaymentFilter & { page?: number; limit?: number; paginate?: boolean }): Promise<{ items: Payment[]; total: number; page: number; pages: number }> {
+    try {
+      const response = await this.db.executeWithRetry(async () => {
+        const params: any = { ...(filters || {}), paginate: 'true' };
+        return await api.get('/payments/company', {
+          params,
+          validateStatus: (status) => status < 500
+        });
+      });
+
+      if (response.status === 401) {
+        return this.handleAuthError(response);
+      }
+
+      const data = response.data;
+      if (!data || typeof data !== 'object' || !Array.isArray(data.items)) {
+        throw new Error('Invalid paginated response format');
+      }
+      return {
+        items: data.items as Payment[],
+        total: Number(data.total) || 0,
+        page: Number(data.page) || 1,
+        pages: Number(data.pages) || 1,
+      };
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
   async createPayment(paymentData: PaymentFormData): Promise<Payment> {
     try {
       return await this.db.executeWithRetry(async () => {
@@ -67,6 +97,30 @@ class PaymentService {
         const response = await api.post('/accountants/payments', paymentData);
         return response.data;
       });
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
+  // Sales-specific payment creation (separate endpoint)
+  async createSalesPaymentAccountant(paymentData: PaymentFormData): Promise<{ status?: string; payment?: Payment; data?: Payment; message?: string }> {
+    try {
+      return await this.db.executeWithRetry(async () => {
+        const response = await api.post('/accountants/sales-payments', paymentData);
+        return response.data;
+      });
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
+  async getSalesPayments(filters?: PaymentFilter): Promise<Payment[]> {
+    try {
+      const response = await this.db.executeWithRetry(async () => {
+        return await api.get('/accountants/sales-payments', { params: filters });
+      });
+      const raw = response.data as any;
+      return Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
     } catch (error: any) {
       return this.handleAuthError(error);
     }
@@ -160,10 +214,10 @@ class PaymentService {
     }
   }
 
-  async getAgents(): Promise<any[]> {
+  async getAgents(role: string = 'agent'): Promise<any[]> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.get('/users/agents');
+        const response = await api.get('/users/agents', { params: { role } });
         return response.data;
       });
     } catch (error: any) {
@@ -228,12 +282,14 @@ class PaymentService {
   }
 
   // Public method for getting agents using public API
-  async getAgentsPublic(companyId?: string): Promise<any[]> {
+  async getAgentsPublic(companyId?: string, role: string = 'agent'): Promise<any[]> {
     try {
       const config: any = {};
       if (companyId) {
         config.params = { companyId };
       }
+      if (!config.params) config.params = {};
+      config.params.role = role;
       
       const response = await publicApi.get('/users/public/agents', config);
       return response.data.data || [];

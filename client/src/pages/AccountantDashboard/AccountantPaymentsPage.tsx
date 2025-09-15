@@ -35,6 +35,9 @@ const AccountantPaymentsPage: React.FC = () => {
   const tenantService = useTenantService();
 
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [page, setPage] = useState<number>(1);
+  const [limit, setLimit] = useState<number>(25);
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,20 +123,21 @@ const AccountantPaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
+        const [propertiesData, tenantsData, paymentsPage] = await Promise.all([
           propertyService.getProperties(),
-          tenantService.getAll(),
-          paymentService.getPayments(),
-          paymentService.getLevyPayments(user?.companyId)
+          // Defer tenants heavy fetch; load lazily when needed
+          Promise.resolve({ tenants: [] as Tenant[] }),
+          paymentService.getPaymentsPage({ page, limit, includeProvisional: 'true' } as any)
         ]);
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
-        const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
-        const paymentsList = Array.isArray(paymentsData) ? paymentsData : [];
-        const levyPayments = Array.isArray(levyPaymentsData) ? levyPaymentsData : [];
+        const tenants = Array.isArray((tenantsData as any)?.tenants) ? (tenantsData as any).tenants : [];
+        const paymentsList = Array.isArray((paymentsPage as any)?.items) ? (paymentsPage as any).items : [];
+        const total = Number((paymentsPage as any)?.total) || paymentsList.length;
         setProperties(properties);
         setTenants(tenants);
-        setPayments([...(paymentsList as any[]), ...(levyPayments as any[])]);
+        setPayments(paymentsList as any[]);
+        setTotalCount(total);
       } catch (err: any) {
         if (!isMounted) return;
         setError('Failed to load data. Please try again later.');
@@ -160,37 +164,16 @@ const AccountantPaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const filterParams: any = {};
+        const filterParams: any = { page, limit, paginate: true };
         if (debouncedFilters.startDate) filterParams.startDate = debouncedFilters.startDate.toISOString();
         if (debouncedFilters.endDate) filterParams.endDate = debouncedFilters.endDate.toISOString();
         if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
         if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
         // Include provisional payments on accountant view
-        const paymentsResult = await paymentService.getPayments({ ...filterParams, includeProvisional: 'true' } as any);
-        // Fetch levy payments and apply same filters client-side
-        let levy: any[] = [];
-        try {
-          levy = await paymentService.getLevyPayments(user?.companyId);
-        } catch {
-          levy = [];
-        }
-        const applyClientFilters = (list: any[]): any[] => {
-          return list.filter((p: any) => {
-            const date = p.paymentDate ? new Date(p.paymentDate) : null;
-            if (debouncedFilters.startDate && date && date < debouncedFilters.startDate) return false;
-            if (debouncedFilters.endDate && date && date > debouncedFilters.endDate) return false;
-            if (debouncedFilters.status && p.status !== debouncedFilters.status) return false;
-            if (debouncedFilters.paymentMethod && p.paymentMethod !== debouncedFilters.paymentMethod) return false;
-            if (debouncedFilters.propertyId) {
-              const propId = typeof p.propertyId === 'object' && p.propertyId?._id ? p.propertyId._id : p.propertyId;
-              if (String(propId || '') !== String(debouncedFilters.propertyId)) return false;
-            }
-            return true;
-          });
-        };
-        const filteredLevy = applyClientFilters(levy);
-        setPayments([...(paymentsResult as any[]), ...filteredLevy]);
+        const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true' } as any);
+        setPayments(items as any[]);
+        setTotalCount(total);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {
@@ -198,7 +181,7 @@ const AccountantPaymentsPage: React.FC = () => {
       }
     };
     loadPayments();
-  }, [debouncedFilters, user?.companyId]);
+  }, [debouncedFilters, user?.companyId, page, limit]);
 
   const handleCreatePayment = async (data: PaymentFormData) => {
     try {
@@ -290,6 +273,7 @@ const AccountantPaymentsPage: React.FC = () => {
       ) : (
         <PaymentList
           payments={payments}
+          totalCount={totalCount}
           onEdit={(payment) => {
             setSelectedPayment(payment);
             setShowForm(true);
@@ -299,7 +283,13 @@ const AccountantPaymentsPage: React.FC = () => {
             setFinalizeOpen(true);
           }}
           onDownloadReceipt={async () => {}}
-          onFilterChange={setFilters}
+          onFilterChange={(next) => {
+            const n = next as any;
+            if (typeof n.page === 'number') setPage(n.page);
+            if (typeof n.limit === 'number') setLimit(n.limit);
+            const { page: _p, limit: _l, ...rest } = n;
+            setFilters(rest);
+          }}
           isMobile={false}
           filters={filters}
           loading={loading}

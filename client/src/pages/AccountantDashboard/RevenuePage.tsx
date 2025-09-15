@@ -111,7 +111,7 @@ const RevenuePage: React.FC = () => {
     .filter(p => p.paymentType === 'rental')
     .reduce((sum, p) => sum + (p.commissionDetails?.agencyShare || 0), 0), [filtered]);
   const salesCommissionRevenue = useMemo(() => filtered
-    .filter(p => p.paymentType === 'introduction')
+    .filter(p => p.paymentType === 'sale')
     .reduce((sum, p) => sum + (p.commissionDetails?.agencyShare || 0), 0), [filtered]);
   const totalCommissionRevenue = rentalsCommissionRevenue + salesCommissionRevenue;
 
@@ -146,7 +146,7 @@ const RevenuePage: React.FC = () => {
       return {
         id: p._id,
         date: new Date(p.paymentDate),
-        label: p.paymentType === 'introduction' ? 'Sales Commission' : 'Rental Commission',
+        label: p.paymentType === 'sale' ? 'Sales Commission' : 'Rental Commission',
         subtitle: `Ref: ${p.referenceNumber}`,
         amount: agencyShare
       };

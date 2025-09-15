@@ -30,10 +30,10 @@ const SalesPaymentsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<'quick' | 'installment'>('quick');
-  const [filters, setFilters] = useState<PaymentFilter>({});
+  const [filters, setFilters] = useState<PaymentFilter>({ saleMode: 'quick' as any });
 
   const summary = useMemo(() => {
-    const salesPayments = payments.filter(p => p.paymentType === 'introduction');
+    const salesPayments = payments.filter(p => p.paymentType === 'sale');
     const totalIncome = salesPayments.reduce((sum, p) => sum + p.amount, 0);
     const totalPayments = salesPayments.length;
     const overduePayments = salesPayments.filter(p => p.status === 'failed').length;
@@ -57,12 +57,14 @@ const SalesPaymentsPage: React.FC = () => {
         const [propertiesData, tenantsData, paymentsData] = await Promise.all([
           propertyService.getProperties().catch(() => []),
           tenantService.getAll().catch(() => ({ tenants: [] })),
-          paymentService.getPayments().catch(() => [])
+          paymentService.getSalesPayments().catch(() => [])
         ]);
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
         const tenants = Array.isArray((tenantsData as any).tenants) ? (tenantsData as any).tenants : (Array.isArray(tenantsData) ? tenantsData : []);
-        const payments = Array.isArray(paymentsData) ? (paymentsData as Payment[]).filter(p => (p as any).paymentType === 'introduction') : [];
+        const payments = (Array.isArray(paymentsData) ? (paymentsData as Payment[]) : [])
+          .filter(p => p.paymentType === 'sale')
+          .filter(p => (p as any).saleMode === mode);
         setProperties(properties);
         setTenants(tenants);
         setPayments(payments);
@@ -83,8 +85,9 @@ const SalesPaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const data = await paymentService.getPayments(filters);
-        setPayments(Array.isArray(data) ? data.filter(p => p.paymentType === 'introduction') : []);
+        const data = await paymentService.getSalesPayments({ ...filters, paymentType: 'sale', saleMode: mode });
+        const onlySales = (Array.isArray(data) ? data : []).filter((p: any) => p.paymentType === 'sale');
+        setPayments((onlySales as any[]).filter(p => (p as any).saleMode === mode) as Payment[]);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {
@@ -92,16 +95,22 @@ const SalesPaymentsPage: React.FC = () => {
       }
     };
     applyFilters();
-  }, [filters]);
+  }, [filters, mode]);
+
+  useEffect(() => {
+    setFilters(prev => ({ ...prev, saleMode: mode }));
+  }, [mode]);
 
   const handleCreatePayment = async (data: PaymentFormData) => {
     try {
       setLoading(true);
       setError(null);
-      const payload: PaymentFormData = { ...data, paymentType: 'introduction' };
-      const created = await paymentService.createPaymentAccountant(payload);
-      const createdPayment = (created as any)?.data || created;
-      if (createdPayment) setPayments(prev => [...prev, createdPayment as Payment]);
+      const payload: PaymentFormData = { ...data, paymentType: 'sale' };
+      const created = await paymentService.createSalesPaymentAccountant(payload);
+      const createdPayment = (created as any)?.payment || (created as any)?.data || created;
+      if (createdPayment && (createdPayment as any).paymentType === 'sale') {
+        setPayments(prev => [...prev, createdPayment as Payment]);
+      }
       setShowForm(false);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to create sales payment');

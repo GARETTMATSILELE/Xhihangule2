@@ -255,19 +255,25 @@ class AgentAccountService {
                 const updatedAccount = yield this.getOrCreateAgentAccount(agentId);
                 // Get commission data from payments for display
                 console.log('Fetching commission data for agentId:', agentId);
+                // Determine agent role to filter payment types
+                const agentUser = yield User_1.User.findById(agentId).select('role');
+                const paymentTypeFilter = ((agentUser === null || agentUser === void 0 ? void 0 : agentUser.role) === 'sales') ? 'sale' : 'rental';
                 // First check if there are any payments for this agent
                 const totalPayments = yield Payment_1.Payment.countDocuments({
-                    agentId: new mongoose_1.default.Types.ObjectId(agentId)
+                    agentId: new mongoose_1.default.Types.ObjectId(agentId),
+                    paymentType: paymentTypeFilter
                 });
                 console.log('Total payments for agent:', totalPayments);
                 const completedPayments = yield Payment_1.Payment.countDocuments({
                     agentId: new mongoose_1.default.Types.ObjectId(agentId),
-                    status: 'completed'
+                    status: 'completed',
+                    paymentType: paymentTypeFilter
                 });
                 console.log('Completed payments for agent:', completedPayments);
                 const commissionData = yield Payment_1.Payment.find({
                     agentId: new mongoose_1.default.Types.ObjectId(agentId),
-                    status: 'completed'
+                    status: 'completed',
+                    paymentType: paymentTypeFilter
                 }).populate('propertyId', 'address propertyName')
                     .populate('tenantId', 'firstName lastName')
                     .select('paymentDate amount commissionDetails propertyId tenantId referenceNumber paymentType manualPropertyAddress manualTenantName')
@@ -309,7 +315,7 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 // Get all agents for the company
-                const agents = yield User_1.User.find({ companyId: new mongoose_1.default.Types.ObjectId(companyId), role: 'agent' });
+                const agents = yield User_1.User.find({ companyId: new mongoose_1.default.Types.ObjectId(companyId), role: { $in: ['agent', 'sales'] } });
                 const agentIds = agents.map(agent => agent._id);
                 // Get or create accounts for all agents
                 const accounts = yield Promise.all(agentIds.map(agentId => this.getOrCreateAgentAccount(agentId.toString())));
@@ -329,11 +335,15 @@ class AgentAccountService {
             var _a;
             try {
                 console.log('Syncing commission transactions for agent:', agentId);
+                // Determine agent role to filter payment types
+                const agentUser = yield User_1.User.findById(agentId).select('role');
+                const paymentTypeFilter = ((agentUser === null || agentUser === void 0 ? void 0 : agentUser.role) === 'sales') ? 'sale' : 'rental';
                 // Get all completed payments for this agent
                 const payments = yield Payment_1.Payment.find({
                     agentId: new mongoose_1.default.Types.ObjectId(agentId),
-                    status: 'completed'
-                }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId');
+                    status: 'completed',
+                    paymentType: paymentTypeFilter
+                }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
                 const account = yield this.getOrCreateAgentAccount(agentId);
                 let newTransactionsAdded = 0;
                 for (const payment of payments) {

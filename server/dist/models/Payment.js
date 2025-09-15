@@ -39,8 +39,14 @@ const collections_1 = require("../config/collections");
 const PaymentSchema = new mongoose_1.Schema({
     paymentType: {
         type: String,
-        enum: ['introduction', 'rental'],
+        enum: ['sale', 'rental', 'introduction'],
         required: true,
+    },
+    saleMode: {
+        type: String,
+        enum: ['quick', 'installment'],
+        required: false,
+        default: 'quick'
     },
     propertyType: {
         type: String,
@@ -100,13 +106,13 @@ const PaymentSchema = new mongoose_1.Schema({
     // Add rental period fields
     rentalPeriodMonth: {
         type: Number,
-        required: true,
+        required: function () { return this.paymentType === 'rental'; },
         min: 1,
         max: 12,
     },
     rentalPeriodYear: {
         type: Number,
-        required: true,
+        required: function () { return this.paymentType === 'rental'; },
     },
     // Advance payment fields
     advanceMonthsPaid: {
@@ -229,6 +235,7 @@ const PaymentSchema = new mongoose_1.Schema({
 });
 // Add indexes for common queries
 PaymentSchema.index({ companyId: 1, paymentDate: -1 });
+PaymentSchema.index({ companyId: 1, paymentType: 1, paymentDate: -1 });
 PaymentSchema.index({ propertyId: 1 });
 PaymentSchema.index({ tenantId: 1 });
 PaymentSchema.index({ agentId: 1 });

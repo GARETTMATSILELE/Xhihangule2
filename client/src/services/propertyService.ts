@@ -192,6 +192,36 @@ export const usePropertyService = () => {
     }
   };
 
+  // Sales-specific create using authenticated sales endpoint
+  const createPropertySales = async (propertyData: Partial<Property>): Promise<Property> => {
+    try {
+      validateUserAndCompany(user);
+
+      const payload = {
+        name: propertyData.name,
+        address: propertyData.address,
+        price: propertyData.price ?? propertyData.rent ?? 0,
+        bedrooms: propertyData.bedrooms ?? 0,
+        bathrooms: propertyData.bathrooms ?? 0,
+        status: propertyData.status ?? 'available',
+        builtArea: propertyData.builtArea ?? 0,
+        landArea: propertyData.landArea ?? 0,
+        description: propertyData.description ?? '',
+        propertyOwnerId: (propertyData as any).propertyOwnerId,
+        agentId: (propertyData as any).agentId,
+        commission: propertyData.commission,
+        commissionPreaPercent: (propertyData as any).commissionPreaPercent,
+        commissionAgencyPercentRemaining: (propertyData as any).commissionAgencyPercentRemaining,
+        commissionAgentPercentRemaining: (propertyData as any).commissionAgentPercentRemaining,
+      };
+
+      const response = await api.post('/properties/sales', payload);
+      return extractPropertyData(response.data);
+    } catch (error) {
+      return handleApiError(error);
+    }
+  };
+
   const updateProperty = async (id: string, propertyData: Partial<Property>): Promise<Property> => {
     try {
       const validatedUser = validateUserAndCompany(user);
@@ -200,7 +230,9 @@ export const usePropertyService = () => {
         throw new Error('Property ID is required');
       }
 
-      const response = await api.put(`/properties/${id}`, {
+      // Sales dashboard users use dedicated sales update route (no admin gate)
+      const endpoint = validatedUser.role === 'sales' ? `/properties/sales/${id}` : `/properties/${id}`;
+      const response = await api.put(endpoint, {
         ...propertyData,
         companyId: validatedUser.companyId
       });
@@ -316,6 +348,7 @@ export const usePropertyService = () => {
     getPropertiesForUser,
     getProperty,
     createProperty,
+    createPropertySales,
     updateProperty,
     deleteProperty,
     getByOwnerId,

@@ -6,7 +6,7 @@ const isAgent = (req, res, next) => {
     if (!req.user) {
         throw new errorHandler_1.AppError('Authentication required', 401);
     }
-    if (req.user.role !== 'agent') {
+    if (!['agent', 'sales'].includes(req.user.role)) {
         throw new errorHandler_1.AppError('Access denied. Agent role required.', 403);
     }
     next();
@@ -46,7 +46,7 @@ const canCreateProperty = (req, res, next) => {
     if (!req.user) {
         throw new errorHandler_1.AppError('Authentication required', 401);
     }
-    if (!['admin', 'owner', 'agent'].includes(req.user.role)) {
+    if (!['admin', 'owner', 'agent', 'sales'].includes(req.user.role)) {
         throw new errorHandler_1.AppError('Access denied. Admin, Owner, or Agent role required to create properties.', 403);
     }
     next();

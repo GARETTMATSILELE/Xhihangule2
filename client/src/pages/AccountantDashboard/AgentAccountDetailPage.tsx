@@ -524,8 +524,8 @@ const AgentAccountDetailPage: React.FC = () => {
                       <TableCell>{tenantName}</TableCell>
                       <TableCell>
                         <Chip
-                          label={commission.paymentType === 'introduction' ? 'Introduction' : 'Rental'}
-                          color={commission.paymentType === 'introduction' ? 'primary' : 'secondary'}
+                          label={(commission as any).paymentType === 'rental' ? 'Rental' : 'Sale'}
+                          color={(commission as any).paymentType === 'rental' ? 'secondary' : 'primary'}
                           size="small"
                         />
                       </TableCell>

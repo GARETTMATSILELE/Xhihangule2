@@ -39,8 +39,9 @@
  * - PaymentSummary: Dashboard statistics
  */
 
-export type PaymentType = 'rental' | 'introduction' | 'levy' | 'municipal';
+export type PaymentType = 'rental' | 'sale' | 'introduction' | 'levy' | 'municipal';
 export type PropertyType = 'residential' | 'commercial';
+export type SaleMode = 'quick' | 'installment';
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money';
 export type PaymentStatus = 'pending' | 'completed' | 'failed';
 export type Currency = 'USD' | 'ZWL';
@@ -57,6 +58,7 @@ export const SUPPORTED_CURRENCIES: Currency[] = ['USD', 'ZWL'];
 
 export interface PaymentFormData {
   paymentType: PaymentType;
+  saleMode?: SaleMode;
   propertyType: PropertyType;
   propertyId: string;
   tenantId: string;
@@ -97,6 +99,7 @@ export interface PaymentFormData {
 export interface Payment {
   _id: string;
   paymentType: PaymentType;
+  saleMode?: SaleMode;
   propertyType: PropertyType;
   propertyId: string;
   tenantId: string;
@@ -143,6 +146,7 @@ export interface PaymentFilter {
   startDate?: Date;
   endDate?: Date;
   paymentType?: PaymentType;
+  saleMode?: SaleMode;
   propertyType?: PropertyType;
   status?: PaymentStatus;
   agentId?: string;

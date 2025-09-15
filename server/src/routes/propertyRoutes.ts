@@ -4,6 +4,7 @@ import {
   getProperty,
   createProperty,
   createPropertyPublic,
+  createSalesProperty,
   updateProperty,
   deleteProperty,
   getVacantProperties,
@@ -115,6 +116,10 @@ router.get('/', authWithCompany, getProperties);
 router.get('/vacant', authWithCompany, getVacantProperties);
 router.get('/:id', authWithCompany, getProperty);
 router.post('/', authWithCompany, canCreateProperty, createProperty);
+// Sales route for creating property with sales fields
+router.post('/sales', authWithCompany, createSalesProperty);
+// Allow sales/agents to update their own sales properties (controller enforces ownership)
+router.put('/sales/:id', authWithCompany, updateProperty);
 router.put('/:id', authWithCompany, isAdmin, updateProperty);
 router.delete('/:id', authWithCompany, isAdmin, deleteProperty);
 

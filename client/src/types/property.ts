@@ -1,4 +1,4 @@
-export type PropertyStatus = 'available' | 'rented' | 'maintenance';
+export type PropertyStatus = 'available' | 'rented' | 'maintenance' | 'under_offer' | 'sold';
 export type PropertyType = 'apartment' | 'house' | 'commercial';
 
 export interface Property {
@@ -8,14 +8,19 @@ export interface Property {
   type: PropertyType;
   status: PropertyStatus;
   rent: number;
+  price?: number;
   bedrooms: number;
   bathrooms: number;
   area: number;
+  builtArea?: number;
+  landArea?: number;
   description: string;
   images: string[];
   amenities: string[];
   companyId: string;
   ownerId: string;
+  agentId?: string;
+  propertyOwnerId?: string;
   occupancyRate: number;
   totalRentCollected: number;
   currentArrears: number;
@@ -32,8 +37,12 @@ export interface Property {
   paidInAdvance?: boolean;
   advanceMonths?: number;
   // New fields
-  rentalType?: 'management' | 'introduction';
+  rentalType?: 'management' | 'introduction' | 'sale';
   commission?: number;
+  commissionPreaPercent?: number;
+  commissionAgencyPercentRemaining?: number;
+  commissionAgentPercentRemaining?: number;
+  saleType?: 'cash' | 'installment';
   // New fields for levy/municipal fees
   levyOrMunicipalType?: 'levy' | 'municipal';
   levyOrMunicipalAmount?: number;
@@ -44,7 +53,7 @@ export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'created
   status?: PropertyStatus;
   occupiedUnits?: number;
   // New fields
-  rentalType?: 'management' | 'introduction';
+  rentalType?: 'management' | 'introduction' | 'sale';
   commission?: number;
   // New fields for levy/municipal fees
   levyOrMunicipalType?: 'levy' | 'municipal';

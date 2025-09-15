@@ -2,7 +2,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
 export interface IPayment extends Document {
-  paymentType: 'introduction' | 'rental';
+  paymentType: 'sale' | 'rental' | 'introduction';
+  saleMode?: 'quick' | 'installment';
   propertyType: 'residential' | 'commercial';
   propertyId: mongoose.Types.ObjectId;
   tenantId: mongoose.Types.ObjectId;
@@ -55,8 +56,14 @@ export interface IPayment extends Document {
 const PaymentSchema: Schema = new Schema({
   paymentType: {
     type: String,
-    enum: ['introduction', 'rental'],
+    enum: ['sale', 'rental', 'introduction'],
     required: true,
+  },
+  saleMode: {
+    type: String,
+    enum: ['quick', 'installment'],
+    required: false,
+    default: 'quick'
   },
   propertyType: {
     type: String,
@@ -116,13 +123,13 @@ const PaymentSchema: Schema = new Schema({
   // Add rental period fields
   rentalPeriodMonth: {
     type: Number,
-    required: true,
+    required: function(this: any) { return this.paymentType === 'rental'; },
     min: 1,
     max: 12,
   },
   rentalPeriodYear: {
     type: Number,
-    required: true,
+    required: function(this: any) { return this.paymentType === 'rental'; },
   },
   // Advance payment fields
   advanceMonthsPaid: {
@@ -246,6 +253,7 @@ const PaymentSchema: Schema = new Schema({
 
 // Add indexes for common queries
 PaymentSchema.index({ companyId: 1, paymentDate: -1 });
+PaymentSchema.index({ companyId: 1, paymentType: 1, paymentDate: -1 });
 PaymentSchema.index({ propertyId: 1 });
 PaymentSchema.index({ tenantId: 1 });
 PaymentSchema.index({ agentId: 1 });
