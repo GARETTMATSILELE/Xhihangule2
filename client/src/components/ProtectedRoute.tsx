@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Box, CircularProgress, Typography, Alert, Button } from '@mui/material';
+import { getDashboardPath } from '../utils/registrationUtils';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -52,8 +53,9 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
   if (requiredRoles && requiredRoles.length > 0) {
     if (!requiredRoles.includes(user.role)) {
       console.log('ProtectedRoute: User role not authorized', { userRole: user.role, requiredRoles });
-      // Redirect to login on unauthorized access per requirement
-      return <Navigate to="/login" replace state={{ from: location }} />;
+      // Redirect unauthorized users to their own dashboard instead of login
+      const fallback = getDashboardPath(user.role as any);
+      return <Navigate to={fallback} replace />;
     }
   }
 

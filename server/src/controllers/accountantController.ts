@@ -158,7 +158,8 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
         const perMonthAgentShare = coveredMonths.length > 0 ? totalAgentShare / coveredMonths.length : 0;
 
         coveredMonths.forEach(({ year, month }) => {
-          const key = `${payment.propertyId.toString()}-${year}-${month}`;
+          const propKey = payment?.propertyId ? (payment.propertyId as any).toString() : String((payment as any).propertyId || 'unknown');
+          const key = `${propKey}-${year}-${month}`;
           paymentMap.set(key, true);
 
           const commissionKey = `${year}-${month}`;
@@ -182,13 +183,14 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
         let hasPayment = false;
         if (filterMonth !== null) {
           // Check specific month
-          const key = `${lease.propertyId.toString()}-${filterYear}-${filterMonth}`;
+          const leaseKey = (lease as any)?.propertyId ? (lease as any).propertyId.toString() : String((lease as any).propertyId || 'unknown');
+          const key = `${leaseKey}-${filterYear}-${filterMonth}`;
           hasPayment = paymentMap.has(key);
         } else {
           // Check entire year
-          const yearPayments = Array.from(paymentMap.keys()).filter(key => 
-            key.startsWith(`${lease.propertyId.toString()}-${filterYear}-`)
-          );
+          const leaseKey = (lease as any)?.propertyId ? (lease as any).propertyId.toString() : String((lease as any).propertyId || 'unknown');
+          const prefix = `${leaseKey}-${filterYear}-`;
+          const yearPayments = Array.from(paymentMap.keys()).filter(key => key.startsWith(prefix));
           hasPayment = yearPayments.length > 0;
         }
 
@@ -339,7 +341,7 @@ export const getAgencyCommission = async (req: Request, res: Response) => {
       agencyCommission.details.push({
         paymentId: payment._id.toString(),
         paymentDate: payment.paymentDate,
-        propertyId: payment.propertyId.toString(),
+        propertyId: payment?.propertyId ? (payment.propertyId as any).toString() : String((payment as any).propertyId || ''),
         propertyName: property?.name || (payment as any).manualPropertyAddress || 'Manual Entry',
         propertyAddress: property?.address || (payment as any).manualPropertyAddress || 'Manual Entry',
         rentalAmount: rentalAmount,
@@ -478,7 +480,7 @@ export const getPREACommission = async (req: Request, res: Response) => {
 
       if (!shouldInclude) continue;
 
-      const key = (payment.propertyId as any).toString();
+      const key = payment?.propertyId ? (payment.propertyId as any).toString() : String((payment as any).propertyId || '');
       const name = property?.name || (payment as any).manualPropertyAddress || 'Manual Entry';
       const rentAmount = typeof (payment as any).amount === 'number' ? (payment as any).amount : 0;
       if (propertyMap.has(key)) {

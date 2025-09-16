@@ -111,7 +111,8 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 const totalAgentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
                 const perMonthAgentShare = coveredMonths.length > 0 ? totalAgentShare / coveredMonths.length : 0;
                 coveredMonths.forEach(({ year, month }) => {
-                    const key = `${payment.propertyId.toString()}-${year}-${month}`;
+                    const propKey = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || 'unknown');
+                    const key = `${propKey}-${year}-${month}`;
                     paymentMap.set(key, true);
                     const commissionKey = `${year}-${month}`;
                     if (agentCommissionMap.has(commissionKey)) {
@@ -133,12 +134,15 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 let hasPayment = false;
                 if (filterMonth !== null) {
                     // Check specific month
-                    const key = `${lease.propertyId.toString()}-${filterYear}-${filterMonth}`;
+                    const leaseKey = (lease === null || lease === void 0 ? void 0 : lease.propertyId) ? lease.propertyId.toString() : String(lease.propertyId || 'unknown');
+                    const key = `${leaseKey}-${filterYear}-${filterMonth}`;
                     hasPayment = paymentMap.has(key);
                 }
                 else {
                     // Check entire year
-                    const yearPayments = Array.from(paymentMap.keys()).filter(key => key.startsWith(`${lease.propertyId.toString()}-${filterYear}-`));
+                    const leaseKey = (lease === null || lease === void 0 ? void 0 : lease.propertyId) ? lease.propertyId.toString() : String(lease.propertyId || 'unknown');
+                    const prefix = `${leaseKey}-${filterYear}-`;
+                    const yearPayments = Array.from(paymentMap.keys()).filter(key => key.startsWith(prefix));
                     hasPayment = yearPayments.length > 0;
                 }
                 agentDetails.properties.push({
@@ -279,7 +283,7 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
             agencyCommission.details.push({
                 paymentId: payment._id.toString(),
                 paymentDate: payment.paymentDate,
-                propertyId: payment.propertyId.toString(),
+                propertyId: (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || ''),
                 propertyName: (property === null || property === void 0 ? void 0 : property.name) || payment.manualPropertyAddress || 'Manual Entry',
                 propertyAddress: (property === null || property === void 0 ? void 0 : property.address) || payment.manualPropertyAddress || 'Manual Entry',
                 rentalAmount: rentalAmount,
@@ -414,7 +418,7 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
             if (!shouldInclude)
                 continue;
-            const key = payment.propertyId.toString();
+            const key = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || '');
             const name = (property === null || property === void 0 ? void 0 : property.name) || payment.manualPropertyAddress || 'Manual Entry';
             const rentAmount = typeof payment.amount === 'number' ? payment.amount : 0;
             if (propertyMap.has(key)) {

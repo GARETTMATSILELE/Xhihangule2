@@ -18,106 +18,30 @@ import {
   Chip,
   IconButton,
   Tooltip,
-  InputAdornment
+  InputAdornment,
+  Dialog,
+  DialogContent
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { 
   Search as SearchIcon, 
   FilterList as FilterIcon,
-  Clear as ClearIcon 
+  Clear as ClearIcon,
+  Print as PrintIcon,
+  Download as DownloadIcon 
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-
-const columns: GridColDef[] = [
-  { 
-    field: 'paymentDate', 
-    headerName: 'Date', 
-    width: 120, 
-    valueGetter: (params) => new Date(params.row.paymentDate).toLocaleDateString() 
-  },
-  { 
-    field: 'propertyId', 
-    headerName: 'Property', 
-    width: 200, 
-    valueGetter: (params) => {
-      if (params.row.propertyId && typeof params.row.propertyId === 'object') {
-        return params.row.propertyId.name || 'Unknown Property';
-      }
-      return 'Unknown Property';
-    }
-  },
-  { 
-    field: 'amount', 
-    headerName: 'Amount', 
-    width: 120,
-    valueGetter: (params) => {
-      const currency = params.row.currency || 'USD';
-      return `${currency} ${params.row.amount?.toLocaleString() || 0}`;
-    }
-  },
-  { 
-    field: 'paymentMethod', 
-    headerName: 'Method', 
-    width: 130,
-    valueGetter: (params) => {
-      const method = params.row.paymentMethod;
-      return method?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Unknown';
-    }
-  },
-  { 
-    field: 'referenceNumber', 
-    headerName: 'Reference', 
-    width: 140 
-  },
-  { 
-    field: 'status', 
-    headerName: 'Status', 
-    width: 100,
-    renderCell: (params) => {
-      const status = params.row.status;
-      const color = status === 'completed' ? 'success' : status === 'pending' ? 'warning' : 'error';
-      return (
-        <Chip
-          label={status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'}
-          color={color as any}
-          size="small"
-          variant="outlined"
-        />
-      );
-    }
-  },
-  { 
-    field: 'currency', 
-    headerName: 'Currency', 
-    width: 100 
-  },
-  { 
-    field: 'processedBy', 
-    headerName: 'Processed By', 
-    width: 180,
-    valueGetter: (params) => {
-      if (params.row.processedBy && typeof params.row.processedBy === 'object') {
-        const user = params.row.processedBy;
-        return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown User';
-      }
-      return 'Unknown User';
-    }
-  },
-  { 
-    field: 'notes', 
-    headerName: 'Notes', 
-    width: 200,
-    valueGetter: (params) => params.row.notes || '-'
-  },
-];
+import PaymentReceipt from '../../components/payments/PaymentReceipt';
 
 const LevyPaymentsPage: React.FC = () => {
   const { user } = useAuth();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
   
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -208,6 +132,159 @@ const LevyPaymentsPage: React.FC = () => {
         setLoading(false);
       });
   }, [user?.companyId]);
+
+  const handlePrint = async (id: string) => {
+    try {
+      const receipt = await paymentService.getPaymentReceipt(id, user?.companyId);
+      setSelectedReceipt(receipt);
+      setPrintOpen(true);
+    } catch (err) {
+      console.error('Failed to fetch receipt', err);
+      alert('Failed to fetch receipt');
+    }
+  };
+
+  const handleDownload = async (id: string, reference?: string) => {
+    try {
+      const blob = await paymentService.downloadReceiptPublic(id, user?.companyId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `receipt-${reference || id}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download receipt', err);
+      alert('Failed to download receipt');
+    }
+  };
+
+  const columns: GridColDef[] = [
+    { 
+      field: 'paymentDate', 
+      headerName: 'Date', 
+      width: 120, 
+      valueGetter: (params) => new Date(params.row.paymentDate).toLocaleDateString() 
+    },
+    { 
+      field: 'propertyId', 
+      headerName: 'Property', 
+      width: 200, 
+      valueGetter: (params) => {
+        if (params.row.propertyId && typeof params.row.propertyId === 'object') {
+          return params.row.propertyId.name || 'Unknown Property';
+        }
+        return 'Unknown Property';
+      }
+    },
+    { 
+      field: 'amount', 
+      headerName: 'Amount', 
+      width: 120,
+      valueGetter: (params) => {
+        const currency = params.row.currency || 'USD';
+        return `${currency} ${params.row.amount?.toLocaleString() || 0}`;
+      }
+    },
+    { 
+      field: 'paymentMethod', 
+      headerName: 'Method', 
+      width: 130,
+      valueGetter: (params) => {
+        const method = params.row.paymentMethod;
+        return method?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Unknown';
+      }
+    },
+    { 
+      field: 'referenceNumber', 
+      headerName: 'Reference', 
+      width: 220,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, overflow: 'hidden' }}>
+          <Typography variant="body2" sx={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: 180 }}>
+            {params.row.referenceNumber || '-'}
+          </Typography>
+        </Box>
+      )
+    },
+    { 
+      field: 'status', 
+      headerName: 'Status', 
+      width: 100,
+      renderCell: (params) => {
+        const status = params.row.status;
+        const color = status === 'completed' ? 'success' : status === 'pending' ? 'warning' : 'error';
+        return (
+          <Chip
+            label={status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'}
+            color={color as any}
+            size="small"
+            variant="outlined"
+          />
+        );
+      }
+    },
+    { 
+      field: 'currency', 
+      headerName: 'Currency', 
+      width: 100 
+    },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 160,
+      sortable: false,
+      filterable: false,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="Print Receipt">
+            <IconButton
+              color="primary"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrint(params.row._id);
+              }}
+            >
+              <PrintIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Download HTML Receipt">
+            <IconButton
+              color="secondary"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownload(params.row._id, params.row.referenceNumber);
+              }}
+            >
+              <DownloadIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )
+    },
+    { 
+      field: 'processedBy', 
+      headerName: 'Processed By', 
+      width: 180,
+      valueGetter: (params) => {
+        if (params.row.processedBy && typeof params.row.processedBy === 'object') {
+          const user = params.row.processedBy;
+          return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown User';
+        }
+        return 'Unknown User';
+      }
+    },
+    { 
+      field: 'notes', 
+      headerName: 'Notes', 
+      width: 200,
+      valueGetter: (params) => params.row.notes || '-'
+    },
+  ];
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -369,6 +446,23 @@ const LevyPaymentsPage: React.FC = () => {
             </Paper>
           )}
         </Box>
+
+        {/* Print Dialog */}
+        <Dialog 
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogContent>
+            {selectedReceipt && (
+              <PaymentReceipt
+                receipt={selectedReceipt}
+                onClose={() => setPrintOpen(false)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </Box>
     </LocalizationProvider>
   );

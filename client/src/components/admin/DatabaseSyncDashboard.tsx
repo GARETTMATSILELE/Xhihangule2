@@ -49,6 +49,7 @@ import {
   Pause
 } from '@mui/icons-material';
 import api from '../../api';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface SyncStatus {
   realTime: {
@@ -103,6 +104,7 @@ interface SyncHealth {
 }
 
 const DatabaseSyncDashboard: React.FC = () => {
+  const { user } = useAuth();
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncSchedules, setSyncSchedules] = useState<SyncSchedule[]>([]);
   const [syncHealth, setSyncHealth] = useState<SyncHealth | null>(null);
@@ -128,6 +130,29 @@ const DatabaseSyncDashboard: React.FC = () => {
     const interval = setInterval(loadSyncData, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
   }, []);
+
+  // Auto-start real-time sync when an authenticated admin/accountant visits the page
+  useEffect(() => {
+    const tryStartRealtime = async () => {
+      try {
+        // Only attempt for admin/accountant roles
+        if (!user || !['admin', 'accountant'].includes(user.role)) return;
+
+        // Check current status first to avoid redundant starts
+        const statusRes = await api.get('/sync/status');
+        const isRunning = Boolean(statusRes?.data?.data?.realTime?.isRunning);
+        if (!isRunning) {
+          await api.post('/sync/real-time/start');
+          await loadSyncData();
+        }
+      } catch (e) {
+        // Non-fatal: surface in UI error banner
+        setError((e as any)?.message || 'Failed to auto-start real-time sync');
+      }
+    };
+    tryStartRealtime();
+    // Run this when user changes (e.g., impersonation) or on first mount
+  }, [user?.role]);
 
   const loadSyncData = async () => {
     try {

@@ -6125,3 +6125,269 @@
 {"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-15T16:43:39.098Z"}
 {"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-15T16:43:39.099Z"}
 {"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-15T16:43:39.100Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T17:00:00.018Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T17:00:00.022Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T16:00:00.022Z","timestamp":"2025-09-15T17:00:00.023Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T17:00:00.180Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 162ms","timestamp":"2025-09-15T17:00:00.184Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T18:00:00.014Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T18:00:00.028Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T17:00:00.031Z","timestamp":"2025-09-15T18:00:00.031Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T18:00:00.227Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 214ms","timestamp":"2025-09-15T18:00:00.230Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T19:00:00.013Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T19:00:00.016Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T18:00:00.016Z","timestamp":"2025-09-15T19:00:00.016Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T19:00:00.182Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 170ms","timestamp":"2025-09-15T19:00:00.185Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T20:00:00.022Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T20:00:00.032Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T19:00:00.034Z","timestamp":"2025-09-15T20:00:00.034Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T20:00:00.247Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 225ms","timestamp":"2025-09-15T20:00:00.250Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T21:00:00.003Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T21:00:00.004Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T20:00:00.004Z","timestamp":"2025-09-15T21:00:00.004Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T21:00:00.205Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 204ms","timestamp":"2025-09-15T21:00:00.210Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T22:00:00.017Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T22:00:00.019Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T21:00:00.020Z","timestamp":"2025-09-15T22:00:00.020Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T22:00:00.224Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 208ms","timestamp":"2025-09-15T22:00:00.229Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-15T23:00:00.026Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-15T23:00:00.033Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T22:00:00.034Z","timestamp":"2025-09-15T23:00:00.034Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-15T23:00:00.228Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 206ms","timestamp":"2025-09-15T23:00:00.235Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T00:00:00.019Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T00:00:00.024Z"}
+{"level":"info","message":"Syncing changes since 2025-09-15T23:00:00.028Z","timestamp":"2025-09-16T00:00:00.028Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T00:00:00.294Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 276ms","timestamp":"2025-09-16T00:00:00.298Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T01:00:00.022Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T01:00:00.035Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T00:00:00.037Z","timestamp":"2025-09-16T01:00:00.037Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T01:00:00.209Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 188ms","timestamp":"2025-09-16T01:00:00.211Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T02:00:00.006Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T02:00:00.009Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T01:00:00.009Z","timestamp":"2025-09-16T02:00:00.010Z"}
+{"level":"info","message":"Executing scheduled sync: daily_sync","timestamp":"2025-09-16T02:00:00.033Z"}
+{"level":"info","message":"Starting daily synchronization...","timestamp":"2025-09-16T02:00:00.044Z"}
+{"level":"info","message":"Starting full database synchronization...","timestamp":"2025-09-16T02:00:00.049Z"}
+{"level":"info","message":"Syncing 16 properties...","timestamp":"2025-09-16T02:00:00.102Z"}
+{"level":"info","message":"Updated property account for property 68778f56a77a7624d898bde7","timestamp":"2025-09-16T02:00:00.174Z"}
+{"level":"info","message":"Updated property account for property 6881ecd8a15ae3f0afd218ff","timestamp":"2025-09-16T02:00:00.184Z"}
+{"level":"info","message":"Updated property account for property 6888a10c8ef6ae57ca36b653","timestamp":"2025-09-16T02:00:00.246Z"}
+{"level":"info","message":"Updated property account for property 68a705ad7a1f3f54b6cc93ec","timestamp":"2025-09-16T02:00:00.295Z"}
+{"level":"info","message":"Updated property account for property 68a8a10dc34416fb6e715184","timestamp":"2025-09-16T02:00:00.338Z"}
+{"level":"info","message":"Updated property account for property 68ab1b776c70c4a42cd2113a","timestamp":"2025-09-16T02:00:00.374Z"}
+{"level":"info","message":"Updated property account for property 68b73a06f62a980887e4772c","timestamp":"2025-09-16T02:00:00.404Z"}
+{"level":"info","message":"Updated property account for property 68b861c3e65e778ef53508f1","timestamp":"2025-09-16T02:00:00.444Z"}
+{"level":"info","message":"Updated property account for property 68b96ed0d1431d1f6d18e8ec","timestamp":"2025-09-16T02:00:00.481Z"}
+{"level":"info","message":"Updated property account for property 68bab7e7e84308265da8e8a4","timestamp":"2025-09-16T02:00:00.551Z"}
+{"level":"info","message":"Updated property account for property 68baf504f230ec47f16790a9","timestamp":"2025-09-16T02:00:00.575Z"}
+{"level":"info","message":"Updated property account for property 68c0148b765aed88ad378aee","timestamp":"2025-09-16T02:00:00.640Z"}
+{"level":"info","message":"Updated property account for property 68c2b471bb900924ab8f5e45","timestamp":"2025-09-16T02:00:00.663Z"}
+{"level":"info","message":"Updated property account for property 68c3c9e28313dabf9866966b","timestamp":"2025-09-16T02:00:00.730Z"}
+{"level":"info","message":"Updated property account for property 68c4123ee5d64e7ed6704958","timestamp":"2025-09-16T02:00:00.765Z"}
+{"level":"info","message":"Updated property account for property 68c42624a5fcbc4752ac9f55","timestamp":"2025-09-16T02:00:00.782Z"}
+{"level":"info","message":"Syncing 30 completed payments...","timestamp":"2025-09-16T02:00:00.814Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T02:00:00.975Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 970ms","timestamp":"2025-09-16T02:00:00.979Z"}
+{"level":"info","message":"Syncing 16 users...","timestamp":"2025-09-16T02:00:01.193Z"}
+{"level":"info","message":"Updated owner name in 4 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-16T02:00:01.228Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a6f7dbbbfe5eb39dc89953","timestamp":"2025-09-16T02:00:01.249Z"}
+{"level":"info","message":"Updated owner name in 3 property accounts for user 68a87e730a904b150ddec26b","timestamp":"2025-09-16T02:00:01.295Z"}
+{"level":"info","message":"Updated owner name in 5 property accounts for user 68aa70dbb9860b8f73836af8","timestamp":"2025-09-16T02:00:01.325Z"}
+{"level":"info","message":"Full sync completed in 1297ms. Success: 32, Errors: 0","timestamp":"2025-09-16T02:00:01.346Z"}
+{"level":"info","message":"Old sync errors cleanup completed","timestamp":"2025-09-16T02:00:01.349Z"}
+{"level":"info","message":"Daily synchronization completed","timestamp":"2025-09-16T02:00:01.350Z"}
+{"level":"info","message":"Completed scheduled sync: daily_sync in 1326ms","timestamp":"2025-09-16T02:00:01.362Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T03:00:00.015Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T03:00:00.017Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T02:00:00.017Z","timestamp":"2025-09-16T03:00:00.017Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T03:00:00.184Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 169ms","timestamp":"2025-09-16T03:00:00.186Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T04:00:00.022Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T04:00:00.031Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T03:00:00.035Z","timestamp":"2025-09-16T04:00:00.035Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T04:00:00.221Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 199ms","timestamp":"2025-09-16T04:00:00.224Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T05:00:00.007Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T05:00:00.011Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T04:00:00.013Z","timestamp":"2025-09-16T05:00:00.013Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T05:00:00.260Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 254ms","timestamp":"2025-09-16T05:00:00.262Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T06:07:41.128Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T06:07:41.937Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T05:07:42.537Z","timestamp":"2025-09-16T06:07:42.538Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T06:07:46.856Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 5745ms","timestamp":"2025-09-16T06:07:46.874Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T07:00:00.015Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T07:00:00.018Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T06:00:00.018Z","timestamp":"2025-09-16T07:00:00.018Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T07:00:00.170Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 156ms","timestamp":"2025-09-16T07:00:00.174Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T08:00:00.005Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T08:00:00.015Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T07:00:00.018Z","timestamp":"2025-09-16T08:00:00.018Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T08:00:00.261Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 256ms","timestamp":"2025-09-16T08:00:00.263Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T09:00:00.010Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T09:00:00.017Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T08:00:00.048Z","timestamp":"2025-09-16T09:00:00.048Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T09:00:00.208Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 199ms","timestamp":"2025-09-16T09:00:00.210Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T10:00:00.018Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T10:00:00.024Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T09:00:00.025Z","timestamp":"2025-09-16T10:00:00.025Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T10:00:00.168Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 152ms","timestamp":"2025-09-16T10:00:00.170Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T11:00:00.018Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T11:00:00.023Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T10:00:00.025Z","timestamp":"2025-09-16T11:00:00.025Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T11:00:00.206Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 189ms","timestamp":"2025-09-16T11:00:00.208Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T12:00:00.012Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T12:00:00.014Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T11:00:00.018Z","timestamp":"2025-09-16T12:00:00.018Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T12:00:00.203Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 192ms","timestamp":"2025-09-16T12:00:00.205Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-16T12:30:03.908Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Sep 17 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:30:04.073Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-16T12:30:04.074Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Sep 16 2025 15:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:30:04.079Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-16T12:30:04.080Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 21 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:30:04.083Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-16T12:30:04.084Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:30:04.089Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-16T12:30:04.091Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-16T12:30:04.093Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-16T12:30:04.094Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-16T12:30:04.094Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-16T12:30:04.095Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-16T12:30:04.095Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-16T12:30:04.095Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-16T12:30:04.096Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-16T12:30:04.096Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-16T12:36:58.137Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Sep 17 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:36:58.318Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-16T12:36:58.320Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Sep 16 2025 15:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:36:58.325Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-16T12:36:58.326Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 21 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:36:58.331Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-16T12:36:58.333Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:36:58.340Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-16T12:36:58.342Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-16T12:36:58.343Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-16T12:36:58.344Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-16T12:36:58.345Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-16T12:36:58.345Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-16T12:36:58.350Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-16T12:36:58.352Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-16T12:36:58.356Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-16T12:36:58.359Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-16T12:53:55.576Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Sep 17 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:53:56.135Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-16T12:53:56.178Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Sep 16 2025 15:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:53:56.203Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-16T12:53:56.222Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 21 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:53:56.246Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-16T12:53:56.279Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T12:53:56.309Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-16T12:53:56.337Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-16T12:53:56.355Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-16T12:53:56.360Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-16T12:53:56.362Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-16T12:53:56.373Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-16T12:53:56.380Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-16T12:53:56.394Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-16T12:53:56.409Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-16T12:53:56.410Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T13:00:00.465Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T13:00:00.582Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T12:00:00.602Z","timestamp":"2025-09-16T13:00:00.604Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T13:02:48.275Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 167815ms","timestamp":"2025-09-16T13:02:48.290Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-16T13:06:02.463Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Sep 17 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:06:02.862Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-16T13:06:02.864Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Sep 16 2025 16:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:06:02.872Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-16T13:06:02.878Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 21 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:06:02.891Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-16T13:06:02.893Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:06:02.912Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-16T13:06:02.919Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-16T13:06:02.932Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-16T13:06:02.936Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-16T13:06:02.938Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-16T13:06:02.939Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-16T13:06:02.940Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-16T13:06:02.941Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-16T13:06:02.942Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-16T13:06:02.943Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-09-16T13:13:44.233Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Wed Sep 17 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:13:44.345Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-09-16T13:13:44.347Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Tue Sep 16 2025 16:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:13:44.351Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-09-16T13:13:44.352Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Sep 21 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:13:44.359Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-09-16T13:13:44.360Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Wed Oct 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-09-16T13:13:44.366Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-09-16T13:13:44.367Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-09-16T13:13:44.370Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-09-16T13:13:44.376Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-09-16T13:13:44.381Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-09-16T13:13:44.384Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-09-16T13:13:44.386Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-09-16T13:13:44.387Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-09-16T13:13:44.390Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-09-16T13:13:44.391Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-09-16T14:00:00.036Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-09-16T14:00:00.041Z"}
+{"level":"info","message":"Syncing changes since 2025-09-16T13:00:00.041Z","timestamp":"2025-09-16T14:00:00.042Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-09-16T14:00:00.186Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 151ms","timestamp":"2025-09-16T14:00:00.191Z"}
+{"isOperational":true,"level":"error","message":"Error occurred: Access denied. Accountant role required.","method":"GET","name":"AppError","path":"/api/invoices","stack":"AppError: Access denied. Accountant role required.\n    at isAccountant (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\roles.js:40:15)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:284:15\n    at Function.process_params (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\auth.js:172:9\n    at Generator.next (<anonymous>)","statusCode":403,"timestamp":"2025-09-16T14:07:30.175Z"}
+{"isOperational":true,"level":"error","message":"Error occurred: Access denied. Accountant role required.","method":"GET","name":"AppError","path":"/api/invoices","stack":"AppError: Access denied. Accountant role required.\n    at isAccountant (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\roles.js:40:15)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:284:15\n    at Function.process_params (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\auth.js:172:9\n    at Generator.next (<anonymous>)","statusCode":403,"timestamp":"2025-09-16T14:07:30.300Z"}
+{"isOperational":true,"level":"error","message":"Error occurred: Access denied. Accountant role required.","method":"GET","name":"AppError","path":"/api/accountants/agent-accounts","stack":"AppError: Access denied. Accountant role required.\n    at isAccountant (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\roles.js:40:15)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:284:15\n    at Function.process_params (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\auth.js:53:9\n    at Generator.next (<anonymous>)","statusCode":403,"timestamp":"2025-09-16T14:07:43.370Z"}
+{"isOperational":true,"level":"error","message":"Error occurred: Access denied. Accountant role required.","method":"GET","name":"AppError","path":"/api/accountants/agent-accounts","stack":"AppError: Access denied. Accountant role required.\n    at isAccountant (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\roles.js:40:15)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:284:15\n    at Function.process_params (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\auth.js:53:9\n    at Generator.next (<anonymous>)","statusCode":403,"timestamp":"2025-09-16T14:07:43.484Z"}
+{"isOperational":true,"level":"error","message":"Error occurred: Access denied. Accountant role required.","method":"GET","name":"AppError","path":"/api/accountants/agent-accounts","stack":"AppError: Access denied. Accountant role required.\n    at isAccountant (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\roles.js:40:15)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:284:15\n    at Function.process_params (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\auth.js:53:9\n    at Generator.next (<anonymous>)","statusCode":403,"timestamp":"2025-09-16T14:07:47.621Z"}
+{"isOperational":true,"level":"error","message":"Error occurred: Access denied. Accountant role required.","method":"GET","name":"AppError","path":"/api/accountants/agent-accounts","stack":"AppError: Access denied. Accountant role required.\n    at isAccountant (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\roles.js:40:15)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:284:15\n    at Function.process_params (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\node_modules\\express\\lib\\router\\index.js:280:10)\n    at C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\middleware\\auth.js:53:9\n    at Generator.next (<anonymous>)","statusCode":403,"timestamp":"2025-09-16T14:07:47.714Z"}
+{"level":"info","message":"Starting real-time database synchronization...","timestamp":"2025-09-16T14:12:33.922Z"}
+{"level":"warn","message":"Standalone MongoDB detected - change streams not supported","timestamp":"2025-09-16T14:12:34.050Z"}
+{"level":"warn","message":"Could not determine MongoDB configuration - assuming standalone","timestamp":"2025-09-16T14:12:34.053Z"}
+{"level":"error","message":"Failed to set up change streams: Change streams require replica set configuration","stack":"Error: Change streams require replica set configuration\n    at DatabaseSyncService.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:180:27)\n    at Generator.next (<anonymous>)\n    at fulfilled (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:38:58)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-09-16T14:12:34.061Z"}
+{"level":"warn","message":"Change streams setup failed, attempting polling fallback: Change streams require replica set configuration","stack":"Error: Change streams require replica set configuration\n    at DatabaseSyncService.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:180:27)\n    at Generator.next (<anonymous>)\n    at fulfilled (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\databaseSyncService.js:38:58)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-09-16T14:12:34.069Z"}
+{"level":"warn","message":"Change streams not supported on standalone MongoDB. Real-time sync will use polling instead.","timestamp":"2025-09-16T14:12:34.072Z"}
+{"level":"info","message":"Starting polling-based synchronization...","timestamp":"2025-09-16T14:12:34.077Z"}
+{"level":"info","message":"Polling-based synchronization started successfully","timestamp":"2025-09-16T14:12:34.080Z"}
+{"level":"info","message":"Real-time sync started successfully with polling fallback","timestamp":"2025-09-16T14:12:34.081Z"}
+{"level":"info","message":"Real-time sync is already running","timestamp":"2025-09-16T14:12:34.105Z"}
+{"level":"info","message":"Starting full database synchronization...","timestamp":"2025-09-16T14:16:06.208Z"}
+{"level":"info","message":"Syncing 16 properties...","timestamp":"2025-09-16T14:16:06.213Z"}
+{"level":"info","message":"Updated property account for property 68778f56a77a7624d898bde7","timestamp":"2025-09-16T14:16:06.242Z"}
+{"level":"info","message":"Updated property account for property 6881ecd8a15ae3f0afd218ff","timestamp":"2025-09-16T14:16:06.255Z"}
+{"level":"info","message":"Updated property account for property 6888a10c8ef6ae57ca36b653","timestamp":"2025-09-16T14:16:06.261Z"}
+{"level":"info","message":"Updated property account for property 68a705ad7a1f3f54b6cc93ec","timestamp":"2025-09-16T14:16:06.273Z"}
+{"level":"info","message":"Updated property account for property 68a8a10dc34416fb6e715184","timestamp":"2025-09-16T14:16:06.287Z"}
+{"level":"info","message":"Updated property account for property 68ab1b776c70c4a42cd2113a","timestamp":"2025-09-16T14:16:06.295Z"}
+{"level":"info","message":"Updated property account for property 68b73a06f62a980887e4772c","timestamp":"2025-09-16T14:16:06.307Z"}
+{"level":"info","message":"Updated property account for property 68b861c3e65e778ef53508f1","timestamp":"2025-09-16T14:16:06.320Z"}
+{"level":"info","message":"Updated property account for property 68b96ed0d1431d1f6d18e8ec","timestamp":"2025-09-16T14:16:06.328Z"}
+{"level":"info","message":"Updated property account for property 68bab7e7e84308265da8e8a4","timestamp":"2025-09-16T14:16:06.340Z"}
+{"level":"info","message":"Updated property account for property 68baf504f230ec47f16790a9","timestamp":"2025-09-16T14:16:06.352Z"}
+{"level":"info","message":"Updated property account for property 68c0148b765aed88ad378aee","timestamp":"2025-09-16T14:16:06.359Z"}
+{"level":"info","message":"Updated property account for property 68c2b471bb900924ab8f5e45","timestamp":"2025-09-16T14:16:06.367Z"}
+{"level":"info","message":"Updated property account for property 68c3c9e28313dabf9866966b","timestamp":"2025-09-16T14:16:06.374Z"}
+{"level":"info","message":"Updated property account for property 68c4123ee5d64e7ed6704958","timestamp":"2025-09-16T14:16:06.383Z"}
+{"level":"info","message":"Updated property account for property 68c42624a5fcbc4752ac9f55","timestamp":"2025-09-16T14:16:06.390Z"}
+{"level":"info","message":"Syncing 30 completed payments...","timestamp":"2025-09-16T14:16:06.404Z"}
+{"level":"info","message":"Syncing 16 users...","timestamp":"2025-09-16T14:16:07.003Z"}
+{"level":"info","message":"Updated owner name in 4 property accounts for user 683dc55672d212a2f8aebff0","timestamp":"2025-09-16T14:16:07.038Z"}
+{"level":"info","message":"Updated owner name in 1 property accounts for user 68a6f7dbbbfe5eb39dc89953","timestamp":"2025-09-16T14:16:07.051Z"}
+{"level":"info","message":"Updated owner name in 3 property accounts for user 68a87e730a904b150ddec26b","timestamp":"2025-09-16T14:16:07.069Z"}
+{"level":"info","message":"Updated owner name in 5 property accounts for user 68aa70dbb9860b8f73836af8","timestamp":"2025-09-16T14:16:07.089Z"}
+{"level":"info","message":"Full sync completed in 893ms. Success: 32, Errors: 0","timestamp":"2025-09-16T14:16:07.101Z"}

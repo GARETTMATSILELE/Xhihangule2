@@ -204,27 +204,9 @@ const LevyPaymentsPage: React.FC = () => {
       width: 220,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, overflow: 'hidden' }}>
-          <Typography variant="body2" sx={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: 120 }}>
+          <Typography variant="body2" sx={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: 180 }}>
             {params.row.referenceNumber || '-'}
           </Typography>
-          <Tooltip title="Print Receipt">
-            <IconButton
-              color="primary"
-              size="small"
-              onClick={(e) => { e.stopPropagation(); handlePrint(params.row._id); }}
-            >
-              <PrintIcon fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Download HTML Receipt">
-            <IconButton
-              color="secondary"
-              size="small"
-              onClick={(e) => { e.stopPropagation(); handleDownload(params.row._id, params.row.referenceNumber); }}
-            >
-              <DownloadIcon fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
         </Box>
       )
     },

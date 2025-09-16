@@ -437,58 +437,61 @@ const AgentDashboard: React.FC = () => {
                                     {filteredPayments.length === 0 ? (
                                       <Typography color="text.secondary">No commission payments found for the selected period.</Typography>
                                     ) : (
-                                      <Grid container spacing={2}>
-                                        {filteredPayments.map((pay: any) => {
-                                          const propertyId =
-                                            getId(pay.propertyId) ||
-                                            getId(pay.property) ||
-                                            getId(pay?.property?._id) ||
-                                            getId(pay?.property?.id);
-                                          const tenantId =
-                                            getId(pay.tenantId) ||
-                                            getId(pay.tenant) ||
-                                            getId(pay?.tenant?._id) ||
-                                            getId(pay?.tenant?.id);
-                                          const propertyObj = resolvePropertyById(propertyId);
-                                          const propertyName =
-                                            propertyObj?.name ||
-                                            pay?.property?.name ||
-                                            pay?.property?.title ||
-                                            pay?.propertyName ||
-                                            'Unknown Property';
-                                          const tenantObj = resolveTenantById(tenantId);
-                                          const tenantName = tenantObj
-                                            ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || tenantObj.name || tenantObj.fullName || 'Unknown Tenant'
-                                            : (`${pay?.tenant?.firstName || ''} ${pay?.tenant?.lastName || ''}`.trim() || pay?.tenant?.name || pay?.tenant?.fullName || pay?.tenantName || 'Unknown Tenant');
-                                          const paymentDate = pay.paymentDate ? new Date(pay.paymentDate) : null;
-                                          const agentShare = pay._distributedAgentShare || pay.commissionDetails?.agentShare || 0;
-                                          const totalCommission = pay.commissionDetails?.totalCommission || 0;
-                                          return (
-                                            <Grid item xs={12} key={pay._id}>
-                                              <Card>
-                                                <CardContent>
-                                                  <Grid container alignItems="center" spacing={2}>
-                                                    <Grid item xs={12} md={5}>
-                                                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{propertyName}</Typography>
-                                                      <Typography color="text.secondary">Tenant: {tenantName}</Typography>
+                                      <Box sx={{ maxHeight: 420, overflowY: 'auto', pr: 1 }}>
+                                        <Grid container spacing={2}>
+                                          {filteredPayments.map((pay: any) => {
+                                            const propertyId =
+                                              getId(pay.propertyId) ||
+                                              getId(pay.property) ||
+                                              getId(pay?.property?._id) ||
+                                              getId(pay?.property?.id);
+                                            const tenantId =
+                                              getId(pay.tenantId) ||
+                                              getId(pay.tenant) ||
+                                              getId(pay?.tenant?._id) ||
+                                              getId(pay?.tenant?.id);
+                                            const propertyObj = resolvePropertyById(propertyId);
+        
+                                            const propertyName =
+                                              propertyObj?.name ||
+                                              pay?.property?.name ||
+                                              pay?.property?.title ||
+                                              pay?.propertyName ||
+                                              'Unknown Property';
+                                            const tenantObj = resolveTenantById(tenantId);
+                                            const tenantName = tenantObj
+                                              ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || tenantObj.name || tenantObj.fullName || 'Unknown Tenant'
+                                              : (`${pay?.tenant?.firstName || ''} ${pay?.tenant?.lastName || ''}`.trim() || pay?.tenant?.name || pay?.tenant?.fullName || pay?.tenantName || 'Unknown Tenant');
+                                            const paymentDate = pay.paymentDate ? new Date(pay.paymentDate) : null;
+                                            const agentShare = pay._distributedAgentShare || pay.commissionDetails?.agentShare || 0;
+                                            const totalCommission = pay.commissionDetails?.totalCommission || 0;
+                                            return (
+                                              <Grid item xs={12} key={pay._id}>
+                                                <Card>
+                                                  <CardContent>
+                                                    <Grid container alignItems="center" spacing={2}>
+                                                      <Grid item xs={12} md={5}>
+                                                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{propertyName}</Typography>
+                                                        <Typography color="text.secondary">Tenant: {tenantName}</Typography>
+                                                      </Grid>
+                                                      <Grid item xs={12} md={4}>
+                                                        <Typography color="text.secondary">Payment Date</Typography>
+                                                        <Typography>{paymentDate ? paymentDate.toLocaleDateString() : 'N/A'}</Typography>
+                                                      </Grid>
+                                                      <Grid item xs={12} md={3}>
+                                                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                                          <Chip label={`Agent Share: $${agentShare.toLocaleString()}`} color="success" size="small" />
+                                                          <Chip label={`Commission: $${totalCommission.toLocaleString()}`} color="warning" size="small" />
+                                                        </Box>
+                                                      </Grid>
                                                     </Grid>
-                                                    <Grid item xs={12} md={4}>
-                                                      <Typography color="text.secondary">Payment Date</Typography>
-                                                      <Typography>{paymentDate ? paymentDate.toLocaleDateString() : 'N/A'}</Typography>
-                                                    </Grid>
-                                                    <Grid item xs={12} md={3}>
-                                                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                                        <Chip label={`Agent Share: $${agentShare.toLocaleString()}`} color="success" size="small" />
-                                                        <Chip label={`Commission: $${totalCommission.toLocaleString()}`} color="warning" size="small" />
-                                                      </Box>
-                                                    </Grid>
-                                                  </Grid>
-                                                </CardContent>
-                                              </Card>
-                                            </Grid>
-                                          );
-                                        })}
-                                      </Grid>
+                                                  </CardContent>
+                                                </Card>
+                                              </Grid>
+                                            );
+                                          })}
+                                        </Grid>
+                                      </Box>
                                     )}
                                   </>
                                 );

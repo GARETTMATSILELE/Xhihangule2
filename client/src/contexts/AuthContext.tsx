@@ -98,6 +98,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const initializeAuth = async () => {
       try {
+        // If we're on the login page, do not attempt automatic sign-in or token refresh
+        if (window.location.pathname === '/login') {
+          setLoading(false);
+          setHasInitialized(true);
+          return;
+        }
+
         // Check if we have tokens in localStorage (for persistence across page reloads)
         const storedAccessToken = localStorage.getItem('accessToken');
         const storedRefreshToken = localStorage.getItem('refreshToken');
@@ -300,9 +307,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return userData;
     } catch (error) {
       console.error('Login failed:', error);
-      const message = error instanceof AxiosError 
-        ? error.response?.data?.message || 'Login failed'
-        : 'Login failed';
+      let message = 'Login failed';
+      if (error instanceof AxiosError) {
+        if (error.code === 'ECONNABORTED') {
+          message = 'Server timeout. Please try again.';
+        } else if (!error.response) {
+          message = 'Cannot reach the server. Please ensure the backend is running.';
+        } else {
+          message = (error.response.data as any)?.message || 'Login failed';
+        }
+      }
       setError(message);
       setLoading(false);
       throw error;

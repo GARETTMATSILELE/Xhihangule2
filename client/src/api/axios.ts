@@ -6,12 +6,16 @@ const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || win
 const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
 const API_URL = import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
 
+// Apply a reasonable global timeout so UI fails fast if API is down
+axios.defaults.timeout = 8000;
+
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json'
   },
-  withCredentials: true // This ensures cookies are sent with requests
+  withCredentials: true, // This ensures cookies are sent with requests
+  timeout: 8000
 });
 
 // Local token helpers to avoid circular dependency with AuthContext
@@ -116,7 +120,8 @@ api.interceptors.response.use(
           headers: {
             'Content-Type': 'application/json'
           },
-          withCredentials: true // This ensures cookies are sent
+          withCredentials: true, // This ensures cookies are sent
+          timeout: 8000
         });
 
         console.log('Refresh response received:', {
