@@ -25,11 +25,14 @@ import paymentService from '../../services/paymentService';
 import companyAccountService, { CompanyAccountSummary } from '../../services/companyAccountService';
 import { Payment } from '../../types/payment';
 
-type Period = 'month' | 'quarter' | 'year' | 'all';
+type Period = 'month_range' | 'year';
 
 const RevenuePage: React.FC = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [period, setPeriod] = useState<Period>('month');
+  const [period, setPeriod] = useState<Period>('month_range');
+  const [startMonth, setStartMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [endMonth, setEndMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [companySummary, setCompanySummary] = useState<CompanyAccountSummary | null>(null);
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [addExpenseOpen, setAddExpenseOpen] = useState<boolean>(false);
@@ -75,36 +78,42 @@ const RevenuePage: React.FC = () => {
   }, []);
 
   const filtered = useMemo(() => {
-    if (period === 'all') return payments;
-    const now = new Date();
-    if (period === 'month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      return payments.filter(p => new Date(p.paymentDate) >= start && new Date(p.paymentDate) <= end);
-    }
-    if (period === 'quarter') {
-      const quarter = Math.floor(now.getMonth() / 3);
-      const start = new Date(now.getFullYear(), quarter * 3, 1);
-      const end = new Date(now.getFullYear(), quarter * 3 + 3, 0, 23, 59, 59, 999);
-      return payments.filter(p => new Date(p.paymentDate) >= start && new Date(p.paymentDate) <= end);
+    if (period === 'month_range') {
+      if (!startMonth || !endMonth) return payments;
+      const [sy, sm] = startMonth.split('-').map(Number);
+      const [ey, em] = endMonth.split('-').map(Number);
+      const start = new Date(Math.min(new Date(sy, (sm || 1) - 1, 1).getTime(), new Date(ey, (em || 1) - 1, 1).getTime()));
+      const end = new Date(Math.max(
+        new Date(ey, (em || 1), 0, 23, 59, 59, 999).getTime(),
+        new Date(sy, (sm || 1), 0, 23, 59, 59, 999).getTime()
+      ));
+      return payments.filter(p => {
+        const d = new Date(p.paymentDate);
+        return d >= start && d <= end;
+      });
     }
     // year
-    const start = new Date(now.getFullYear(), 0, 1);
-    const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+    const start = new Date(selectedYear, 0, 1);
+    const end = new Date(selectedYear, 11, 31, 23, 59, 59, 999);
     return payments.filter(p => new Date(p.paymentDate) >= start && new Date(p.paymentDate) <= end);
-  }, [payments, period]);
+  }, [payments, period, startMonth, endMonth, selectedYear]);
 
   // Period window
   const [periodStart, periodEnd] = useMemo(() => {
-    const now = new Date();
-    if (period === 'month') return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)] as const;
-    if (period === 'quarter') {
-      const q = Math.floor(now.getMonth() / 3);
-      return [new Date(now.getFullYear(), q * 3, 1), new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999)] as const;
+    if (period === 'month_range') {
+      if (!startMonth || !endMonth) return [new Date(0), new Date()] as const;
+      const [sy, sm] = startMonth.split('-').map(Number);
+      const [ey, em] = endMonth.split('-').map(Number);
+      const start = new Date(Math.min(new Date(sy, (sm || 1) - 1, 1).getTime(), new Date(ey, (em || 1) - 1, 1).getTime()));
+      const end = new Date(Math.max(
+        new Date(ey, (em || 1), 0, 23, 59, 59, 999).getTime(),
+        new Date(sy, (sm || 1), 0, 23, 59, 59, 999).getTime()
+      ));
+      return [start, end] as const;
     }
-    if (period === 'year') return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999)] as const;
-    return [new Date(0), new Date()] as const;
-  }, [period]);
+    // year
+    return [new Date(selectedYear, 0, 1), new Date(selectedYear, 11, 31, 23, 59, 59, 999)] as const;
+  }, [period, startMonth, endMonth, selectedYear]);
 
   // Commission revenues (company share)
   const rentalsCommissionRevenue = useMemo(() => filtered
@@ -200,12 +209,40 @@ const RevenuePage: React.FC = () => {
           <FormControl size="small" sx={{ minWidth: 160 }}>
             <InputLabel>Period</InputLabel>
             <Select value={period} label="Period" onChange={(e) => setPeriod(e.target.value as Period)}>
-              <MenuItem value="month">This Month</MenuItem>
-              <MenuItem value="quarter">This Quarter</MenuItem>
-              <MenuItem value="year">This Year</MenuItem>
-              <MenuItem value="all">All Time</MenuItem>
+              <MenuItem value="month_range">Month to Month</MenuItem>
+              <MenuItem value="year">Year</MenuItem>
             </Select>
           </FormControl>
+          {period === 'month_range' && (
+            <>
+              <TextField
+                size="small"
+                label="Start Month"
+                type="month"
+                value={startMonth}
+                onChange={(e) => setStartMonth(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+              <TextField
+                size="small"
+                label="End Month"
+                type="month"
+                value={endMonth}
+                onChange={(e) => setEndMonth(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </>
+          )}
+          {period === 'year' && (
+            <TextField
+              size="small"
+              label="Year"
+              type="number"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value) || new Date().getFullYear())}
+              inputProps={{ min: 1970, max: 9999 }}
+            />
+          )}
           <Button variant="contained" onClick={() => setAddExpenseOpen(true)}>Add Expense</Button>
         </Box>
       </Box>

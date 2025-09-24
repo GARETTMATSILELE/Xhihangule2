@@ -10,6 +10,7 @@
     "@fortawesome/free-regular-svg-icons": "^6.5.1",
     "@fortawesome/free-solid-svg-icons": "^6.5.1",
     "@fortawesome/react-fontawesome": "^0.2.0",
+    "@fullcalendar/core": "^6.1.19",
     "@fullcalendar/daygrid": "^6.1.19",
     "@fullcalendar/interaction": "^6.1.19",
     "@fullcalendar/react": "^6.1.19",
@@ -36,10 +37,12 @@
     "dayjs": "^1.11.18",
     "jspdf": "^3.0.1",
     "jspdf-autotable": "^5.0.2",
+    "leaflet": "^1.9.4",
     "react": "^18.2.0",
     "react-big-calendar": "^1.18.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.56.4",
+    "react-leaflet": "^4.2.1",
     "react-router-dom": "^6.21.0",
     "react-scripts": "^5.0.1",
     "recharts": "^2.7.2",
@@ -62,18 +65,7 @@
       "react-app/jest"
     ]
   },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
+  "browserslist": "defaults",
   "devDependencies": {
     "@babel/core": "^7.23.0",
     "@babel/preset-env": "^7.23.0",

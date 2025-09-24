@@ -650,7 +650,7 @@ const WrittenInvoicesPage: React.FC = () => {
           }
         }}
       >
-        <DialogTitle>
+        <DialogTitle sx={{ '@media print': { display: 'none' } }}>
           Print Tax Invoice
           <Button 
             onClick={handleClosePrintDialog}

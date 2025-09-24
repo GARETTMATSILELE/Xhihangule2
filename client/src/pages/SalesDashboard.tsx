@@ -9,6 +9,7 @@ import api from "../api/axios";
 import { useNotification } from "../components/Layout/Header";
 import SalesSidebar from "../components/Layout/SalesSidebar";
 import SalesLeadsPage from "./SalesDashboard/LeadsPage";
+import ValuationsPage from "./SalesDashboard/ValuationsPage";
 import { dealService } from "../services/dealService";
 import { buyerService } from "../services/buyerService";
 import { leadService } from "../services/leadService";
@@ -689,7 +690,12 @@ export default function CRM() {
       <div className="w-full pl-0 pr-6 py-4 flex gap-6">
         <SalesSidebar />
         <main className="flex-1 space-y-6 max-w-5xl mx-auto">
-        {/* KPI cards */}
+        {location.pathname.includes('/sales-dashboard/valuations') ? (
+          <ValuationsPage />
+        ) : (
+          <>
+        {/* KPI cards (hidden on Valuations page) */}
+        {!location.pathname.includes('/sales-dashboard/valuations') && (
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader>
@@ -719,8 +725,10 @@ export default function CRM() {
             </CardContent>
           </Card>
         </section>
+        )}
 
-        {/* Commission card under KPI cards */}
+        {/* Commission card under KPI cards (hidden on Valuations page) */}
+        {!location.pathname.includes('/sales-dashboard/valuations') && (
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card>
             <CardHeader>
@@ -734,9 +742,10 @@ export default function CRM() {
             </CardContent>
           </Card>
         </section>
+        )}
 
-        {/* Tab bar (hidden on Files section) */}
-        {!location.pathname.includes('/sales-dashboard/files') && (
+        {/* Tab bar (hidden on Files and Valuations section) */}
+        {!location.pathname.includes('/sales-dashboard/files') && !location.pathname.includes('/sales-dashboard/valuations') && (
           <nav className="flex flex-wrap gap-2">
             {[
               "Leads","Viewings","Buyers","Owners","Properties","Deals"
@@ -746,9 +755,9 @@ export default function CRM() {
             <div className="flex-1" />
             {/* Quick add menu */}
             <div className="flex gap-2">
-              <Button className="bg-emerald-600 text-white border-emerald-600" onClick={()=>setShowLeadModal(true)}>+ Lead</Button>
-              <Button className="bg-amber-600 text-white border-amber-600" onClick={()=>setShowViewingModal(true)}>+ Viewing</Button>
-              <Button className="bg-sky-600 text-white border-sky-600" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
+              <Button className="bg-emerald-600 text-blue-600 border-emerald-600" onClick={()=>setShowLeadModal(true)}>+ Lead</Button>
+              <Button className="bg-amber-600 text-blue-600 border-amber-600" onClick={()=>setShowViewingModal(true)}>+ Viewing</Button>
+              <Button className="bg-sky-600 text-blue-600 border-sky-600" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
             </div>
           </nav>
         )}
@@ -931,7 +940,7 @@ export default function CRM() {
           </Card>
         )}
 
-        {!location.pathname.includes('/sales-dashboard/files') && tab === "Leads" && (
+        {!location.pathname.includes('/sales-dashboard/files') && !location.pathname.includes('/sales-dashboard/valuations') && tab === "Leads" && (
           <Card>
             <CardHeader>
               <CardTitle>Leads</CardTitle>
@@ -987,7 +996,7 @@ export default function CRM() {
           </Card>
         )}
 
-        {tab === "Viewings" && (
+        {!location.pathname.includes('/sales-dashboard/valuations') && tab === "Viewings" && (
           <Card>
             <CardHeader>
               <CardTitle>Scheduled Viewings</CardTitle>
@@ -1021,7 +1030,7 @@ export default function CRM() {
           </Card>
         )}
 
-        {tab === "Buyers" && (
+        {!location.pathname.includes('/sales-dashboard/valuations') && tab === "Buyers" && (
           <Card>
             <CardHeader className="flex items-center justify-between">
               <CardTitle>Buyers</CardTitle>
@@ -1064,7 +1073,7 @@ export default function CRM() {
           </Card>
         )}
 
-        {tab === "Owners" && (
+        {!location.pathname.includes('/sales-dashboard/valuations') && tab === "Owners" && (
           <Card>
             <CardHeader className="flex items-center justify-between">
               <CardTitle>Property Owners</CardTitle>
@@ -1100,7 +1109,7 @@ export default function CRM() {
           </Card>
         )}
 
-        {tab === "Properties" && (
+        {!location.pathname.includes('/sales-dashboard/valuations') && tab === "Properties" && (
           <Card>
             <CardHeader className="flex items-center justify-between">
               <CardTitle>Properties</CardTitle>
@@ -1173,7 +1182,7 @@ export default function CRM() {
           </Card>
         )}
 
-        {tab === "Deals" && (
+        {!location.pathname.includes('/sales-dashboard/valuations') && tab === "Deals" && (
           <Card>
             <CardHeader className="flex items-center justify-between">
               <CardTitle>Deals Pipeline</CardTitle>
@@ -1233,6 +1242,8 @@ export default function CRM() {
           </Card>
         )}
 
+        
+
         {nav === 'settings' && (
           <Card>
             <CardHeader>
@@ -1251,6 +1262,8 @@ export default function CRM() {
               </div>
             </CardContent>
           </Card>
+        )}
+          </>
         )}
         </main>
       </div>

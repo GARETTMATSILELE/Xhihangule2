@@ -27,7 +27,7 @@ export const SalesSidebar: React.FC = () => {
   const { notifications } = useNotification();
 
   const isActive = (
-    key: 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals'
+  key: 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals' | 'valuations'
   ) => {
     if (key === 'dashboard') {
       return (
@@ -50,6 +50,7 @@ export const SalesSidebar: React.FC = () => {
     if (key === 'owners') return location.pathname.includes('/sales-dashboard/owners');
     if (key === 'properties') return location.pathname.includes('/sales-dashboard/properties');
     if (key === 'deals') return location.pathname.includes('/sales-dashboard/deals');
+    if (key === 'valuations') return location.pathname.includes('/sales-dashboard/valuations');
     if (key === 'settings') return location.pathname.includes('/sales-dashboard/settings');
     return false;
   };
@@ -75,7 +76,7 @@ export const SalesSidebar: React.FC = () => {
           <span>Files</span>
         </button>
         {/* Section quick-links */}
-        {(["Leads","Viewings","Buyers","Owners","Properties","Deals"] as const).map(section => {
+        {(["Leads","Viewings","Buyers","Owners","Properties","Deals","Valuations"] as const).map(section => {
           const key = section.toLowerCase() as 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals';
           const active = isActive(key as any);
           return (
@@ -83,7 +84,8 @@ export const SalesSidebar: React.FC = () => {
               key={section}
               className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm font-medium", active?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}
               onClick={()=>{
-                navigate(`/sales-dashboard/${key}`);
+                const pathKey = section.toLowerCase();
+                navigate(`/sales-dashboard/${pathKey}`);
               }}
             >
               <span>{section}</span>

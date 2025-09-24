@@ -30,6 +30,7 @@ import dealRoutes from './routes/dealRoutes';
 import buyerRoutes from './routes/buyerRoutes';
 import leadRoutes from './routes/leadRoutes';
 import viewingRoutes from './routes/viewingRoutes';
+import valuationRoutes from './routes/valuationRoutes';
 
 import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
@@ -130,6 +131,7 @@ app.use('/api/deals', dealRoutes);
 app.use('/api/buyers', buyerRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/viewings', viewingRoutes);
+app.use('/api/valuations', valuationRoutes);
 
 app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);

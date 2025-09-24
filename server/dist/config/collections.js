@@ -15,5 +15,6 @@ exports.COLLECTIONS = {
     LEVY_PAYMENTS: 'levypayments',
     MUNICIPAL_PAYMENTS: 'municipalpayments',
     PROPERTY_ACCOUNTS: 'propertyaccounts',
-    AGENT_ACCOUNTS: 'agentaccounts'
+    AGENT_ACCOUNTS: 'agentaccounts',
+    VALUATIONS: 'valuations'
 };

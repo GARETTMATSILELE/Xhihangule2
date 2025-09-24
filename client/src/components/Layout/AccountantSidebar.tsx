@@ -67,7 +67,8 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
             width: drawerWidth,
             boxSizing: 'border-box',
             position: 'fixed',
-            height: '100vh',
+            top: '64px',
+            height: 'calc(100vh - 64px)',
           },
         }}
       >
@@ -91,12 +92,12 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
           color: '#FFFFFF',
           borderRight: 'none',
           position: 'fixed',
-          height: '100vh',
-          mt: '64px',
+          top: '64px',
+          height: 'calc(100vh - 64px)',
         },
       }}
     >
-      <Box sx={{ overflow: 'auto', px: 2 }}>
+      <Box sx={{ height: '100%', overflowY: 'auto', px: 2, pb: 2 }}>
         {company && user && (
           <>
             <Box sx={{ px: 2, mb: 2, mt: 2 }}>
