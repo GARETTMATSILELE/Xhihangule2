@@ -190,13 +190,18 @@ export const getProperties = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
     };
 
-    // Always show only sales properties in sales dashboard context
-    // Note: If other contexts call this endpoint, consider scoping by route or flag
-    query.rentalType = 'sale';
+    // Apply rentalType filter only when explicitly requested or for sales users
+    if (typeof req.query.rentalType === 'string' && req.query.rentalType.trim()) {
+      query.rentalType = req.query.rentalType;
+    }
 
-    // If user is sales (or not admin/accountant), show only properties assigned to them by agentId
-    if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
-      // Prefer agentId ownership for sales users
+    // Restrict visibility based on role
+    if (req.user.role === 'sales') {
+      // Sales users should only see sales properties assigned to them
+      query.rentalType = 'sale';
+      query.agentId = new mongoose.Types.ObjectId(req.user.userId);
+    } else if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+      // Non-admin/accountant users only see their assigned properties
       query.agentId = new mongoose.Types.ObjectId(req.user.userId);
     }
     
