@@ -32,12 +32,23 @@ export const useTenantService = () => {
   const getAll = async (): Promise<{ tenants: Tenant[] }> => {
     if (!user?.companyId) {
       throw new Error('Company ID is required');
-      }
+    }
     // Request a high limit to retrieve all tenants for the company (server enforces company scope)
     const response = await api.get('/tenants', {
       params: { page: 1, limit: 10000 }
     });
-      return response.data;
+    const raw = response.data as any;
+    // Normalize common shapes
+    const tenants: Tenant[] = Array.isArray(raw?.tenants)
+      ? raw.tenants
+      : Array.isArray(raw?.data?.tenants)
+        ? raw.data.tenants
+        : Array.isArray(raw?.data)
+          ? raw.data
+          : Array.isArray(raw)
+            ? raw
+            : [];
+    return { tenants };
   };
 
   // Public API version for admin dashboard

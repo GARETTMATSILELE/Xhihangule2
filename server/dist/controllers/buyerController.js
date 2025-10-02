@@ -44,7 +44,7 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { name, email, phone, budgetMin, budgetMax, prefs } = req.body;
+        const { name, email, phone, idNumber, budgetMin, budgetMax, prefs } = req.body;
         if (!name)
             throw new errorHandler_1.AppError('Name is required', 400);
         const buyer = yield Buyer_1.Buyer.create({
@@ -53,6 +53,7 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             phone,
             budgetMin: Number(budgetMin || 0),
             budgetMax: Number(budgetMax || 0),
+            idNumber: idNumber,
             prefs: prefs || '',
             companyId: req.user.companyId,
             ownerId: req.user.userId

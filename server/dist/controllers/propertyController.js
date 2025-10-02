@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPropertyPublic = exports.getAdminDashboardProperties = exports.getVacantProperties = exports.deleteProperty = exports.updateProperty = exports.createSalesProperty = exports.createProperty = exports.getProperty = exports.getProperties = exports.getPublicProperties = void 0;
 const Property_1 = require("../models/Property");
+const SalesOwner_1 = require("../models/SalesOwner");
 const chartController_1 = require("./chartController");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -178,9 +179,13 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const query = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         };
-        // If user is not an admin or accountant, only show their properties
+        // Always show only sales properties in sales dashboard context
+        // Note: If other contexts call this endpoint, consider scoping by route or flag
+        query.rentalType = 'sale';
+        // If user is sales (or not admin/accountant), show only properties assigned to them by agentId
         if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
-            query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+            // Prefer agentId ownership for sales users
+            query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
         console.log('Executing property query:', {
             query,
@@ -403,6 +408,20 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
             commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0),
         });
         const saved = yield property.save();
+        // If a sales owner was selected, associate this property to the owner's properties list
+        if (propertyOwnerId) {
+            try {
+                yield SalesOwner_1.SalesOwner.findOneAndUpdate({ _id: propertyOwnerId, companyId: req.user.companyId }, { $addToSet: { properties: saved._id } });
+            }
+            catch (assocErr) {
+                // Non-fatal; log and continue returning the created property
+                console.warn('Failed to associate property with sales owner', {
+                    error: assocErr === null || assocErr === void 0 ? void 0 : assocErr.message,
+                    propertyId: saved._id,
+                    propertyOwnerId
+                });
+            }
+        }
         return res.status(201).json(saved);
     }
     catch (error) {

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSalesOwnerById = exports.getSalesOwners = exports.createSalesOwner = void 0;
+exports.updateSalesOwner = exports.getSalesOwnerById = exports.getSalesOwners = exports.createSalesOwner = void 0;
 const SalesOwner_1 = require("../models/SalesOwner");
 const createSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -48,12 +48,19 @@ const createSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, functio
 });
 exports.createSalesOwner = createSalesOwner;
 const getSalesOwners = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             return res.status(401).json({ message: 'Company ID not found' });
         }
-        const owners = yield SalesOwner_1.SalesOwner.find({ companyId: req.user.companyId, creatorId: req.user.userId }).select('-password');
+        // Admins/accountants should see all sales owners within the company.
+        // Sales agents see only the owners they created.
+        const filter = { companyId: req.user.companyId };
+        const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
+        if (!role || String(role).toLowerCase() === 'sales') {
+            filter.creatorId = req.user.userId;
+        }
+        const owners = yield SalesOwner_1.SalesOwner.find(filter).select('-password');
         res.json({ owners });
     }
     catch (error) {
@@ -84,3 +91,38 @@ const getSalesOwnerById = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getSalesOwnerById = getSalesOwnerById;
+const updateSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Company ID not found' });
+        }
+        const id = req.params.id;
+        if (!id) {
+            return res.status(400).json({ message: 'Sales owner ID is required' });
+        }
+        // Allow updating selected fields only
+        const { firstName, lastName, email, phone, properties } = req.body || {};
+        const update = {};
+        if (typeof firstName === 'string')
+            update.firstName = firstName;
+        if (typeof lastName === 'string')
+            update.lastName = lastName;
+        if (typeof email === 'string')
+            update.email = email;
+        if (typeof phone === 'string')
+            update.phone = phone;
+        if (Array.isArray(properties))
+            update.properties = properties;
+        const owner = yield SalesOwner_1.SalesOwner.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, update, { new: true }).select('-password');
+        if (!owner) {
+            return res.status(404).json({ message: 'Sales owner not found' });
+        }
+        res.json(owner);
+    }
+    catch (error) {
+        console.error('Error updating sales owner:', error);
+        res.status(500).json({ message: 'Error updating sales owner' });
+    }
+});
+exports.updateSalesOwner = updateSalesOwner;

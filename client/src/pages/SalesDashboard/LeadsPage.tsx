@@ -21,13 +21,28 @@ const Input = (props: any) => (
 );
 
 export function LeadsPage() {
+  const [properties, setProperties] = React.useState<any[]>([]);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const mod = await import('../../services/propertyService');
+        const svc = mod.usePropertyService ? mod.usePropertyService() : null;
+        if (svc && svc.getProperties) {
+          const props = await svc.getProperties();
+          setProperties(Array.isArray(props) ? props.filter((p:any)=> (p as any).rentalType === 'sale') : []);
+        }
+      } catch {
+        setProperties([]);
+      }
+    })();
+  }, []);
   const [leads, setLeads] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState<string>('');
   const [editing, setEditing] = React.useState<any | null>(null);
-  const [form, setForm] = React.useState<any>({ name: '', source: '', interest: '', email: '', phone: '', status: 'New' });
-  const [createForm, setCreateForm] = React.useState<any>({ name: '', source: '', interest: '', email: '', phone: '', status: 'New' });
+  const [form, setForm] = React.useState<any>({ name: '', source: '', interest: '', notes: '', email: '', phone: '', status: 'New' });
+  const [createForm, setCreateForm] = React.useState<any>({ name: '', source: '', interest: '', notes: '', email: '', phone: '', status: 'New', useManualInterest: false, propertyId: '' });
 
   const load = React.useCallback(async () => {
     try {
@@ -52,7 +67,7 @@ export function LeadsPage() {
 
   const startEdit = (lead: any) => {
     setEditing(lead);
-    setForm({ name: lead.name || '', source: lead.source || '', interest: lead.interest || '', email: lead.email || '', phone: lead.phone || '', status: lead.status || 'New' });
+    setForm({ name: lead.name || '', source: lead.source || '', interest: lead.interest || '', notes: lead.notes || '', email: lead.email || '', phone: lead.phone || '', status: lead.status || 'New' });
   };
 
   const saveEdit = async () => {
@@ -77,8 +92,11 @@ export function LeadsPage() {
     try {
       setLoading(true);
       setError(null);
-      await leadService.create(createForm);
-      setCreateForm({ name: '', source: '', interest: '', email: '', phone: '', status: 'New' });
+      const pickedName = !createForm.useManualInterest
+        ? (properties.find((p:any)=> String(p._id)===String(createForm.propertyId))?.name || createForm.interest)
+        : createForm.interest;
+      await leadService.create({ ...createForm, interest: pickedName });
+      setCreateForm({ name: '', source: '', interest: '', notes: '', email: '', phone: '', status: 'New', useManualInterest: false, propertyId: '' });
       await load();
     } catch (e: any) {
       setError(e?.message || 'Failed to create lead');
@@ -123,12 +141,23 @@ export function LeadsPage() {
             <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input placeholder="Name" value={createForm.name} onChange={(e: any)=>setCreateForm((f: any)=>({...f, name: e.target.value}))} />
               <Input placeholder="Source" value={createForm.source} onChange={(e: any)=>setCreateForm((f: any)=>({...f, source: e.target.value}))} />
-              <Input placeholder="Interest" value={createForm.interest} onChange={(e: any)=>setCreateForm((f: any)=>({...f, interest: e.target.value}))} />
+              <div className="md:col-span-1">
+                <select className="px-3 py-2 rounded-xl border w-full" value={createForm.propertyId} onChange={(e: any)=>setCreateForm((f: any)=>({...f, propertyId: e.target.value, useManualInterest: false}))} disabled={createForm.useManualInterest}>
+                  <option value="">-- Select sale property --</option>
+                  {properties.map((p:any)=> (<option key={p._id} value={p._id}>{p.name}</option>))}
+                </select>
+                <label className="mt-2 inline-flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={createForm.useManualInterest} onChange={(e: any)=>setCreateForm((f: any)=>({...f, useManualInterest: e.target.checked}))} />
+                  Enter interest manually
+                </label>
+              </div>
+              <Input placeholder="Manual Interest" value={createForm.interest} onChange={(e: any)=>setCreateForm((f: any)=>({...f, interest: e.target.value}))} disabled={!createForm.useManualInterest} />
               <Input placeholder="Email" value={createForm.email} onChange={(e: any)=>setCreateForm((f: any)=>({...f, email: e.target.value}))} />
               <Input placeholder="Phone" value={createForm.phone} onChange={(e: any)=>setCreateForm((f: any)=>({...f, phone: e.target.value}))} />
               <select className="px-3 py-2 rounded-xl border" value={createForm.status} onChange={(e)=>setCreateForm((f: any)=>({...f, status: e.target.value}))}>
                 {['New','Contacted','Qualified','Viewing','Offer','Won','Lost'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+              <Input placeholder="Notes" value={createForm.notes} onChange={(e: any)=>setCreateForm((f: any)=>({...f, notes: e.target.value}))} />
               <div>
                 <button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={createLead} disabled={loading}>Create Lead</button>
               </div>
@@ -179,6 +208,7 @@ export function LeadsPage() {
                 <Input placeholder="Name" value={form.name} onChange={(e: any)=>setForm((f: any)=>({...f, name: e.target.value}))} />
                 <Input placeholder="Source" value={form.source} onChange={(e: any)=>setForm((f: any)=>({...f, source: e.target.value}))} />
                 <Input placeholder="Interest" value={form.interest} onChange={(e: any)=>setForm((f: any)=>({...f, interest: e.target.value}))} />
+                <Input placeholder="Notes" value={form.notes} onChange={(e: any)=>setForm((f: any)=>({...f, notes: e.target.value}))} />
                 <Input placeholder="Email" value={form.email} onChange={(e: any)=>setForm((f: any)=>({...f, email: e.target.value}))} />
                 <Input placeholder="Phone" value={form.phone} onChange={(e: any)=>setForm((f: any)=>({...f, phone: e.target.value}))} />
                 <select className="px-3 py-2 rounded-xl border" value={form.status} onChange={(e)=>setForm((f: any)=>({...f, status: e.target.value}))}>

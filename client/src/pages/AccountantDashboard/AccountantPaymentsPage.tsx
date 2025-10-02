@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -116,22 +116,45 @@ const AccountantPaymentsPage: React.FC = () => {
     };
   }, [payments]);
 
+  const initialFetchDone = useRef(false);
   useEffect(() => {
     let isMounted = true;
     const loadData = async () => {
       if (authLoading) return;
+      if (initialFetchDone.current) return;
+      initialFetchDone.current = true;
       try {
         setLoading(true);
         setError(null);
-        const [propertiesData, tenantsData, paymentsPage] = await Promise.all([
+        const [propertiesResult, tenantsResult, paymentsPage] = await Promise.allSettled([
           propertyService.getProperties(),
-          // Defer tenants heavy fetch; load lazily when needed
-          Promise.resolve({ tenants: [] as Tenant[] }),
+          tenantService.getAll(),
           paymentService.getPaymentsPage({ page, limit, includeProvisional: 'true' } as any)
         ]);
         if (!isMounted) return;
-        const properties = Array.isArray(propertiesData) ? propertiesData : [];
-        const tenants = Array.isArray((tenantsData as any)?.tenants) ? (tenantsData as any).tenants : [];
+        let properties: Property[] = [];
+        let tenants: Tenant[] = [];
+        if (propertiesResult.status === 'fulfilled') {
+          properties = Array.isArray(propertiesResult.value) ? propertiesResult.value : [];
+        } else {
+          // Fallback to public properties filtered by current user/company
+          try {
+            const uid = user?._id as any;
+            const cid = user?.companyId as any;
+            const role = user?.role as any;
+            properties = await propertyService.getPropertiesForUser(uid, cid, role);
+          } catch {}
+        }
+        if ((tenantsResult as any).status === 'fulfilled') {
+          const tv = (tenantsResult as any).value;
+          tenants = Array.isArray(tv?.tenants) ? tv.tenants : [];
+        } else {
+          // Fallback to public tenants
+          try {
+            const tpub = await tenantService.getAllPublic();
+            tenants = Array.isArray(tpub?.tenants) ? tpub.tenants : [];
+          } catch {}
+        }
         const paymentsList = Array.isArray((paymentsPage as any)?.items) ? (paymentsPage as any).items : [];
         const total = Number((paymentsPage as any)?.total) || paymentsList.length;
         setProperties(properties);
@@ -140,10 +163,8 @@ const AccountantPaymentsPage: React.FC = () => {
         setTotalCount(total);
       } catch (err: any) {
         if (!isMounted) return;
-        setError('Failed to load data. Please try again later.');
-        setProperties([]);
-        setTenants([]);
-        setPayments([]);
+        // Show partial data if some calls failed
+        setError('Some data failed to load. You can retry from the filters.');
       } finally {
         if (isMounted) setLoading(false);
       }

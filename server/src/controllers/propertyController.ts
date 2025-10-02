@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Property, IProperty } from '../models/Property';
+import { SalesOwner } from '../models/SalesOwner';
 import { ChartData } from '../models/ChartData';
 import { JwtPayload } from '../types/auth';
 import { updateChartMetrics } from './chartController';
@@ -188,10 +189,15 @@ export const getProperties = async (req: Request, res: Response) => {
     const query: any = { 
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
     };
-    
-    // If user is not an admin or accountant, only show their properties
+
+    // Always show only sales properties in sales dashboard context
+    // Note: If other contexts call this endpoint, consider scoping by route or flag
+    query.rentalType = 'sale';
+
+    // If user is sales (or not admin/accountant), show only properties assigned to them by agentId
     if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
-      query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
+      // Prefer agentId ownership for sales users
+      query.agentId = new mongoose.Types.ObjectId(req.user.userId);
     }
     
     console.log('Executing property query:', {
@@ -461,6 +467,24 @@ export const createSalesProperty = async (req: Request, res: Response) => {
     });
 
     const saved = await property.save();
+
+    // If a sales owner was selected, associate this property to the owner's properties list
+    if (propertyOwnerId) {
+      try {
+        await SalesOwner.findOneAndUpdate(
+          { _id: propertyOwnerId, companyId: req.user.companyId },
+          { $addToSet: { properties: saved._id } }
+        );
+      } catch (assocErr) {
+        // Non-fatal; log and continue returning the created property
+        console.warn('Failed to associate property with sales owner', {
+          error: (assocErr as any)?.message,
+          propertyId: saved._id,
+          propertyOwnerId
+        });
+      }
+    }
+
     return res.status(201).json(saved);
   } catch (error) {
     console.error('Error creating sales property:', error);

@@ -44,13 +44,14 @@ const createLead = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { name, source, interest, email, phone, status } = req.body;
+        const { name, source, interest, email, phone, status, notes } = req.body;
         if (!name)
             throw new errorHandler_1.AppError('Name is required', 400);
         const lead = yield Lead_1.Lead.create({
             name,
             source: source || '',
             interest: interest || '',
+            notes: notes || '',
             email,
             phone,
             status: status || 'New',

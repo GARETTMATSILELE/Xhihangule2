@@ -202,14 +202,14 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Initial fetch when authenticated
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && user?.companyId) {
       fetchCompany();
     } else {
       setLoading(false);
       setCompany(null);
       setHasCompany(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.companyId]);
 
   // Set up periodic refresh of company data
   useEffect(() => {
@@ -238,7 +238,15 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 export const useCompany = () => {
   const context = useContext(CompanyContext);
   if (context === undefined) {
-    throw new Error('useCompany must be used within a CompanyProvider');
+    // Graceful fallback to avoid runtime crashes if a component renders outside provider
+    return {
+      company: null,
+      loading: false,
+      error: null,
+      fetchCompany: async () => {},
+      hasCompany: false,
+      refreshCompany: async () => {},
+    } as CompanyContextType;
   }
   return context;
 }; 

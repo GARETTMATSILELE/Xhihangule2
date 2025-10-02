@@ -611,6 +611,8 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       commissionDetails,
       manualPropertyAddress,
       manualTenantName,
+      buyerName,
+      sellerName,
       propertyId,
       tenantId,
       agentId,
@@ -692,6 +694,8 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       // Manual fields
       manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
       manualTenantName: manualTenant ? manualTenantName : undefined,
+      buyerName: buyerName || (manualTenant ? manualTenantName : undefined),
+      sellerName: sellerName,
       // Sales linkage
       saleId: saleObjId,
     });
@@ -813,7 +817,8 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     if (paginate) {
       const [items, total] = await Promise.all([
         baseQuery
-          .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional')
+          .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName')
+          .populate('propertyId', 'name address')
           .lean()
           .skip((page - 1) * limit)
           .limit(limit),
@@ -1394,7 +1399,13 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       createdAt: payment.createdAt,
       // Include manual entry fields
       manualPropertyAddress: payment.manualPropertyAddress,
-      manualTenantName: payment.manualTenantName
+      manualTenantName: payment.manualTenantName,
+      // Sales names (buyer/seller) for sales receipts
+      buyerName: (payment as any).buyerName,
+      sellerName: (payment as any).sellerName,
+      paymentType: (payment as any).paymentType,
+      saleId: (payment as any).saleId,
+      referenceNumber: payment.referenceNumber
     };
 
     console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });

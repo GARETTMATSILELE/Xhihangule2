@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -6,26 +6,21 @@ import {
   CircularProgress,
   Alert,
   Grid,
-  Card,
-  CardContent,
-  Container,
   TextField,
-  MenuItem,
   FormControl,
   InputLabel,
   Select,
+  MenuItem,
   SelectChangeEvent,
   Paper,
-  Snackbar,
   Checkbox,
   FormControlLabel,
   Switch,
-  Divider,
   Autocomplete,
 } from '@mui/material';
 import paymentService from '../../services/paymentService';
 import { usePropertyService } from '../../services/propertyService';
-import { Payment, PaymentStatus, PaymentMethod, Currency, PAYMENT_METHODS, SUPPORTED_CURRENCIES } from '../../types/payment';
+import { Payment, PAYMENT_METHODS, SUPPORTED_CURRENCIES } from '../../types/payment';
 import { Tenant } from '../../types/tenant';
 import { Property } from '../../types/property';
 import { PaymentFormData } from '../../types/payment';
@@ -33,6 +28,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useAuth } from '../../contexts/AuthContext';
+import publicApi from '../../api/publicApi';
 
 export interface PaymentFormProps {
   onSubmit: (data: PaymentFormData) => Promise<void>;
@@ -61,6 +57,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
+  const [internalProperties, setInternalProperties] = useState<Property[]>([]);
+  const [internalTenants, setInternalTenants] = useState<Tenant[]>([]);
   
   // New state for manual entry
   const [useManualProperty, setUseManualProperty] = useState(false);
@@ -103,8 +101,62 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     // Only run when initialData changes (i.e., new payment or edit)
   }, [initialData]);
 
-  // Calculate total amount for advance payment
-  const totalAdvanceAmount = isAdvance && propertyRent ? propertyRent * advanceMonths : (propertyRent || 0);
+  // Fallback load for properties/tenants when props are empty (run once)
+  const fallbackLoadedRef = useRef(false);
+  useEffect(() => {
+    const loadFallback = async () => {
+      try {
+        setLoadingData(true);
+        setError(null);
+        let propsList: Property[] = Array.isArray(properties) && properties.length ? properties : [];
+        let tenantList: Tenant[] = Array.isArray(tenants) && tenants.length ? tenants : [];
+        if (!propsList.length) {
+          // Prefer public endpoints first to avoid auth route timeouts
+          try {
+            propsList = await propertyService.getPublicProperties();
+          } catch {
+            try {
+              const uid = user?._id as any;
+              const cid = user?.companyId as any;
+              const role = user?.role as any;
+              propsList = await propertyService.getPropertiesForUser(uid, cid, role);
+            } catch {
+              // last resort (may timeout): authenticated properties
+              try {
+                propsList = await propertyService.getProperties();
+              } catch {}
+            }
+          }
+        }
+        if (!tenantList.length) {
+          try {
+            const resp = await publicApi.get('/tenants/public');
+            const raw = resp.data as any;
+            tenantList = Array.isArray(raw?.tenants) ? raw.tenants : Array.isArray(raw?.data?.tenants) ? raw.data.tenants : Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
+          } catch {
+            // ignore; tenant list stays empty
+          }
+        }
+        setInternalProperties(propsList);
+        setInternalTenants(tenantList);
+      } catch (e) {
+        console.error('Fallback load failed:', e);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+    // Only run once when incoming props are empty; otherwise bind props to internals
+    if ((properties && properties.length > 0) || (tenants && tenants.length > 0)) {
+      setInternalProperties(properties);
+      setInternalTenants(tenants);
+      return;
+    }
+    if (!fallbackLoadedRef.current) {
+      fallbackLoadedRef.current = true;
+      loadFallback();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [properties?.length, tenants?.length]);
 
   // Update formData when advance payment changes
   useEffect(() => {
@@ -138,7 +190,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     }
     // For levy payments, show the levy amount from the property
     if (formData.paymentType === 'levy') {
-      const property = properties.find(p => String(p._id) === String(formData.propertyId));
+      const property = internalProperties.find(p => String(p._id) === String(formData.propertyId));
       if (property && property.levyOrMunicipalType === 'levy' && property.levyOrMunicipalAmount) {
         setPropertyRent(property.levyOrMunicipalAmount);
       } else {
@@ -147,13 +199,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       return;
     }
     // For other payment types, show rent
-    const property = properties.find(p => String(p._id) === String(formData.propertyId));
+    const property = internalProperties.find(p => String(p._id) === String(formData.propertyId));
     if (property && property.rent) {
       setPropertyRent(property.rent);
     } else {
       setPropertyRent(null);
     }
-  }, [formData.propertyId, formData.paymentType, properties]);
+  }, [formData.propertyId, formData.paymentType, internalProperties]);
 
   // When rent or advance months change, update amount
   useEffect(() => {
@@ -198,6 +250,16 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     fetchAgents();
   }, []); // Only run once on mount
 
+  // Clear agentId if current value does not exist in options
+  useEffect(() => {
+    if (!formData.agentId) return;
+    const exists = agents.some(a => String(a._id) === String(formData.agentId));
+    if (!exists) {
+      setFormData(prev => ({ ...prev, agentId: '' }));
+    }
+    // eslint-disable-next-line
+  }, [agents]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -232,7 +294,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       // Get commission percentage from selected property (only if not manual)
       let commissionPercent = 0;
       if (!useManualProperty && formData.propertyId) {
-        commissionPercent = getCommissionForProperty(formData.propertyId, properties);
+        commissionPercent = getCommissionForProperty(formData.propertyId, internalProperties);
       }
       const totalCommission = formData.amount * (commissionPercent / 100);
       const preaFee = totalCommission * 0.03;
@@ -256,7 +318,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
       // Ensure ownerId is included (only if not manual property)
       if (!useManualProperty && formData.propertyId) {
-        const property = properties.find(p => String(p._id) === String(formData.propertyId));
+        const property = internalProperties.find(p => String(p._id) === String(formData.propertyId));
         if (property && (property as any).ownerId) {
           const rawOwner = (property as any).ownerId;
           dataToSubmit.ownerId = typeof rawOwner === 'string' ? rawOwner : rawOwner?._id;
@@ -375,16 +437,16 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <Grid item xs={12}>
               <Autocomplete
-                options={properties}
+                options={internalProperties}
                 getOptionLabel={(option: Property) => `${option.name} - ${option.address}`}
-                value={properties.find((p) => String(p._id) === String(formData.propertyId)) || null}
+                value={internalProperties.find((p) => String(p._id) === String(formData.propertyId)) || null}
                 onChange={(_, newValue: Property | null) => {
                   const newPropertyId = newValue ? String(newValue._id) : '';
                   // Find tenant linked to this property (prefer Active)
                   let autoTenantId = '';
                   let autoAgentId = '';
                   if (newPropertyId) {
-                    const tenantsForProperty = tenants.filter((t) => String(t.propertyId || '') === newPropertyId);
+                    const tenantsForProperty = internalTenants.filter((t) => String(t.propertyId || '') === newPropertyId);
                     const selectedTenant = tenantsForProperty.find((t) => t.status === 'Active') || tenantsForProperty[0];
                     if (selectedTenant) {
                       autoTenantId = String(selectedTenant._id);
@@ -393,11 +455,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                       }
                     }
                   }
+                  const agentExists = agents.some(a => String(a._id) === String(autoAgentId));
                   setFormData((prev) => ({
                     ...prev,
                     propertyId: newPropertyId,
                     tenantId: newPropertyId ? autoTenantId : '',
-                    agentId: newPropertyId ? (autoAgentId || prev.agentId || '') : '',
+                    agentId: newPropertyId ? (agentExists ? autoAgentId : '') : '',
                   }));
                 }}
                 renderInput={(params) => (
@@ -436,9 +499,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <Grid item xs={12}>
               <Autocomplete
-                options={tenants}
+                options={internalTenants}
                 getOptionLabel={(option: Tenant) => `${option.firstName} ${option.lastName} - ${option.email}`}
-                value={tenants.find((t) => String(t._id) === String(formData.tenantId)) || null}
+                value={internalTenants.find((t) => String(t._id) === String(formData.tenantId)) || null}
                 onChange={(_, newValue: Tenant | null) => {
                   setFormData((prev) => ({
                     ...prev,
@@ -459,7 +522,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               <InputLabel>Agent</InputLabel>
               <Select
                 name="agentId"
-                value={formData.agentId}
+                value={agents.some(a => String(a._id) === String(formData.agentId)) ? formData.agentId : ''}
                 onChange={handleInputChange}
                 label="Agent"
                 required

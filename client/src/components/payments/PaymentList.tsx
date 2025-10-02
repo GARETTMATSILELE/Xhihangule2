@@ -9,7 +9,6 @@ import {
   TableHead,
   TableRow,
   TablePagination,
-  TextField,
   Grid,
   FormControl,
   InputLabel,
@@ -17,14 +16,12 @@ import {
   MenuItem,
   IconButton,
   Chip,
-  useTheme,
   Card,
   CardContent,
   Typography,
   Alert,
   CircularProgress,
   Button,
-  Snackbar,
   Dialog,
   DialogContent,
 } from '@mui/material';
@@ -33,10 +30,10 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Download as DownloadIcon, Edit as EditIcon, Print as PrintIcon } from '@mui/icons-material';
 import { Payment, PaymentFilter, PAYMENT_METHODS } from '../../types/payment';
-import { Lease } from '../../types/lease';
+// removed unused Lease
 import { Tenant } from '../../types/tenant';
 import { Property } from '../../types/property';
-import { PaymentFormData } from '../../types/payment';
+// removed unused PaymentFormData
 import PaymentReceipt from './PaymentReceipt';
 import paymentService from '../../services/paymentService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -54,6 +51,8 @@ export interface PaymentListProps {
   properties?: Property[];
   tenants?: Tenant[];
   totalCount?: number;
+  // Optional override for printing receipt; if provided, used instead of default
+  getReceiptForPrint?: (payment: Payment) => Promise<any>;
 }
 
 const PaymentList: React.FC<PaymentListProps> = (props) => {
@@ -70,18 +69,17 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     properties = [],
     tenants = [],
     totalCount,
+    getReceiptForPrint,
   } = props;
-  const theme = useTheme();
+  // removed unused theme
   const { user } = useAuth();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [downloadingReceipt, setDownloadingReceipt] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [printReceipt, setPrintReceipt] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
   const [loadingReceipt, setLoadingReceipt] = useState(false);
-  const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [onlyDeposits, setOnlyDeposits] = useState<boolean>(false);
   const [allSalesPayments, setAllSalesPayments] = useState<Payment[] | null>(null);
 
@@ -178,33 +176,19 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     return payments;
   }, [payments]);
 
-  const handleDownloadReceipt = async (payment: Payment) => {
-    try {
-      setDownloadingReceipt(payment._id);
-      setDownloadError(null);
-      if (onDownloadReceipt) {
-        await onDownloadReceipt(payment);
-      }
-    } catch (error) {
-      setDownloadError('Failed to download receipt. Please try again.');
-      console.error('Error downloading receipt:', error);
-    } finally {
-      setDownloadingReceipt(null);
-    }
-  };
+  // removed unused handleDownloadReceipt since not passed currently
 
   const handlePrintReceipt = async (payment: Payment) => {
     try {
       setLoadingReceipt(true);
-      const receipt = await paymentService.getPaymentReceipt(payment._id, user?.companyId);
+      const receipt = getReceiptForPrint
+        ? await getReceiptForPrint(payment)
+        : await paymentService.getPaymentReceipt(payment._id, user?.companyId);
       setSelectedReceipt(receipt);
       setPrintReceipt(true);
     } catch (error) {
       console.error('Error fetching receipt:', error);
-      setMessage({
-        type: 'error',
-        text: 'Failed to load receipt'
-      });
+      setDownloadError('Failed to load receipt');
     } finally {
       setLoadingReceipt(false);
     }
@@ -215,20 +199,63 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     setSelectedReceipt(null);
   };
 
-  // Helper function to get property display (manual address for sales, else property name)
+  // Helper to display property address (or name/address combo), preferring to show both
   const getPropertyDisplay = useCallback((payment: Payment) => {
-    if ((payment as any).manualPropertyAddress) {
-      return (payment as any).manualPropertyAddress as string;
+    const manualAddress = (payment as any).manualPropertyAddress as string | undefined;
+
+    // Build the "normal" property display (from populated object or lookup by id)
+    const propRefRaw = (payment as any).property ?? (payment as any).propertyId;
+    let normalDisplay: string | null = null;
+
+    const buildDisplayFromProperty = (prop: any): string | null => {
+      if (!prop) return null;
+      const name = prop?.name || prop?.propertyName;
+      const address = prop?.address || prop?.propertyAddress;
+      if (address && name) return `${name} - ${address}`;
+      if (address) return address;
+      if (name) return name;
+      return null;
+    };
+
+    const lookupById = (id: any): string | null => {
+      if (!id) return null;
+      const idStr = String((id && id._id) || id.id || id);
+      const property = properties.find(p => String(p._id) === idStr);
+      if (property) {
+        const built = buildDisplayFromProperty(property as any);
+        if (built) return built;
+      }
+      return null;
+    };
+
+    if (propRefRaw) {
+      if (typeof propRefRaw === 'object') {
+        // Try direct fields (populated doc) first
+        normalDisplay = buildDisplayFromProperty(propRefRaw);
+        // If only an id-like object, try lookup from provided properties list
+        if (!normalDisplay) {
+          normalDisplay = lookupById(propRefRaw);
+        }
+      } else if (typeof propRefRaw === 'string') {
+        normalDisplay = lookupById(propRefRaw);
+      }
     }
-    const propertyId = (payment as any).propertyId as any;
-    if (!propertyId) return 'Unknown Property';
-    if (typeof propertyId === 'object' && propertyId.name) {
-      return propertyId.name;
+
+    // Also try loose fallbacks sometimes present on payment itself
+    if (!normalDisplay) {
+      const loose = buildDisplayFromProperty(payment as any);
+      if (loose) normalDisplay = loose;
     }
-    if (typeof propertyId === 'string') {
-      const property = properties.find(p => p._id === propertyId);
-      if (property) return property.name;
+
+    // If both manual and normal are available, show both to provide full context
+    if (manualAddress && normalDisplay) {
+      return `${manualAddress} (${normalDisplay})`;
     }
+
+    // Otherwise fall back to whichever is available
+    if (manualAddress) return manualAddress;
+    if (normalDisplay) return normalDisplay;
+
     return 'Unknown Property';
   }, [properties]);
 

@@ -1,0 +1,18 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const auth_1 = require("../middleware/auth");
+const roles_1 = require("../middleware/roles");
+const developmentController_1 = require("../controllers/developmentController");
+const router = express_1.default.Router();
+router.get('/', auth_1.authWithCompany, developmentController_1.listDevelopments);
+router.get('/:id', auth_1.authWithCompany, developmentController_1.getDevelopment);
+router.get('/:id/units', auth_1.authWithCompany, developmentController_1.listUnitsForDevelopment);
+router.post('/', auth_1.authWithCompany, developmentController_1.createDevelopment);
+router.patch('/:id', auth_1.authWithCompany, developmentController_1.updateDevelopment);
+router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, developmentController_1.deleteDevelopment);
+router.post('/:id/recompute-stats', auth_1.authWithCompany, developmentController_1.recomputeStats);
+exports.default = router;

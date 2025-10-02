@@ -4,6 +4,7 @@ export interface IBuyer extends Document {
   name: string;
   email?: string;
   phone?: string;
+  idNumber?: string;
   budgetMin?: number;
   budgetMax?: number;
   prefs?: string;
@@ -17,6 +18,7 @@ const BuyerSchema: Schema = new Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, trim: true },
   phone: { type: String, trim: true },
+  idNumber: { type: String, trim: true },
   budgetMin: { type: Number, default: 0, min: 0 },
   budgetMax: { type: Number, default: 0, min: 0 },
   prefs: { type: String, default: '' },

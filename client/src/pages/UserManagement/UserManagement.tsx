@@ -87,7 +87,11 @@ const ROLES: Role[] = [
   }
 ];
 
-export const UserManagement: React.FC = () => {
+interface UserManagementProps {
+  embedded?: boolean;
+}
+
+export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false }) => {
   const { user, isAuthenticated } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [openDialog, setOpenDialog] = useState(false);
@@ -250,6 +254,13 @@ export const UserManagement: React.FC = () => {
   };
 
   if (loading) {
+    if (embedded) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
     return (
       <Box sx={{ display: 'flex', minHeight: '100vh' }}>
         <AdminSidebar activeTab={activeTab} onTabChange={setActiveTab} />
@@ -265,6 +276,13 @@ export const UserManagement: React.FC = () => {
 
   // Check if user is authenticated and has admin role
   if (!isAuthenticated || !user) {
+    if (embedded) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <Typography variant="h6" color="error">Please log in to access User Management</Typography>
+        </Box>
+      );
+    }
     return (
       <Box sx={{ display: 'flex', minHeight: '100vh' }}>
         <AdminSidebar activeTab={activeTab} onTabChange={setActiveTab} />
@@ -281,6 +299,13 @@ export const UserManagement: React.FC = () => {
   }
 
   if (user.role !== 'admin') {
+    if (embedded) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <Typography variant="h6" color="error">Admin access required for User Management</Typography>
+        </Box>
+      );
+    }
     return (
       <Box sx={{ display: 'flex', minHeight: '100vh' }}>
         <AdminSidebar activeTab={activeTab} onTabChange={setActiveTab} />
@@ -292,6 +317,140 @@ export const UserManagement: React.FC = () => {
             </Typography>
           </Box>
         </Box>
+      </Box>
+    );
+  }
+
+  if (embedded) {
+    return (
+      <Box sx={{ p: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4" component="h1">
+            User Management
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleOpenDialog()}
+          >
+            Add User
+          </Button>
+        </Box>
+
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Email</TableCell>
+                <TableCell>Role</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {users.map((user) => (
+                <TableRow key={user.id || user.email}>
+                  <TableCell>{`${user.firstName} ${user.lastName}`}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>{user.role}</TableCell>
+                  <TableCell>{user.status}</TableCell>
+                  <TableCell align="right">
+                    <IconButton onClick={() => handleOpenDialog(user)} color="primary">
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton onClick={() => handleDeleteUser(user.id)} color="error">
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+
+        <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+          <DialogTitle>
+            {selectedUser ? 'Edit User' : 'Add New User'}
+          </DialogTitle>
+          <form onSubmit={handleSubmit}>
+            <DialogContent>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  name="firstName"
+                  label="First Name"
+                  value={formData.firstName}
+                  onChange={handleInputChange}
+                  required
+                  fullWidth
+                />
+                <TextField
+                  name="lastName"
+                  label="Last Name"
+                  value={formData.lastName}
+                  onChange={handleInputChange}
+                  required
+                  fullWidth
+                />
+                <TextField
+                  name="email"
+                  label="Email"
+                  type="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  required
+                  fullWidth
+                />
+                <FormControl fullWidth required>
+                  <InputLabel>Role</InputLabel>
+                  <Select
+                    name="role"
+                    value={formData.role}
+                    onChange={handleRoleChange}
+                    label="Role"
+                  >
+                    {ROLES.map((role) => (
+                      <MenuItem key={role.id} value={role.name}>
+                        {role.name.charAt(0).toUpperCase() + role.name.slice(1)}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                {!selectedUser && (
+                  <TextField
+                    name="password"
+                    label="Password"
+                    type="password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    required
+                    fullWidth
+                  />
+                )}
+              </Box>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={handleCloseDialog}>Cancel</Button>
+              <Button type="submit" variant="contained">
+                {selectedUser ? 'Update' : 'Create'}
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
+
+        <Snackbar
+          open={!!message}
+          autoHideDuration={6000}
+          onClose={() => setMessage(null)}
+        >
+          <Alert
+            onClose={() => setMessage(null)}
+            severity={message?.type}
+            sx={{ width: '100%' }}
+          >
+            {message?.text}
+          </Alert>
+        </Snackbar>
       </Box>
     );
   }

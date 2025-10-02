@@ -89,10 +89,26 @@ const AdminPropertyOwnersPage: React.FC = () => {
       setLoading(true);
       setError(null);
       const companyId = user?.companyId;
-      // Admin should see all owners in same company
-      const ownersData = await ownerService.getAllPublic(companyId);
-      const normalizedOwners = Array.isArray(ownersData?.owners) ? ownersData.owners : (ownersData || []);
-      setOwners(normalizedOwners);
+      // Admin should see all owners in same company (both rental/property owners and sales owners)
+      const [ownersData, salesOwnersRaw] = await Promise.all([
+        ownerService.getAllPublic(companyId),
+        // sales owners (from /sales-owners) — service returns { owners: [...] } or an array
+        ownerService.getAll().catch(() => ({ owners: [] }))
+      ]);
+      const publicOwners = Array.isArray((ownersData as any)?.owners) ? (ownersData as any).owners : (Array.isArray(ownersData as any) ? (ownersData as any) : []);
+      const salesOwnersArr = Array.isArray((salesOwnersRaw as any)?.owners) ? (salesOwnersRaw as any).owners : (Array.isArray(salesOwnersRaw as any) ? (salesOwnersRaw as any) : []);
+      // Merge and deduplicate by _id (fallback to email)
+      const map = new Map<string, any>();
+      ;(publicOwners || []).forEach((o: any) => {
+        const key = String(o?._id || o?.id || o?.email || Math.random());
+        if (!map.has(key)) map.set(key, { ...o, __source: 'rental' });
+      });
+      ;(salesOwnersArr || []).forEach((o: any) => {
+        const key = String(o?._id || o?.id || o?.email || Math.random());
+        if (!map.has(key)) map.set(key, { ...o, __source: 'sales' });
+      });
+      const mergedOwners = Array.from(map.values());
+      setOwners(mergedOwners);
       const props = await propertyService.getPublicProperties();
       setProperties(props);
     } catch (err: any) {
@@ -198,7 +214,11 @@ const AdminPropertyOwnersPage: React.FC = () => {
           companyId: formData.companyId,
           properties: formData.propertyIds,
         };
-        await ownerService.update(selectedOwner._id, updateData);
+        if ((selectedOwner as any).__source === 'sales') {
+          await ownerService.updateSales(selectedOwner._id, updateData);
+        } else {
+          await ownerService.update(selectedOwner._id, updateData);
+        }
         setSnackbar({ open: true, message: 'Property owner updated', severity: 'success' });
       } else {
         if (!formData.password) {

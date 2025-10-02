@@ -4,7 +4,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 const isBrowser = typeof window !== 'undefined';
 const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
 const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
-const API_URL = import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
+const API_URL = (typeof window !== 'undefined' && (window as any).__API_BASE__) || import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
 
 // Apply a reasonable global timeout so UI fails fast if API is down
 axios.defaults.timeout = 8000;

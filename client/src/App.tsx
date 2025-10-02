@@ -33,6 +33,7 @@ const SalesBuyersPage = lazy(() => import('./pages/SalesDashboard/BuyersPage'));
 const SalesOwnersPage = lazy(() => import('./pages/SalesDashboard/OwnersPage'));
 const SalesPropertiesPage = lazy(() => import('./pages/SalesDashboard/PropertiesPage'));
 const SalesDealsPage = lazy(() => import('./pages/SalesDashboard/DealsPage'));
+const SalesDevelopmentsPage = lazy(() => import('./pages/SalesDashboard/DevelopmentsPage'));
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })));
 const DashboardOverview = lazy(() => import('./pages/AccountantDashboard/DashboardOverview'));
 const AccountantPaymentsPage = lazy(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
@@ -198,6 +199,15 @@ const App: React.FC = () => {
                   <PropertyProvider>
                     <CompanyProvider>
                       <SalesDealsPage />
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/developments" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <SalesDevelopmentsPage />
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>

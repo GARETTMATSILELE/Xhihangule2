@@ -40,6 +40,9 @@ export interface IPayment extends Document {
   // Manual entry fields for properties/tenants not in database
   manualPropertyAddress?: string;
   manualTenantName?: string;
+  // Sales-specific manual fields
+  buyerName?: string;
+  sellerName?: string;
   // Provisional workflow fields
   isProvisional?: boolean;
   isInSuspense?: boolean;
@@ -212,6 +215,14 @@ const PaymentSchema: Schema = new Schema({
     required: false,
   },
   manualTenantName: {
+    type: String,
+    required: false,
+  },
+  buyerName: {
+    type: String,
+    required: false,
+  },
+  sellerName: {
     type: String,
     required: false,
   },

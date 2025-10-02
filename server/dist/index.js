@@ -159,6 +159,35 @@ app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
 app.use('/api/invoices', invoiceRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
+// Session-scoped routes to support multiple concurrent sessions in one browser profile
+const sessionRouter = express_1.default.Router();
+sessionRouter.use('/properties', propertyRoutes_1.default);
+sessionRouter.use('/tenants', tenantRoutes_1.default);
+sessionRouter.use('/leases', leaseRoutes_1.default);
+sessionRouter.use('/payments', paymentRoutes_1.default);
+sessionRouter.use('/charts', chartRoutes_1.default);
+sessionRouter.use('/auth', auth_1.default);
+sessionRouter.use('/companies', companyRoutes_1.default);
+sessionRouter.use('/users', userRoutes_1.default);
+sessionRouter.use('/agents', agentRoutes_1.default);
+sessionRouter.use('/accountants', accountantRoutes_1.default);
+sessionRouter.use('/files', fileRoutes_1.default);
+sessionRouter.use('/property-owners', propertyOwnerRoutes_1.default);
+sessionRouter.use('/sales-owners', salesOwnerRoutes_1.default);
+sessionRouter.use('/owners', ownerRoutes_1.default);
+sessionRouter.use('/health', healthRoutes_1.default);
+sessionRouter.use('/maintenance', maintenanceRequestRoutes_1.default);
+sessionRouter.use('/deals', dealRoutes_1.default);
+sessionRouter.use('/buyers', buyerRoutes_1.default);
+sessionRouter.use('/leads', leadRoutes_1.default);
+sessionRouter.use('/viewings', viewingRoutes_1.default);
+sessionRouter.use('/valuations', valuationRoutes_1.default);
+sessionRouter.use('/levy-payments', levyPaymentRoutes_1.default);
+sessionRouter.use('/municipal-payments', municipalPaymentRoutes_1.default);
+sessionRouter.use('/payment-requests', paymentRequestRoutes_1.default);
+sessionRouter.use('/invoices', invoiceRoutes_1.default);
+sessionRouter.use('/sync', syncRoutes_1.default);
+app.use('/api/s/:sessionId', sessionRouter);
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {
     const staticPath = path_1.default.join(__dirname, 'public');

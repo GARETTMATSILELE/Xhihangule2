@@ -558,7 +558,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
     }
     try {
         const user = req.user;
-        const { paymentDate, paymentMethod, amount, referenceNumber, notes, currency, commissionDetails, manualPropertyAddress, manualTenantName, propertyId, tenantId, agentId, processedBy, saleId, rentalPeriodMonth, rentalPeriodYear, saleMode } = req.body;
+        const { paymentDate, paymentMethod, amount, referenceNumber, notes, currency, commissionDetails, manualPropertyAddress, manualTenantName, buyerName, sellerName, propertyId, tenantId, agentId, processedBy, saleId, rentalPeriodMonth, rentalPeriodYear, saleMode } = req.body;
         if (!amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({ message: 'Missing required fields: amount, paymentDate, paymentMethod' });
         }
@@ -626,6 +626,8 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             // Manual fields
             manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
             manualTenantName: manualTenant ? manualTenantName : undefined,
+            buyerName: buyerName || (manualTenant ? manualTenantName : undefined),
+            sellerName: sellerName,
             // Sales linkage
             saleId: saleObjId,
         });
@@ -743,7 +745,8 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (paginate) {
             const [items, total] = yield Promise.all([
                 baseQuery
-                    .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional')
+                    .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName')
+                    .populate('propertyId', 'name address')
                     .lean()
                     .skip((page - 1) * limit)
                     .limit(limit),
@@ -1255,7 +1258,13 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             createdAt: payment.createdAt,
             // Include manual entry fields
             manualPropertyAddress: payment.manualPropertyAddress,
-            manualTenantName: payment.manualTenantName
+            manualTenantName: payment.manualTenantName,
+            // Sales names (buyer/seller) for sales receipts
+            buyerName: payment.buyerName,
+            sellerName: payment.sellerName,
+            paymentType: payment.paymentType,
+            saleId: payment.saleId,
+            referenceNumber: payment.referenceNumber
         };
         console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });
         res.json({

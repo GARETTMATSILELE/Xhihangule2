@@ -199,7 +199,10 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         manualPropertyAddress: saleReference || `Sale - ${sellerName}`,
         manualTenantName: buyerName,
         // Optional linkage to SalesContract for installments and summaries
-        saleId: saleId || undefined
+        saleId: saleId || undefined,
+        // Explicitly include buyer/seller fields for backend persistence
+        buyerName,
+        sellerName
       } as PaymentFormData;
 
       await Promise.resolve(onSubmit(data));

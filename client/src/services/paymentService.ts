@@ -56,9 +56,10 @@ class PaymentService {
         const params: any = { ...(filters || {}), paginate: 'true' };
         return await api.get('/payments/company', {
           params,
-          validateStatus: (status) => status < 500
+          validateStatus: (status) => status < 500,
+          timeout: 30000
         });
-      });
+      }, { maxRetries: 0 });
 
       if (response.status === 401) {
         return this.handleAuthError(response);

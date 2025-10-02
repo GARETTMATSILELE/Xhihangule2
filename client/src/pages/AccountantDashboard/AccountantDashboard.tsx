@@ -27,6 +27,15 @@ const AccountantDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
 
+  // Support path-scoped sessions
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('sessionId');
+    if (sessionId) {
+      (window as any).__API_BASE__ = `${window.location.origin}/api/s/${sessionId}`;
+    }
+  }, []);
+
   // Add CSS classes to body and html to prevent white space
   useEffect(() => {
     document.body.classList.add('accountant-dashboard-active');

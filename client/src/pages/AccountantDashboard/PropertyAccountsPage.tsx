@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button } from '@mui/material';
+import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button, TextField } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { Property } from '../../types/property';
 import { usePropertyService } from '../../services/propertyService';
@@ -20,6 +20,7 @@ const PropertyAccountsPage: React.FC = () => {
   const { getAllPublic: getAllPropertyOwners } = usePropertyOwnerService();
   const [tenantMap, setTenantMap] = useState<Record<string, string>>({});
   const [ownerMap, setOwnerMap] = useState<Record<string, string>>({});
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const fetchProperties = async () => {
@@ -97,11 +98,41 @@ const PropertyAccountsPage: React.FC = () => {
     return <Box color="error.main">{error}</Box>;
   }
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const visibleProperties = normalizedQuery
+    ? properties.filter((property) => {
+        const name = (property.name || '').toString().toLowerCase();
+        const address = (property.address || '').toString().toLowerCase();
+        const ownerName = (ownerMap[property._id] || '').toLowerCase();
+        const tenantName = (tenantMap[property._id] || '').toLowerCase();
+        return (
+          name.includes(normalizedQuery) ||
+          address.includes(normalizedQuery) ||
+          ownerName.includes(normalizedQuery) ||
+          tenantName.includes(normalizedQuery)
+        );
+      })
+    : properties;
+
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>Property Accounts</Typography>
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          fullWidth
+          size="small"
+          label="Search properties, owners, tenants"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </Box>
       <Grid container spacing={3}>
-        {properties.map((property) => (
+        {visibleProperties.length === 0 && (
+          <Grid item xs={12}>
+            <Typography variant="body2" color="text.secondary">No matching properties.</Typography>
+          </Grid>
+        )}
+        {visibleProperties.map((property) => (
           <Grid item xs={12} md={6} lg={4} key={property._id}>
             <Card sx={{ cursor: 'pointer' }} onClick={() => handlePropertyClick(property._id)}>
               <CardContent>

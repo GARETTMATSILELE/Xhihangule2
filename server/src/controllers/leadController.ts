@@ -25,13 +25,14 @@ export const createLead = async (req: Request, res: Response) => {
     if (!req.user?.userId) throw new AppError('Authentication required', 401);
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
-    const { name, source, interest, email, phone, status } = req.body;
+    const { name, source, interest, email, phone, status, notes } = req.body;
     if (!name) throw new AppError('Name is required', 400);
 
     const lead = await Lead.create({
       name,
       source: source || '',
       interest: interest || '',
+      notes: notes || '',
       email,
       phone,
       status: status || 'New',

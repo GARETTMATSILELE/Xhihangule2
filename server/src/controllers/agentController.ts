@@ -1015,6 +1015,7 @@ export const createAgentFile = async (req: Request, res: Response) => {
     // Create file record
     const file = new File({
       propertyId: new mongoose.Types.ObjectId(propertyId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
       fileName: req.file.originalname,
       fileType,
       fileUrl: req.file.buffer.toString('base64'),

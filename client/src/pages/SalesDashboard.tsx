@@ -294,7 +294,7 @@ const Modal = ({ open, onClose, title, children, width = "max-w-2xl" }) => {
           <h3 className="text-lg font-semibold">{title}</h3>
           <button onClick={onClose} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200">✕</button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="p-4 max-h-[80vh] overflow-y-auto">{children}</div>
       </div>
     </div>
   );
@@ -324,6 +324,14 @@ const propertyColors = {
 // --- Main CRM component ---
 export default function CRM() {
   const { user, logout } = useAuth();
+  // Support path-scoped sessions: if present, use sessionId in API base for this page load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('sessionId');
+    if (sessionId) {
+      (window as any).__API_BASE__ = `${window.location.origin}/api/s/${sessionId}`;
+    }
+  }, []);
   const { properties: backendProperties, refreshProperties } = useProperties();
   const propertyService = usePropertyService();
   const propertyOwnerService = usePropertyOwnerService();
@@ -508,6 +516,7 @@ export default function CRM() {
         name: lead.name,
         source: lead.source,
         interest: lead.interest,
+        notes: lead.notes,
         email: lead.email,
         phone: lead.phone,
         status: lead.status || 'New'
@@ -574,8 +583,11 @@ export default function CRM() {
         (payload as any).agentId = user._id;
       }
       // Prefer direct sales endpoint to avoid rental routes
-      await apiService.createPropertySales(payload);
+      const createdRes = await apiService.createPropertySales(payload);
+      const created = (createdRes && (createdRes as any).data) ? (createdRes as any).data : createdRes;
       await refreshProperties();
+      // Refresh owners so the assigned owner's properties array reflects the new property
+      await refreshOwners();
     } catch (e) {}
   };
   const openEditProperty = (id: string) => {
@@ -1302,7 +1314,6 @@ export default function CRM() {
             await handleCreateProperty(values);
           }
         }}
-        owners={(owners || []).map(o => ({ id: o._id, name: `${o.firstName || ''} ${o.lastName || ''}`.trim() }))}
         editing={Boolean(editPropertyId)}
         initial={(() => {
           if (!editPropertyId) return undefined;
@@ -1326,6 +1337,11 @@ export default function CRM() {
             commissionAgentPercentRemaining: (bp as any).commissionAgentPercentRemaining ?? 50,
           };
         })()}
+        owners={(owners || []).map((o: any) => ({
+          id: String(o?._id || o?.id || ''),
+          name: ((`${o?.firstName || ''} ${o?.lastName || ''}`.trim()) || o?.name || o?.email || 'Owner')
+        }))}
+        companyId={user?.companyId}
       />
       <ViewingModal open={showViewingModal} onClose={()=>setShowViewingModal(false)} onSubmit={addViewing} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
       <DealModal open={showDealModal} onClose={()=>setShowDealModal(false)} onSubmit={addDeal} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
@@ -1396,11 +1412,23 @@ function PasswordChange() {
   );
 }
 function LeadModal({ open, onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New" });
-  useEffect(()=>{ if(!open) setForm({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New" }); }, [open]);
+  const { properties: backendProperties } = useProperties();
+  const [form, setForm] = useState({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New", notes: "" });
+  const [useManualInterest, setUseManualInterest] = useState(false);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | "">("");
+  useEffect(()=>{ if(!open) { setForm({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New", notes: "" }); setUseManualInterest(false); setSelectedPropertyId(""); } }, [open]);
+  const saleProperties = (backendProperties || []).filter((p: any) => (p as any).rentalType === 'sale');
+  const handleSubmit = (e: any) => {
+    e.preventDefault();
+    const interest = useManualInterest
+      ? form.interest
+      : (saleProperties.find((p: any) => String(p._id) === String(selectedPropertyId))?.name || form.interest);
+    onSubmit({ ...form, interest });
+    onClose();
+  };
   return (
     <Modal open={open} onClose={onClose} title="Add Lead">
-      <form onSubmit={(e)=>{ e.preventDefault(); onSubmit(form); onClose(); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="text-sm">Name</label>
           <Input required value={form.name} onChange={e=>setForm({ ...form, name: e.target.value })} />
@@ -1409,9 +1437,24 @@ function LeadModal({ open, onClose, onSubmit }) {
           <label className="text-sm">Source</label>
           <Input value={form.source} onChange={e=>setForm({ ...form, source: e.target.value })} placeholder="e.g., Website, Referral" />
         </div>
-        <div className="md:col-span-2">
-          <label className="text-sm">Interest</label>
-          <Input value={form.interest} onChange={e=>setForm({ ...form, interest: e.target.value })} placeholder="e.g., 3-bed house in Avondale" />
+        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm">Interest (Property)</label>
+            <select className="w-full px-3 py-2 rounded-xl border" value={selectedPropertyId} onChange={e=>{ setSelectedPropertyId(e.target.value); setUseManualInterest(false); }} disabled={useManualInterest}>
+              <option value="">-- Select sale property --</option>
+              {saleProperties.map((p: any) => (<option key={p._id} value={p._id}>{p.name}</option>))}
+            </select>
+            <div className="mt-2">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={useManualInterest} onChange={e=>setUseManualInterest(e.target.checked)} />
+                Enter interest manually
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="text-sm">Manual Interest</label>
+            <Input value={form.interest} onChange={e=>setForm({ ...form, interest: e.target.value })} placeholder="e.g., 3-bed house in Avondale" disabled={!useManualInterest} />
+          </div>
         </div>
         <div>
           <label className="text-sm">Phone</label>
@@ -1426,6 +1469,10 @@ function LeadModal({ open, onClose, onSubmit }) {
           <select className="w-full px-3 py-2 rounded-xl border" value={form.status} onChange={e=>setForm({...form, status: e.target.value})}>
             {Object.keys(leadColors).map(s => <option key={s}>{s}</option>)}
           </select>
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-sm">Notes</label>
+          <Textarea rows={3} value={form.notes} onChange={e=>setForm({ ...form, notes: e.target.value })} placeholder="Additional notes about this lead" />
         </div>
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
@@ -1517,13 +1564,45 @@ function OwnerModal({ open, onClose, onSubmit }) {
   );
 }
 
-function PropertyModal({ open, onClose, onSubmit, owners, editing, initial }) {
-  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
+function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial, companyId }) {
+  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
   useEffect(()=>{
     if (open) {
-      setForm({ title: initial?.title || "", address: initial?.address || "", price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
+      setForm({ title: initial?.title || "", address: initial?.address || "", price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
     }
   }, [open, owners, initial]);
+  const [valuations, setValuations] = useState<any[]>([]);
+  const [pickedValuationId, setPickedValuationId] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadVals = async () => {
+      try {
+        if (!open || !companyId) return;
+        const mod = await import('../services/valuationsService');
+        const vals = await mod.default.listByCompany(companyId);
+        if (!cancelled) setValuations(Array.isArray(vals) ? vals : []);
+      } catch {}
+    };
+    loadVals();
+    return () => { cancelled = true; };
+  }, [open, companyId]);
+
+  const applyValuation = (valId: string) => {
+    setPickedValuationId(valId);
+    const v = (valuations || []).find((x: any) => x._id === valId);
+    if (!v) return;
+    setForm(prev => ({
+      ...prev,
+      title: typeof v.propertyAddress === 'string' ? v.propertyAddress : (prev.title || ''),
+      address: typeof v.propertyAddress === 'string' ? v.propertyAddress : (prev.address || ''),
+      price: (v.estimatedValue != null && !isNaN(Number(v.estimatedValue))) ? String(v.estimatedValue) : String(prev.price || ''),
+      bedrooms: (v.bedrooms != null && !isNaN(Number(v.bedrooms))) ? Number(v.bedrooms) : prev.bedrooms,
+      bathrooms: (v.bathrooms != null && !isNaN(Number(v.bathrooms))) ? Number(v.bathrooms) : prev.bathrooms,
+      landArea: (v.landSize != null && !isNaN(Number(v.landSize))) ? String(v.landSize) : String(prev.landArea || ''),
+    }));
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={editing ? "Edit Property" : "Add Property"}>
       <form onSubmit={(e)=>{ e.preventDefault(); onSubmit({ ...form, price: Number(form.price||0) }); onClose(); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1536,9 +1615,18 @@ function PropertyModal({ open, onClose, onSubmit, owners, editing, initial }) {
           <Input required value={form.address} onChange={e=>setForm({ ...form, address: e.target.value })} />
         </div>
         <div>
+          <label className="text-sm">Pick from Valuations (optional)</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={pickedValuationId} onChange={e=>applyValuation(e.target.value)}>
+            <option value="">-- Select valuation by address --</option>
+            {(valuations || []).map((v: any) => (
+              <option key={v._id} value={v._id}>{v.propertyAddress}{v.city ? `, ${v.city}` : ''}{v.suburb ? ` (${v.suburb})` : ''}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="text-sm">Owner</label>
           <select className="w-full px-3 py-2 rounded-xl border" value={form.ownerId} onChange={e=>setForm({ ...form, ownerId: e.target.value })}>
-            {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {(owners || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </div>
         <div>
@@ -1639,7 +1727,7 @@ function ViewingModal({ open, onClose, onSubmit, buyers, properties }) {
         </div>
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
-          <Button className="bg-sky-600 text-white border-sky-600" type="submit">Save Viewing</Button>
+          <Button type="submit">Save Viewing</Button>
         </div>
       </form>
     </Modal>

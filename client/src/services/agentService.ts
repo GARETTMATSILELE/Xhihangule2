@@ -8,8 +8,8 @@ export const agentService = {
   // Get properties managed by the agent
   getProperties: async (): Promise<Property[]> => {
     console.log('AgentService: Fetching properties for agent...');
-    // Use general authenticated properties endpoint to avoid agent-only role gate
-    const response = await api.get('/properties');
+    // Use agent-specific endpoint so we only get properties belonging to this agent
+    const response = await api.get('/agents/properties');
     const raw = response.data as any;
     const data: Property[] = Array.isArray(raw)
       ? raw

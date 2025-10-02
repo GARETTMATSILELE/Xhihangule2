@@ -104,6 +104,23 @@ export const usePropertyOwnerService = () => {
     }
   };
 
+  // Update sales owner (in salesowners collection)
+  const updateSales = async (id: string, ownerData: Partial<PropertyOwner> & { properties?: string[] }) => {
+    try {
+      const companyId = getCompanyId();
+
+      if (!ownerData.companyId && companyId) {
+        (ownerData as any).companyId = companyId;
+      }
+
+      const response = await api.patch(`/sales-owners/${id}`, ownerData);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error updating sales owner:', error);
+      throw new Error('Failed to update sales owner');
+    }
+  };
+
   const remove = async (id: string) => {
     try {
       await api.delete(`/property-owners/${id}`);
@@ -120,6 +137,7 @@ export const usePropertyOwnerService = () => {
     create,
     update,
     remove,
+    updateSales,
     // Expose company ID getter for components that need it
     getCompanyId,
   };

@@ -139,11 +139,19 @@ export class DatabaseService {
           }
         }
 
-        return await operation();
+        // If the operation itself sets a no-retry header, honor it
+        const result = await operation();
+        return result;
       } catch (error: any) {
         lastError = error;
         console.error(`Operation failed (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
         
+        // Respect per-request no-retry hint when available
+        const noRetry = error?.config?.headers?.['x-no-retry'] === '1' || error?.config?.headers?.['x-no-retry'] === 1;
+        if (noRetry) {
+          break;
+        }
+
         if (attempt === maxRetries) {
           break;
         }

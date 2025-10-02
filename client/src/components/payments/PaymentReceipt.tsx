@@ -194,8 +194,13 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 </div>
                 <div class="detail-row">
                   <span class="label">${isSale ? 'Buyer' : 'Tenant'}:</span>
-                  <span class="value">${receipt.manualTenantName || (receipt.tenant ? receipt.tenant.firstName + ' ' + receipt.tenant.lastName : (receipt.tenantName || 'N/A'))}</span>
+                  <span class="value">${receipt.buyerName || receipt.manualTenantName || (receipt.tenant ? receipt.tenant.firstName + ' ' + receipt.tenant.lastName : (receipt.tenantName || 'N/A'))}</span>
                 </div>
+                ${isSale && (receipt.sellerName || receipt.manualPropertyAddress) ? `
+                <div class="detail-row">
+                  <span class="label">Seller:</span>
+                  <span class="value">${receipt.sellerName || ''}</span>
+                </div>` : ''}
                 <div class="detail-row">
                   <span class="label">Agent:</span>
                   <span class="value">${(receipt.agent?.firstName || receipt.processedBy?.firstName || '')} ${(receipt.agent?.lastName || receipt.processedBy?.lastName || '') || 'N/A'}</span>

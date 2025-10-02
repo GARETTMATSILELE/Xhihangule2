@@ -30,7 +30,7 @@ import { Properties } from './Properties/Properties';
 import { Tenants } from './Tenants/Tenants';
 import AgentLeasesPage from './agent/AgentLeasesPage';
 import AgentPropertyOwnersPage from './agent/AgentPropertyOwnersPage';
-import PaymentsPageWrapper from '../components/payments/PaymentsPageWrapper';
+import PaymentsPage from './PaymentsPage';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
 import { Files } from './Files/Files';
@@ -38,11 +38,12 @@ import { Maintenance } from './Maintenance/Maintenance';
 import { Communications } from './Communications/Communications';
 import { Settings } from './Settings/Settings';
 import { AgentSettings } from './Settings/AgentSettings';
-import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWrapper';
+// Removed MaintenancePageWrapper to avoid double sidebar/layout
 import LevyPaymentsPage from './agent/LevyPaymentsPage';
 import { SchedulePage } from './agent';
 import paymentService from '../services/paymentService';
 import PropertyDetailsPage from './agent/PropertyDetailsPage';
+import { User } from '../types/auth';
 
 const StatCard = ({ title, value, icon, color, loading, onClick }: { title: string; value: string; icon: React.ReactNode; color: string; loading?: boolean; onClick?: () => void }) => (
   <Card onClick={onClick} sx={{ cursor: onClick ? 'pointer' : 'default' }}>
@@ -111,8 +112,16 @@ function getId(id: any): string {
 
 const AgentDashboard: React.FC = () => {
   const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('sessionId');
+    if (sessionId) {
+      (window as any).__API_BASE__ = `${window.location.origin}/api/s/${sessionId}`;
+    }
+  }, []);
   const [activeTab, setActiveTab] = useState(0);
-  const { user } = useAuth();
+  const { user, company, isAuthenticated, loading: authLoading } = useAuth();
+  const maintenanceUser: User | undefined = user ?? undefined;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboardData, setDashboardData] = useState({
@@ -754,10 +763,29 @@ const AgentDashboard: React.FC = () => {
             <Route path="tenants" element={<Tenants />} />
             <Route path="leases" element={<AgentLeasesPage />} />
             <Route path="property-owners" element={<AgentPropertyOwnersPage />} />
-            <Route path="payments" element={<PaymentsPageWrapper userRole="agent" />} />
+            <Route
+              path="payments"
+              element={
+                <Box sx={{ ml: -3, p: 0 }}>
+                  <PaymentsPage />
+                </Box>
+              }
+            />
             <Route path="levies" element={<LevyPaymentsPage />} />
             <Route path="files" element={<Files />} />
-            <Route path="maintenance" element={<MaintenancePageWrapper userRole="agent" />} />
+            <Route
+              path="maintenance"
+              element={
+                <Box sx={{ ml: -3, p: 0 }}>
+                  <Maintenance
+                    user={maintenanceUser}
+                    company={company || undefined}
+                    isAuthenticated={!!isAuthenticated}
+                    authLoading={authLoading}
+                  />
+                </Box>
+              }
+            />
             <Route path="communications" element={<Communications />} />
             <Route path="tasks" element={
               <Box>

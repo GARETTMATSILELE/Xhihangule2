@@ -5,6 +5,7 @@ export interface LeadDTO {
   name: string;
   source?: string;
   interest?: string;
+  notes?: string;
   email?: string;
   phone?: string;
   status: 'New' | 'Contacted' | 'Qualified' | 'Viewing' | 'Offer' | 'Won' | 'Lost';
@@ -15,6 +16,7 @@ export interface CreateLeadInput {
   name: string;
   source?: string;
   interest?: string;
+  notes?: string;
   email?: string;
   phone?: string;
   status?: LeadDTO['status'];

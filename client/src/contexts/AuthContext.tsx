@@ -115,8 +115,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsImpersonating(storedImpersonating);
           
           try {
-            // Validate the token by fetching user data
-            const response = await api.get('/auth/me');
+            // Validate the token by fetching user data (fail fast, don't block UI long)
+            const response = await api.get('/auth/me', { timeout: 3000 });
             const userData = response.data.user;
             
             // Store user data in localStorage for other services to access
@@ -141,9 +141,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } catch (authError) {
             console.warn('Token validation failed, trying to refresh token:', authError);
             
-            // Try to refresh the token
+            // Try to refresh the token (short timeout as well)
             try {
-              const refreshResponse = await api.post('/auth/refresh-token');
+              const refreshResponse = await api.post('/auth/refresh-token', {}, { timeout: 5000 });
               
               const { token: newAccessToken, refreshToken: newRefreshToken } = refreshResponse.data;
               
@@ -156,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 
                 // Try to get user data again
-                const userResponse = await api.get('/auth/me');
+                const userResponse = await api.get('/auth/me', { timeout: 3000 });
                 const userData = userResponse.data.user;
                 
                 // Store user data in localStorage for other services to access
@@ -326,7 +326,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       // Call logout endpoint to invalidate tokens on server
-      await api.post('/auth/logout');
+      try {
+        await api.post('/auth/logout');
+      } catch (error: any) {
+        // Treat 404 as already logged out
+        if (error?.response?.status !== 404) {
+          console.error('Logout request failed:', error);
+        }
+      }
     } catch (error) {
       console.error('Logout request failed:', error);
     } finally {

@@ -198,6 +198,14 @@ const PaymentSchema = new mongoose_1.Schema({
         type: String,
         required: false,
     },
+    buyerName: {
+        type: String,
+        required: false,
+    },
+    sellerName: {
+        type: String,
+        required: false,
+    },
     // Provisional workflow fields
     isProvisional: {
         type: Boolean,

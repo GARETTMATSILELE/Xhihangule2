@@ -68,7 +68,7 @@ import { Header } from '../components/Layout/Header';
 import { Properties } from './Properties/Properties';
 import { Tenants } from './Tenants/Tenants';
 import { LeaseList } from './leases/LeaseList';
-import PaymentsPageWrapper from '../components/payments/PaymentsPageWrapper';
+import PaymentsPage from './PaymentsPage';
 import { Property } from '../types/property';
 import { Maintenance } from './Maintenance/Maintenance';
 import { UserManagement } from '../pages/UserManagement/UserManagement';
@@ -79,7 +79,7 @@ import { Files } from './Files/Files';
 import { useAdminDashboardService } from '../services/adminDashboardService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
-import MaintenancePageWrapper from '../components/maintenance/MaintenancePageWrapper';
+// Removed MaintenancePageWrapper to avoid nested sidebars and doubled spacing
 import { AdminSettings } from './Settings/AdminSettings';
 import ReportsPage from './admin/ReportsPage';
 import AdminLeasesPage from './AdminLeasesPage';
@@ -182,10 +182,18 @@ interface PropertyStats {
 
 const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('sessionId');
+    if (sessionId) {
+      (window as any).__API_BASE__ = `${window.location.origin}/api/s/${sessionId}`;
+    }
+  }, []);
   const location = useLocation();
   const { getAdminDashboardProperties } = useAdminDashboardService();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const { company } = useCompany();
+  const maintenanceCompany = company ? ({ _id: (company as any)._id as string, name: company.name } as any) : undefined;
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoading, setPropertiesLoading] = useState(true);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
@@ -484,13 +492,39 @@ const AdminDashboard: React.FC = () => {
         <Box sx={{ mt: 8, p: 3 }}>
           <Routes>
             <Route path="/" element={<DashboardContent />} />
-            <Route path="/users" element={<UserManagement />} />
-            <Route path="/maintenance" element={<MaintenancePageWrapper userRole="admin" />} />
+            <Route
+              path="/users"
+              element={
+                <Box sx={{ ml: -3, p: 0 }}>
+                  <UserManagement embedded />
+                </Box>
+              }
+            />
+            <Route
+              path="/maintenance"
+              element={
+                <Box sx={{ ml: -3, p: 0 }}>
+                  <Maintenance
+                    user={user || undefined}
+                    company={maintenanceCompany as any}
+                    isAuthenticated={!!isAuthenticated}
+                    authLoading={authLoading}
+                  />
+                </Box>
+              }
+            />
             <Route path="/properties" element={<Properties />} />
             <Route path="/property-owners" element={<AdminPropertyOwnersPage />} />
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/leases" element={<AdminLeasesPage />} />
-            <Route path="/payments" element={<PaymentsPageWrapper userRole="admin" />} />
+            <Route
+              path="/payments"
+              element={
+                <Box sx={{ ml: -3, p: 0 }}>
+                  <PaymentsPage />
+                </Box>
+              }
+            />
             <Route path="/levies" element={<LevyPaymentsPage />} />
             <Route path="/communications" element={<CommunicationsPage />} />
             <Route path="/files" element={<Files />} />

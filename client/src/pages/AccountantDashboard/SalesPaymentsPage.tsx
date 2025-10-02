@@ -16,6 +16,7 @@ import { Payment, PaymentFilter, PaymentFormData } from '../../types/payment';
 import { Property } from '../../types/property';
 import { Tenant } from '../../types/tenant';
 import PaymentList from '../../components/payments/PaymentList';
+import salesReceiptService from '../../services/salesReceiptService';
 import SalesPaymentForm from '../../components/payments/SalesPaymentForm';
 
 const SalesPaymentsPage: React.FC = () => {
@@ -174,6 +175,10 @@ const SalesPaymentsPage: React.FC = () => {
           error={error}
           properties={properties}
           tenants={tenants}
+          getReceiptForPrint={async (payment) => {
+            // Always use the dedicated sales receipt for sales payments
+            return await salesReceiptService.getSalesPaymentReceipt(payment._id, user?.companyId);
+          }}
         />
       )}
     </Box>

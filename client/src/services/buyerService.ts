@@ -14,6 +14,7 @@ export interface CreateBuyerInput {
   name: string;
   email?: string;
   phone?: string;
+  idNumber?: string;
   budgetMin?: number;
   budgetMax?: number;
   prefs?: string;

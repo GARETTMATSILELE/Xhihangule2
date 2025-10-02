@@ -10,4 +10,5 @@ const router = express_1.default.Router();
 router.post('/', auth_1.authWithCompany, salesOwnerController_1.createSalesOwner);
 router.get('/', auth_1.authWithCompany, salesOwnerController_1.getSalesOwners);
 router.get('/:id', auth_1.authWithCompany, salesOwnerController_1.getSalesOwnerById);
+router.patch('/:id', auth_1.authWithCompany, salesOwnerController_1.updateSalesOwner);
 exports.default = router;

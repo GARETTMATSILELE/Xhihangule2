@@ -27,7 +27,7 @@ export const SalesSidebar: React.FC = () => {
   const { notifications } = useNotification();
 
   const isActive = (
-  key: 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals' | 'valuations'
+  key: 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals' | 'valuations' | 'developments'
   ) => {
     if (key === 'dashboard') {
       return (
@@ -51,6 +51,7 @@ export const SalesSidebar: React.FC = () => {
     if (key === 'properties') return location.pathname.includes('/sales-dashboard/properties');
     if (key === 'deals') return location.pathname.includes('/sales-dashboard/deals');
     if (key === 'valuations') return location.pathname.includes('/sales-dashboard/valuations');
+    if (key === 'developments') return location.pathname.includes('/sales-dashboard/developments');
     if (key === 'settings') return location.pathname.includes('/sales-dashboard/settings');
     return false;
   };
@@ -76,7 +77,7 @@ export const SalesSidebar: React.FC = () => {
           <span>Files</span>
         </button>
         {/* Section quick-links */}
-        {(["Leads","Viewings","Buyers","Owners","Properties","Deals","Valuations"] as const).map(section => {
+        {(["Leads","Viewings","Buyers","Owners","Properties","Deals","Valuations","Developments"] as const).map(section => {
           const key = section.toLowerCase() as 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals';
           const active = isActive(key as any);
           return (

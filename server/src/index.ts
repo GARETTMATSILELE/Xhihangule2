@@ -122,6 +122,37 @@ app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/sync', syncRoutes);
 
+// Session-scoped routes to support multiple concurrent sessions in one browser profile
+const sessionRouter = express.Router();
+sessionRouter.use('/properties', propertyRoutes);
+sessionRouter.use('/tenants', tenantRoutes);
+sessionRouter.use('/leases', leaseRoutes);
+sessionRouter.use('/payments', paymentRoutes);
+sessionRouter.use('/charts', chartRoutes);
+sessionRouter.use('/auth', authRoutes);
+sessionRouter.use('/companies', companyRoutes);
+sessionRouter.use('/users', userRoutes);
+sessionRouter.use('/agents', agentRoutes);
+sessionRouter.use('/accountants', accountantRoutes);
+sessionRouter.use('/files', fileRoutes);
+sessionRouter.use('/property-owners', propertyOwnerRoutes);
+sessionRouter.use('/sales-owners', salesOwnerRoutes);
+sessionRouter.use('/owners', ownerRoutes);
+sessionRouter.use('/health', healthRoutes);
+sessionRouter.use('/maintenance', maintenanceRequestRoutes);
+sessionRouter.use('/deals', dealRoutes);
+sessionRouter.use('/buyers', buyerRoutes);
+sessionRouter.use('/leads', leadRoutes);
+sessionRouter.use('/viewings', viewingRoutes);
+sessionRouter.use('/valuations', valuationRoutes);
+sessionRouter.use('/levy-payments', levyPaymentRoutes);
+sessionRouter.use('/municipal-payments', municipalPaymentRoutes);
+sessionRouter.use('/payment-requests', paymentRequestRoutes);
+sessionRouter.use('/invoices', invoiceRoutes);
+sessionRouter.use('/sync', syncRoutes);
+
+app.use('/api/s/:sessionId', sessionRouter);
+
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {
   const staticPath = path.join(__dirname, 'public');

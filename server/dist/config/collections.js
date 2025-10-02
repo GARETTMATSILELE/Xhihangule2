@@ -16,5 +16,7 @@ exports.COLLECTIONS = {
     MUNICIPAL_PAYMENTS: 'municipalpayments',
     PROPERTY_ACCOUNTS: 'propertyaccounts',
     AGENT_ACCOUNTS: 'agentaccounts',
-    VALUATIONS: 'valuations'
+    VALUATIONS: 'valuations',
+    DEVELOPMENTS: 'developments',
+    DEVELOPMENT_UNITS: 'developmentunits'
 };

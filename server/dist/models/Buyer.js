@@ -39,6 +39,7 @@ const BuyerSchema = new mongoose_1.Schema({
     name: { type: String, required: true, trim: true },
     email: { type: String, trim: true },
     phone: { type: String, trim: true },
+    idNumber: { type: String, trim: true },
     budgetMin: { type: Number, default: 0, min: 0 },
     budgetMax: { type: Number, default: 0, min: 0 },
     prefs: { type: String, default: '' },

@@ -908,6 +908,7 @@ const createAgentFile = (req, res) => __awaiter(void 0, void 0, void 0, function
         // Create file record
         const file = new File_1.default({
             propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             fileName: req.file.originalname,
             fileType,
             fileUrl: req.file.buffer.toString('base64'),

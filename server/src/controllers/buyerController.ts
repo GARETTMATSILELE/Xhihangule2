@@ -25,7 +25,7 @@ export const createBuyer = async (req: Request, res: Response) => {
     if (!req.user?.userId) throw new AppError('Authentication required', 401);
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
-    const { name, email, phone, budgetMin, budgetMax, prefs } = req.body;
+    const { name, email, phone, idNumber, budgetMin, budgetMax, prefs } = req.body;
     if (!name) throw new AppError('Name is required', 400);
 
     const buyer = await Buyer.create({
@@ -34,6 +34,7 @@ export const createBuyer = async (req: Request, res: Response) => {
       phone,
       budgetMin: Number(budgetMin || 0),
       budgetMax: Number(budgetMax || 0),
+      idNumber: idNumber,
       prefs: prefs || '',
       companyId: req.user.companyId,
       ownerId: req.user.userId

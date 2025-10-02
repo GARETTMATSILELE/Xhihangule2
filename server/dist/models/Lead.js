@@ -39,6 +39,7 @@ const LeadSchema = new mongoose_1.Schema({
     name: { type: String, required: true, trim: true },
     source: { type: String, trim: true, default: '' },
     interest: { type: String, trim: true, default: '' },
+    notes: { type: String, trim: true, default: '' },
     email: { type: String, trim: true },
     phone: { type: String, trim: true },
     status: { type: String, enum: ['New', 'Contacted', 'Qualified', 'Viewing', 'Offer', 'Won', 'Lost'], default: 'New' },
