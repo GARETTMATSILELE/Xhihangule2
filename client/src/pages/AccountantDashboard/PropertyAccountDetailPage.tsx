@@ -39,7 +39,6 @@ import {
   TrendingDown as TrendingDownIcon,
   Payment as PaymentIcon,
   History as HistoryIcon,
-  Download as DownloadIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   Pending as PendingIcon,
@@ -50,6 +49,7 @@ import { propertyAccountService, PropertyAccount, Transaction, OwnerPayout, Expe
 import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyOwnerService, PropertyOwner } from '../../services/propertyOwnerService';
 import paymentService from '../../services/paymentService';
+import { Paid as PaidIcon } from '@mui/icons-material';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -117,6 +117,12 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Levies state and payout controls (moved before any early returns to satisfy Hooks rules)
+  const [levyRows, setLevyRows] = useState<any[]>([]);
+  const [payoutOpen, setPayoutOpen] = useState(false);
+  const [payoutRow, setPayoutRow] = useState<any>(null);
+  const [payoutForm, setPayoutForm] = useState({ paidToName: '', paidToAccount: '', paidToContact: '', payoutDate: '', payoutMethod: 'bank_transfer', payoutReference: '', notes: '' });
+
   useEffect(() => {
     const fetchData = async () => {
       if (!propertyId) return;
@@ -171,6 +177,21 @@ const PropertyAccountDetailPage: React.FC = () => {
     
     fetchData();
   }, [propertyId]);
+
+  // Load levy payments for this property (must be declared before any early return)
+  useEffect(() => {
+    const loadLevies = async () => {
+      try {
+        if (!propertyId || !user?.companyId) return;
+        const all = await paymentService.getLevyPayments(user.companyId);
+        const filtered = (Array.isArray(all) ? all : []).filter((p: any) => String(p?.propertyId?._id || p?.propertyId) === String(propertyId));
+        setLevyRows(filtered);
+      } catch {
+        // ignore
+      }
+    };
+    loadLevies();
+  }, [propertyId, user?.companyId]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -824,6 +845,7 @@ const PropertyAccountDetailPage: React.FC = () => {
         <Tabs value={tabValue} onChange={handleTabChange}>
           <Tab label="Transactions" />
           <Tab label="Owner Payouts" />
+          <Tab label="Levies" />
           <Tab label="Summary" />
         </Tabs>
       </Box>
@@ -950,8 +972,121 @@ const PropertyAccountDetailPage: React.FC = () => {
         </TableContainer>
       </TabPanel>
 
-      {/* Summary Tab */}
+      {/* Levies Tab */}
       <TabPanel value={tabValue} index={2}>
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="h6" gutterBottom>Levies</Typography>
+          {levyRows.length === 0 ? (
+            <Typography color="text.secondary">No levy payments found for this property.</Typography>
+          ) : (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Reference</TableCell>
+                    <TableCell>Amount</TableCell>
+                    <TableCell>Method</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {levyRows.map((row: any) => (
+                    <TableRow key={row._id}>
+                      <TableCell>{row.paymentDate ? new Date(row.paymentDate).toLocaleDateString() : '-'}</TableCell>
+                      <TableCell>{row.referenceNumber || '-'}</TableCell>
+                      <TableCell>{propertyAccountService.formatCurrency(Number(row.amount) || 0)}</TableCell>
+                      <TableCell>{(row.paymentMethod || '').toString().replace('_',' ')}</TableCell>
+                      <TableCell>
+                        {row?.payout?.paidOut ? (
+                          <Chip label="Paid Out" color="success" size="small" variant="outlined" />
+                        ) : (
+                          <Chip label={(row.status || '').toString()} size="small" variant="outlined" />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Tooltip title="Initiate Payout">
+                            <IconButton
+                              color="success"
+                              size="small"
+                              onClick={() => {
+                                setPayoutRow(row);
+                                const addr = (row?.propertyId && typeof row.propertyId === 'object') ? (row.propertyId.address || '') : '';
+                                const baseRef = String(row.referenceNumber || row._id || '').toUpperCase();
+                                const suffix = new Date().toISOString().slice(0,10).replace(/-/g, '');
+                                const autoRef = `LPY-${baseRef.slice(-6)}-${suffix}`;
+                                setPayoutForm({ paidToName: '', paidToAccount: addr, paidToContact: '', payoutDate: new Date().toISOString().slice(0,10), payoutMethod: 'bank_transfer', payoutReference: autoRef, notes: '' });
+                                setPayoutOpen(true);
+                              }}
+                            >
+                              <PaidIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Paper>
+
+        <Dialog open={payoutOpen} onClose={() => setPayoutOpen(false)} maxWidth="sm" fullWidth>
+          <DialogContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>Initiate Levy Payout</Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12}><TextField fullWidth label="Paid To (Association Name)" value={payoutForm.paidToName} onChange={(e)=>setPayoutForm(f=>({...f, paidToName: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth label="Account" value={payoutForm.paidToAccount} onChange={(e)=>setPayoutForm(f=>({...f, paidToAccount: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth label="Contact" value={payoutForm.paidToContact} onChange={(e)=>setPayoutForm(f=>({...f, paidToContact: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth type="date" label="Payout Date" InputLabelProps={{ shrink: true }} value={payoutForm.payoutDate} onChange={(e)=>setPayoutForm(f=>({...f, payoutDate: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payout Method</InputLabel>
+                  <Select
+                    label="Payout Method"
+                    value={payoutForm.payoutMethod}
+                    onChange={(e)=>setPayoutForm(f=>({...f, payoutMethod: e.target.value as string}))}
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth label="Payout Reference" value={payoutForm.payoutReference} onChange={(e)=>setPayoutForm(f=>({...f, payoutReference: e.target.value}))} /></Grid>
+              <Grid item xs={12}><TextField fullWidth label="Notes" value={payoutForm.notes} onChange={(e)=>setPayoutForm(f=>({...f, notes: e.target.value}))} /></Grid>
+            </Grid>
+            <Box sx={{ display:'flex', justifyContent:'flex-end', gap:1, mt:2 }}>
+              <Button onClick={()=>setPayoutOpen(false)}>Cancel</Button>
+              <Button variant="contained" onClick={async ()=>{
+                try {
+                  if (!payoutRow?._id) return;
+                  const updated = await paymentService.initiateLevyPayout(payoutRow._id, payoutForm);
+                  // refresh list
+                  if (user?.companyId) {
+                    const all = await paymentService.getLevyPayments(user.companyId);
+                    const filtered = (Array.isArray(all) ? all : []).filter((p: any) => String(p?.propertyId?._id || p?.propertyId) === String(propertyId));
+                    setLevyRows(filtered);
+                  }
+                  setPayoutOpen(false);
+                  // open acknowledgement
+                  const html = await paymentService.getLevyPayoutAcknowledgement(payoutRow._id, user?.companyId);
+                  const win = window.open('', '_blank');
+                  if (win) { win.document.write(html); win.document.close(); win.focus(); }
+                } catch (err) {
+                  console.error('Failed to initiate payout', err);
+                  alert('Failed to initiate payout');
+                }
+              }}>Save & Print Acknowledgement</Button>
+            </Box>
+          </DialogContent>
+        </Dialog>
+      </TabPanel>
+
+      {/* Summary Tab */}
+      <TabPanel value={tabValue} index={3}>
         <Grid container spacing={3}>
           <Grid item xs={12} md={6}>
             <Card>

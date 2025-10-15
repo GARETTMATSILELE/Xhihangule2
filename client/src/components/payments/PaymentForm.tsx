@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import paymentService from '../../services/paymentService';
 import { usePropertyService } from '../../services/propertyService';
+import { useTenantService } from '../../services/tenantService';
 import { Payment, PAYMENT_METHODS, SUPPORTED_CURRENCIES } from '../../types/payment';
 import { Tenant } from '../../types/tenant';
 import { Property } from '../../types/property';
@@ -28,6 +29,7 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import publicApi from '../../api/publicApi';
 
 export interface PaymentFormProps {
@@ -53,7 +55,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   loading = false,
 }) => {
   const { user } = useAuth();
+  const { company } = useCompany();
   const propertyService = usePropertyService();
+  const tenantService = useTenantService();
   const [error, setError] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
@@ -89,6 +93,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [advanceStartMonth, setAdvanceStartMonth] = useState(formData.rentalPeriodMonth);
   const [advanceStartYear, setAdvanceStartYear] = useState(formData.rentalPeriodYear);
   const [propertyRent, setPropertyRent] = useState<number | null>(null);
+  const [remainingForPeriod, setRemainingForPeriod] = useState<number | null>(null);
 
   // Regenerate reference number every time the form is opened for a new payment
   useEffect(() => {
@@ -110,31 +115,44 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         setError(null);
         let propsList: Property[] = Array.isArray(properties) && properties.length ? properties : [];
         let tenantList: Tenant[] = Array.isArray(tenants) && tenants.length ? tenants : [];
-        if (!propsList.length) {
-          // Prefer public endpoints first to avoid auth route timeouts
+
+        // INDIVIDUAL plan: always use authenticated, company-scoped data
+        if (company?.plan === 'INDIVIDUAL') {
           try {
-            propsList = await propertyService.getPublicProperties();
-          } catch {
+            if (!propsList.length) {
+              propsList = await propertyService.getProperties();
+            }
+          } catch {}
+          try {
+            if (!tenantList.length) {
+              const res = await tenantService.getAll();
+              tenantList = res.tenants || [];
+            }
+          } catch {}
+        } else {
+          // Other plans: keep existing public-first fallback
+          if (!propsList.length) {
             try {
-              const uid = user?._id as any;
-              const cid = user?.companyId as any;
-              const role = user?.role as any;
-              propsList = await propertyService.getPropertiesForUser(uid, cid, role);
+              propsList = await propertyService.getPublicProperties();
             } catch {
-              // last resort (may timeout): authenticated properties
               try {
-                propsList = await propertyService.getProperties();
-              } catch {}
+                const uid = user?._id as any;
+                const cid = user?.companyId as any;
+                const role = user?.role as any;
+                propsList = await propertyService.getPropertiesForUser(uid, cid, role);
+              } catch {
+                try {
+                  propsList = await propertyService.getProperties();
+                } catch {}
+              }
             }
           }
-        }
-        if (!tenantList.length) {
-          try {
-            const resp = await publicApi.get('/tenants/public');
-            const raw = resp.data as any;
-            tenantList = Array.isArray(raw?.tenants) ? raw.tenants : Array.isArray(raw?.data?.tenants) ? raw.data.tenants : Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
-          } catch {
-            // ignore; tenant list stays empty
+          if (!tenantList.length) {
+            try {
+              const resp = await publicApi.get('/tenants/public');
+              const raw = resp.data as any;
+              tenantList = Array.isArray(raw?.tenants) ? raw.tenants : Array.isArray(raw?.data?.tenants) ? raw.data.tenants : Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
+            } catch {}
           }
         }
         setInternalProperties(propsList);
@@ -207,6 +225,36 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     }
   }, [formData.propertyId, formData.paymentType, internalProperties]);
 
+  // Fetch remaining balance for the selected rental period (only for real property/tenant and rental payments)
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setRemainingForPeriod(null);
+        if (
+          formData.paymentType === 'rental' &&
+          !useManualProperty && !useManualTenant &&
+          formData.propertyId && formData.tenantId && propertyRent
+        ) {
+          const { remaining } = await paymentService.getRemainingForPeriod({
+            tenantId: String(formData.tenantId),
+            propertyId: String(formData.propertyId),
+            rentalPeriodMonth: Number(formData.rentalPeriodMonth),
+            rentalPeriodYear: Number(formData.rentalPeriodYear),
+            rent: Number(propertyRent)
+          });
+          if (!cancelled) setRemainingForPeriod(remaining);
+        } else {
+          if (!cancelled) setRemainingForPeriod(null);
+        }
+      } catch {
+        if (!cancelled) setRemainingForPeriod(null);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [formData.paymentType, formData.propertyId, formData.tenantId, formData.rentalPeriodMonth, formData.rentalPeriodYear, propertyRent, useManualProperty, useManualTenant]);
+
   // When rent or advance months change, update amount
   useEffect(() => {
     if (propertyRent) {
@@ -237,8 +285,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       try {
         setLoadingData(true);
         setError(null);
-        const agentsList = await paymentService.getAgents();
-        setAgents(Array.isArray(agentsList) ? agentsList : []);
+        let agentsList = await paymentService.getAgents();
+        if (!Array.isArray(agentsList)) agentsList = [] as any[];
+        // INDIVIDUAL plan fallback: if no agents, use logged-in user as the sole agent option
+        if ((company?.plan === 'INDIVIDUAL') && agentsList.length === 0 && user) {
+          agentsList = [{ _id: user._id, firstName: (user as any).firstName || '', lastName: (user as any).lastName || '', email: (user as any).email || '' }];
+        }
+        setAgents(agentsList);
       } catch (error) {
         setError('Failed to fetch agents. Please try again later.');
         console.error('Error fetching agents:', error);
@@ -259,6 +312,15 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     }
     // eslint-disable-next-line
   }, [agents]);
+
+  // Auto-select current user as agent in INDIVIDUAL plan when no agent is preselected and available
+  useEffect(() => {
+    if (company?.plan !== 'INDIVIDUAL') return;
+    if (!formData.agentId && user && agents.some(a => String(a._id) === String(user._id))) {
+      setFormData(prev => ({ ...prev, agentId: String(user._id) }));
+    }
+    // eslint-disable-next-line
+  }, [company?.plan, agents, user?._id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,6 +384,19 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         if (property && (property as any).ownerId) {
           const rawOwner = (property as any).ownerId;
           dataToSubmit.ownerId = typeof rawOwner === 'string' ? rawOwner : rawOwner?._id;
+        }
+      }
+
+      // Inline guard: fully paid or exceeding remaining
+      if (formData.paymentType === 'rental' && remainingForPeriod !== null) {
+        const amount = Number(dataToSubmit.amount || 0);
+        if (remainingForPeriod <= 0) {
+          setError('This month is fully paid. Change rental month.');
+          return;
+        }
+        if (amount > remainingForPeriod) {
+          setError(`Only ${remainingForPeriod.toFixed(2)} remains for this month. Enter an amount ≤ remaining.`);
+          return;
         }
       }
 

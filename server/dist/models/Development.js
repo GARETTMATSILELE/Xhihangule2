@@ -45,13 +45,17 @@ const DevelopmentSchema = new mongoose_1.Schema({
     type: {
         type: String,
         enum: {
-            values: ['stands', 'apartments', 'houses', 'semidetached', 'townhouses'],
-            message: 'Type must be one of: stands, apartments, houses, semidetached, townhouses'
+            values: ['stands', 'apartments', 'houses', 'semidetached', 'townhouses', 'land'],
+            message: 'Type must be one of: stands, apartments, houses, semidetached, townhouses, land'
         },
         required: true,
         index: true
     },
     description: {
+        type: String,
+        trim: true
+    },
+    address: {
         type: String,
         trim: true
     },
@@ -76,6 +80,10 @@ const DevelopmentSchema = new mongoose_1.Schema({
             price: { type: Number, min: [0, 'Price cannot be negative'] },
             size: { type: Number, min: [0, 'Size cannot be negative'] }
         }],
+    commissionPercent: { type: Number, min: 0 },
+    commissionPreaPercent: { type: Number, min: 0 },
+    commissionAgencyPercentRemaining: { type: Number, min: 0, max: 100 },
+    commissionAgentPercentRemaining: { type: Number, min: 0, max: 100 },
     cachedStats: {
         totalUnits: { type: Number, default: 0, min: 0 },
         availableUnits: { type: Number, default: 0, min: 0 },

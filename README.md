@@ -86,7 +86,17 @@ Create a `.env` file in the server directory with:
 MONGODB_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret
 AZURE_STORAGE_CONNECTION_STRING=your_azure_storage_connection_string
-SENDGRID_API_KEY=your_sendgrid_api_key
+
+# Email (choose one)
+# If using SMTP (default in-app nodemailer):
+SMTP_HOST=smtp.yourprovider.com
+SMTP_PORT=587
+SMTP_USER=your_smtp_username
+SMTP_PASS=your_smtp_password
+SMTP_FROM="Your App <no-reply@yourdomain.com>"
+
+# Frontend base URL for password reset links
+APP_BASE_URL=http://localhost:3000
 ```
 
 For the client, create a `.env` file with:
@@ -137,6 +147,8 @@ POST /api/auth/login
 POST /api/auth/register
 POST /api/auth/logout
 GET /api/auth/me
+POST /api/auth/forgot-password
+POST /api/auth/reset-password
 ```
 
 ### Property Accounting
@@ -219,6 +231,22 @@ interface Transaction {
 - **Data Encryption**: Encryption at rest and in transit
 - **Audit Logging**: Complete audit trail for all operations
 - **Company Isolation**: Multi-tenant data isolation
+
+## Password Reset (Forgot/Reset)
+
+The app supports secure password resets via email.
+
+- Request: `POST /api/auth/forgot-password` with `{ email }`. Always returns a generic success message to prevent account enumeration.
+- Email: Generates a one-time token (15-minute expiry) and emails a link to `APP_BASE_URL/reset-password?token=...&email=...`.
+- Reset: `POST /api/auth/reset-password` with `{ token, email, password }` to set a new password and invalidate the token.
+
+Setup:
+- Configure SMTP env vars (see Environment Variables).
+- Ensure `APP_BASE_URL` points to your frontend (e.g., `http://localhost:3000`).
+
+Frontend routes:
+- `/forgot-password`: enter email to request a reset link
+- `/reset-password`: set new password using token link
 
 ## Performance Optimizations
 

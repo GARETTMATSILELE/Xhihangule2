@@ -28,6 +28,8 @@ import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { buyerService } from '../../services/buyerService';
 import { developmentService } from '../../services/developmentService';
 import { developmentUnitService } from '../../services/developmentUnitService';
+import paymentService from '../../services/paymentService';
+import { Payment } from '../../types/payment';
 
 type DevelopmentType = 'stands' | 'apartments' | 'houses' | 'semidetached' | 'townhouses';
 
@@ -122,8 +124,10 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [name, setName] = useState('');
   const [type, setType] = useState<DevelopmentType>('stands');
   const [description, setDescription] = useState('');
+  const [devAddress, setDevAddress] = useState('');
   const [variations, setVariations] = useState<UnitVariation[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [loadingUnits, setLoadingUnits] = useState<Record<string, boolean>>({});
   // Owner fields
   const [ownerFirstName, setOwnerFirstName] = useState('');
   const [ownerLastName, setOwnerLastName] = useState('');
@@ -142,6 +146,14 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [buyerEmail, setBuyerEmail] = useState<string>('');
   const [buyerSaving, setBuyerSaving] = useState<boolean>(false);
   const [creating, setCreating] = useState<boolean>(false);
+  const [openUnit, setOpenUnit] = useState<Record<string, boolean>>({});
+  const [unitPayments, setUnitPayments] = useState<Record<string, Payment[]>>({});
+  const [unitPaymentsLoading, setUnitPaymentsLoading] = useState<Record<string, boolean>>({});
+  // Commission config for development
+  const [commissionPercent, setCommissionPercent] = useState<number>(5);
+  const [preaPercentOfCommission, setPreaPercentOfCommission] = useState<number>(3);
+  const [agencyPercent, setAgencyPercent] = useState<number>(50);
+  const [agentPercent, setAgentPercent] = useState<number>(50);
 
   useEffect(() => {
     const loadDevs = async () => {
@@ -184,6 +196,7 @@ const SalesDevelopmentsPage: React.FC = () => {
         name: name.trim(),
         type,
         description: description.trim() || undefined,
+        address: devAddress.trim() || undefined,
         owner: {
           firstName: ownerFirstName.trim() || undefined,
           lastName: ownerLastName.trim() || undefined,
@@ -198,7 +211,11 @@ const SalesDevelopmentsPage: React.FC = () => {
           count: v.count,
           price: type === 'stands' ? Math.max(0, (v.sizeSqm || 0) * (v.pricePerSqm || 0)) : (v.price || 0),
           size: type === 'stands' ? (v.sizeSqm || 0) : undefined
-        }))
+        })),
+        commissionPercent,
+        commissionPreaPercent: preaPercentOfCommission,
+        commissionAgencyPercentRemaining: agencyPercent,
+        commissionAgentPercentRemaining: agentPercent
       });
 
       // Map server response to local Development shape
@@ -213,12 +230,12 @@ const SalesDevelopmentsPage: React.FC = () => {
         ownerEmail: created.owner?.email,
         ownerIdNumber: created.owner?.idNumber,
         ownerPhone: created.owner?.phone,
-        variations: (created.variations || []).map((v: any) => ({
+          variations: (created.variations || []).map((v: any) => ({
           id: v.id,
           label: v.label,
           count: v.count,
           price: v.price,
-          sizeSqm: created.type === 'stands' ? v.size : undefined
+            sizeSqm: created.type === 'stands' ? v.size : undefined
         })),
         units: [],
         createdAt: created.createdAt || new Date().toISOString()
@@ -239,6 +256,11 @@ const SalesDevelopmentsPage: React.FC = () => {
       setOwnerEmail('');
       setOwnerIdNumber('');
       setOwnerPhone('');
+      setDevAddress('');
+      setCommissionPercent(5);
+      setPreaPercentOfCommission(3);
+      setAgencyPercent(50);
+      setAgentPercent(50);
     } catch (e) {
       // Optionally surface error via snackbar/toast
     } finally {
@@ -275,12 +297,13 @@ const SalesDevelopmentsPage: React.FC = () => {
     if (!buyerName.trim()) return;
     try {
       setBuyerSaving(true);
-      // Store ID number in prefs temporarily until backend supports idNumber
       const created = await buyerService.create({
         name: buyerName.trim(),
         phone: buyerPhone.trim() || undefined,
         email: buyerEmail.trim() || undefined,
-        idNumber: buyerIdNumber.trim() || undefined
+        idNumber: buyerIdNumber.trim() || undefined,
+        developmentId: buyerDevId,
+        developmentUnitId: buyerUnitId
       });
       const displayName = created?.name || buyerName.trim();
       updateUnit(buyerDevId, buyerUnitId, { buyerName: displayName });
@@ -292,20 +315,112 @@ const SalesDevelopmentsPage: React.FC = () => {
     }
   };
 
-  const printUnit = (dev: Development, unit: DevelopmentUnit) => {
-    const variation = dev.variations.find(v => v.id === unit.variationId);
-    const total = computeUnitPrice(dev, unit, variation);
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<!DOCTYPE html><html><head><title>${dev.name} - ${unit.label}</title></head><body>` +
-      `<h2>${dev.name} • ${dev.type.toUpperCase()}</h2>` +
-      `<h3>Unit: ${unit.label}</h3>` +
-      `<p>Status: ${unit.status}</p>` +
-      `<p>Buyer: ${unit.buyerName || '-'}</p>` +
-      `<p>Total Price: ${total.toLocaleString()}</p>` +
-      `</body></html>`);
-    w.document.close();
-    w.print();
+  const printUnit = async (dev: Development, unit: DevelopmentUnit) => {
+    try {
+      const variation = dev.variations.find(v => v.id === unit.variationId);
+      const total = computeUnitPrice(dev, unit, variation);
+      // Load payments for this unit
+      let payments: any[] = [];
+      try {
+        const resp = await developmentUnitService.listPayments(dev.id, { unitId: unit.id });
+        payments = Array.isArray((resp as any)?.items) ? (resp as any).items : (Array.isArray(resp) ? resp as any[] : []);
+      } catch {}
+
+      const buyer = unit.buyerName || '-';
+      const owner = [dev.ownerFirstName || '', dev.ownerLastName || ''].join(' ').trim() || dev.ownerCompanyName || '-';
+      const unitLabel = unit.label || (typeof unit.unitNumber === 'number' ? `Unit ${unit.unitNumber}` : 'Unit');
+      const currencyGuess = (payments[0]?.currency) || 'USD';
+
+      const html = `<!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${dev.name} - ${unitLabel}</title>
+        <style>
+          @page { size: A4; margin: 20mm; }
+          body { font-family: Arial, Helvetica, sans-serif; color: #111; }
+          h1 { font-size: 20px; margin: 0 0 6px; }
+          h2 { font-size: 16px; margin: 12px 0 6px; }
+          .muted { color: #666; }
+          .row { display: flex; justify-content: space-between; gap: 16px; }
+          .card { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin: 8px 0; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+          th { background: #f8fafc; }
+          .amount { text-align: right; font-variant-numeric: tabular-nums; }
+          .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; }
+          .title { font-size: 22px; font-weight: 700; }
+          .sub { font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">${dev.name}</div>
+            <div class="sub">${(dev.description || '').toString()}</div>
+          </div>
+          <div class="sub">Printed: ${new Date().toLocaleString()}</div>
+        </div>
+
+        <div class="card">
+          <h1>${unitLabel}</h1>
+          <div class="row">
+            <div><strong>Development:</strong> ${dev.name}</div>
+            <div><strong>Type:</strong> ${dev.type.toUpperCase()}</div>
+          </div>
+          <div class="row">
+            <div><strong>Owner:</strong> ${owner}</div>
+            <div><strong>Buyer:</strong> ${buyer}</div>
+          </div>
+          <div class="row">
+            <div><strong>Status:</strong> ${unit.status.replace('_',' ').toUpperCase()}</div>
+            <div><strong>Total Unit Price:</strong> ${currencyGuess} ${total.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Payments</h2>
+          ${payments.length === 0 ? `<div class="muted">No payments for this unit.</div>` : `
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Reference</th>
+                <th>Buyer</th>
+                <th>Seller</th>
+                <th>Method</th>
+                <th class="amount">Amount</th>
+                <th>Currency</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${payments.map(p => `
+                <tr>
+                  <td>${new Date(String(p.paymentDate)).toLocaleDateString()}</td>
+                  <td>${p.referenceNumber || ''}</td>
+                  <td>${p.buyerName || ''}</td>
+                  <td>${p.sellerName || ''}</td>
+                  <td>${(p.paymentMethod || '').toString().replace('_',' ')}</td>
+                  <td class="amount">${(p.amount || 0).toLocaleString()}</td>
+                  <td>${p.currency || 'USD'}</td>
+                  <td>${p.notes || ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          `}
+        </div>
+      </body>
+      </html>`;
+
+      const w = window.open('', '_blank');
+      if (!w) return;
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      w.print();
+    } catch {}
   };
 
   return (
@@ -330,7 +445,50 @@ const SalesDevelopmentsPage: React.FC = () => {
                   display="flex"
                   alignItems="center"
                   justifyContent="space-between"
-                  onClick={() => setExpanded(prev => ({ ...prev, [dev.id]: !prev[dev.id] }))}
+                  onClick={async () => {
+                    setExpanded(prev => {
+                      const next = !prev[dev.id];
+                      return { ...prev, [dev.id]: next };
+                    });
+                    // On opening, fetch units if not loaded yet
+                    const isOpening = !expanded[dev.id];
+                    if (isOpening && (dev.units || []).length === 0) {
+                      try {
+                        setLoadingUnits(prev => ({ ...prev, [dev.id]: true }));
+                        const items = await developmentUnitService.list({ developmentId: dev.id, limit: 500 });
+                        const mappedUnits = (items || []).map((u: any) => ({
+                          id: String(u._id || u.id),
+                          variationId: String(u.variationId),
+                          label: String(u.unitCode || ''),
+                          status: (u.status || 'available') as UnitStatus,
+                          buyerName: u.buyerName,
+                          unitNumber: typeof u.unitNumber === 'number' ? u.unitNumber : undefined
+                        }));
+                        updateDevelopment(dev.id, { units: mappedUnits });
+                        // For each unit, load its buyers filtered by development and unit
+                        try {
+                          const allBuyers = await buyerService.list({ developmentId: dev.id });
+                          const buyersByUnit: Record<string, string> = {};
+                          (allBuyers || []).forEach((b: any) => {
+                            if (String(b.developmentId) === String(dev.id) && b.developmentUnitId) {
+                              buyersByUnit[String(b.developmentUnitId)] = b.name;
+                            }
+                          });
+                          const nextUnits: DevelopmentUnit[] = mappedUnits.map((unit: any) => ({
+                            id: String(unit.id),
+                            variationId: String(unit.variationId),
+                            label: String(unit.label),
+                            status: unit.status as UnitStatus,
+                            buyerName: buyersByUnit[String(unit.id)] || unit.buyerName,
+                            unitNumber: typeof unit.unitNumber === 'number' ? unit.unitNumber : undefined
+                          }));
+                          updateDevelopment(dev.id, { units: nextUnits });
+                        } catch {}
+                      } finally {
+                        setLoadingUnits(prev => ({ ...prev, [dev.id]: false }));
+                      }
+                    }
+                  }}
                   sx={{ cursor: 'pointer' }}
                   role="button"
                   aria-expanded={isOpen}
@@ -350,8 +508,31 @@ const SalesDevelopmentsPage: React.FC = () => {
                 {isOpen && (
                   <>
                     <Divider sx={{ my: 2 }} />
+                    {/* Variations list */}
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Variations</Typography>
+                      <Box display="flex" flexWrap="wrap" gap={1}>
+                        {dev.variations.map(v => (
+                          <Chip key={v.id} label={`${v.label} • ${v.count} units${typeof v.price === 'number' ? ` • ${v.price.toLocaleString()}` : ''}${dev.type==='stands' && typeof v.sizeSqm === 'number' ? ` • ${v.sizeSqm} sqm` : ''}`} />
+                        ))}
+                      </Box>
+                    </Box>
                     <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
                       <Chip label={`Available: ${statusCounts['available'] || 0}`} />
+                      {dev.variations.length > 1 && (() => {
+                        const availableByVar: Record<string, number> = {};
+                        (dev.units || []).forEach(u => {
+                          if (u.status === 'available') {
+                            availableByVar[u.variationId] = (availableByVar[u.variationId] || 0) + 1;
+                          }
+                        });
+                        return dev.variations
+                          .map(v => ({ id: v.id, label: v.label, count: availableByVar[v.id] || 0 }))
+                          .filter(x => x.count > 0)
+                          .map(x => (
+                            <Chip key={`avail-${x.id}`} variant="outlined" label={`${x.label}: ${x.count}`} />
+                          ));
+                      })()}
                       <Chip color="warning" label={`Under Offer: ${statusCounts['under_offer'] || 0}`} />
                       <Chip color="success" label={`Sold: ${statusCounts['sold'] || 0}`} />
                     </Box>
@@ -369,11 +550,31 @@ const SalesDevelopmentsPage: React.FC = () => {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {dev.units.map(u => {
+                        {(loadingUnits[dev.id] ? [] : dev.units).map(u => {
                           const variation = dev.variations.find(v => v.id === u.variationId);
                           const total = computeUnitPrice(dev, u, variation);
                           return (
-                            <TableRow key={u.id}>
+                            <>
+                            <TableRow
+                              key={u.id}
+                              hover
+                              onClick={async () => {
+                                setOpenUnit(prev => ({ ...prev, [u.id]: !prev[u.id] }));
+                                const opening = !openUnit[u.id];
+                                if (opening && !unitPayments[u.id]) {
+                                  try {
+                                    setUnitPaymentsLoading(prev => ({ ...prev, [u.id]: true }));
+                                    const payments = await developmentUnitService.listPayments(dev.id, { unitId: u.id });
+                                    setUnitPayments(prev => ({ ...prev, [u.id]: Array.isArray(payments?.items) ? payments.items : (Array.isArray(payments) ? payments : []) }));
+                                  } catch {
+                                    setUnitPayments(prev => ({ ...prev, [u.id]: [] }));
+                                  } finally {
+                                    setUnitPaymentsLoading(prev => ({ ...prev, [u.id]: false }));
+                                  }
+                                }
+                              }}
+                              style={{ cursor: 'pointer' }}
+                            >
                               <TableCell>{
                                 typeof u.unitNumber === 'number'
                                   ? u.unitNumber
@@ -381,7 +582,13 @@ const SalesDevelopmentsPage: React.FC = () => {
                               }</TableCell>
                               <TableCell>{variation?.label}</TableCell>
                               <TableCell>
-                                <TextField select size="small" value={u.status} onChange={(e) => updateUnit(dev.id, u.id, { status: e.target.value as UnitStatus })}>
+                                <TextField select size="small" value={u.status} onChange={async (e) => {
+                                  const next = e.target.value as UnitStatus;
+                                  updateUnit(dev.id, u.id, { status: next });
+                                  try {
+                                    await developmentUnitService.updateStatus(u.id, { to: next });
+                                  } catch {}
+                                }}>
                                   <MenuItem value="available">Available</MenuItem>
                                   <MenuItem value="under_offer">Under Offer</MenuItem>
                                   <MenuItem value="sold">Sold</MenuItem>
@@ -397,14 +604,102 @@ const SalesDevelopmentsPage: React.FC = () => {
                               <TableCell align="right">{total.toLocaleString()}</TableCell>
                               
                               <TableCell>
-                                <Button size="small" startIcon={<AddIcon />} onClick={() => openAddBuyer(dev.id, u.id)}>Add Buyer</Button>
-                                <IconButton size="small" onClick={() => printUnit(dev, u)} title="Print">
+                                <Button size="small" startIcon={<AddIcon />} onClick={(e) => { e.stopPropagation(); openAddBuyer(dev.id, u.id); }}>Add Buyer</Button>
+                                <IconButton size="small" onClick={(e) => { e.stopPropagation(); printUnit(dev, u); }} title="Print">
                                   <PrintIcon fontSize="small" />
                                 </IconButton>
                               </TableCell>
                             </TableRow>
+                            {openUnit[u.id] && (
+                              <TableRow>
+                                <TableCell colSpan={6}>
+                                  {unitPaymentsLoading[u.id] && (
+                                    <Typography variant="body2" color="text.secondary">Loading payments…</Typography>
+                                  )}
+                                  {!unitPaymentsLoading[u.id] && (
+                                    (() => {
+                                      const list = unitPayments[u.id] || [];
+                                      if (list.length === 0) {
+                                        return <Typography variant="body2" color="text.secondary">No payments found for this unit.</Typography>;
+                                      }
+                                      const isInstallment = list.some((p: any) => (p as any).saleMode === 'installment');
+                                      const parseTotal = (text: string) => {
+                                        const m = String(text || '').match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+                                        if (m && m[1]) {
+                                          const n = Number(m[1].replace(/,/g, ''));
+                                          return Number.isFinite(n) ? n : null;
+                                        }
+                                        return null;
+                                      };
+                                      const parsedTotals = list.map(p => parseTotal((p as any).notes)).filter((n): n is number => n != null);
+                                      const totalSale = parsedTotals.length > 0 ? parsedTotals[0] : undefined;
+                                      const currency = (list[0] as any).currency || 'USD';
+                                      if (!isInstallment) {
+                                        const amountPaid = list.reduce((s, p: any) => s + (p.amount || 0), 0);
+                                        const ownerAmount = list.reduce((s, p: any) => s + (p.commissionDetails?.ownerAmount || 0), 0);
+                                        const commissionAmount = list.reduce((s, p: any) => s + (p.commissionDetails?.totalCommission || 0), 0);
+                                        return (
+                                          <Box>
+                                            <Typography variant="subtitle2" sx={{ mb: 1 }}>Quick Sale Summary</Typography>
+                                            <Grid container spacing={2}>
+                                              <Grid item xs={12} md={3}><Typography variant="body2">Total Sale Price: {totalSale != null ? `${currency} ${totalSale.toLocaleString()}` : '—'}</Typography></Grid>
+                                              <Grid item xs={12} md={3}><Typography variant="body2">Amount Paid: {`${currency} ${amountPaid.toLocaleString()}`}</Typography></Grid>
+                                              <Grid item xs={12} md={3}><Typography variant="body2">To Owner: {`${currency} ${ownerAmount.toLocaleString()}`}</Typography></Grid>
+                                              <Grid item xs={12} md={3}><Typography variant="body2">Commission: {`${currency} ${commissionAmount.toLocaleString()}`}</Typography></Grid>
+                                            </Grid>
+                                          </Box>
+                                        );
+                                      }
+                                      const sorted = [...list].sort((a: any, b: any) => new Date(String(a.paymentDate)).getTime() - new Date(String(b.paymentDate)).getTime());
+                                      let balance = Number(totalSale || 0);
+                                      return (
+                                        <Box>
+                                          <Typography variant="subtitle2" sx={{ mb: 1 }}>Installment Payments</Typography>
+                                          <Table size="small">
+                                            <TableHead>
+                                              <TableRow>
+                                                <TableCell>Date</TableCell>
+                                                <TableCell align="right">Amount</TableCell>
+                                                <TableCell align="right">Owner Amount</TableCell>
+                                                <TableCell align="right">Commission</TableCell>
+                                                <TableCell align="right">Balance</TableCell>
+                                              </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                              {sorted.map((p: any, idx: number) => {
+                                                const amt = Number(p.amount || 0);
+                                                const own = Number(p.commissionDetails?.ownerAmount || 0);
+                                                const com = Number(p.commissionDetails?.totalCommission || 0);
+                                                if (totalSale != null) balance = Math.max(0, (idx === 0 ? Number(totalSale) : balance) - amt);
+                                                return (
+                                                  <TableRow key={p._id || idx}>
+                                                    <TableCell>{new Date(String(p.paymentDate)).toLocaleDateString()}</TableCell>
+                                                    <TableCell align="right">{`${currency} ${amt.toLocaleString()}`}</TableCell>
+                                                    <TableCell align="right">{`${currency} ${own.toLocaleString()}`}</TableCell>
+                                                    <TableCell align="right">{`${currency} ${com.toLocaleString()}`}</TableCell>
+                                                    <TableCell align="right">{totalSale != null ? `${currency} ${balance.toLocaleString()}` : '—'}</TableCell>
+                                                  </TableRow>
+                                                );
+                                              })}
+                                            </TableBody>
+                                          </Table>
+                                        </Box>
+                                      );
+                                    })()
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            </>
                           );
                         })}
+                        {loadingUnits[dev.id] && (
+                          <TableRow>
+                            <TableCell colSpan={6}>
+                              <Typography variant="body2" color="text.secondary">Loading units…</Typography>
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
 
@@ -434,8 +729,11 @@ const SalesDevelopmentsPage: React.FC = () => {
                 <MenuItem value="townhouses">Townhouses</MenuItem>
               </TextField>
             </Grid>
-            <Grid item xs={12}>
+            <Grid item xs={12} md={6}>
               <TextField fullWidth multiline minRows={2} label="Description" value={description} onChange={(e)=>setDescription(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField fullWidth label="Development Address" value={devAddress} onChange={(e)=>setDevAddress(e.target.value)} />
             </Grid>
             <Grid item xs={12}>
               <Divider sx={{ my: 1 }} />
@@ -461,6 +759,59 @@ const SalesDevelopmentsPage: React.FC = () => {
             </Grid>
           </Grid>
           <Divider sx={{ my: 2 }} />
+        {/* Commission section (applies across all variations/units) */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Commission</Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Commission %"
+                value={commissionPercent}
+                onChange={(e)=>setCommissionPercent(Math.max(0, Number(e.target.value)||0))}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+                helperText="Applies to total sale price"
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
+                type="number"
+                label="PREA % of Commission"
+                value={preaPercentOfCommission}
+                onChange={(e)=>setPreaPercentOfCommission(Math.max(0, Number(e.target.value)||0))}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Agency % of Remaining"
+                value={agencyPercent}
+                onChange={(e)=>{
+                  const v = Math.max(0, Math.min(100, Number(e.target.value)||0));
+                  setAgencyPercent(v);
+                  setAgentPercent(Number((100 - v).toFixed(2)));
+                }}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Agent % of Remaining"
+                value={agentPercent}
+                InputProps={{ readOnly: true }}
+              />
+            </Grid>
+          </Grid>
+          <Typography variant="caption" color="text.secondary">
+            Commission structure applies to all variations and units in this development. PREA is taken off the top, then the remaining commission is split between agency and agent.
+          </Typography>
+        </Box>
           <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
             <Typography variant="subtitle1">Variations</Typography>
             <Button startIcon={<AddIcon />} onClick={addVariation}>Add Variation</Button>
@@ -471,7 +822,7 @@ const SalesDevelopmentsPage: React.FC = () => {
           {variations.map(v => (
             <Paper key={v.id} variant="outlined" sx={{ p: 1, mb: 1 }}>
               <Grid container spacing={1} alignItems="center">
-                <Grid item xs={12} sm={4}><TextField fullWidth size="small" label={type==='stands'? 'Size label (e.g. 500 sqm)' : 'Variation label (e.g. 3 bed / 2 bath)'} value={v.label} onChange={(e)=>updateVariation(v.id, { label: e.target.value })} /></Grid>
+            <Grid item xs={12} sm={4}><TextField fullWidth size="small" label={(type==='stands')? 'Size label (e.g. 500 sqm)' : 'Variation label (e.g. 3 bed / 2 bath)'} value={v.label} onChange={(e)=>updateVariation(v.id, { label: e.target.value })} /></Grid>
                 <Grid item xs={6} sm={2}><TextField fullWidth size="small" type="number" label="Units" inputProps={{ min: 1 }} value={v.count} onChange={(e)=>updateVariation(v.id, { count: Math.max(1, Number(e.target.value)||1) })} /></Grid>
                 {type === 'stands' ? (
                   <>

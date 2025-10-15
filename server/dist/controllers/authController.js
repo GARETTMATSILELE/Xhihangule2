@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -12,17 +45,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.refreshToken = exports.getCurrentUser = exports.logout = exports.login = exports.signup = void 0;
+exports.refreshToken = exports.getCurrentUser = exports.logout = exports.resetPassword = exports.requestPasswordReset = exports.login = exports.signup = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
+const crypto_1 = __importDefault(require("crypto"));
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const authService_1 = require("../services/authService");
+const emailService_1 = require("../services/emailService");
 const authService = authService_1.AuthService.getInstance();
 // Signup with company details
 const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { email, password, name, company } = req.body;
+        const { email, password, name, company, plan: inputPlan } = req.body;
         console.log('Signup attempt with data:', { email, name, hasCompany: !!company });
         if (!email || !password || !name) {
             throw new errorHandler_1.AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
@@ -58,15 +93,32 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                 yield newUser.save({ session });
                 createdUser = newUser;
                 console.log('User created successfully:', { id: createdUser._id, email: createdUser.email });
-                // Create company if provided (optional now)
-                if (company) {
+                // Create company if provided OR auto-create for INDIVIDUAL plan
+                const isIndividualPlan = (inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan === 'INDIVIDUAL' : false;
+                if (company || isIndividualPlan) {
                     const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'];
-                    const missing = requiredCompanyFields.filter((f) => !company[f]);
+                    const baseName = `${firstName} ${lastName}`.trim();
+                    const nowSuffix = `${Date.now()}`.slice(-6);
+                    const autoCompany = company || {
+                        name: baseName || 'Individual Owner',
+                        description: 'Auto-created individual plan company',
+                        email: email,
+                        address: 'N/A',
+                        phone: '0000000000',
+                        website: undefined,
+                        registrationNumber: `REG-${nowSuffix}`,
+                        tinNumber: `TIN-${nowSuffix}`,
+                        vatNumber: undefined
+                    };
+                    const missing = requiredCompanyFields.filter((f) => !autoCompany[f]);
                     if (missing.length > 0) {
                         throw new errorHandler_1.AppError(`Missing company fields: ${missing.join(', ')}`, 400, 'VALIDATION_ERROR');
                     }
                     console.log('Creating new company...');
-                    const companyDoc = new Company_1.Company(Object.assign(Object.assign({}, company), { ownerId: createdUser._id }));
+                    const { PLAN_CONFIG } = yield Promise.resolve().then(() => __importStar(require('../types/plan')));
+                    const plan = (inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
+                    const cfg = PLAN_CONFIG[plan];
+                    const companyDoc = new Company_1.Company(Object.assign(Object.assign({}, autoCompany), { ownerId: createdUser._id, plan, propertyLimit: cfg.propertyLimit, featureFlags: cfg.featureFlags }));
                     const newCompany = yield companyDoc.save({ session });
                     companyId = newCompany._id;
                     companyData = newCompany;
@@ -99,10 +151,30 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                         isActive: true
                     });
                     console.log('User created successfully (fallback):', { id: createdUser._id, email: createdUser.email });
-                    if (company) {
+                    // Fallback path: create company if provided OR auto-create for INDIVIDUAL plan
+                    if (company || ((inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan === 'INDIVIDUAL' : false)) {
                         try {
                             console.log('Creating new company (fallback)...');
-                            const newCompany = yield Company_1.Company.create(Object.assign(Object.assign({}, company), { ownerId: createdUser._id }));
+                            const { PLAN_CONFIG } = yield Promise.resolve().then(() => __importStar(require('../types/plan')));
+                            const plan = (inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
+                            const cfg = PLAN_CONFIG[plan];
+                            const [firstNameRaw, ...lastParts2] = String(name).trim().split(/\s+/);
+                            const firstName2 = firstNameRaw || 'User';
+                            const lastName2 = lastParts2.join(' ') || firstNameRaw || 'Admin';
+                            const baseName2 = `${firstName2} ${lastName2}`.trim();
+                            const nowSuffix2 = `${Date.now()}`.slice(-6);
+                            const autoCompany2 = company || {
+                                name: baseName2 || 'Individual Owner',
+                                description: 'Auto-created individual plan company',
+                                email: email,
+                                address: 'N/A',
+                                phone: '0000000000',
+                                website: undefined,
+                                registrationNumber: `REG-${nowSuffix2}`,
+                                tinNumber: `TIN-${nowSuffix2}`,
+                                vatNumber: undefined
+                            };
+                            const newCompany = yield Company_1.Company.create(Object.assign(Object.assign({}, autoCompany2), { ownerId: createdUser._id, plan, propertyLimit: cfg.propertyLimit, featureFlags: cfg.featureFlags }));
                             companyId = newCompany._id;
                             companyData = newCompany;
                             console.log('Company created successfully (fallback):', { id: newCompany._id, name: newCompany.name });
@@ -216,14 +288,14 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
         // Use auth service for login
         const { user: userData, token, refreshToken } = yield authService.login(email, password);
         // Get full user data from database
-        const fullUser = yield User_1.User.findById(userData.userId);
+        const fullUser = yield User_1.User.findById(userData.userId).maxTimeMS(5000);
         if (!fullUser) {
             throw new errorHandler_1.AppError('User not found after login', 404);
         }
         // Get company details if user has a company
         let company = null;
         if (userData.companyId) {
-            company = yield Company_1.Company.findById(userData.companyId);
+            company = yield Company_1.Company.findById(userData.companyId).maxTimeMS(5000);
             console.log('Found company:', {
                 id: company === null || company === void 0 ? void 0 : company._id,
                 name: company === null || company === void 0 ? void 0 : company.name,
@@ -266,7 +338,30 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
                 createdAt: fullUser.createdAt,
                 updatedAt: fullUser.updatedAt
             },
-            company,
+            company: company ? {
+                _id: company._id,
+                name: company.name,
+                address: company.address,
+                phone: company.phone,
+                email: company.email,
+                website: company.website,
+                registrationNumber: company.registrationNumber,
+                tinNumber: company.tinNumber,
+                vatNumber: company.vatNumber,
+                ownerId: company.ownerId,
+                description: company.description,
+                logo: company.logo,
+                isActive: company.isActive,
+                subscriptionStatus: company.subscriptionStatus,
+                subscriptionEndDate: company.subscriptionEndDate,
+                bankAccounts: company.bankAccounts,
+                commissionConfig: company.commissionConfig,
+                plan: company.plan,
+                propertyLimit: company.propertyLimit,
+                featureFlags: company.featureFlags,
+                createdAt: company.createdAt,
+                updatedAt: company.updatedAt
+            } : null,
             token,
             refreshToken
         });
@@ -286,6 +381,70 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.login = login;
+// Request password reset: create token, store hash+expiry, email link
+const requestPasswordReset = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            throw new errorHandler_1.AppError('Email is required', 400, 'VALIDATION_ERROR');
+        }
+        const user = yield User_1.User.findOne({ email: String(email).toLowerCase() });
+        // To prevent user enumeration, respond 200 even if not found
+        if (!user) {
+            return res.json({ message: 'If that email exists, a reset link has been sent' });
+        }
+        const token = crypto_1.default.randomBytes(32).toString('hex');
+        const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        user.resetPasswordToken = tokenHash;
+        user.resetPasswordExpires = new Date(Date.now() + 1000 * 60 * 15); // 15 minutes
+        yield user.save();
+        const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+        const resetUrl = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(user.email)}`;
+        yield (0, emailService_1.sendMail)({
+            to: user.email,
+            subject: 'Password Reset Request',
+            html: `
+        <p>You requested a password reset.</p>
+        <p>Click the link below to reset your password. This link expires in 15 minutes.</p>
+        <p><a href="${resetUrl}">Reset your password</a></p>
+        <p>If you did not request this, you can safely ignore this email.</p>
+      `,
+            text: `Reset your password: ${resetUrl}`
+        });
+        return res.json({ message: 'If that email exists, a reset link has been sent' });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.requestPasswordReset = requestPasswordReset;
+// Reset password using token
+const resetPassword = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { token, email, password } = req.body;
+        if (!token || !email || !password) {
+            throw new errorHandler_1.AppError('Token, email and new password are required', 400, 'VALIDATION_ERROR');
+        }
+        const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        const user = yield User_1.User.findOne({
+            email: String(email).toLowerCase(),
+            resetPasswordToken: tokenHash,
+            resetPasswordExpires: { $gt: new Date() }
+        });
+        if (!user) {
+            throw new errorHandler_1.AppError('Invalid or expired reset token', 400, 'INVALID_TOKEN');
+        }
+        user.password = password;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+        yield user.save();
+        return res.json({ message: 'Password has been reset successfully' });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+exports.resetPassword = resetPassword;
 // Logout
 const logout = (req, res) => {
     // Clear refresh token cookie

@@ -1,5 +1,5 @@
 export type PropertyStatus = 'available' | 'rented' | 'maintenance' | 'under_offer' | 'sold';
-export type PropertyType = 'apartment' | 'house' | 'commercial';
+export type PropertyType = 'apartment' | 'house' | 'commercial' | 'land';
 
 export interface Property {
   _id: string;
@@ -14,6 +14,7 @@ export interface Property {
   area: number;
   builtArea?: number;
   landArea?: number;
+  pricePerSqm?: number;
   description: string;
   images: string[];
   amenities: string[];

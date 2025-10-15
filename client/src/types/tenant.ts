@@ -12,6 +12,8 @@ export interface Tenant {
   companyId: string;
   status: TenantStatus;
   propertyId?: string;
+  // Optional: allow linking a tenant to multiple properties
+  propertyIds?: string[];
   ownerId?: string; // Agent who created this tenant
   idNumber?: string;
   emergencyContact?: string;
@@ -34,6 +36,8 @@ export interface TenantFormData {
   phone: string;
   status?: TenantStatus;
   propertyId?: string;
+  // Optional: allow linking a tenant to multiple properties
+  propertyIds?: string[];
   ownerId?: string; // Agent who created this tenant
   idNumber?: string;
   emergencyContact?: string;

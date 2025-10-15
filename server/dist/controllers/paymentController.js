@@ -106,28 +106,7 @@ const getPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.getPayment = getPayment;
-// Helper function to calculate commission with company-specific splits
-const calculateCommission = (amount, commissionPercentage, companyId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
-    const { Company } = yield Promise.resolve().then(() => __importStar(require('../models/Company')));
-    const company = yield Company.findById(companyId).lean();
-    const totalCommission = (amount * commissionPercentage) / 100;
-    const preaPercentOfTotal = Math.max(0, Math.min(1, (_b = (_a = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _a === void 0 ? void 0 : _a.preaPercentOfTotal) !== null && _b !== void 0 ? _b : 0.03));
-    const agentPercentOfRemaining = Math.max(0, Math.min(1, (_d = (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.agentPercentOfRemaining) !== null && _d !== void 0 ? _d : 0.6));
-    const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_f = (_e = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _e === void 0 ? void 0 : _e.agencyPercentOfRemaining) !== null && _f !== void 0 ? _f : 0.4));
-    // PREA share comes off the top; handle 0% gracefully
-    const preaFee = totalCommission * preaPercentOfTotal;
-    const remainingCommission = totalCommission - preaFee;
-    const agentShare = remainingCommission * agentPercentOfRemaining;
-    const agencyShare = remainingCommission * agencyPercentOfRemaining;
-    return {
-        totalCommission,
-        preaFee,
-        agentShare,
-        agencyShare,
-        ownerAmount: amount - totalCommission,
-    };
-});
+const commissionService_1 = require("../services/commissionService");
 // Create a new payment (for lease-based payments)
 const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
@@ -191,7 +170,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             });
         }
         const rent = property.rent || lease.rentAmount;
-        // For advance payments, validate amount
+        // For advance payments spanning multiple months, require full multiple of rent
         if (advanceMonthsPaid && advanceMonthsPaid > 1) {
             const expectedAmount = rent * advanceMonthsPaid;
             if (amount !== expectedAmount) {
@@ -202,16 +181,43 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         }
         else {
-            // For single month, validate amount
-            if (amount !== rent) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: `Amount must equal rent (${rent}) for the selected month.`
-                });
+            // Allow partial payments for a single month up to remaining balance
+            const periodFilter = {
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                paymentType: 'rental',
+                tenantId: lease.tenantId,
+                propertyId: lease.propertyId,
+                rentalPeriodYear,
+                rentalPeriodMonth,
+                status: { $in: ['pending', 'completed'] }
+            };
+            const [agg] = yield Payment_1.Payment.aggregate([
+                { $match: periodFilter },
+                { $group: { _id: null, total: { $sum: '$amount' } } }
+            ]);
+            const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+            const rentCents = Math.round((rent || 0) * 100);
+            const remainingCents = rentCents - alreadyPaidCents;
+            if (remainingCents <= 0) {
+                return res.status(409).json({ status: 'error', message: 'This month is fully paid. Change rental month.' });
+            }
+            const amountCents = Math.round((amount || 0) * 100);
+            if (amountCents > remainingCents) {
+                return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+            }
+        }
+        // Idempotency check (optional client-provided key)
+        if (req.body.idempotencyKey) {
+            const dup = yield Payment_1.Payment.findOne({
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                idempotencyKey: String(req.body.idempotencyKey)
+            }).lean();
+            if (dup) {
+                return res.status(200).json({ message: 'Payment processed successfully', payment: dup });
             }
         }
         // Calculate commission based on property commission percentage and company config
-        const paymentCommissionDetails = yield calculateCommission(amount, property.commission || 0, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        const paymentCommissionDetails = yield commissionService_1.CommissionService.calculate(amount, property.commission || 0, new mongoose_1.default.Types.ObjectId(req.user.companyId));
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -235,6 +241,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             notes: '', // Default empty notes
             commissionDetails: paymentCommissionDetails,
             rentUsed: rent, // Store the rent used for this payment
+            idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
         });
         yield payment.save();
         // Generate reference number after save (using payment._id)
@@ -374,12 +381,12 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                     const commissionPercent = typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number'
                         ? prop.commission
                         : ((propertyType || 'residential') === 'residential' ? 15 : 10);
-                    finalCommissionDetails = (yield calculateCommission(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+                    finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
                 }
                 else {
                     // Manual entries have no linked property; fall back to default base rates
                     const commissionPercent = (propertyType || 'residential') === 'residential' ? 15 : 10;
-                    finalCommissionDetails = (yield calculateCommission(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+                    finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
                 }
             }
             catch (err) {
@@ -397,6 +404,52 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                     agencyShare,
                     ownerAmount: amount - totalCommission,
                 };
+            }
+        }
+        // Remaining-balance enforcement for rental payments (single month or advance)
+        if ((paymentType || 'rental') === 'rental') {
+            const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose_1.default.Types.ObjectId(rawTenantId) : undefined);
+            const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose_1.default.Types.ObjectId(rawPropertyId) : undefined);
+            // Only enforce when both real tenant and property are present
+            if (tenantObjectId && propertyObjectId && rentalPeriodMonth && rentalPeriodYear) {
+                const [agg] = yield Payment_1.Payment.aggregate([
+                    {
+                        $match: {
+                            companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
+                            paymentType: 'rental',
+                            tenantId: tenantObjectId,
+                            propertyId: propertyObjectId,
+                            rentalPeriodYear,
+                            rentalPeriodMonth,
+                            status: { $in: ['pending', 'completed'] }
+                        }
+                    },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]);
+                const rentBaseline = typeof rentUsed === 'number' ? rentUsed : (() => {
+                    const fallback = 0;
+                    return fallback;
+                })();
+                // If commissionDetails was computed above and property was fetched, prefer rentUsed or compute from property when possible
+                const rentCents = Math.round((rentBaseline || 0) * 100);
+                const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                const remainingCents = rentCents - alreadyPaidCents;
+                if (rentCents > 0) {
+                    if (remainingCents <= 0) {
+                        return { error: { status: 409, message: 'This month is fully paid. Change rental month.' } };
+                    }
+                    const amountCents = Math.round((amount || 0) * 100);
+                    if (amountCents > remainingCents) {
+                        return { error: { status: 400, message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` } };
+                    }
+                }
+            }
+        }
+        // Idempotency: short-circuit on duplicate key
+        if (req.body.idempotencyKey) {
+            const existing = yield Payment_1.Payment.findOne({ companyId: new mongoose_1.default.Types.ObjectId(user.companyId), idempotencyKey: String(req.body.idempotencyKey) }).lean();
+            if (existing) {
+                return { payment: existing };
             }
         }
         // Determine provisional flags
@@ -434,6 +487,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             isInSuspense: markProvisional,
             commissionFinalized: !markProvisional,
             provisionalRelationshipType: markProvisional ? 'unknown' : undefined,
+            idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
             saleId: rawSaleId ? new mongoose_1.default.Types.ObjectId(rawSaleId) : undefined,
         });
         // Save and related updates (with or without session)
@@ -558,7 +612,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
     }
     try {
         const user = req.user;
-        const { paymentDate, paymentMethod, amount, referenceNumber, notes, currency, commissionDetails, manualPropertyAddress, manualTenantName, buyerName, sellerName, propertyId, tenantId, agentId, processedBy, saleId, rentalPeriodMonth, rentalPeriodYear, saleMode } = req.body;
+        const { paymentDate, paymentMethod, amount, referenceNumber, notes, currency, commissionDetails, manualPropertyAddress, manualTenantName, buyerName, sellerName, propertyId, tenantId, agentId, processedBy, saleId, rentalPeriodMonth, rentalPeriodYear, saleMode, developmentId, developmentUnitId } = req.body;
         if (!amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({ message: 'Missing required fields: amount, paymentDate, paymentMethod' });
         }
@@ -568,6 +622,35 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
         const agId = toObjectId(agentId) || new mongoose_1.default.Types.ObjectId(user.userId);
         const procBy = toObjectId(processedBy) || new mongoose_1.default.Types.ObjectId(user.userId);
         const saleObjId = toObjectId(saleId);
+        const devId = toObjectId(developmentId);
+        const unitId = toObjectId(developmentUnitId);
+        // Optional validation: if development/unit provided, ensure they belong to the same company and match
+        let devAddressForManual;
+        if (devId) {
+            const dev = yield (yield Promise.resolve().then(() => __importStar(require('../models/Development')))).Development.findOne({ _id: devId, companyId: new mongoose_1.default.Types.ObjectId(user.companyId) }).lean();
+            if (!dev) {
+                return res.status(400).json({ message: 'Invalid developmentId' });
+            }
+            devAddressForManual = [dev.name, dev.address].filter(Boolean).join(' - ');
+            if (unitId) {
+                const unit = yield (yield Promise.resolve().then(() => __importStar(require('../models/DevelopmentUnit')))).DevelopmentUnit.findOne({ _id: unitId, developmentId: devId }).lean();
+                if (!unit) {
+                    return res.status(400).json({ message: 'Selected unit does not belong to the selected development' });
+                }
+            }
+        }
+        else if (unitId) {
+            // If only unitId provided, still verify it exists and derive development for consistency
+            const unit = yield (yield Promise.resolve().then(() => __importStar(require('../models/DevelopmentUnit')))).DevelopmentUnit.findOne({ _id: unitId }).lean();
+            if (!unit) {
+                return res.status(400).json({ message: 'Invalid developmentUnitId' });
+            }
+            const dev = yield (yield Promise.resolve().then(() => __importStar(require('../models/Development')))).Development.findOne({ _id: unit.developmentId, companyId: new mongoose_1.default.Types.ObjectId(user.companyId) }).lean();
+            if (!dev) {
+                return res.status(400).json({ message: 'Unit belongs to a development not accessible in this company' });
+            }
+            devAddressForManual = [dev.name, dev.address].filter(Boolean).join(' - ');
+        }
         // Calculate commission if not provided
         let finalCommissionDetails = commissionDetails;
         if (!finalCommissionDetails) {
@@ -577,13 +660,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                     const prop = yield Property_1.Property.findById(propId);
                     percent = typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number' ? prop.commission : 15;
                 }
-                finalCommissionDetails = yield (() => __awaiter(void 0, void 0, void 0, function* () {
-                    const c = yield (() => __awaiter(void 0, void 0, void 0, function* () {
-                        const { totalCommission, preaFee, agentShare, agencyShare, ownerAmount } = yield (yield calculateCommission(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
-                        return { totalCommission, preaFee, agentShare, agencyShare, ownerAmount };
-                    }))();
-                    return c;
-                }))();
+                finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
             }
             catch (_a) {
                 const base = (amount * 0.15);
@@ -624,12 +701,14 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             rentalPeriodMonth: periodMonth,
             rentalPeriodYear: periodYear,
             // Manual fields
-            manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
+            manualPropertyAddress: manualProperty ? (manualPropertyAddress || devAddressForManual) : (devAddressForManual || undefined),
             manualTenantName: manualTenant ? manualTenantName : undefined,
             buyerName: buyerName || (manualTenant ? manualTenantName : undefined),
             sellerName: sellerName,
             // Sales linkage
             saleId: saleObjId,
+            developmentId: devId,
+            developmentUnitId: unitId
         });
         yield payment.save();
         // Post company and agent shares
@@ -745,7 +824,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (paginate) {
             const [items, total] = yield Promise.all([
                 baseQuery
-                    .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName')
+                    .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear')
                     .populate('propertyId', 'name address')
                     .lean()
                     .skip((page - 1) * limit)
@@ -991,7 +1070,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             return res.status(404).json({ message: 'Property not found' });
         }
         const rent = property.rent || lease.rentAmount;
-        // For advance payments, validate amount
+        // For advance payments spanning multiple months, require full multiple of rent
         if (advanceMonthsPaid && advanceMonthsPaid > 1) {
             const expectedAmount = rent * advanceMonthsPaid;
             if (amount !== expectedAmount) {
@@ -1002,16 +1081,43 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
         }
         else {
-            // For single month, validate amount
-            if (amount !== rent) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: `Amount must equal rent (${rent}) for the selected month.`
-                });
+            // Allow partial payments for a single month up to remaining balance
+            const periodFilter = {
+                companyId: new mongoose_1.default.Types.ObjectId(lease.companyId),
+                paymentType: 'rental',
+                tenantId: lease.tenantId,
+                propertyId: lease.propertyId,
+                rentalPeriodYear,
+                rentalPeriodMonth,
+                status: { $in: ['pending', 'completed'] }
+            };
+            const [agg] = yield Payment_1.Payment.aggregate([
+                { $match: periodFilter },
+                { $group: { _id: null, total: { $sum: '$amount' } } }
+            ]);
+            const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+            const rentCents = Math.round((rent || 0) * 100);
+            const remainingCents = rentCents - alreadyPaidCents;
+            if (remainingCents <= 0) {
+                return res.status(409).json({ status: 'error', message: 'This month is fully paid. Change rental month.' });
+            }
+            const amountCents = Math.round((amount || 0) * 100);
+            if (amountCents > remainingCents) {
+                return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+            }
+        }
+        // Idempotency check (optional client-provided key)
+        if (req.body.idempotencyKey) {
+            const dup = yield Payment_1.Payment.findOne({
+                companyId: new mongoose_1.default.Types.ObjectId(lease.companyId),
+                idempotencyKey: String(req.body.idempotencyKey)
+            }).lean();
+            if (dup) {
+                return res.status(200).json({ status: 'success', data: dup, message: 'Payment created successfully' });
             }
         }
         // Calculate commission based on property commission percentage
-        const publicCommissionDetails = yield calculateCommission(amount, property.commission || 0, new mongoose_1.default.Types.ObjectId(lease.companyId));
+        const publicCommissionDetails = yield commissionService_1.CommissionService.calculate(amount, property.commission || 0, new mongoose_1.default.Types.ObjectId(lease.companyId));
         // Create payment record
         const payment = new Payment_1.Payment({
             amount,
@@ -1035,6 +1141,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             notes: '', // Default empty notes
             commissionDetails: publicCommissionDetails,
             rentUsed: rent, // Store the rent used for this payment
+            idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
         });
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
@@ -1322,7 +1429,7 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
             return res.status(404).json({ message: 'Property not found' });
         }
         const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
-        const finalCommission = yield calculateCommission(payment.amount, commissionPercent, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        const finalCommission = yield commissionService_1.CommissionService.calculate(payment.amount, commissionPercent, new mongoose_1.default.Types.ObjectId(req.user.companyId));
         payment.propertyId = new mongoose_1.default.Types.ObjectId(propertyId);
         payment.tenantId = new mongoose_1.default.Types.ObjectId(tenantId);
         if (ownerId) {

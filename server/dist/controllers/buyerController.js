@@ -16,6 +16,8 @@ exports.deleteBuyer = exports.updateBuyer = exports.createBuyer = exports.listBu
 const mongoose_1 = __importDefault(require("mongoose"));
 const Buyer_1 = require("../models/Buyer");
 const errorHandler_1 = require("../middleware/errorHandler");
+const Development_1 = require("../models/Development");
+const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
 const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -26,6 +28,14 @@ const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const query = { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) };
         if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        }
+        // Optional filters for developments
+        const { developmentId, developmentUnitId } = req.query;
+        if (developmentId && mongoose_1.default.Types.ObjectId.isValid(String(developmentId))) {
+            query.developmentId = new mongoose_1.default.Types.ObjectId(String(developmentId));
+        }
+        if (developmentUnitId && mongoose_1.default.Types.ObjectId.isValid(String(developmentUnitId))) {
+            query.developmentUnitId = new mongoose_1.default.Types.ObjectId(String(developmentUnitId));
         }
         const buyers = yield Buyer_1.Buyer.find(query).sort({ createdAt: -1 });
         res.json({ status: 'success', data: buyers });
@@ -44,9 +54,28 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { name, email, phone, idNumber, budgetMin, budgetMax, prefs } = req.body;
+        const { name, email, phone, idNumber, budgetMin, budgetMax, prefs, developmentId, developmentUnitId } = req.body;
         if (!name)
             throw new errorHandler_1.AppError('Name is required', 400);
+        let devId = undefined;
+        let unitId = undefined;
+        if (developmentId && mongoose_1.default.Types.ObjectId.isValid(String(developmentId))) {
+            const dev = yield Development_1.Development.findOne({ _id: developmentId, companyId: req.user.companyId }).lean();
+            if (!dev)
+                throw new errorHandler_1.AppError('Invalid developmentId', 400);
+            devId = new mongoose_1.default.Types.ObjectId(String(developmentId));
+        }
+        if (developmentUnitId && mongoose_1.default.Types.ObjectId.isValid(String(developmentUnitId))) {
+            const unit = yield DevelopmentUnit_1.DevelopmentUnit.findOne({ _id: developmentUnitId }).lean();
+            if (!unit)
+                throw new errorHandler_1.AppError('Invalid developmentUnitId', 400);
+            if (devId && String(unit.developmentId) !== String(devId)) {
+                throw new errorHandler_1.AppError('Unit does not belong to the specified development', 400);
+            }
+            unitId = new mongoose_1.default.Types.ObjectId(String(developmentUnitId));
+            if (!devId)
+                devId = new mongoose_1.default.Types.ObjectId(String(unit.developmentId));
+        }
         const buyer = yield Buyer_1.Buyer.create({
             name,
             email,
@@ -55,6 +84,8 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             budgetMax: Number(budgetMax || 0),
             idNumber: idNumber,
             prefs: prefs || '',
+            developmentId: devId,
+            developmentUnitId: unitId,
             companyId: req.user.companyId,
             ownerId: req.user.userId
         });

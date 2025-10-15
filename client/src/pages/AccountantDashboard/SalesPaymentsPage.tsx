@@ -5,7 +5,10 @@ import {
   Button,
   Alert,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Grid,
+  TextField,
+  MenuItem
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,6 +21,10 @@ import { Tenant } from '../../types/tenant';
 import PaymentList from '../../components/payments/PaymentList';
 import salesReceiptService from '../../services/salesReceiptService';
 import SalesPaymentForm from '../../components/payments/SalesPaymentForm';
+import { developmentService } from '../../services/developmentService';
+import { developmentUnitService } from '../../services/developmentUnitService';
+import { salesContractService } from '../../services/accountantService';
+import { buyerService } from '../../services/buyerService';
 
 const SalesPaymentsPage: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -32,6 +39,14 @@ const SalesPaymentsPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<'quick' | 'installment'>('quick');
   const [filters, setFilters] = useState<PaymentFilter>({ saleMode: 'quick' as any });
+  // Development linkage state
+  const [developments, setDevelopments] = useState<any[]>([]);
+  const [selectedDevId, setSelectedDevId] = useState<string>('');
+  const [units, setUnits] = useState<any[]>([]);
+  const [selectedUnitId, setSelectedUnitId] = useState<string>('');
+  const [saleId, setSaleId] = useState<string>('');
+  const [commissionDefaults, setCommissionDefaults] = useState<{ commissionPercent?: number; preaPercentOfCommission?: number; agencyPercentRemaining?: number; agentPercentRemaining?: number }>({});
+  const [prefill, setPrefill] = useState<{ saleReference?: string; sellerName?: string; totalSalePrice?: number; commission?: { commissionPercent?: number; preaPercentOfCommission?: number; agencyPercentRemaining?: number; agentPercentRemaining?: number } } | undefined>(undefined);
 
   const summary = useMemo(() => {
     const salesPayments = payments.filter(p => p.paymentType === 'sale');
@@ -55,10 +70,11 @@ const SalesPaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const [propertiesData, tenantsData, paymentsData] = await Promise.all([
+        const [propertiesData, tenantsData, paymentsData, devs] = await Promise.all([
           propertyService.getProperties().catch(() => []),
           tenantService.getAll().catch(() => ({ tenants: [] })),
-          paymentService.getSalesPayments().catch(() => [])
+          paymentService.getSalesPayments().catch(() => []),
+          developmentService.list().catch(() => [])
         ]);
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
@@ -69,6 +85,7 @@ const SalesPaymentsPage: React.FC = () => {
         setProperties(properties);
         setTenants(tenants);
         setPayments(payments);
+        setDevelopments(Array.isArray(devs) ? devs : []);
       } catch (err: any) {
         if (!isMounted) return;
         setError('Failed to load sales payments');
@@ -106,7 +123,10 @@ const SalesPaymentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const payload: PaymentFormData = { ...data, paymentType: 'sale' };
+      const payload: PaymentFormData = { ...data, paymentType: 'sale' } as any;
+      if (saleId) (payload as any).saleId = saleId;
+      if (selectedDevId) (payload as any).developmentId = selectedDevId;
+      if (selectedUnitId) (payload as any).developmentUnitId = selectedUnitId as any;
       const created = await paymentService.createSalesPaymentAccountant(payload);
       const createdPayment = (created as any)?.payment || (created as any)?.data || created;
       if (createdPayment && (createdPayment as any).paymentType === 'sale') {
@@ -155,6 +175,120 @@ const SalesPaymentsPage: React.FC = () => {
         </Box>
       )}
       {showForm ? (
+        <>
+        <Box sx={{ mb: 2 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={4}>
+              <TextField select fullWidth label="Development" value={selectedDevId} onChange={async (e) => {
+                const id = e.target.value;
+                setSelectedDevId(id);
+                setSelectedUnitId('');
+                setSaleId('');
+                setCommissionDefaults({});
+                // Reset prefill; will reapply after data loads
+                setPrefill(undefined);
+                if (id) {
+                  try {
+                    // Load units
+                    const data = await developmentUnitService.list({ developmentId: id, limit: 500 });
+                    setUnits(Array.isArray(data) ? data : data?.items || []);
+                    // Apply commission defaults
+                    const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(id));
+                    if (dev) {
+                      setCommissionDefaults({
+                        commissionPercent: dev.commissionPercent,
+                        preaPercentOfCommission: dev.commissionPreaPercent,
+                        agencyPercentRemaining: dev.commissionAgencyPercentRemaining,
+                        agentPercentRemaining: dev.commissionAgentPercentRemaining
+                      });
+                      // Prefill seller from owner and base address for reference
+                      const ownerName = [dev.owner?.firstName, dev.owner?.lastName].filter(Boolean).join(' ').trim();
+                      const baseRef = [dev.name, dev.address].filter(Boolean).join(' - ');
+                      setPrefill(prev => ({
+                        ...prev,
+                        saleReference: baseRef || prev?.saleReference,
+                        sellerName: ownerName || prev?.sellerName,
+                        commission: {
+                          commissionPercent: dev.commissionPercent,
+                          preaPercentOfCommission: dev.commissionPreaPercent,
+                          agencyPercentRemaining: dev.commissionAgencyPercentRemaining,
+                          agentPercentRemaining: dev.commissionAgentPercentRemaining
+                        }
+                      }));
+                    }
+                  } catch {
+                    setUnits([]);
+                  }
+                } else {
+                  setUnits([]);
+                }
+              }}>
+                <MenuItem value="">None</MenuItem>
+                {(developments || []).map((d: any) => (
+                  <MenuItem key={d._id || d.id} value={d._id || d.id}>
+                    {d.name}{d.address ? ` — ${d.address}` : ''}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField select fullWidth label="Unit" value={selectedUnitId} onChange={async (e) => {
+                const uid = e.target.value;
+                setSelectedUnitId(uid);
+                setSaleId('');
+                if (uid) {
+                  try {
+                    // Try to resolve an existing sale by buyerName + development name
+                    const unit = (units || []).find((u: any) => String(u._id || u.id) === String(uid));
+                    const buyerName = unit?.buyerName || '';
+                    const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(selectedDevId));
+                    const devName = dev?.name || '';
+                    const list = await salesContractService.list({ reference: '' });
+                    const found = (Array.isArray(list) ? list : []).find((s: any) => {
+                      const ref = String(s.reference || s.manualPropertyAddress || '').toLowerCase();
+                      return (buyerName && String(s.buyerName||'').toLowerCase() === String(buyerName).toLowerCase()) || (ref && (ref.includes(devName.toLowerCase())));
+                    });
+                    if (found) setSaleId(found._id);
+                    // Auto-fill buyer by querying buyers collection with development/unit filters
+                    try {
+                      const buyers = await buyerService.list({ developmentId: selectedDevId, developmentUnitId: uid });
+                      const b = Array.isArray(buyers) ? buyers[0] : undefined;
+                      if (b) {
+                        setPrefill(prev => ({
+                          ...prev,
+                          sellerName: prev?.sellerName, // keep seller if set from dev owner
+                          saleReference: prev?.saleReference,
+                          // SalesPaymentForm reads buyerName from its own state; we pass via prefill by trick: set saleReference which triggers contract search; it still allows manual edit
+                        }));
+                        // Imperatively set buyerName by dispatching a custom event (form is sibling component)
+                        window.dispatchEvent(new CustomEvent('sales-form-set-buyer', { detail: { name: b.name } }));
+                      }
+                    } catch {}
+                    // Prefill reference with development address + unit code/number, and price from unit
+                    const unitLabel = unit?.unitCode || (unit?.unitNumber ? `Unit ${unit.unitNumber}` : '');
+                    const baseRef = [dev?.name, dev?.address, unitLabel].filter(Boolean).join(' - ');
+                    const unitPrice = typeof unit?.price === 'number' ? unit.price : undefined;
+                    setPrefill(prev => ({
+                      ...prev,
+                      saleReference: baseRef || prev?.saleReference,
+                      totalSalePrice: typeof unitPrice === 'number' ? unitPrice : prev?.totalSalePrice
+                    }));
+                  } catch {}
+                }
+              }} disabled={!selectedDevId} helperText={!selectedDevId ? 'Select a development first' : undefined}>
+                <MenuItem value="">None</MenuItem>
+                {(units || []).map((u: any) => (
+                  <MenuItem key={u._id || u.id} value={u._id || u.id}>
+                    {(u.unitCode || `Unit ${u.unitNumber || ''}`)}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField fullWidth label="Linked Sale (optional)" value={saleId} onChange={(e)=>setSaleId(e.target.value)} placeholder="Auto-filled when found" />
+            </Grid>
+          </Grid>
+        </Box>
         <SalesPaymentForm
           onSubmit={async (data) => {
             await handleCreatePayment(data);
@@ -162,7 +296,9 @@ const SalesPaymentsPage: React.FC = () => {
           }}
           onCancel={() => setShowForm(false)}
           isInstallment={mode === 'installment'}
+          prefill={prefill}
         />
+        </>
       ) : (
         <PaymentList
           payments={payments}

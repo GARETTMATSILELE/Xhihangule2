@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
+const limits_1 = require("../middleware/limits");
 const roles_1 = require("../middleware/roles");
 const multer_1 = __importDefault(require("multer"));
 const agentController_1 = require("../controllers/agentController");
@@ -43,7 +44,7 @@ router.get('/properties', (req, res) => {
     console.log('Agent properties route hit');
     (0, agentController_1.getAgentProperties)(req, res);
 });
-router.post('/properties', agentController_1.createAgentProperty);
+router.post('/properties', limits_1.enforcePropertyLimit, agentController_1.createAgentProperty);
 router.put('/properties/:id', agentController_1.updateAgentProperty);
 router.get('/tenants', agentController_1.getAgentTenants);
 router.post('/tenants', agentController_1.createAgentTenant);

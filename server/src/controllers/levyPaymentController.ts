@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import { Lease } from '../models/Lease';
 import { Tenant } from '../models/Tenant';
 import { Company } from '../models/Company';
+import { Property } from '../models/Property';
 
 export const createLevyPayment = async (req: Request, res: Response) => {
   try {
@@ -149,6 +150,121 @@ export const getLevyReceiptPublic = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error fetching levy receipt:', error);
     res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch levy receipt' });
+  }
+};
+
+export const initiateLevyPayout = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.companyId || !req.user?.userId) {
+      throw new AppError('Authentication and company required', 401);
+    }
+    const { id } = req.params;
+    const { paidToName, paidToAccount, paidToContact, payoutDate, payoutMethod, payoutReference, notes } = req.body;
+    const levy = await LevyPayment.findOne({ _id: id, companyId: req.user.companyId });
+    if (!levy) throw new AppError('Levy payment not found', 404);
+    const normalizedMethod = typeof payoutMethod === 'string'
+      ? payoutMethod.trim().toLowerCase().replace(/\s+/g, '_')
+      : undefined;
+    const allowedMethods = ['cash', 'bank_transfer', 'mobile_money', 'cheque'];
+    const methodToSave = normalizedMethod && allowedMethods.includes(normalizedMethod) ? normalizedMethod : undefined;
+    levy.set('payout', {
+      ...(levy.get('payout') || {}),
+      paidOut: true,
+      paidToName,
+      paidToAccount,
+      paidToContact,
+      payoutDate: payoutDate ? new Date(payoutDate) : new Date(),
+      payoutMethod: methodToSave,
+      payoutReference,
+      notes,
+      processedBy: req.user.userId
+    });
+    // Update top-level status to paid_out for easier filtering
+    levy.set('status', 'paid_out');
+    await levy.save();
+    const populated = await LevyPayment.findById(levy._id)
+      .populate('propertyId', 'name address')
+      .populate('processedBy', 'firstName lastName email');
+    res.json(populated);
+  } catch (error: any) {
+    if (error instanceof AppError) throw error;
+    console.error('Error initiating levy payout:', error);
+    throw new AppError('Error initiating levy payout', 500);
+  }
+};
+
+export const getLevyPayoutAcknowledgement = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const companyId = (req.query.companyId as string) || req.user?.companyId;
+    const levy = await LevyPayment.findOne({ _id: id, ...(companyId ? { companyId } : {}) })
+      .populate('propertyId', 'name address')
+      .populate('processedBy', 'firstName lastName email');
+    if (!levy) throw new AppError('Levy payment not found', 404);
+    const company = levy.companyId ? await Company.findById(levy.companyId).select('name address phone email logo') : null;
+    const html = `<!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8" /><title>Levy Payout Acknowledgement - ${levy.referenceNumber || levy._id}</title>
+      <style>
+        @page { size: A4; margin: 18mm; }
+        body { font-family: Arial, sans-serif; color: #333; }
+        .wrap { max-width: 720px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 18px; }
+        .logo { max-width: 160px; max-height: 70px; object-fit: contain; display:block; margin:0 auto 8px; }
+        .title { font-size: 22px; font-weight: bold; }
+        .line { font-size: 12px; color: #555; }
+        .section { margin-top: 16px; }
+        .row { display:flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; }
+        .label { font-weight: 600; color:#666; min-width: 180px; }
+        .value { text-align:right; }
+        .ack { margin-top: 24px; padding-top: 16px; border-top: 2px solid #333; }
+        .sig-line { margin-top: 32px; }
+        .sig { border-top: 1px solid #333; display:inline-block; min-width: 260px; padding-top: 4px; text-align:center; }
+        .note { margin-top: 12px; font-size: 12px; color: #666; }
+        @media print { .no-print { display:none; } }
+      </style></head>
+      <body>
+        <div class="wrap">
+          <div class="header">
+            ${company?.logo ? `<img class="logo" src="data:image/png;base64,${company.logo}" alt="Logo"/>` : ''}
+            <div class="title">Levy Payout Acknowledgement</div>
+            ${company?.name ? `<div class="line">${company.name}</div>` : ''}
+            ${company?.address ? `<div class="line">${company.address}</div>` : ''}
+            ${(company?.phone || company?.email) ? `<div class="line">${company.phone || ''} ${company.phone && company.email ? ' | ' : ''} ${company.email || ''}</div>` : ''}
+          </div>
+          <div class="section">
+            <div class="row"><div class="label">Payout Reference</div><div class="value">${levy.payout?.payoutReference || '-'}</div></div>
+            <div class="row"><div class="label">Payout Date</div><div class="value">${levy.payout?.payoutDate ? new Date(levy.payout.payoutDate).toLocaleDateString() : new Date().toLocaleDateString()}</div></div>
+            <div class="row"><div class="label">Property</div><div class="value">${(levy.propertyId as any)?.name || 'N/A'}</div></div>
+            <div class="row"><div class="label">Amount</div><div class="value">${levy.currency || 'USD'} ${(levy.amount || 0).toFixed(2)}</div></div>
+            <div class="row"><div class="label">Payment Method</div><div class="value">${levy.payout?.payoutMethod || '-'}</div></div>
+          </div>
+          <div class="section">
+            <div class="row"><div class="label">Paid To (Association)</div><div class="value">${levy.payout?.paidToName || '-'}</div></div>
+            ${levy.payout?.paidToAccount ? `<div class="row"><div class="label">Account</div><div class="value">${levy.payout.paidToAccount}</div></div>` : ''}
+            ${levy.payout?.paidToContact ? `<div class="row"><div class="label">Contact</div><div class="value">${levy.payout.paidToContact}</div></div>` : ''}
+          </div>
+          ${levy.payout?.notes ? `<div class="section"><div class="label">Notes</div><div class="value">${levy.payout.notes}</div></div>` : ''}
+          <div class="ack">
+            <p>We acknowledge receipt of the above payout.</p>
+            <div class="sig-line">
+              <div class="sig">Payee Signature</div>
+            </div>
+            <div class="sig-line" style="margin-top: 24px;">
+              <div class="sig">Printed Name & Date</div>
+            </div>
+          </div>
+          <div class="no-print" style="text-align:center; margin-top:16px;">
+            <button onclick="window.print()" style="padding:8px 16px; background:#1976d2; color:#fff; border:none; border-radius:4px; cursor:pointer;">Print</button>
+          </div>
+        </div>
+      </body></html>`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error: any) {
+    if (error instanceof AppError) throw error;
+    console.error('Error generating payout acknowledgement:', error);
+    throw new AppError('Failed to generate payout acknowledgement', 500);
   }
 };
 

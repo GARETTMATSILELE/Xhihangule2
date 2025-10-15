@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.COLLECTIONS = void 0;
+exports.ensureCollections = exports.COLLECTIONS = void 0;
 exports.COLLECTIONS = {
     USERS: 'users',
     COMPANIES: 'companies',
@@ -18,5 +18,8 @@ exports.COLLECTIONS = {
     AGENT_ACCOUNTS: 'agentaccounts',
     VALUATIONS: 'valuations',
     DEVELOPMENTS: 'developments',
-    DEVELOPMENT_UNITS: 'developmentunits'
+    DEVELOPMENT_UNITS: 'developmentunits',
+    INSPECTIONS: 'inspections'
 };
+// Backward-compatible augmentation for new collections
+exports.ensureCollections = Object.assign(Object.assign({}, exports.COLLECTIONS), { INSPECTIONS: exports.COLLECTIONS.INSPECTIONS || 'inspections' });

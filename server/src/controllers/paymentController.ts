@@ -64,32 +64,7 @@ export const getPayment = async (req: Request, res: Response) => {
   }
 };
 
-// Helper function to calculate commission with company-specific splits
-const calculateCommission = async (
-  amount: number,
-  commissionPercentage: number,
-  companyId: mongoose.Types.ObjectId
-) => {
-  const { Company } = await import('../models/Company');
-  const company = await Company.findById(companyId).lean();
-  const totalCommission = (amount * commissionPercentage) / 100;
-  const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
-  const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
-  const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
-
-  // PREA share comes off the top; handle 0% gracefully
-  const preaFee = totalCommission * preaPercentOfTotal;
-  const remainingCommission = totalCommission - preaFee;
-  const agentShare = remainingCommission * agentPercentOfRemaining;
-  const agencyShare = remainingCommission * agencyPercentOfRemaining;
-  return {
-    totalCommission,
-    preaFee,
-    agentShare,
-    agencyShare,
-    ownerAmount: amount - totalCommission,
-  };
-};
+import { CommissionService } from '../services/commissionService';
 
 // Create a new payment (for lease-based payments)
 export const createPayment = async (req: Request, res: Response) => {
@@ -170,7 +145,7 @@ export const createPayment = async (req: Request, res: Response) => {
       });
     }
     const rent = property.rent || lease.rentAmount;
-    // For advance payments, validate amount
+    // For advance payments spanning multiple months, require full multiple of rent
     if (advanceMonthsPaid && advanceMonthsPaid > 1) {
       const expectedAmount = rent * advanceMonthsPaid;
       if (amount !== expectedAmount) {
@@ -180,17 +155,45 @@ export const createPayment = async (req: Request, res: Response) => {
         });
       }
     } else {
-      // For single month, validate amount
-      if (amount !== rent) {
-        return res.status(400).json({
-          status: 'error',
-          message: `Amount must equal rent (${rent}) for the selected month.`
-        });
+      // Allow partial payments for a single month up to remaining balance
+      const periodFilter: any = {
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        paymentType: 'rental',
+        tenantId: lease.tenantId,
+        propertyId: lease.propertyId,
+        rentalPeriodYear,
+        rentalPeriodMonth,
+        status: { $in: ['pending', 'completed'] }
+      };
+      const [agg] = await Payment.aggregate([
+        { $match: periodFilter },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
+      const rentCents = Math.round((rent || 0) * 100);
+      const remainingCents = rentCents - alreadyPaidCents;
+      if (remainingCents <= 0) {
+        return res.status(409).json({ status: 'error', message: 'This month is fully paid. Change rental month.' });
+      }
+      const amountCents = Math.round((amount || 0) * 100);
+      if (amountCents > remainingCents) {
+        return res.status(400).json({ status: 'error', message: `Only ${(remainingCents/100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+      }
+    }
+
+    // Idempotency check (optional client-provided key)
+    if (req.body.idempotencyKey) {
+      const dup = await Payment.findOne({
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        idempotencyKey: String(req.body.idempotencyKey)
+      }).lean();
+      if (dup) {
+        return res.status(200).json({ message: 'Payment processed successfully', payment: dup });
       }
     }
 
     // Calculate commission based on property commission percentage and company config
-    const paymentCommissionDetails = await calculateCommission(
+    const paymentCommissionDetails = await CommissionService.calculate(
       amount,
       property.commission || 0,
       new mongoose.Types.ObjectId(req.user.companyId)
@@ -219,6 +222,7 @@ export const createPayment = async (req: Request, res: Response) => {
       notes: '', // Default empty notes
       commissionDetails: paymentCommissionDetails,
       rentUsed: rent, // Store the rent used for this payment
+      idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
     });
 
     await payment.save();
@@ -397,7 +401,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
           const commissionPercent = typeof prop?.commission === 'number'
             ? prop.commission
             : ((propertyType || 'residential') === 'residential' ? 15 : 10);
-          finalCommissionDetails = await calculateCommission(
+          finalCommissionDetails = await CommissionService.calculate(
             amount,
             commissionPercent,
             new mongoose.Types.ObjectId(user.companyId)
@@ -405,7 +409,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         } else {
           // Manual entries have no linked property; fall back to default base rates
           const commissionPercent = (propertyType || 'residential') === 'residential' ? 15 : 10;
-          finalCommissionDetails = await calculateCommission(
+          finalCommissionDetails = await CommissionService.calculate(
             amount,
             commissionPercent,
             new mongoose.Types.ObjectId(user.companyId)
@@ -426,6 +430,54 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
           agencyShare,
           ownerAmount: amount - totalCommission,
         } as any;
+      }
+    }
+
+    // Remaining-balance enforcement for rental payments (single month or advance)
+    if ((paymentType || 'rental') === 'rental') {
+      const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
+      const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose.Types.ObjectId(rawPropertyId) : undefined);
+      // Only enforce when both real tenant and property are present
+      if (tenantObjectId && propertyObjectId && rentalPeriodMonth && rentalPeriodYear) {
+        const [agg] = await Payment.aggregate([
+          {
+            $match: {
+              companyId: new mongoose.Types.ObjectId(user.companyId),
+              paymentType: 'rental',
+              tenantId: tenantObjectId,
+              propertyId: propertyObjectId,
+              rentalPeriodYear,
+              rentalPeriodMonth,
+              status: { $in: ['pending', 'completed'] }
+            }
+          },
+          { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+        const rentBaseline = typeof rentUsed === 'number' ? rentUsed : (() => {
+          const fallback = 0;
+          return fallback;
+        })();
+        // If commissionDetails was computed above and property was fetched, prefer rentUsed or compute from property when possible
+        const rentCents = Math.round((rentBaseline || 0) * 100);
+        const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
+        const remainingCents = rentCents - alreadyPaidCents;
+        if (rentCents > 0) {
+          if (remainingCents <= 0) {
+            return { error: { status: 409, message: 'This month is fully paid. Change rental month.' } };
+          }
+          const amountCents = Math.round((amount || 0) * 100);
+          if (amountCents > remainingCents) {
+            return { error: { status: 400, message: `Only ${(remainingCents/100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` } };
+          }
+        }
+      }
+    }
+
+    // Idempotency: short-circuit on duplicate key
+    if ((req.body as any).idempotencyKey) {
+      const existing = await Payment.findOne({ companyId: new mongoose.Types.ObjectId(user.companyId), idempotencyKey: String((req.body as any).idempotencyKey) }).lean();
+      if (existing) {
+        return { payment: existing as any };
       }
     }
 
@@ -464,6 +516,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       isInSuspense: markProvisional,
       commissionFinalized: !markProvisional,
       provisionalRelationshipType: markProvisional ? 'unknown' : undefined,
+      idempotencyKey: (req.body as any).idempotencyKey ? String((req.body as any).idempotencyKey) : undefined,
       saleId: rawSaleId ? new mongoose.Types.ObjectId(rawSaleId) : undefined,
     });
     // Save and related updates (with or without session)
@@ -620,7 +673,9 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       saleId,
       rentalPeriodMonth,
       rentalPeriodYear,
-      saleMode
+      saleMode,
+      developmentId,
+      developmentUnitId
     } = req.body as any;
 
     if (!amount || !paymentDate || !paymentMethod) {
@@ -633,6 +688,35 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
     const agId = toObjectId(agentId) || new mongoose.Types.ObjectId(user.userId);
     const procBy = toObjectId(processedBy) || new mongoose.Types.ObjectId(user.userId);
     const saleObjId = toObjectId(saleId);
+    const devId = toObjectId(developmentId);
+    const unitId = toObjectId(developmentUnitId);
+
+    // Optional validation: if development/unit provided, ensure they belong to the same company and match
+    let devAddressForManual: string | undefined;
+    if (devId) {
+      const dev = await (await import('../models/Development')).Development.findOne({ _id: devId, companyId: new mongoose.Types.ObjectId(user.companyId) }).lean();
+      if (!dev) {
+        return res.status(400).json({ message: 'Invalid developmentId' });
+      }
+      devAddressForManual = [dev.name, (dev as any).address].filter(Boolean).join(' - ');
+      if (unitId) {
+        const unit = await (await import('../models/DevelopmentUnit')).DevelopmentUnit.findOne({ _id: unitId, developmentId: devId }).lean();
+        if (!unit) {
+          return res.status(400).json({ message: 'Selected unit does not belong to the selected development' });
+        }
+      }
+    } else if (unitId) {
+      // If only unitId provided, still verify it exists and derive development for consistency
+      const unit = await (await import('../models/DevelopmentUnit')).DevelopmentUnit.findOne({ _id: unitId }).lean();
+      if (!unit) {
+        return res.status(400).json({ message: 'Invalid developmentUnitId' });
+      }
+      const dev = await (await import('../models/Development')).Development.findOne({ _id: (unit as any).developmentId, companyId: new mongoose.Types.ObjectId(user.companyId) }).lean();
+      if (!dev) {
+        return res.status(400).json({ message: 'Unit belongs to a development not accessible in this company' });
+      }
+      devAddressForManual = [dev.name, (dev as any).address].filter(Boolean).join(' - ');
+    }
 
     // Calculate commission if not provided
     let finalCommissionDetails = commissionDetails;
@@ -643,13 +727,11 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
           const prop = await Property.findById(propId);
           percent = typeof prop?.commission === 'number' ? (prop as any).commission : 15;
         }
-        finalCommissionDetails = await (async () => {
-          const c = await (async () => {
-            const { totalCommission, preaFee, agentShare, agencyShare, ownerAmount } = await (await calculateCommission(amount, percent, new mongoose.Types.ObjectId(user.companyId))) as any;
-            return { totalCommission, preaFee, agentShare, agencyShare, ownerAmount };
-          })();
-          return c;
-        })();
+        finalCommissionDetails = await CommissionService.calculate(
+          amount,
+          percent,
+          new mongoose.Types.ObjectId(user.companyId)
+        ) as any;
       } catch {
         const base = (amount * 0.15);
         const prea = base * 0.03;
@@ -692,12 +774,14 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       rentalPeriodMonth: periodMonth,
       rentalPeriodYear: periodYear,
       // Manual fields
-      manualPropertyAddress: manualProperty ? manualPropertyAddress : undefined,
+      manualPropertyAddress: manualProperty ? (manualPropertyAddress || devAddressForManual) : (devAddressForManual || undefined),
       manualTenantName: manualTenant ? manualTenantName : undefined,
       buyerName: buyerName || (manualTenant ? manualTenantName : undefined),
       sellerName: sellerName,
       // Sales linkage
       saleId: saleObjId,
+      developmentId: devId,
+      developmentUnitId: unitId
     });
 
     await payment.save();
@@ -817,7 +901,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     if (paginate) {
       const [items, total] = await Promise.all([
         baseQuery
-          .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName')
+          .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear')
           .populate('propertyId', 'name address')
           .lean()
           .skip((page - 1) * limit)
@@ -1108,7 +1192,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Property not found' });
     }
     const rent = property.rent || lease.rentAmount;
-    // For advance payments, validate amount
+    // For advance payments spanning multiple months, require full multiple of rent
     if (advanceMonthsPaid && advanceMonthsPaid > 1) {
       const expectedAmount = rent * advanceMonthsPaid;
       if (amount !== expectedAmount) {
@@ -1118,16 +1202,48 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
         });
       }
     } else {
-      // For single month, validate amount
-      if (amount !== rent) {
-        return res.status(400).json({
-          status: 'error',
-          message: `Amount must equal rent (${rent}) for the selected month.`
-        });
+      // Allow partial payments for a single month up to remaining balance
+      const periodFilter: any = {
+        companyId: new mongoose.Types.ObjectId(lease.companyId),
+        paymentType: 'rental',
+        tenantId: lease.tenantId,
+        propertyId: lease.propertyId,
+        rentalPeriodYear,
+        rentalPeriodMonth,
+        status: { $in: ['pending', 'completed'] }
+      };
+      const [agg] = await Payment.aggregate([
+        { $match: periodFilter },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
+      const rentCents = Math.round((rent || 0) * 100);
+      const remainingCents = rentCents - alreadyPaidCents;
+      if (remainingCents <= 0) {
+        return res.status(409).json({ status: 'error', message: 'This month is fully paid. Change rental month.' });
+      }
+      const amountCents = Math.round((amount || 0) * 100);
+      if (amountCents > remainingCents) {
+        return res.status(400).json({ status: 'error', message: `Only ${(remainingCents/100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
       }
     }
+    // Idempotency check (optional client-provided key)
+    if (req.body.idempotencyKey) {
+      const dup = await Payment.findOne({
+        companyId: new mongoose.Types.ObjectId(lease.companyId),
+        idempotencyKey: String(req.body.idempotencyKey)
+      }).lean();
+      if (dup) {
+        return res.status(200).json({ status: 'success', data: dup, message: 'Payment created successfully' });
+      }
+    }
+
     // Calculate commission based on property commission percentage
-    const publicCommissionDetails = await calculateCommission(amount, property.commission || 0, new mongoose.Types.ObjectId(lease.companyId));
+    const publicCommissionDetails = await CommissionService.calculate(
+      amount,
+      property.commission || 0,
+      new mongoose.Types.ObjectId(lease.companyId)
+    );
 
     // Create payment record
     const payment = new Payment({
@@ -1152,6 +1268,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       notes: '', // Default empty notes
       commissionDetails: publicCommissionDetails,
       rentUsed: rent, // Store the rent used for this payment
+      idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
     });
 
     await payment.save();
@@ -1481,7 +1598,7 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     }
 
     const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
-    const finalCommission = await calculateCommission(
+    const finalCommission = await CommissionService.calculate(
       payment.amount,
       commissionPercent,
       new mongoose.Types.ObjectId(req.user.companyId)

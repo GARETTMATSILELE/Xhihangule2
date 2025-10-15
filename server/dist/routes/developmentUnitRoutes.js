@@ -9,4 +9,5 @@ const developmentUnitController_1 = require("../controllers/developmentUnitContr
 const router = express_1.default.Router();
 router.get('/', auth_1.authWithCompany, developmentUnitController_1.listUnits);
 router.patch('/:unitId/status', auth_1.authWithCompany, developmentUnitController_1.updateUnitStatus);
+router.patch('/:unitId/buyer', auth_1.authWithCompany, developmentUnitController_1.setUnitBuyer);
 exports.default = router;

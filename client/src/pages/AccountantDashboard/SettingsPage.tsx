@@ -141,6 +141,7 @@ const SettingsPage: React.FC = () => {
       setSettings(prev => ({
         ...prev,
         companyName: company.name || '',
+        plan: (company as any).plan || 'ENTERPRISE',
         registrationNumber: company.registrationNumber || '',
         tinNumber: company.tinNumber || '',
         vatNumber: company.vatNumber || '',
@@ -149,6 +150,7 @@ const SettingsPage: React.FC = () => {
         companyEmail: company.email || '',
         companyWebsite: company.website || '',
         bankAccounts: company.bankAccounts || [],
+        fiscalConfig: (company as any).fiscalConfig || {},
         // Commission defaults
         preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
         agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
@@ -243,6 +245,8 @@ const SettingsPage: React.FC = () => {
       
       const companyUpdateData = {
         name: settings.companyName,
+        plan: (settings as any).plan,
+        cycle: (settings as any).cycle,
         registrationNumber: settings.registrationNumber,
         tinNumber: settings.tinNumber,
         vatNumber: settings.vatNumber,
@@ -251,8 +255,11 @@ const SettingsPage: React.FC = () => {
         email: settings.companyEmail,
         website: settings.companyWebsite,
         bankAccounts: settings.bankAccounts,
+        fiscalConfig: (settings as any).fiscalConfig,
       };
 
+      // Update plan/cycle at subscription level and company details
+      await apiService.changeSubscriptionPlan({ plan: (settings as any).plan, cycle: (settings as any).cycle });
       await apiService.updateCompany(companyUpdateData);
       await refreshCompany(); // Refresh company data
       
@@ -288,6 +295,7 @@ const SettingsPage: React.FC = () => {
           email: settings.companyEmail,
           website: settings.companyWebsite,
           bankAccounts: settings.bankAccounts,
+          fiscalConfig: (settings as any).fiscalConfig,
           commissionConfig: {
             preaPercentOfTotal: Number(settings.preaPercentOfTotal),
             agentPercentOfRemaining: Number(settings.agentPercentOfRemaining),
@@ -353,6 +361,7 @@ const SettingsPage: React.FC = () => {
           <Tab label="Documents" />
           <Tab label="Billing" />
           <Tab label="Bank" />
+          <Tab label="Fiscalization" />
         </Tabs>
 
         {/* Account Settings */}
@@ -522,6 +531,31 @@ const SettingsPage: React.FC = () => {
                 margin="normal"
                 required
               />
+              <FormControl fullWidth margin="normal">
+                <InputLabel>Plan</InputLabel>
+                <Select
+                  name="plan"
+                  value={(settings as any).plan || 'ENTERPRISE'}
+                  onChange={handleSelectChange}
+                  label="Plan"
+                >
+                  <MenuItem value="INDIVIDUAL">Individual (up to 10 properties)</MenuItem>
+                  <MenuItem value="SME">SME (up to 25 properties)</MenuItem>
+                  <MenuItem value="ENTERPRISE">Enterprise (unlimited)</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl fullWidth margin="normal">
+                <InputLabel>Billing Cycle</InputLabel>
+                <Select
+                  name="cycle"
+                  value={(settings as any).cycle || 'monthly'}
+                  onChange={handleSelectChange}
+                  label="Billing Cycle"
+                >
+                  <MenuItem value="monthly">Monthly</MenuItem>
+                  <MenuItem value="yearly">Yearly</MenuItem>
+                </Select>
+              </FormControl>
               <TextField
                 fullWidth
                 label="Registration Number"
@@ -924,6 +958,126 @@ const SettingsPage: React.FC = () => {
                   <MenuItem value="QIF">QIF</MenuItem>
                 </Select>
               </FormControl>
+            </Grid>
+          </Grid>
+        </TabPanel>
+
+        {/* Fiscalization Settings */}
+        <TabPanel value={activeTab} index={7}>
+          <Grid container spacing={3}>
+            <Grid item xs={12}>
+              <Typography variant="h6" gutterBottom>
+                Fiscalization (ZIMRA/Agent)
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Configure fiscalization provider or agent details to enable fiscal tax invoices.
+              </Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean((company as any)?.fiscalConfig?.enabled)}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setSettings(prev => ({
+                        ...prev,
+                        fiscalConfig: {
+                          ...(prev as any).fiscalConfig,
+                          enabled
+                        }
+                      }));
+                    }}
+                    name="fiscalEnabled"
+                  />
+                }
+                label="Enable Fiscalization"
+              />
+              <TextField
+                fullWidth
+                label="Provider/Integrator Name"
+                value={(settings as any).fiscalConfig?.providerName || ''}
+                onChange={(e) => setSettings(prev => ({
+                  ...prev,
+                  fiscalConfig: { ...(prev as any).fiscalConfig, providerName: e.target.value }
+                }))}
+                margin="normal"
+              />
+              <TextField
+                fullWidth
+                label="Agent Name (optional)"
+                value={(settings as any).fiscalConfig?.agentName || ''}
+                onChange={(e) => setSettings(prev => ({
+                  ...prev,
+                  fiscalConfig: { ...(prev as any).fiscalConfig, agentName: e.target.value }
+                }))}
+                margin="normal"
+              />
+              <TextField
+                fullWidth
+                label="Fiscal Device Serial/ID"
+                value={(settings as any).fiscalConfig?.deviceSerial || ''}
+                onChange={(e) => setSettings(prev => ({
+                  ...prev,
+                  fiscalConfig: { ...(prev as any).fiscalConfig, deviceSerial: e.target.value }
+                }))}
+                margin="normal"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="FDMS/Agent Base URL"
+                placeholder="https://api.example-agent.co.zw"
+                value={(settings as any).fiscalConfig?.fdmsBaseUrl || ''}
+                onChange={(e) => setSettings(prev => ({
+                  ...prev,
+                  fiscalConfig: { ...(prev as any).fiscalConfig, fdmsBaseUrl: e.target.value }
+                }))}
+                margin="normal"
+              />
+              <TextField
+                fullWidth
+                label="API Key"
+                value={(settings as any).fiscalConfig?.apiKey || ''}
+                onChange={(e) => setSettings(prev => ({
+                  ...prev,
+                  fiscalConfig: { ...(prev as any).fiscalConfig, apiKey: e.target.value }
+                }))}
+                margin="normal"
+              />
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="API Username"
+                    value={(settings as any).fiscalConfig?.apiUsername || ''}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      fiscalConfig: { ...(prev as any).fiscalConfig, apiUsername: e.target.value }
+                    }))}
+                    margin="normal"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="API Password"
+                    type="password"
+                    value={(settings as any).fiscalConfig?.apiPassword || ''}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      fiscalConfig: { ...(prev as any).fiscalConfig, apiPassword: e.target.value }
+                    }))}
+                    margin="normal"
+                  />
+                </Grid>
+              </Grid>
+            </Grid>
+            <Grid item xs={12}>
+              <Alert severity="info">
+                These details are provided by your fiscalization agent/integrator. Enabling fiscalization will require network access to the agent gateway when generating invoices.
+              </Alert>
             </Grid>
           </Grid>
         </TabPanel>

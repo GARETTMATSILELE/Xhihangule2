@@ -59,7 +59,7 @@ class LeaseController {
     }
     createLease(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c;
+            var _a, _b, _c, _d;
             try {
                 console.log('Creating lease with data:', JSON.stringify(req.body, null, 2));
                 console.log('User info:', req.user);
@@ -126,7 +126,8 @@ class LeaseController {
                     depositAmount: Number(finalDepositAmount),
                     status: req.body.status || 'active',
                     companyId: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) ? new mongoose_1.default.Types.ObjectId(req.user.companyId) : (req.body.companyId ? new mongoose_1.default.Types.ObjectId(req.body.companyId) : undefined),
-                    ownerId: req.body.ownerId, // <-- Add this line to save ownerId
+                    // Always stamp ownerId from the authenticated user context (required by schema)
+                    ownerId: ((_d = req.user) === null || _d === void 0 ? void 0 : _d.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
                     // Additional fields with defaults
                     monthlyRent: Number(req.body.monthlyRent || finalRentAmount),
                     securityDeposit: Number(req.body.securityDeposit || finalDepositAmount),

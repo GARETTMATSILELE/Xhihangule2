@@ -1,5 +1,5 @@
 import express from 'express';
-import { login, signup, getCurrentUser, refreshToken } from '../controllers/authController';
+import { login, signup, getCurrentUser, refreshToken, requestPasswordReset, resetPassword } from '../controllers/authController';
 import { auth } from '../middleware/auth';
 
 const router = express.Router();
@@ -8,6 +8,8 @@ const router = express.Router();
 router.post('/login', login);
 router.post('/signup', signup);
 router.post('/refresh-token', refreshToken);
+router.post('/forgot-password', requestPasswordReset);
+router.post('/reset-password', resetPassword);
 
 // Test endpoint to verify authentication
 router.get('/test', (req, res) => {

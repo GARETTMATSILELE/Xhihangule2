@@ -8,6 +8,7 @@ import { Property, PropertyFilter as PropertyFilterType, PropertyFormData } from
 import './Properties.css';
 import { Typography, Box, Alert, CircularProgress, TextField, InputAdornment, Paper } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import { useProperties } from '../../contexts/PropertyContext';
 import { useAdminDashboardService } from '../../services/adminDashboardService';
 import { useLocation } from 'react-router-dom';
@@ -16,6 +17,7 @@ import { Tenant } from '../../types/tenant';
 
 export const Properties: React.FC = () => {
   const { user, company } = useAuth();
+  const { company: companyDetails } = useCompany();
   const location = useLocation();
   const { properties: contextProperties, loading: contextLoading, error: contextError, addProperty: contextAddProperty, updateProperty: contextUpdateProperty, deleteProperty: contextDeleteProperty } = useProperties();
   const { getAdminDashboardProperties, addProperty: adminAddProperty, updateProperty: adminUpdateProperty, deleteProperty: adminDeleteProperty } = useAdminDashboardService();
@@ -78,6 +80,11 @@ export const Properties: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [propertyAddressSearch, setPropertyAddressSearch] = useState('');
   const [tenantNameSearch, setTenantNameSearch] = useState('');
+  const [listingFilter, setListingFilter] = useState<'all' | 'rental' | 'sale'>('all');
+  // Plan-based property limits
+  const planLimit = companyDetails?.propertyLimit ?? null;
+  const propertiesCount = properties.length;
+  const limitReached = planLimit != null && propertiesCount >= (planLimit || 0);
 
   // Fetch admin properties when on admin route
   useEffect(() => {
@@ -143,10 +150,16 @@ export const Properties: React.FC = () => {
   }
 
   function getPropertyDisplayStatus(property: Property): Property['status'] {
-    // If property indicates rented but has no active tenant, treat as available for display
-    const pid = getId(property._id);
-    if (property.status === 'rented') {
-      const hasActiveTenant = agentTenants.some(t => getId((t as any).propertyId) === pid && (t.status === 'Active'));
+    // Admin routes should reflect the backend status exactly
+    if (isAdminRoute) {
+      return property.status;
+    }
+    // Agent routes: if marked rented but there is no active tenant, show as available
+    if (isAgentRoute && property.status === 'rented') {
+      const pid = getId(property._id);
+      const hasActiveTenant = agentTenants.some(
+        (t) => getId((t as any).propertyId) === pid && t.status === 'Active'
+      );
       if (!hasActiveTenant) return 'available';
     }
     return property.status;
@@ -313,8 +326,10 @@ export const Properties: React.FC = () => {
     const matchesSearch = !searchQuery || 
       property.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       property.address.toLowerCase().includes(searchQuery.toLowerCase());
+    const isSale = property.rentalType === 'sale';
+    const matchesListing = listingFilter === 'all' || (listingFilter === 'sale' ? isSale : !isSale);
 
-    return matchesStatus && matchesLocation && matchesRent && matchesSearch;
+    return matchesStatus && matchesLocation && matchesRent && matchesSearch && matchesListing;
   }) || [];
 
   // Map properties to include display status for the list rendering
@@ -363,6 +378,11 @@ export const Properties: React.FC = () => {
       )}
       
       <div className="properties-page">
+        {limitReached && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            You have reached your property limit ({planLimit}). Upgrade your plan in Settings to add more properties.
+          </Alert>
+        )}
         <div className="properties-header">
           <h1>Properties</h1>
           <div className="properties-actions">
@@ -375,6 +395,16 @@ export const Properties: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            <div className="listing-filter">
+              <select
+                value={listingFilter}
+                onChange={(e) => setListingFilter(e.target.value as 'all' | 'rental' | 'sale')}
+              >
+                <option value="all">All</option>
+                <option value="rental">Rentals</option>
+                <option value="sale">Sales</option>
+              </select>
+            </div>
             <button 
               className="filter-button"
               onClick={() => setShowFilter(!showFilter)}
@@ -385,10 +415,10 @@ export const Properties: React.FC = () => {
             <button 
               className="add-button"
               onClick={() => setShowForm(true)}
-              disabled={!user?.companyId || !['admin', 'owner', 'agent'].includes(user?.role || '')}
+              disabled={!user?.companyId || !['admin', 'owner', 'agent'].includes(user?.role || '') || limitReached}
               title={!user?.companyId ? 'Company association required' : 
                      !['admin', 'owner', 'agent'].includes(user?.role || '') ? 'Admin, Owner, or Agent role required' : 
-                     'Add new property'}
+                     (limitReached ? 'Property limit reached. Upgrade plan to add more.' : 'Add new property')}
             >
               <FontAwesomeIcon icon={faPlus} />
               Add Property

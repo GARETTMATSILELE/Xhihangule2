@@ -56,8 +56,7 @@ class PaymentService {
         const params: any = { ...(filters || {}), paginate: 'true' };
         return await api.get('/payments/company', {
           params,
-          validateStatus: (status) => status < 500,
-          timeout: 30000
+        validateStatus: (status) => status < 500
         });
       }, { maxRetries: 0 });
 
@@ -423,6 +422,38 @@ class PaymentService {
       return response.data;
     } catch (error: any) {
       return this.handleAuthError(error);
+    }
+  }
+
+  async initiateLevyPayout(id: string, payload: { paidToName: string; paidToAccount?: string; paidToContact?: string; payoutDate?: string; payoutMethod?: string; payoutReference?: string; notes?: string }) {
+    const response = await api.post(`/levy-payments/${id}/payout`, payload);
+    return response.data;
+  }
+
+  async getLevyPayoutAcknowledgement(id: string, companyId?: string): Promise<string> {
+    const config: any = { responseType: 'text' };
+    if (companyId) config.params = { companyId };
+    const response = await publicApi.get(`/levy-payments/public/${id}/payout/ack`, config);
+    return response.data;
+  }
+
+  async getRemainingForPeriod(params: { tenantId: string; propertyId: string; rentalPeriodMonth: number; rentalPeriodYear: number; rent: number }): Promise<{ remaining: number; totalPaid: number }> {
+    const { tenantId, propertyId, rentalPeriodMonth, rentalPeriodYear, rent } = params;
+    try {
+      // Query paginated payments filtered by property, and then sum client-side (fast, cached on server)
+      const page1 = await this.getPaymentsPage({ paginate: true, page: 1, limit: 200, propertyId });
+      const relevant = page1.items.filter(p => String(p.tenantId) === String(tenantId)
+        && p.paymentType === 'rental'
+        && p.rentalPeriodMonth === rentalPeriodMonth
+        && p.rentalPeriodYear === rentalPeriodYear
+        && (p.status === 'completed' || p.status === 'pending'));
+      const totalPaid = relevant.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const remaining = Math.max(0, (rent || 0) - totalPaid);
+      return { remaining, totalPaid };
+    } catch (error: any) {
+      console.warn('Failed to fetch remaining for period:', error);
+      // If error, fall back to zero paid to avoid blocking UI
+      return { remaining: Math.max(0, rent || 0), totalPaid: 0 };
     }
   }
 }

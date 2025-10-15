@@ -29,6 +29,7 @@ import {
   Sync as SyncIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 
 const drawerWidth = 280;
 
@@ -39,9 +40,10 @@ interface AdminSidebarProps {
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChange }) => {
   const navigate = useNavigate();
-  const { user, company, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { company } = useCompany();
 
-  const menuItems = [
+  const baseItems = [
     { 
       text: 'Dashboard', 
       icon: <DashboardIcon />, 
@@ -113,6 +115,19 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
       path: '/admin-dashboard/settings' 
     },
   ];
+
+  const menuItems = React.useMemo(() => {
+    const items = [...baseItems];
+    // Add Property Accounts menu only for INDIVIDUAL plan
+    if (company?.plan === 'INDIVIDUAL') {
+      items.splice(6, 0, {
+        text: 'Property Accounts',
+        icon: <AccountBalanceIcon />,
+        path: '/admin-dashboard/property-accounts'
+      });
+    }
+    return items;
+  }, [company?.plan]);
 
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);

@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadCompanyLogo = exports.getCompanyById = exports.updateCurrentCompany = exports.getCurrentCompany = exports.deleteCompany = exports.updateCompany = exports.createCompany = exports.getCompany = exports.getCompanies = void 0;
 const Company_1 = require("../models/Company");
+const plan_1 = require("../types/plan");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -60,6 +61,7 @@ const getCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.getCompany = getCompany;
 const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
         console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
@@ -74,6 +76,8 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
             console.log('Company already exists:', existingCompany);
             throw new errorHandler_1.AppError('Company with this name or email already exists', 400);
         }
+        const plan = (((_a = req.body) === null || _a === void 0 ? void 0 : _a.plan) && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(req.body.plan)) ? req.body.plan : 'ENTERPRISE';
+        const config = plan_1.PLAN_CONFIG[plan];
         const company = new Company_1.Company({
             name,
             description,
@@ -84,7 +88,10 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
             registrationNumber,
             tinNumber,
             vatNumber,
-            ownerId: req.user.userId
+            ownerId: req.user.userId,
+            plan,
+            propertyLimit: config.propertyLimit,
+            featureFlags: config.featureFlags
         });
         console.log('Saving new company:', company);
         yield company.save();
@@ -137,7 +144,7 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
 exports.createCompany = createCompany;
 const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -161,6 +168,14 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             updateData.logo = logo;
         if (bankAccounts !== undefined)
             updateData.bankAccounts = bankAccounts;
+        if (fiscalConfig !== undefined)
+            updateData.fiscalConfig = fiscalConfig;
+        if (plan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan)) {
+            const cfg = plan_1.PLAN_CONFIG[plan];
+            updateData.plan = plan;
+            updateData.propertyLimit = cfg.propertyLimit;
+            updateData.featureFlags = cfg.featureFlags;
+        }
         const company = yield Company_1.Company.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true, runValidators: true });
         if (!company) {
             throw new errorHandler_1.AppError('Company not found', 404);
@@ -319,7 +334,7 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             throw new errorHandler_1.AppError('Company not found', 404);
         }
         // Update the company
-        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -343,6 +358,14 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             updateData.logo = logo;
         if (bankAccounts !== undefined)
             updateData.bankAccounts = bankAccounts;
+        if (fiscalConfig !== undefined)
+            updateData.fiscalConfig = fiscalConfig;
+        if (plan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan)) {
+            const cfg = plan_1.PLAN_CONFIG[plan];
+            updateData.plan = plan;
+            updateData.propertyLimit = cfg.propertyLimit;
+            updateData.featureFlags = cfg.featureFlags;
+        }
         const updatedCompany = yield Company_1.Company.findByIdAndUpdate(company._id, { $set: updateData }, { new: true, runValidators: true });
         if (!updatedCompany) {
             throw new errorHandler_1.AppError('Error updating company', 500);
@@ -382,9 +405,36 @@ const getCompanyById = (req, res) => __awaiter(void 0, void 0, void 0, function*
             id: company._id,
             name: company.name
         });
+        if (!company) {
+            return res.status(404).json({ status: 'error', message: 'Company not found', code: 'NO_COMPANY' });
+        }
         res.json({
             status: 'success',
-            data: company
+            data: {
+                _id: company._id,
+                name: company.name,
+                address: company.address,
+                phone: company.phone,
+                email: company.email,
+                website: company.website,
+                registrationNumber: company.registrationNumber,
+                tinNumber: company.tinNumber,
+                vatNumber: company.vatNumber,
+                ownerId: company.ownerId,
+                description: company.description,
+                logo: company.logo,
+                isActive: company.isActive,
+                subscriptionStatus: company.subscriptionStatus,
+                subscriptionEndDate: company.subscriptionEndDate,
+                bankAccounts: company.bankAccounts,
+                commissionConfig: company.commissionConfig,
+                plan: company.plan,
+                propertyLimit: company.propertyLimit,
+                featureFlags: company.featureFlags,
+                fiscalConfig: company.fiscalConfig,
+                createdAt: company.createdAt,
+                updatedAt: company.updatedAt
+            }
         });
     }
     catch (error) {

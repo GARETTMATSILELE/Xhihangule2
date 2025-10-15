@@ -13,6 +13,7 @@ import {
 } from '../controllers/propertyController';
 import { authWithCompany } from '../middleware/auth';
 import { isAdmin, isAgent, canCreateProperty } from '../middleware/roles';
+import { enforcePropertyLimit } from '../middleware/limits';
 import { logger } from '../utils/logger';
 import { Property, IProperty } from '../models/Property';
 
@@ -115,7 +116,7 @@ router.get('/admin-dashboard', (req, res, next) => {
 router.get('/', authWithCompany, getProperties);
 router.get('/vacant', authWithCompany, getVacantProperties);
 router.get('/:id', authWithCompany, getProperty);
-router.post('/', authWithCompany, canCreateProperty, createProperty);
+router.post('/', authWithCompany, canCreateProperty, enforcePropertyLimit, createProperty);
 // Sales route for creating property with sales fields
 router.post('/sales', authWithCompany, createSalesProperty);
 // Allow sales/agents to update their own sales properties (controller enforces ownership)

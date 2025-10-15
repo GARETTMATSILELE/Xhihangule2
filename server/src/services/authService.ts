@@ -44,13 +44,13 @@ export class AuthService {
     await this.initialize();
     
     // First try to find in PropertyOwner collection
-    let propertyOwner = await PropertyOwner.findById(userId);
+    let propertyOwner = await PropertyOwner.findById(userId).maxTimeMS(5000);
     if (propertyOwner) {
       return { user: propertyOwner, type: 'propertyOwner' as const };
     }
     
     // If not found, try User collection
-    let user = await User.findById(userId);
+    let user = await User.findById(userId).maxTimeMS(5000);
     if (user) {
       return { user, type: 'user' as const };
     }
@@ -61,7 +61,7 @@ export class AuthService {
   public async login(email: string, password: string): Promise<{ user: JwtUser; token: string; refreshToken: string }> {
     await this.initialize();
     // Check only the User collection
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ email }).maxTimeMS(5000);
     if (!user) {
       throw new AppError('Invalid credentials', 401, 'AUTH_ERROR');
     }

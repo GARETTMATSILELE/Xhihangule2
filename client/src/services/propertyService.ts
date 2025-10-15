@@ -200,7 +200,9 @@ export const usePropertyService = () => {
       const payload = {
         name: propertyData.name,
         address: propertyData.address,
+        type: (propertyData as any).type,
         price: propertyData.price ?? propertyData.rent ?? 0,
+        pricePerSqm: (propertyData as any).pricePerSqm ?? 0,
         bedrooms: propertyData.bedrooms ?? 0,
         bathrooms: propertyData.bathrooms ?? 0,
         status: propertyData.status ?? 'available',

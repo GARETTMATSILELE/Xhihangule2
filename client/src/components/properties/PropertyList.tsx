@@ -87,7 +87,7 @@ const PropertyList: React.FC<PropertyListProps> = ({
               <TableCell>Name</TableCell>
               <TableCell>Address</TableCell>
               <TableCell>Type</TableCell>
-              <TableCell>Rent</TableCell>
+              <TableCell>{isAgentRoute ? 'Rent' : 'Amount'}</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Bedrooms</TableCell>
               <TableCell>Bathrooms</TableCell>
@@ -118,7 +118,11 @@ const PropertyList: React.FC<PropertyListProps> = ({
                 </TableCell>
                 <TableCell>{property.address}</TableCell>
                 <TableCell>{property.type}</TableCell>
-                <TableCell>${property.rent}</TableCell>
+                <TableCell>
+                  {isAgentRoute
+                    ? `$${property.rent ?? 0}`
+                    : `$${property.rentalType === 'sale' ? (property.price ?? 0) : (property.rent ?? 0)}`}
+                </TableCell>
                 <TableCell>
                   <Chip 
                     label={property.status} 

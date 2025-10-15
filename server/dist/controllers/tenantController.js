@@ -130,7 +130,7 @@ const createTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!['admin', 'owner', 'agent'].includes(req.user.role)) {
             throw new errorHandler_1.AppError('Access denied. Admin, Owner, or Agent role required to create tenants.', 403);
         }
-        const { firstName, lastName, email, phone, propertyId, status, idNumber, emergencyContact } = req.body;
+        const { firstName, lastName, email, phone, propertyId, propertyIds, status, idNumber, emergencyContact } = req.body;
         // Validate required fields
         if (!firstName || !lastName || !email || !phone) {
             throw new errorHandler_1.AppError('All fields are required', 400);
@@ -143,7 +143,8 @@ const createTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         logger_1.logger.info('Creating tenant', {
             email,
             companyId: req.user.companyId,
-            propertyId
+            propertyId,
+            propertyIdsCount: Array.isArray(propertyIds) ? propertyIds.length : 0
         });
         const existingTenant = yield Tenant_1.Tenant.findOne({
             email,
@@ -160,19 +161,35 @@ const createTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             status: status || 'Active',
             propertyId: propertyId ? new mongoose_1.default.Types.ObjectId(propertyId) : undefined,
+            // Ensure ownerId is captured for admin/owner flows as required by schema
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             idNumber,
             emergencyContact
         };
+        // If propertyIds provided, normalize them to ObjectIds
+        if (Array.isArray(propertyIds) && propertyIds.length > 0) {
+            tenantData.propertyIds = propertyIds
+                .filter((id) => !!id)
+                .map((id) => new mongoose_1.default.Types.ObjectId(String(id)));
+            // If multi selected, clear single propertyId unless explicitly provided
+            if (!propertyId) {
+                delete tenantData.propertyId;
+            }
+        }
         const newTenant = new Tenant_1.Tenant(tenantData);
         yield newTenant.save();
-        // If property is assigned, update property status
-        if (propertyId) {
+        // If properties are assigned, update their statuses
+        if (Array.isArray(tenantData.propertyIds) && tenantData.propertyIds.length > 0) {
+            yield Property_1.Property.updateMany({ _id: { $in: tenantData.propertyIds } }, { status: 'rented' });
+        }
+        else if (propertyId) {
             yield Property_1.Property.findByIdAndUpdate(propertyId, { status: 'rented' });
         }
         logger_1.logger.info('Tenant created successfully', {
             tenantId: newTenant._id,
             email,
-            propertyId
+            propertyId,
+            propertyIdsCount: Array.isArray(tenantData.propertyIds) ? tenantData.propertyIds.length : 0
         });
         res.status(201).json(newTenant);
     }
@@ -197,12 +214,13 @@ const updateTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             throw new errorHandler_1.AppError('Company ID not found', 401);
         }
         const { id } = req.params;
-        const _c = req.body, { email, propertyId } = _c, updateData = __rest(_c, ["email", "propertyId"]);
+        const _c = req.body, { email, propertyId, propertyIds } = _c, updateData = __rest(_c, ["email", "propertyId", "propertyIds"]);
         logger_1.logger.info('Updating tenant', {
             tenantId: id,
             companyId: req.user.companyId,
             updateFields: Object.keys(updateData),
-            propertyId
+            propertyId,
+            propertyIdsCount: Array.isArray(propertyIds) ? propertyIds.length : 0
         });
         if (email) {
             const existingTenant = yield Tenant_1.Tenant.findOne({
@@ -219,21 +237,35 @@ const updateTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!currentTenant) {
             throw new errorHandler_1.AppError('Tenant not found', 404);
         }
-        // Handle property changes
-        if (propertyId !== ((_b = currentTenant.propertyId) === null || _b === void 0 ? void 0 : _b.toString())) {
-            // If tenant had a previous property, mark it as available
+        // Handle property changes for single propertyId
+        if (typeof propertyId !== 'undefined' && propertyId !== ((_b = currentTenant.propertyId) === null || _b === void 0 ? void 0 : _b.toString())) {
             if (currentTenant.propertyId) {
                 yield Property_1.Property.findByIdAndUpdate(currentTenant.propertyId, { status: 'available' });
             }
-            // If new property is assigned, mark it as rented
             if (propertyId) {
                 yield Property_1.Property.findByIdAndUpdate(propertyId, { status: 'rented' });
             }
         }
+        // Handle propertyIds changes (multi)
+        if (Array.isArray(propertyIds)) {
+            const currentIds = currentTenant.propertyIds || [];
+            const currentIdsStr = currentIds.map((id) => id.toString());
+            const nextIds = propertyIds.map((id) => String(id));
+            const removed = currentIdsStr.filter((id) => !nextIds.includes(id));
+            const added = nextIds.filter((id) => !currentIdsStr.includes(id));
+            if (removed.length > 0) {
+                yield Property_1.Property.updateMany({ _id: { $in: removed } }, { status: 'available' });
+            }
+            if (added.length > 0) {
+                yield Property_1.Property.updateMany({ _id: { $in: added } }, { status: 'rented' });
+            }
+            // Normalize updateData.propertyIds to ObjectIds
+            updateData.propertyIds = nextIds.map((id) => new mongoose_1.default.Types.ObjectId(id));
+        }
         const updatedTenant = yield Tenant_1.Tenant.findOneAndUpdate({
             _id: id,
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
-        }, Object.assign(Object.assign(Object.assign({}, updateData), (email && { email })), (propertyId && { propertyId: new mongoose_1.default.Types.ObjectId(propertyId) })), { new: true, runValidators: true });
+        }, Object.assign(Object.assign(Object.assign({}, updateData), (email && { email })), (typeof propertyId !== 'undefined' && propertyId !== '' ? { propertyId: new mongoose_1.default.Types.ObjectId(propertyId) } : { propertyId: undefined })), { new: true, runValidators: true });
         if (!updatedTenant) {
             throw new errorHandler_1.AppError('Tenant not found', 404);
         }

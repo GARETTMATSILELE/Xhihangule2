@@ -347,8 +347,8 @@ export const createProperty = async (req: Request, res: Response) => {
     }
 
     // Validate property type if provided
-    if (propertyData.type && !['apartment', 'house', 'commercial'].includes(propertyData.type)) {
-      throw new AppError('Invalid property type: Must be one of: apartment, house, commercial', 400);
+    if (propertyData.type && !['apartment', 'house', 'commercial', 'land'].includes(propertyData.type)) {
+      throw new AppError('Invalid property type: Must be one of: apartment, house, commercial, land', 400);
     }
 
     console.log('Creating property with data:', propertyData);
@@ -426,11 +426,13 @@ export const createSalesProperty = async (req: Request, res: Response) => {
       name,
       address,
       price,
+      type,
       bedrooms,
       bathrooms,
       status,
       builtArea,
       landArea,
+      pricePerSqm,
       description,
       propertyOwnerId,
       agentId,
@@ -448,14 +450,20 @@ export const createSalesProperty = async (req: Request, res: Response) => {
     // Map status from UI labels to backend enums if necessary
     const normalizedStatus = (status || 'available').toString().toLowerCase().replace(' ', '_');
 
+    const typeNormalized = String(type || '').toLowerCase();
+    const allowedTypes = ['apartment','house','commercial','land'];
+    const isLand = typeNormalized === 'land';
+    const computedPrice = isLand ? (Number(landArea || 0) * Number(pricePerSqm || 0)) : Number(price || 0);
+
     const property = new Property({
       name,
       address,
-      type: 'house',
+      type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house') as any,
       status: normalizedStatus,
-      price: typeof price === 'number' ? price : Number(price || 0),
-      bedrooms: Number(bedrooms || 0),
-      bathrooms: Number(bathrooms || 0),
+      price: computedPrice,
+      pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0,
+      bedrooms: isLand ? 0 : Number(bedrooms || 0),
+      bathrooms: isLand ? 0 : Number(bathrooms || 0),
       builtArea: Number(builtArea || 0),
       landArea: Number(landArea || 0),
       description: description || '',

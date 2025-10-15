@@ -15,14 +15,16 @@ export interface CreateBuyerInput {
   email?: string;
   phone?: string;
   idNumber?: string;
+  developmentId?: string;
+  developmentUnitId?: string;
   budgetMin?: number;
   budgetMax?: number;
   prefs?: string;
 }
 
 export const buyerService = {
-  async list() {
-    const res = await api.get('/buyers');
+  async list(filters?: { developmentId?: string; developmentUnitId?: string }) {
+    const res = await api.get('/buyers', { params: filters });
     return Array.isArray(res.data) ? res.data : res.data.data;
   },
   async create(input: CreateBuyerInput) {

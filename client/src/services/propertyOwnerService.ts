@@ -69,6 +69,17 @@ export const usePropertyOwnerService = () => {
     }
   };
 
+  // Fetch sales owner by id (from salesowners collection)
+  const getSalesById = async (id: string) => {
+    try {
+      const response = await api.get(`/sales-owners/${id}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error fetching sales owner:', error);
+      throw new Error('Failed to fetch sales owner details');
+    }
+  };
+
   const create = async (ownerData: CreatePropertyOwnerData, opts?: { channel?: 'sales' | 'default' }) => {
     try {
       const companyId = getCompanyId();
@@ -134,6 +145,7 @@ export const usePropertyOwnerService = () => {
     getAll,
     getAllPublic,
     getById,
+    getSalesById,
     create,
     update,
     remove,

@@ -31,12 +31,13 @@ export interface IPayment extends Document {
     agencyShare: number;
     ownerAmount: number;
   };
-  status: 'pending' | 'completed' | 'failed';
+  status: 'pending' | 'completed' | 'failed' | 'reversed' | 'refunded';
   currency: 'USD' | 'ZWL';
   leaseId?: mongoose.Types.ObjectId;
   recipientId?: mongoose.Types.ObjectId | string;
   recipientType?: string;
   reason?: string;
+  idempotencyKey?: string;
   // Manual entry fields for properties/tenants not in database
   manualPropertyAddress?: string;
   manualTenantName?: string;
@@ -52,6 +53,9 @@ export interface IPayment extends Document {
   finalizedBy?: mongoose.Types.ObjectId;
   // Sales contract linkage (for introduction payments)
   saleId?: mongoose.Types.ObjectId;
+  // Optional linkage to development/unit for sales
+  developmentId?: mongoose.Types.ObjectId;
+  developmentUnitId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -185,7 +189,7 @@ const PaymentSchema: Schema = new Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed'],
+    enum: ['pending', 'completed', 'failed', 'reversed', 'refunded'],
     default: 'pending',
   },
   currency: {
@@ -258,6 +262,21 @@ const PaymentSchema: Schema = new Schema({
     ref: 'SalesContract',
     required: false
   },
+  developmentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Development',
+    required: false
+  },
+  developmentUnitId: {
+    type: Schema.Types.ObjectId,
+    ref: 'DevelopmentUnit',
+    required: false
+  },
+  idempotencyKey: {
+    type: String,
+    required: false,
+    index: true
+  },
 }, {
   timestamps: true
 });
@@ -272,6 +291,9 @@ PaymentSchema.index({ status: 1 });
 // Add compound index for agent commission queries
 PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
 PaymentSchema.index({ saleId: 1 });
+PaymentSchema.index({ developmentId: 1 });
+PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
+PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
 
 export const Payment = mongoose.model<IPayment>('Payment', PaymentSchema, COLLECTIONS.PAYMENTS); 

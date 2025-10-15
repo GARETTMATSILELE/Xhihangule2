@@ -52,10 +52,10 @@ router.get('/prea-commission', roles_1.canViewCommissions, (req, res) => {
     console.log('PREA commission route hit');
     (0, accountantController_1.getPREACommission)(req, res);
 });
-// Deposit ledger routes - require accountant role
-router.get('/property-accounts/:propertyId/deposits', roles_1.isAccountant, accountantController_1.getPropertyDepositLedger);
-router.get('/property-accounts/:propertyId/deposits/summary', roles_1.isAccountant, accountantController_1.getPropertyDepositSummary);
-router.post('/property-accounts/:propertyId/deposits/payout', roles_1.isAccountant, accountantController_1.createPropertyDepositPayout);
+// Deposit ledger routes - allow admin and accountant
+router.get('/property-accounts/:propertyId/deposits', roles_1.canViewCommissions, accountantController_1.getPropertyDepositLedger);
+router.get('/property-accounts/:propertyId/deposits/summary', roles_1.canViewCommissions, accountantController_1.getPropertyDepositSummary);
+router.post('/property-accounts/:propertyId/deposits/payout', roles_1.canViewCommissions, accountantController_1.createPropertyDepositPayout);
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', roles_1.canManagePayments, paymentController_1.getCompanyPayments);
 // Sales-specific payment endpoints
@@ -114,22 +114,22 @@ router.post('/payments/finalize-bulk', roles_1.canManagePayments, (req, res) => 
         res.status(500).json({ message: 'Failed to bulk finalize payments' });
     }
 }));
-// Property Account routes - require accountant role
-router.get('/property-accounts', roles_1.isAccountant, propertyAccountController_1.getCompanyPropertyAccounts);
-router.get('/property-accounts/:propertyId', roles_1.isAccountant, (req, res) => {
+// Property Account routes - allow admin and accountant
+router.get('/property-accounts', roles_1.canViewCommissions, propertyAccountController_1.getCompanyPropertyAccounts);
+router.get('/property-accounts/:propertyId', roles_1.canViewCommissions, (req, res) => {
     var _a;
     console.log('Property account detail route hit:', req.params.propertyId);
     console.log('User role:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.role);
     (0, propertyAccountController_1.getPropertyAccount)(req, res);
 });
-router.get('/property-accounts/:propertyId/transactions', roles_1.isAccountant, propertyAccountController_1.getPropertyTransactions);
-router.post('/property-accounts/:propertyId/expense', roles_1.isAccountant, propertyAccountController_1.addExpense);
-router.post('/property-accounts/:propertyId/payout', roles_1.isAccountant, propertyAccountController_1.createOwnerPayout);
-router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.isAccountant, propertyAccountController_1.updatePayoutStatus);
-router.get('/property-accounts/:propertyId/payouts', roles_1.isAccountant, propertyAccountController_1.getPayoutHistory);
-router.post('/property-accounts/sync', roles_1.isAccountant, propertyAccountController_1.syncPropertyAccounts);
-router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.isAccountant, propertyAccountController_1.getPaymentRequestDocument);
-router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.isAccountant, propertyAccountController_1.getAcknowledgementDocument);
+router.get('/property-accounts/:propertyId/transactions', roles_1.canViewCommissions, propertyAccountController_1.getPropertyTransactions);
+router.post('/property-accounts/:propertyId/expense', roles_1.canViewCommissions, propertyAccountController_1.addExpense);
+router.post('/property-accounts/:propertyId/payout', roles_1.canViewCommissions, propertyAccountController_1.createOwnerPayout);
+router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.canViewCommissions, propertyAccountController_1.updatePayoutStatus);
+router.get('/property-accounts/:propertyId/payouts', roles_1.canViewCommissions, propertyAccountController_1.getPayoutHistory);
+router.post('/property-accounts/sync', roles_1.canViewCommissions, propertyAccountController_1.syncPropertyAccounts);
+router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);
+router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.canViewCommissions, propertyAccountController_1.getAcknowledgementDocument);
 // Company account routes
 router.get('/company-account/summary', roles_1.isAccountant, companyAccountController_1.getCompanyAccountSummary);
 router.get('/company-account/transactions', roles_1.isAccountant, companyAccountController_1.getCompanyTransactions);

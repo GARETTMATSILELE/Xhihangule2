@@ -50,6 +50,7 @@ export const getAgentProperties = async (req: Request, res: Response) => {
     
     const properties = await Property.find(query)
     .populate('ownerId', 'firstName lastName email')
+    .populate('propertyOwnerId', 'firstName lastName email phone')
     .sort({ createdAt: -1 }); // Sort by newest first
 
     console.log('Found properties for agent:', {
@@ -378,7 +379,7 @@ export const createAgentTenant = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Only agents can create tenants via this endpoint.' });
     }
 
-    const { firstName, lastName, email, phone, propertyId, status, idNumber, emergencyContact } = req.body;
+    const { firstName, lastName, email, phone, propertyId, propertyIds, status, idNumber, emergencyContact } = req.body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !phone) {
@@ -391,10 +392,23 @@ export const createAgentTenant = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid email format' });
     }
 
-    // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
-    if (!property) {
-      return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
+    // Validate property ownership for single or multiple properties
+    if (Array.isArray(propertyIds) && propertyIds.length > 0) {
+      const ids = propertyIds.map((id: any) => new mongoose.Types.ObjectId(String(id)));
+      const ownedCount = await Property.countDocuments({
+        _id: { $in: ids },
+        ownerId: new mongoose.Types.ObjectId(req.user.userId),
+        companyId: new mongoose.Types.ObjectId(req.user.companyId)
+      });
+      if (ownedCount !== ids.length) {
+        return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
+      }
+    } else {
+      // Ensure the property belongs to this agent (single)
+      const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
+      if (!property) {
+        return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
+      }
     }
 
     // Check for existing tenant with same email in this company
@@ -415,24 +429,33 @@ export const createAgentTenant = async (req: Request, res: Response) => {
       }
     }
 
-    const tenantData = {
+    const tenantData: any = {
       firstName,
       lastName,
       email,
       phone,
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       status: status || 'Active',
-      propertyId: new mongoose.Types.ObjectId(propertyId),
+      propertyId: propertyId ? new mongoose.Types.ObjectId(propertyId) : undefined,
       ownerId: new mongoose.Types.ObjectId(req.user.userId), // Set the agent as the owner
       idNumber,
       emergencyContact
     };
 
+    if (Array.isArray(propertyIds) && propertyIds.length > 0) {
+      tenantData.propertyIds = propertyIds.map((id: any) => new mongoose.Types.ObjectId(String(id)));
+      if (!propertyId) delete tenantData.propertyId;
+    }
+
     const newTenant = new Tenant(tenantData);
     await newTenant.save();
 
-    // Mark property as rented
-    await Property.findByIdAndUpdate(new mongoose.Types.ObjectId(propertyId), { status: 'rented' });
+    // Mark property/properties as rented
+    if (Array.isArray(tenantData.propertyIds) && tenantData.propertyIds.length > 0) {
+      await Property.updateMany({ _id: { $in: tenantData.propertyIds } }, { status: 'rented' });
+    } else if (propertyId) {
+      await Property.findByIdAndUpdate(new mongoose.Types.ObjectId(propertyId), { status: 'rented' });
+    }
 
     res.status(201).json(newTenant);
   } catch (error) {
@@ -660,25 +683,12 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     }
 
     // Calculate commission based on property's commission percentage and company-specific splits
-    const company = await Company.findById(new mongoose.Types.ObjectId(req.user.companyId)).lean();
     const commissionPercentage = Number(property.commission || 0);
-    const totalCommission = (amount * commissionPercentage) / 100;
-    const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
-    const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
-    const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
-
-    const preaFee = totalCommission * preaPercentOfTotal;
-    const remainingCommission = totalCommission - preaFee;
-    const agentShare = remainingCommission * agentPercentOfRemaining;
-    const agencyShare = remainingCommission * agencyPercentOfRemaining;
-
-    const commissionDetails = {
-      totalCommission,
-      preaFee,
-      agentShare,
-      agencyShare,
-      ownerAmount: amount - totalCommission,
-    };
+    const commissionDetails = await (await import('../services/commissionService')).CommissionService.calculate(
+      amount,
+      commissionPercentage,
+      new mongoose.Types.ObjectId(req.user.companyId)
+    );
 
     // Create payment record
     const payment = new Payment({

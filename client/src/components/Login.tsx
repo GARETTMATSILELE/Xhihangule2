@@ -88,6 +88,16 @@ const Login = () => {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </div>
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password')}
+              className="text-sm text-indigo-600 hover:text-indigo-700"
+              disabled={loading}
+            >
+              Forgot your password?
+            </button>
+          </div>
         </form>
       </div>
     </div>

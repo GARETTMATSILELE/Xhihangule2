@@ -82,7 +82,7 @@ const LevyPaymentSchema = new mongoose_1.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'completed', 'failed'],
+        enum: ['pending', 'completed', 'failed', 'paid_out'],
         default: 'pending',
     },
     currency: {
@@ -93,6 +93,19 @@ const LevyPaymentSchema = new mongoose_1.Schema({
     monthlyLevies: {
         type: Number,
         required: false,
+    },
+    payout: {
+        paidOut: { type: Boolean, default: false },
+        paidToName: { type: String },
+        paidToAccount: { type: String },
+        paidToContact: { type: String },
+        payoutDate: { type: Date },
+        payoutMethod: { type: String, enum: ['cash', 'bank_transfer', 'mobile_money', 'cheque'] },
+        payoutReference: { type: String },
+        acknowledgedBy: { type: String },
+        acknowledgedAt: { type: Date },
+        notes: { type: String },
+        processedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' }
     },
 }, {
     timestamps: true

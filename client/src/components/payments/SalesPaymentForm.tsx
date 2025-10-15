@@ -25,12 +25,23 @@ type Props = {
   onSubmit: (data: PaymentFormData) => Promise<void> | void;
   onCancel: () => void;
   isInstallment?: boolean;
+  prefill?: {
+    saleReference?: string;
+    sellerName?: string;
+    totalSalePrice?: number;
+    commission?: {
+      commissionPercent?: number;
+      preaPercentOfCommission?: number;
+      agencyPercentRemaining?: number;
+      agentPercentRemaining?: number;
+    }
+  };
 };
 
 const PAYMENT_METHODS: PaymentMethod[] = ['bank_transfer', 'cash', 'credit_card', 'mobile_money'];
 const CURRENCIES: Currency[] = ['USD', 'ZWL'];
 
-const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false }) => {
+const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, prefill }) => {
   const { user } = useAuth();
   const [buyerName, setBuyerName] = useState('');
   const [sellerName, setSellerName] = useState('');
@@ -58,6 +69,20 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
   const [loadingProperties, setLoadingProperties] = useState<boolean>(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
 
+  // Apply prefill values when provided (without clobbering user typing if not provided)
+  useEffect(() => {
+    if (!prefill) return;
+    if (typeof prefill.saleReference === 'string') setSaleReference(prefill.saleReference);
+    if (typeof prefill.sellerName === 'string') setSellerName(prefill.sellerName);
+    if (typeof prefill.totalSalePrice === 'number' && !Number.isNaN(prefill.totalSalePrice)) setTotalSalePrice(String(prefill.totalSalePrice));
+    if (prefill.commission) {
+      if (typeof prefill.commission.commissionPercent === 'number') setCommissionPercent(prefill.commission.commissionPercent);
+      if (typeof prefill.commission.preaPercentOfCommission === 'number') setPreaPercentOfCommission(prefill.commission.preaPercentOfCommission);
+      if (typeof prefill.commission.agencyPercentRemaining === 'number') handleAgencyPercentChange(prefill.commission.agencyPercentRemaining);
+      if (typeof prefill.commission.agentPercentRemaining === 'number') setAgentPercent(prefill.commission.agentPercentRemaining);
+    }
+  }, [prefill]);
+
   useEffect(() => {
     const loadAgents = async () => {
       try {
@@ -69,6 +94,16 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     };
     loadAgents();
   }, [user?.companyId]);
+
+  // Listen for external buyer prefill events from parent page (e.g., selecting a development unit)
+  useEffect(() => {
+    const handler = (e: any) => {
+      const name = e?.detail?.name;
+      if (typeof name === 'string' && name.trim()) setBuyerName(name.trim());
+    };
+    window.addEventListener('sales-form-set-buyer', handler as any);
+    return () => window.removeEventListener('sales-form-set-buyer', handler as any);
+  }, []);
 
   // Load properties for address/reference autocomplete
   useEffect(() => {
@@ -107,22 +142,21 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     return () => { cancelled = true; };
   }, [saleReference]);
 
+  // Commission should be calculated from amount paid (not total price) for both quick and installment
   const totalCommission = useMemo(() => {
     const price = Number(totalSalePrice) || 0;
     return (commissionPercent / 100) * price;
   }, [totalSalePrice, commissionPercent]);
 
-  const commissionForThisPayment = useMemo(() => {
-    const price = Number(totalSalePrice) || 0;
+  const commissionOnPaid = useMemo(() => {
     const paid = Number(amountPaid) || 0;
-    if (!isInstallment || price <= 0) return totalCommission;
-    const ratio = Math.max(0, Math.min(1, paid / price));
-    return totalCommission * ratio;
-  }, [isInstallment, totalCommission, totalSalePrice, amountPaid]);
+    return (commissionPercent / 100) * paid;
+  }, [amountPaid, commissionPercent]);
 
   useEffect(() => {
     // Calculate splits based on configured percentages
-    const baseCommission = isInstallment ? commissionForThisPayment : totalCommission;
+    // Always use commission based on amount paid
+    const baseCommission = commissionOnPaid;
     const prea = (preaPercentOfCommission / 100) * baseCommission;
     const remaining = Math.max(0, baseCommission - prea);
     const agency = remaining * (agencyPercent / 100);
@@ -130,7 +164,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     setPreaShare(Number(prea.toFixed(2)));
     setAgencyShare(Number(agency.toFixed(2)));
     setAgentShare(Number(agent.toFixed(2)));
-  }, [isInstallment, commissionForThisPayment, totalCommission, preaPercentOfCommission, agencyPercent, agentPercent]);
+  }, [commissionOnPaid, preaPercentOfCommission, agencyPercent, agentPercent]);
 
   // Keep agent percent complementary to agency percent
   const handleAgencyPercentChange = (value: number) => {
@@ -146,9 +180,8 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
 
   const ownerAmountForThisPayment = useMemo(() => {
     const paid = Number(amountPaid) || 0;
-    const commission = isInstallment ? commissionForThisPayment : totalCommission;
-    return Math.max(0, paid - commission);
-  }, [amountPaid, isInstallment, commissionForThisPayment, totalCommission]);
+    return Math.max(0, paid - commissionOnPaid);
+  }, [amountPaid, commissionOnPaid]);
 
   const handleSubmit = async () => {
     try {
@@ -162,7 +195,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
       }
       // Ensure splits sum to commission for this payment
       const sumSplits = Number((preaShare + agencyShare + agentShare).toFixed(2));
-      const totalCommRounded = Number((isInstallment ? commissionForThisPayment : totalCommission).toFixed(2));
+      const totalCommRounded = Number(commissionOnPaid.toFixed(2));
       if (Math.abs(sumSplits - totalCommRounded) > 0.02) {
         setError('Commission splits must add up to total commission');
         return;

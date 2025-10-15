@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
@@ -69,6 +69,9 @@ import { Properties } from './Properties/Properties';
 import { Tenants } from './Tenants/Tenants';
 import { LeaseList } from './leases/LeaseList';
 import PaymentsPage from './PaymentsPage';
+import paymentService from '../services/paymentService';
+import { useLeaseService } from '../services/leaseService';
+import { useTenantService } from '../services/tenantService';
 import { Property } from '../types/property';
 import { Maintenance } from './Maintenance/Maintenance';
 import { UserManagement } from '../pages/UserManagement/UserManagement';
@@ -79,6 +82,8 @@ import { Files } from './Files/Files';
 import { useAdminDashboardService } from '../services/adminDashboardService';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
+import PropertyAccountsPage from './admin/PropertyAccountsPage';
+import PropertyLedgerPage from './admin/PropertyLedgerPage';
 // Removed MaintenancePageWrapper to avoid nested sidebars and doubled spacing
 import { AdminSettings } from './Settings/AdminSettings';
 import ReportsPage from './admin/ReportsPage';
@@ -200,6 +205,14 @@ const AdminDashboard: React.FC = () => {
   
   const [activeTab, setActiveTab] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const leaseService = useLeaseService();
+  const tenantService = useTenantService();
+  const [tenants, setTenants] = useState<any[]>([]);
+  const [leases, setLeases] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [levyPayments, setLevyPayments] = useState<any[]>([]);
+  const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
+  const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
 
   // Update active tab based on current route
   useEffect(() => {
@@ -255,6 +268,169 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     fetchProperties();
   }, [fetchProperties]);
+
+  // Load company-wide tenants, leases, payments, and levy payments
+  useEffect(() => {
+    (async () => {
+      try {
+        const [tpub, lpub, pays, levy] = await Promise.all([
+          tenantService.getAllPublic().catch(() => ({ tenants: [] })),
+          leaseService.getAllPublic().catch(() => []),
+          paymentService.getPayments().catch(() => []),
+          user?.companyId ? paymentService.getLevyPayments(user.companyId).catch(() => []) : Promise.resolve([])
+        ]);
+        setTenants(Array.isArray((tpub as any)?.tenants) ? (tpub as any).tenants : []);
+        setLeases(Array.isArray(lpub) ? lpub : []);
+        setPayments(Array.isArray(pays) ? pays : []);
+        setLevyPayments(Array.isArray(levy) ? levy : []);
+      } catch {
+        setTenants([]); setLeases([]); setPayments([]); setLevyPayments([]);
+      }
+    })();
+  }, [user?.companyId]);
+
+  // Filter out sale/sales properties
+  const rentalProperties = useMemo(() => (properties || []).filter((p: any) => {
+    const rt = (p?.rentalType || '').toString().toLowerCase();
+    return rt !== 'sale' && rt !== 'sales';
+  }), [properties]);
+
+  const computedOutstandingLevies = useMemo(() => {
+    try {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+      const ymKey = (y: number, m: number) => `${y}-${m}`;
+      const paidByProperty: Record<string, Set<string>> = {};
+      const pushPaid = (propId: string, y: number, m: number) => {
+        const key = ymKey(y, m);
+        if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
+        paidByProperty[propId].add(key);
+      };
+      for (const p of levyPayments || []) {
+        const status = (p?.status || '').toString().toLowerCase();
+        const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
+        if (!isCompleted) continue;
+        const anyP: any = p as any;
+        const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+        if (!pid) continue;
+        const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
+        const sy = Number(anyP?.advancePeriodStart?.year);
+        const sm = Number(anyP?.advancePeriodStart?.month);
+        const ey = Number(anyP?.advancePeriodEnd?.year);
+        const em = Number(anyP?.advancePeriodEnd?.month);
+        if (monthsPaid > 1 && sy && sm && ey && em) {
+          let y = sy; let m = sm;
+          while (y < ey || (y === ey && m <= em)) { pushPaid(pid, y, m); m += 1; if (m > 12) { m = 1; y += 1; } }
+        } else {
+          const m = anyP?.rentalPeriodMonth || anyP?.levyPeriodMonth || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getMonth() + 1) : undefined);
+          const y = anyP?.rentalPeriodYear || anyP?.levyPeriodYear || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getFullYear()) : undefined);
+          if (y && m) pushPaid(pid, Number(y), Number(m));
+        }
+      }
+      let total = 0;
+      const iterateMonths = (start: Date, end: Date, cb: (y: number, m: number) => void, hardCapMonths: number = 240) => {
+        let y = start.getFullYear();
+        let m = start.getMonth() + 1;
+        let count = 0;
+        while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
+          cb(y, m); m += 1; if (m > 12) { m = 1; y += 1; } count += 1;
+        }
+      };
+      for (const prop of rentalProperties || []) {
+        if ((prop as any)?.levyOrMunicipalType !== 'levy') continue;
+        const pid = String((prop as any)?._id || (prop as any)?.id || '');
+        if (!pid) continue;
+        const monthlyLevy = Number((prop as any)?.levyOrMunicipalAmount) || 0;
+        if (!monthlyLevy) continue;
+        const paidKeys = paidByProperty[pid] || new Set<string>();
+        const missing = new Set<string>();
+        const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+        for (const l of leasesForProperty) {
+          const start = l?.startDate ? new Date(l.startDate) : null;
+          const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
+          if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
+          const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          iterateMonths(ns, ne, (y, m) => {
+            const key = ymKey(y, m);
+            if (!paidKeys.has(key)) missing.add(key);
+          });
+        }
+        total += missing.size * monthlyLevy;
+      }
+      return total;
+    } catch { return 0; }
+  }, [rentalProperties, leases, levyPayments]);
+
+  const computedOutstandingRentals = useMemo(() => {
+    try {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+      const ymKey = (y: number, m: number) => `${y}-${m}`;
+      const paidByProperty: Record<string, Set<string>> = {};
+      const pushPaid = (propId: string, y: number, m: number) => {
+        const key = ymKey(y, m);
+        if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
+        paidByProperty[propId].add(key);
+      };
+      for (const p of payments || []) {
+        const t = String((p as any)?.paymentType || '').toLowerCase();
+        if (t === 'levy' || t === 'municipal' || t === 'sale') continue;
+        const status = (p?.status || '').toString().toLowerCase();
+        const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
+        if (!isCompleted) continue;
+        const anyP: any = p as any;
+        const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+        if (!pid) continue;
+        const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
+        const sy = Number(anyP?.advancePeriodStart?.year);
+        const sm = Number(anyP?.advancePeriodStart?.month);
+        const ey = Number(anyP?.advancePeriodEnd?.year);
+        const em = Number(anyP?.advancePeriodEnd?.month);
+        if (monthsPaid > 1 && sy && sm && ey && em) {
+          let y = sy; let m = sm;
+          while (y < ey || (y === ey && m <= em)) { pushPaid(pid, y, m); m += 1; if (m > 12) { m = 1; y += 1; } }
+        } else {
+          const m = anyP?.rentalPeriodMonth || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getMonth() + 1) : undefined);
+          const y = anyP?.rentalPeriodYear || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getFullYear()) : undefined);
+          if (y && m) pushPaid(pid, Number(y), Number(m));
+        }
+      }
+      let total = 0;
+      const iterateMonths = (start: Date, end: Date, cb: (y: number, m: number) => void, hardCapMonths: number = 240) => {
+        let y = start.getFullYear();
+        let m = start.getMonth() + 1;
+        let count = 0;
+        while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
+          cb(y, m); m += 1; if (m > 12) { m = 1; y += 1; } count += 1;
+        }
+      };
+      for (const prop of rentalProperties || []) {
+        const pid = String((prop as any)?._id || (prop as any)?.id || '');
+        if (!pid) continue;
+        const monthlyRent = Number((prop as any)?.rent) || 0;
+        if (!monthlyRent) continue;
+        const paidKeys = paidByProperty[pid] || new Set<string>();
+        const missing = new Set<string>();
+        const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+        for (const l of leasesForProperty) {
+          const start = l?.startDate ? new Date(l.startDate) : null;
+          const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
+          if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
+          const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          iterateMonths(ns, ne, (y, m) => {
+            const key = ymKey(y, m);
+            if (!paidKeys.has(key)) missing.add(key);
+          });
+        }
+        total += missing.size * monthlyRent;
+      }
+      return total;
+    } catch { return 0; }
+  }, [rentalProperties, leases, payments]);
 
   // If no company, show a setup prompt at the top of the dashboard
   const showCompanySetup = isAuthenticated && (!user?.companyId && !company);
@@ -408,6 +584,30 @@ const AdminDashboard: React.FC = () => {
           </Grid>
         </Grid>
 
+        {/* Outstanding cards for admin (company-wide) */}
+        <Grid container spacing={3} sx={{ mt: 2 }}>
+          <Grid item xs={12} md={6} lg={3}>
+            <StatCard
+              title="Outstanding rentals"
+              value={`$${Number(computedOutstandingRentals || 0).toLocaleString()}`}
+              icon={<PaymentIcon />}
+              color="#dc004e"
+              theme={theme}
+              onClick={() => { setShowOutstandingRentals(true); setShowOutstandingLevies(false); }}
+            />
+          </Grid>
+          <Grid item xs={12} md={6} lg={3}>
+            <StatCard
+              title="Outstanding levies"
+              value={`$${Number(computedOutstandingLevies || 0).toLocaleString()}`}
+              icon={<PaymentIcon />}
+              color="#ff9800"
+              theme={theme}
+              onClick={() => { setShowOutstandingLevies(true); setShowOutstandingRentals(false); }}
+            />
+          </Grid>
+        </Grid>
+
         <Grid container spacing={3} sx={{ mt: 2 }}>
           <Grid item xs={12} md={6}>
             <Paper sx={chartStyles.card}>
@@ -471,6 +671,266 @@ const AdminDashboard: React.FC = () => {
           </Grid>
         </Grid>
 
+        {(showOutstandingLevies || showOutstandingRentals) && (
+          <Box sx={{ mt: 3 }}>
+            {showOutstandingLevies ? (
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Typography variant="h6">Properties Without Levy Payments</Typography>
+                  <Button size="small" onClick={() => setShowOutstandingLevies(false)}>Hide</Button>
+                </Box>
+                {(() => {
+                  const now = new Date();
+                  const currentMonth = now.getMonth() + 1;
+                  const currentYear = now.getFullYear();
+                  const ymKey = (y: number, m: number) => `${y}-${m}`;
+                  const paidByProperty: Record<string, Set<string>> = {};
+                  const pushPaid = (propId: string, y: number, m: number) => {
+                    const key = ymKey(y, m);
+                    if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
+                    paidByProperty[propId].add(key);
+                  };
+                  for (const p of levyPayments || []) {
+                    const status = (p?.status || '').toString().toLowerCase();
+                    const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
+                    if (!isCompleted) continue;
+                    const anyP: any = p as any;
+                    const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+                    if (!pid) continue;
+                    const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
+                    const sy = Number(anyP?.advancePeriodStart?.year);
+                    const sm = Number(anyP?.advancePeriodStart?.month);
+                    const ey = Number(anyP?.advancePeriodEnd?.year);
+                    const em = Number(anyP?.advancePeriodEnd?.month);
+                    if (monthsPaid > 1 && sy && sm && ey && em) {
+                      let y = sy; let m = sm;
+                      while (y < ey || (y === ey && m <= em)) { pushPaid(pid, y, m); m += 1; if (m > 12) { m = 1; y += 1; } }
+                    } else {
+                      const m = anyP?.rentalPeriodMonth || anyP?.levyPeriodMonth || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getMonth() + 1) : undefined);
+                      const y = anyP?.rentalPeriodYear || anyP?.levyPeriodYear || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getFullYear()) : undefined);
+                      if (y && m) pushPaid(pid, Number(y), Number(m));
+                    }
+                  }
+                  const iterateMonths = (start: Date, end: Date, cb: (y: number, m: number, label: string) => void, hardCapMonths: number = 240) => {
+                    let y = start.getFullYear();
+                    let m = start.getMonth() + 1;
+                    let count = 0;
+                    while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
+                      const label = new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'short', year: 'numeric' });
+                      cb(y, m, label);
+                      m += 1; if (m > 12) { m = 1; y += 1; }
+                      count += 1;
+                    }
+                  };
+                  const items = (rentalProperties || [])
+                    .filter((prop: any) => (prop as any)?.levyOrMunicipalType === 'levy')
+                    .map((prop: any) => {
+                      const pid = String((prop as any)?._id || (prop as any)?.id || '');
+                      const paidKeys = paidByProperty[pid] || new Set<string>();
+                      const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+                      const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
+                      let propertyTotalMissing = 0;
+                      let propertyTotalAmount = 0;
+                      const monthlyLevy = Number((prop as any)?.levyOrMunicipalAmount) || 0;
+                      for (const l of leasesForProperty) {
+                        const start = l?.startDate ? new Date(l.startDate) : null;
+                        const end = l?.endDate ? new Date(l.endDate) : now;
+                        if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
+                        const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+                        const labels: string[] = [];
+                        iterateMonths(new Date(start.getFullYear(), start.getMonth(), 1), new Date(normEnd.getFullYear(), normEnd.getMonth(), 1), (y, m, label) => {
+                          if (!paidKeys.has(ymKey(y, m))) labels.push(label);
+                        });
+                        if (labels.length > 0) {
+                          const tid = String(l?.tenantId?._id || l?.tenantId || '');
+                          const t = (tenants || []).find((tt: any) => String(tt?._id || tt?.id) === tid);
+                          const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
+                          perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
+                          propertyTotalMissing += labels.length;
+                          propertyTotalAmount += labels.length * monthlyLevy;
+                        }
+                      }
+                      return { prop, pid, perTenantMissing, propertyTotalMissing, propertyTotalAmount };
+                    })
+                    .filter((row: any) => (row.perTenantMissing || []).length > 0)
+                    .sort((a: any, b: any) => (b.propertyTotalMissing || 0) - (a.propertyTotalMissing || 0));
+                  if (!items.length) {
+                    return <Typography color="textSecondary">All levy-paying properties have payments recorded for the lease periods.</Typography>;
+                  }
+                  return (
+                    <Grid container spacing={2}>
+                      {items.map((row: any) => {
+                        const prop = row.prop;
+                        const perTenantMissing = row.perTenantMissing as Array<{ tenantId: string; tenantName: string; labels: string[] }>;
+                        return (
+                          <Grid item xs={12} key={row.pid}>
+                            <Card>
+                              <CardContent>
+                                <Grid container alignItems="flex-start" spacing={2}>
+                                  <Grid item xs={12} md={6}>
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{(prop as any).name || 'Unnamed Property'}</Typography>
+                                    <Typography color="textSecondary">{(prop as any).address || ''}</Typography>
+                                  </Grid>
+                                  <Grid item xs={12} md={6}>
+                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                                      <Chip label={`Total owed months: ${row.propertyTotalMissing}`} size="small" color="warning" />
+                                      <Chip label={`Owed: $${Number(row.propertyTotalAmount || 0).toLocaleString()}`} size="small" color="error" />
+                                    </Box>
+                                    {perTenantMissing.map((pt, idx) => (
+                                      <Box key={pt.tenantId || idx} sx={{ mb: 1 }}>
+                                        <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>{pt.tenantName}</Typography>
+                                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                          {pt.labels.map((label: string, i: number) => (
+                                            <Chip key={i} label={label} size="small" color="warning" />
+                                          ))}
+                                        </Box>
+                                      </Box>
+                                    ))}
+                                  </Grid>
+                                </Grid>
+                              </CardContent>
+                            </Card>
+                          </Grid>
+                        );
+                      })}
+                    </Grid>
+                  );
+                })()}
+              </Box>
+            ) : (
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Typography variant="h6">Properties With Unpaid Rentals</Typography>
+                  <Button size="small" onClick={() => setShowOutstandingRentals(false)}>Hide</Button>
+                </Box>
+                {(() => {
+                  const now = new Date();
+                  const currentMonth = now.getMonth() + 1;
+                  const currentYear = now.getFullYear();
+                  const ymKey = (y: number, m: number) => `${y}-${m}`;
+                  const paidByProperty: Record<string, Set<string>> = {};
+                  const pushPaid = (propId: string, y: number, m: number) => {
+                    const key = ymKey(y, m);
+                    if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
+                    paidByProperty[propId].add(key);
+                  };
+                  for (const p of payments || []) {
+                    const t = String((p as any)?.paymentType || '').toLowerCase();
+                    if (t === 'levy' || t === 'municipal' || t === 'sale') continue;
+                    const status = (p?.status || '').toString().toLowerCase();
+                    const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
+                    if (!isCompleted) continue;
+                    const anyP: any = p as any;
+                    const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+                    if (!pid) continue;
+                    const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
+                    const sy = Number(anyP?.advancePeriodStart?.year);
+                    const sm = Number(anyP?.advancePeriodStart?.month);
+                    const ey = Number(anyP?.advancePeriodEnd?.year);
+                    const em = Number(anyP?.advancePeriodEnd?.month);
+                    if (monthsPaid > 1 && sy && sm && ey && em) {
+                      let y = sy; let m = sm;
+                      while (y < ey || (y === ey && m <= em)) { pushPaid(pid, y, m); m += 1; if (m > 12) { m = 1; y += 1; } }
+                    } else {
+                      const m = anyP?.rentalPeriodMonth || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getMonth() + 1) : undefined);
+                      const y = anyP?.rentalPeriodYear || (anyP?.paymentDate ? (new Date(anyP.paymentDate).getFullYear()) : undefined);
+                      if (y && m) pushPaid(pid, Number(y), Number(m));
+                    }
+                  }
+                  const iterateMonths = (start: Date, end: Date, cb: (y: number, m: number, label: string) => void, hardCapMonths: number = 240) => {
+                    let y = start.getFullYear();
+                    let m = start.getMonth() + 1;
+                    let count = 0;
+                    while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
+                      const label = new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'short', year: 'numeric' });
+                      cb(y, m, label);
+                      m += 1; if (m > 12) { m = 1; y += 1; }
+                      count += 1;
+                    }
+                  };
+                  const items = (rentalProperties || [])
+                    .map((prop: any) => {
+                      const pid = String((prop as any)?._id || (prop as any)?.id || '');
+                      const paidKeys = paidByProperty[pid] || new Set<string>();
+                      const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+                      const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
+                      const missingSet = new Set<string>();
+                      const missingLabels: string[] = [];
+                      for (const l of leasesForProperty) {
+                        const start = l?.startDate ? new Date(l.startDate) : null;
+                        const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
+                        if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
+                        const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                        const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+                        const labels: string[] = [];
+                        iterateMonths(ns, ne, (y, m, label) => {
+                          const key = ymKey(y, m);
+                          if (!paidKeys.has(key)) {
+                            labels.push(label);
+                            if (!missingSet.has(key)) { missingSet.add(key); missingLabels.push(label); }
+                          }
+                        });
+                        if (labels.length > 0) {
+                          const tid = String(l?.tenantId?._id || l?.tenantId || '');
+                          const t = (tenants || []).find((tt: any) => String(tt?._id || tt?.id) === tid);
+                          const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
+                          perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
+                        }
+                      }
+                      const missed = missingSet.size;
+                      const monthlyRent = Number((prop as any)?.rent) || 0;
+                      const propertyTotalAmount = missed * monthlyRent;
+                      return { prop, pid, missed, missingLabels, perTenantMissing, propertyTotalAmount };
+                    })
+                    .filter((row: any) => (row.missed || 0) > 0)
+                    .sort((a: any, b: any) => (b.missed || 0) - (a.missed || 0));
+                  if (!items.length) {
+                    return <Typography color="textSecondary">All properties have a rental payment recorded for the lease periods.</Typography>;
+                  }
+                  return (
+                    <Grid container spacing={2}>
+                      {items.map((row: any) => {
+                        const prop = row.prop;
+                        const perTenantMissing = row.perTenantMissing as Array<{ tenantId: string; tenantName: string; labels: string[] }>;
+                        return (
+                          <Grid item xs={12} key={row.pid}>
+                            <Card>
+                              <CardContent>
+                                <Grid container alignItems="flex-start" spacing={2}>
+                                  <Grid item xs={12} md={6}>
+                                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{(prop as any).name || 'Unnamed Property'}</Typography>
+                                    <Typography color="textSecondary">{(prop as any).address || ''}</Typography>
+                                  </Grid>
+                                  <Grid item xs={12} md={6}>
+                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                                      <Chip label={`Total owed months: ${row.missed}`} size="small" color="warning" />
+                                      <Chip label={`Owed: $${Number(row.propertyTotalAmount || 0).toLocaleString()}`} size="small" color="error" />
+                                    </Box>
+                                    {perTenantMissing.map((pt, idx) => (
+                                      <Box key={pt.tenantId || idx} sx={{ mb: 1 }}>
+                                        <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>{pt.tenantName}</Typography>
+                                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                          {pt.labels.map((label: string, i: number) => (
+                                            <Chip key={i} label={label} size="small" color="warning" />
+                                          ))}
+                                        </Box>
+                                      </Box>
+                                    ))}
+                                  </Grid>
+                                </Grid>
+                              </CardContent>
+                            </Card>
+                          </Grid>
+                        );
+                      })}
+                    </Grid>
+                  );
+                })()}
+              </Box>
+            )}
+          </Box>
+        )}
+
         <Box sx={{ mt: 4, p: 3, backgroundColor: theme.cardBackground, borderRadius: 2, border: `1px solid ${theme.border}` }}>
           <Typography variant="h6" gutterBottom sx={chartStyles.text}>
             Note
@@ -531,6 +991,26 @@ const AdminDashboard: React.FC = () => {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/sync" element={<DatabaseSyncDashboard />} />
             <Route path="/settings" element={<AdminSettings />} />
+            {company?.plan === 'INDIVIDUAL' && (
+              <>
+                <Route
+                  path="/property-accounts"
+                  element={
+                    <Box sx={{ ml: -3, p: 0 }}>
+                      <PropertyAccountsPage />
+                    </Box>
+                  }
+                />
+                <Route
+                  path="/property-accounts/:propertyId/ledger"
+                  element={
+                    <Box sx={{ ml: -3, p: 0 }}>
+                      <PropertyLedgerPage />
+                    </Box>
+                  }
+                />
+              </>
+            )}
           </Routes>
         </Box>
       </Box>

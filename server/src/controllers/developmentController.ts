@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { AppError } from '../middleware/errorHandler';
 import { Development, IDevelopment } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
+import { Payment } from '../models/Payment';
 
 const ensureAuthCompany = (req: Request) => {
   if (!req.user?.userId) {
@@ -39,12 +40,12 @@ export const createDevelopment = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
 
-    const { name, type, description, owner, variations } = req.body || {};
+    const { name, type, description, address, owner, variations, commissionPercent, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
 
     if (!name || !type) {
       throw new AppError('Missing required fields: name and type', 400);
     }
-    const allowedTypes = ['stands', 'apartments', 'houses', 'semidetached', 'townhouses'];
+    const allowedTypes = ['stands', 'apartments', 'houses', 'semidetached', 'townhouses', 'land'];
     if (!allowedTypes.includes(String(type))) {
       throw new AppError('Invalid development type', 400);
     }
@@ -66,9 +67,14 @@ export const createDevelopment = async (req: Request, res: Response) => {
         name,
         type,
         description: description || '',
+        address: address || '',
         companyId: new mongoose.Types.ObjectId(req.user!.companyId),
         owner: owner || {},
         variations,
+        commissionPercent: typeof commissionPercent === 'number' ? commissionPercent : undefined,
+        commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
+        commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
+        commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : undefined,
         createdBy: new mongoose.Types.ObjectId(req.user!.userId),
         updatedBy: new mongoose.Types.ObjectId(req.user!.userId)
       });
@@ -111,9 +117,14 @@ export const createDevelopment = async (req: Request, res: Response) => {
             name,
             type,
             description: description || '',
+            address: address || '',
             companyId: new mongoose.Types.ObjectId(req.user!.companyId),
             owner: owner || {},
             variations,
+            commissionPercent: typeof commissionPercent === 'number' ? commissionPercent : undefined,
+            commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
+            commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
+            commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : undefined,
             createdBy: new mongoose.Types.ObjectId(req.user!.userId),
             updatedBy: new mongoose.Types.ObjectId(req.user!.userId)
           }
@@ -209,8 +220,15 @@ export const updateDevelopment = async (req: Request, res: Response) => {
       name: req.body?.name,
       type: req.body?.type,
       description: req.body?.description,
+      address: req.body?.address,
       owner: req.body?.owner
     } as any;
+
+    // Commission fields (optional)
+    if (typeof req.body?.commissionPercent === 'number') (allowed as any).commissionPercent = req.body.commissionPercent;
+    if (typeof req.body?.commissionPreaPercent === 'number') (allowed as any).commissionPreaPercent = req.body.commissionPreaPercent;
+    if (typeof req.body?.commissionAgencyPercentRemaining === 'number') (allowed as any).commissionAgencyPercentRemaining = req.body.commissionAgencyPercentRemaining;
+    if (typeof req.body?.commissionAgentPercentRemaining === 'number') (allowed as any).commissionAgentPercentRemaining = req.body.commissionAgentPercentRemaining;
 
     // Remove undefined keys
     Object.keys(allowed).forEach(k => (allowed as any)[k] === undefined && delete (allowed as any)[k]);
@@ -283,6 +301,39 @@ export const listUnitsForDevelopment = async (req: Request, res: Response) => {
   } catch (error: any) {
     const status = (error as any)?.statusCode || 500;
     const message = (error as any)?.message || 'Error fetching development units';
+    return res.status(status).json({ message });
+  }
+};
+
+export const listPaymentsForDevelopment = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const companyId = new mongoose.Types.ObjectId(req.user!.companyId);
+    const dev = await Development.findOne({ _id: req.params.id, companyId }).lean();
+    if (!dev) throw new AppError('Development not found', 404);
+
+    const { unitId, saleMode } = req.query as any;
+    const query: any = {
+      companyId,
+      paymentType: 'sale',
+      developmentId: new mongoose.Types.ObjectId(req.params.id)
+    };
+    if (unitId && mongoose.Types.ObjectId.isValid(String(unitId))) {
+      query.developmentUnitId = new mongoose.Types.ObjectId(String(unitId));
+    }
+    if (saleMode && (String(saleMode) === 'quick' || String(saleMode) === 'installment')) {
+      query.saleMode = String(saleMode);
+    }
+
+    const payments = await Payment.find(query)
+      .select('paymentDate amount currency commissionDetails buyerName sellerName saleMode manualPropertyAddress referenceNumber developmentId developmentUnitId')
+      .sort({ paymentDate: -1 })
+      .lean();
+
+    return res.json({ items: payments });
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error fetching development payments';
     return res.status(status).json({ message });
   }
 };

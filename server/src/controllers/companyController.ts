@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { Company, ICompany } from '../models/Company';
+import { PLAN_CONFIG, Plan } from '../types/plan';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { AppError } from '../middleware/errorHandler';
 import { JwtPayload } from '../types/auth';
@@ -66,6 +67,9 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
       throw new AppError('Company with this name or email already exists', 400);
     }
 
+    const plan: Plan = (req.body?.plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(req.body.plan)) ? req.body.plan : 'ENTERPRISE';
+    const config = PLAN_CONFIG[plan];
+
     const company = new Company({
       name,
       description,
@@ -76,7 +80,10 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
       registrationNumber,
       tinNumber,
       vatNumber,
-      ownerId: (req.user as JwtPayload).userId
+      ownerId: (req.user as JwtPayload).userId,
+      plan,
+      propertyLimit: config.propertyLimit,
+      featureFlags: config.featureFlags
     });
 
     console.log('Saving new company:', company);
@@ -132,7 +139,7 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
 
 export const updateCompany = async (req: Request, res: Response) => {
   try {
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -146,6 +153,13 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (vatNumber !== undefined) updateData.vatNumber = vatNumber;
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
+    if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
+    if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
+      const cfg = PLAN_CONFIG[plan as Plan];
+      (updateData as any).plan = plan as Plan;
+      (updateData as any).propertyLimit = cfg.propertyLimit;
+      (updateData as any).featureFlags = cfg.featureFlags;
+    }
 
     const company = await Company.findByIdAndUpdate(
       req.params.id,
@@ -321,7 +335,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     }
 
     // Update the company
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -335,6 +349,13 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     if (vatNumber !== undefined) updateData.vatNumber = vatNumber;
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
+    if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
+    if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
+      const cfg = PLAN_CONFIG[plan as Plan];
+      (updateData as any).plan = plan as Plan;
+      (updateData as any).propertyLimit = cfg.propertyLimit;
+      (updateData as any).featureFlags = cfg.featureFlags;
+    }
 
     const updatedCompany = await Company.findByIdAndUpdate(
       company._id,
@@ -385,9 +406,37 @@ export const getCompanyById = async (req: Request, res: Response) => {
       name: company.name
     });
 
+    if (!company) {
+      return res.status(404).json({ status: 'error', message: 'Company not found', code: 'NO_COMPANY' });
+    }
+
     res.json({
       status: 'success',
-      data: company
+      data: {
+        _id: company._id,
+        name: company.name,
+        address: company.address,
+        phone: company.phone,
+        email: company.email,
+        website: company.website,
+        registrationNumber: company.registrationNumber,
+        tinNumber: company.tinNumber,
+        vatNumber: company.vatNumber,
+        ownerId: company.ownerId,
+        description: company.description,
+        logo: company.logo,
+        isActive: company.isActive,
+        subscriptionStatus: company.subscriptionStatus,
+        subscriptionEndDate: company.subscriptionEndDate,
+        bankAccounts: company.bankAccounts,
+        commissionConfig: company.commissionConfig,
+        plan: (company as any).plan,
+        propertyLimit: (company as any).propertyLimit,
+        featureFlags: (company as any).featureFlags,
+        fiscalConfig: (company as any).fiscalConfig,
+        createdAt: (company as any).createdAt,
+        updatedAt: (company as any).updatedAt
+      }
     });
   } catch (error) {
     console.error('Error in getCompanyById:', error);

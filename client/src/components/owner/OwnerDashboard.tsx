@@ -31,6 +31,8 @@ import {
   MenuItem,
   InputLabel,
   FormControl,
+    useTheme,
+    useMediaQuery,
 } from '@mui/material';
 import {
   BarChart,
@@ -144,6 +146,10 @@ export default function OwnerDashboard() {
   const [selectedWeek, setSelectedWeek] = useState<number>(Math.ceil((new Date().getDate() + new Date(new Date().getFullYear(), new Date().getMonth(), 1).getDay()) / 7));
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+
+  // Mobile responsiveness helpers
+  const theme = useTheme();
+  const isXs = useMediaQuery(theme.breakpoints.down('sm'));
 
   // Cleanup
   const cleanup = useCallback(() => {
@@ -439,14 +445,14 @@ export default function OwnerDashboard() {
 
   if (isAnyLoading) {
     return (
-      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4, px: { xs: 2, sm: 3 } }}>
         <Grid container spacing={3}>
           <Grid item xs={12}>
-            <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ flexDirection: { xs: 'column', md: 'row' }, gap: { xs: 1, md: 0 } }}>
               <Typography variant="h4" component="h1">
                 Welcome {userName || 'Property Owner'}
               </Typography>
-              <Button variant="outlined" color="primary" onClick={handleLogout}>
+              <Button variant="outlined" color="primary" size="small" onClick={handleLogout}>
                 Logout
               </Button>
             </Box>
@@ -469,14 +475,14 @@ export default function OwnerDashboard() {
         <Route
           path="/"
           element={
-            <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+            <Container maxWidth="lg" sx={{ mt: 4, mb: 4, px: { xs: 2, sm: 3 } }}>
               <Grid container spacing={3}>
                 <Grid item xs={12}>
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ flexDirection: { xs: 'column', md: 'row' }, gap: { xs: 1, md: 0 } }}>
                     <Typography variant="h4" component="h1">
                       Welcome {userName || 'Property Owner'}
                     </Typography>
-                    <Button variant="outlined" color="primary" onClick={handleLogout}>
+                    <Button variant="outlined" color="primary" size="small" onClick={handleLogout}>
                       Logout
                     </Button>
                   </Box>
@@ -490,7 +496,7 @@ export default function OwnerDashboard() {
 
                 <Grid item xs={12}>
                   <Paper sx={{ p: 2 }}>
-                    <Tabs value={activeTab} onChange={handleTabChange} aria-label="dashboard tabs">
+                    <Tabs value={activeTab} onChange={handleTabChange} aria-label="dashboard tabs" variant={isXs ? 'scrollable' : 'standard'} scrollButtons={isXs ? 'auto' : false}>
                       <Tab label="Properties" icon={<BusinessIcon />} iconPosition="start" />
                       <Tab label="Financial Data" icon={<PaymentIcon />} iconPosition="start" />
                       <Tab label="Maintenance" icon={<BuildIcon />} iconPosition="start" />
@@ -532,7 +538,7 @@ export default function OwnerDashboard() {
                         {/* Property Cards */}
                         <Grid container spacing={3} sx={{ mb: 4 }}>
                           {properties.map((property) => (
-                            <Grid item xs={12} md={6} lg={4} key={property._id}>
+                            <Grid item xs={12} sm={6} lg={4} key={property._id}>
                               <Card>
                                 <CardContent>
                                   <Typography color="textSecondary" gutterBottom>
@@ -580,13 +586,13 @@ export default function OwnerDashboard() {
 
                                          {activeTab === 1 && (
                        <Box sx={{ mt: 2 }}>
-                         <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
                            <Typography variant="h6">
                              Financial Overview
                            </Typography>
                            
                            {/* Time Filter Controls */}
-                           <Box display="flex" gap={1} alignItems="center">
+                          <Box display="flex" gap={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
                              <Button
                                variant={timeFilter === 'day' ? 'contained' : 'outlined'}
                                size="small"

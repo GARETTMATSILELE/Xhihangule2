@@ -43,6 +43,13 @@ interface Invoice {
     branchName: string;
     branchCode: string;
   } | null;
+  fiscalData?: {
+    qrContent?: string; // payload to encode in QR
+    fiscalNumber?: string;
+    deviceSerial?: string;
+    documentNumber?: string;
+    signature?: string;
+  } | null;
 }
 
 interface InvoicePrintProps {
@@ -126,7 +133,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
                 className="company-logo"
               />
             )}
-            <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold' }}>
+            <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold' }} className="company-name">
               {company?.name || 'Company Name'}
             </Typography>
             <Typography variant="body2" color="text.secondary">
@@ -142,6 +149,26 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               <Typography variant="body2" color="text.secondary">
                 Website: {company.website}
               </Typography>
+            )}
+            {/* Tax/Registration details at top alongside company details */}
+            {(company?.registrationNumber || company?.tinNumber || (company as any)?.vatNumber) && (
+              <Box sx={{ mt: 1 }}>
+                {company?.registrationNumber && (
+                  <Typography variant="body2" color="text.secondary">
+                    Reg. No: {company.registrationNumber}
+                  </Typography>
+                )}
+                {company?.tinNumber && (
+                  <Typography variant="body2" color="text.secondary">
+                    Tax No: {company.tinNumber}
+                  </Typography>
+                )}
+                {(company as any)?.vatNumber && (
+                  <Typography variant="body2" color="text.secondary">
+                    VAT No: {(company as any).vatNumber}
+                  </Typography>
+                )}
+              </Box>
             )}
           </div>
 
@@ -161,6 +188,23 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
             </Typography>
             <div className={`status-badge ${getStatusClass(invoice.status)}`}>
               {invoice.status.toUpperCase()}
+            </div>
+
+            {/* Fiscal QR Code: show QR if available, else placeholder */}
+            <div className="fiscal-qr">
+              {invoice.fiscalData?.qrContent ? (
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(invoice.fiscalData.qrContent)}`}
+                  alt="Fiscal QR Code"
+                  className="fiscal-qr-box"
+                />
+              ) : (
+                <div className="fiscal-qr-box">
+                  <Typography variant="caption" color="text.secondary">
+                    Fiscal QR Code
+                  </Typography>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -221,43 +265,8 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
 
         {/* Tax Breakdown */}
         <div className="tax-breakdown">
-          <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={12} md={6}>
-              {/* Bank Account Details */}
-              {invoice.selectedBankAccount && (
-                <Box sx={{ 
-                  border: '1px solid #e0e0e0', 
-                  borderRadius: 1, 
-                  p: 2,
-                  bgcolor: '#f9f9f9',
-                  height: 'fit-content'
-                }}>
-                  <Typography variant="h6" gutterBottom sx={{ borderBottom: '1px solid #e0e0e0', pb: 1 }}>
-                    Bank Account Details
-                  </Typography>
-                  
-                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                    <strong>Account Name:</strong> {invoice.selectedBankAccount.accountName}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                    <strong>Account Number:</strong> {invoice.selectedBankAccount.accountNumber}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                    <strong>Account Type:</strong> {invoice.selectedBankAccount.accountType}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                    <strong>Bank Name:</strong> {invoice.selectedBankAccount.bankName}
-                  </Typography>
-                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                    <strong>Branch Name:</strong> {invoice.selectedBankAccount.branchName}
-                  </Typography>
-                  <Typography variant="body2">
-                    <strong>Branch Code:</strong> {invoice.selectedBankAccount.branchCode}
-                  </Typography>
-                </Box>
-              )}
-            </Grid>
-            <Grid item xs={12} md={6}>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={12}>
               <Box sx={{ 
                 border: '1px solid #e0e0e0', 
                 borderRadius: 1, 
@@ -313,6 +322,39 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               </Box>
             </Grid>
           </Grid>
+
+          {/* Bank Account Details BELOW totals */}
+          {invoice.selectedBankAccount && (
+            <Box sx={{ 
+              border: '1px solid #e0e0e0', 
+              borderRadius: 1, 
+              p: 2,
+              bgcolor: '#f9f9f9',
+              mt: 2
+            }}>
+              <Typography variant="h6" gutterBottom sx={{ borderBottom: '1px solid #e0e0e0', pb: 1 }}>
+                Bank Account Details
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                <strong>Account Name:</strong> {invoice.selectedBankAccount.accountName}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                <strong>Account Number:</strong> {invoice.selectedBankAccount.accountNumber}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                <strong>Account Type:</strong> {invoice.selectedBankAccount.accountType}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                <strong>Bank Name:</strong> {invoice.selectedBankAccount.bankName}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                <strong>Branch Name:</strong> {invoice.selectedBankAccount.branchName}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Branch Code:</strong> {invoice.selectedBankAccount.branchCode}
+              </Typography>
+            </Box>
+          )}
         </div>
 
         {/* Additional Details */}
@@ -335,6 +377,13 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
           {company && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               {company.name} | Reg: {company.registrationNumber} | Tax: {company.tinNumber}
+            </Typography>
+          )}
+          {invoice.fiscalData && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              {invoice.fiscalData.fiscalNumber ? `Fiscal No: ${invoice.fiscalData.fiscalNumber}  ` : ''}
+              {invoice.fiscalData.deviceSerial ? `Device: ${invoice.fiscalData.deviceSerial}  ` : ''}
+              {invoice.fiscalData.documentNumber ? `Doc No: ${invoice.fiscalData.documentNumber}  ` : ''}
             </Typography>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

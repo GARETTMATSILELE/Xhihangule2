@@ -157,6 +157,39 @@ const companySchema = new mongoose_1.Schema({
             max: 1,
             default: 0.4
         }
+    },
+    plan: {
+        type: String,
+        enum: ['INDIVIDUAL', 'SME', 'ENTERPRISE'],
+        default: 'ENTERPRISE'
+    },
+    propertyLimit: {
+        type: Number,
+        default: null
+    },
+    featureFlags: {
+        commissionEnabled: {
+            type: Boolean,
+            default: true
+        },
+        agentAccounts: {
+            type: Boolean,
+            default: true
+        },
+        propertyAccounts: {
+            type: Boolean,
+            default: true
+        }
+    },
+    fiscalConfig: {
+        enabled: { type: Boolean, default: false },
+        providerName: { type: String, trim: true },
+        agentName: { type: String, trim: true },
+        deviceSerial: { type: String, trim: true },
+        fdmsBaseUrl: { type: String, trim: true },
+        apiKey: { type: String, trim: true },
+        apiUsername: { type: String, trim: true },
+        apiPassword: { type: String, trim: true }
     }
 }, {
     timestamps: true

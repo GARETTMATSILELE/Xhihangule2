@@ -26,9 +26,11 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import accountantService, { CommissionData, AgencyCommission, PREACommission } from '../../services/accountantService';
+import { useCompany } from '../../contexts/CompanyContext';
 
 const CommissionsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
+  const { company } = useCompany();
   const [agentCommissions, setAgentCommissions] = useState<CommissionData | null>(null);
   const [agencyCommission, setAgencyCommission] = useState<AgencyCommission | null>(null);
   const [preaCommission, setPREACommission] = useState<PREACommission | null>(null);
@@ -1279,6 +1281,20 @@ const CommissionsPage: React.FC = () => {
       XLSX.utils.book_append_sheet(workbook, worksheet, title);
       XLSX.writeFile(workbook, `${title.toLowerCase().replace(' ', '_')}.xlsx`);
     }
+  // Gate entire page if commissions disabled
+  if (company?.featureFlags && company.featureFlags.commissionEnabled === false) {
+    return (
+      <Box sx={{ width: '100%', mt: 4 }}>
+        <Typography variant="h5" gutterBottom>
+          Commissions
+        </Typography>
+        <Alert severity="info">
+          Commissions are not available on your current plan.
+        </Alert>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ width: '100%' }}>
       <Box sx={{ mt: 4 }}>

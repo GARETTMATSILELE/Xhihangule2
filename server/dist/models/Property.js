@@ -50,8 +50,8 @@ const PropertySchema = new mongoose_1.Schema({
     type: {
         type: String,
         enum: {
-            values: ['apartment', 'house', 'commercial'],
-            message: 'Property type must be one of: apartment, house, commercial'
+            values: ['apartment', 'house', 'commercial', 'land'],
+            message: 'Property type must be one of: apartment, house, commercial, land'
         },
         default: 'apartment'
     },
@@ -96,6 +96,11 @@ const PropertySchema = new mongoose_1.Schema({
     landArea: {
         type: Number,
         min: [0, 'Land area cannot be negative'],
+        default: 0
+    },
+    pricePerSqm: {
+        type: Number,
+        min: [0, 'Price per sqm cannot be negative'],
         default: 0
     },
     description: {

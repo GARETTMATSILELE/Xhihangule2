@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { useCompany } from "../contexts/CompanyContext";
 import { useProperties } from "../contexts/PropertyContext";
 import { usePropertyOwnerService } from "../services/propertyOwnerService";
 import accountantService from "../services/accountantService";
@@ -289,12 +290,13 @@ const Modal = ({ open, onClose, title, children, width = "max-w-2xl" }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className={cls("relative w-full mx-4 bg-white rounded-2xl shadow-xl border", width)}>
+      {/* Fullscreen on mobile, modal on desktop */}
+      <div className={cls("relative bg-white shadow-xl border w-full h-full mx-0 rounded-none md:h-auto md:mx-4 md:rounded-2xl", width)}>
         <div className="p-4 border-b flex items-center justify-between rounded-t-2xl">
           <h3 className="text-lg font-semibold">{title}</h3>
           <button onClick={onClose} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200">✕</button>
         </div>
-        <div className="p-4 max-h-[80vh] overflow-y-auto">{children}</div>
+        <div className="p-4 md:max-h-[80vh] md:overflow-y-auto h-[calc(100%-56px)] overflow-y-auto">{children}</div>
       </div>
     </div>
   );
@@ -324,6 +326,7 @@ const propertyColors = {
 // --- Main CRM component ---
 export default function CRM() {
   const { user, logout } = useAuth();
+  const { company } = useCompany();
   // Support path-scoped sessions: if present, use sessionId in API base for this page load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -338,9 +341,13 @@ export default function CRM() {
   const navigate = useNavigate();
   const location = useLocation();
   const { notifications, addNotification, markAllRead } = useNotification();
-  const [tab, setTab] = useState("Leads");
-  const [query, setQuery] = useState("");
-  const [nav, setNav] = useState<'dashboard' | 'files' | 'settings'>('dashboard');
+  // Boot skeleton for initial paint
+  const [bootLoading, setBootLoading] = useState(true);
+  useEffect(() => { const t = setTimeout(()=>setBootLoading(false), 800); return ()=>clearTimeout(t); }, []);
+  const [tab, setTab] = usePersistentState('sales_tab', "Leads");
+  const [query, setQuery] = usePersistentState('sales_query', "");
+  const [nav, setNav] = usePersistentState('sales_nav', 'dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editPropertyId, setEditPropertyId] = useState<string | null>(null);
   const displayName = (user ? `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email : "Property CRM");
   const userInitials = useMemo(() => {
@@ -585,8 +592,24 @@ export default function CRM() {
       // Prefer direct sales endpoint to avoid rental routes
       const createdRes = await apiService.createPropertySales(payload);
       const created = (createdRes && (createdRes as any).data) ? (createdRes as any).data : createdRes;
+
+      // If an owner was selected, append the created property to the owner's properties in salesowners collection
+      const ownerId = property.ownerId;
+      if (ownerId && created && (created as any)._id) {
+        try {
+          // Fetch current sales owner to get latest properties array
+          const owner = await propertyOwnerService.getSalesById(ownerId);
+          const currentProps: string[] = Array.isArray((owner as any)?.properties)
+            ? (owner as any).properties.map((p: any) => (typeof p === 'object' && p?._id ? p._id : (p?.$oid || p)))
+            : [];
+          const nextProps = Array.from(new Set([...(currentProps || []), String((created as any)._id)]));
+          await propertyOwnerService.updateSales(ownerId, { properties: nextProps });
+        } catch (e) {
+          // Non-fatal: proceed even if linking fails
+        }
+      }
+
       await refreshProperties();
-      // Refresh owners so the assigned owner's properties array reflects the new property
       await refreshOwners();
     } catch (e) {}
   };
@@ -674,6 +697,7 @@ export default function CRM() {
       <header className="sticky top-0 z-40 backdrop-blur bg-white/70 border-b">
         <div className="w-full pl-0 pr-4 py-3 flex items-center gap-3">
           <div className="flex items-center gap-2">
+            <button className="md:hidden p-2 rounded-xl border bg-slate-100 hover:bg-slate-200" onClick={()=>setSidebarOpen(true)} aria-label="Open menu">☰</button>
             <div className="h-9 w-9 rounded-2xl bg-slate-900 text-white grid place-items-center font-bold">
               {userInitials}
             </div>
@@ -700,47 +724,73 @@ export default function CRM() {
       </header>
 
       <div className="w-full pl-0 pr-6 py-4 flex gap-6">
-        <SalesSidebar />
+        {/* Sidebar: static on desktop, drawer on mobile */}
+        <div className="hidden md:block"><SalesSidebar /></div>
+        {sidebarOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <div className="absolute inset-0 bg-black/30" onClick={()=>setSidebarOpen(false)} />
+            <div className="absolute left-0 top-0 bottom-0 w-64 bg-white shadow-xl">
+              <SalesSidebar />
+            </div>
+          </div>
+        )}
         <main className="flex-1 space-y-6 max-w-5xl mx-auto">
         {location.pathname.includes('/sales-dashboard/valuations') ? (
           <ValuationsPage />
         ) : (
           <>
-        {/* KPI cards (hidden on Valuations page) */}
-        {!location.pathname.includes('/sales-dashboard/valuations') && (
+        {/* KPI cards (hidden on Valuations and Files pages) */}
+        {!location.pathname.includes('/sales-dashboard/valuations') && !location.pathname.includes('/sales-dashboard/files') && (
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Leads</CardTitle>
-            </CardHeader>
-            <CardContent className="text-3xl font-bold">{backendLeads.length}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Upcoming Viewings</CardTitle>
-            </CardHeader>
-            <CardContent className="text-3xl font-bold">{(backendViewings || []).filter(v => new Date(v.when) > new Date()).length}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Active Properties</CardTitle>
-            </CardHeader>
-            <CardContent className="text-3xl font-bold">{(backendProperties || []).filter((p: any) => p.status !== 'rented').length}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Won Deals</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{(backendDeals || []).filter((d: any) => d.won).length}</div>
-              <div className="text-sm text-slate-500">{money(((backendDeals || []).filter((d: any) => d.won)).reduce((s: number, d: any) => s + Number(d.offerPrice || 0), 0))} total</div>
-            </CardContent>
-          </Card>
+          {bootLoading ? (
+            <>
+              {[1,2,3,4].map(i => (
+                <Card key={`kpi-skel-${i}`}>
+                  <CardHeader>
+                    <div className="h-4 w-24 bg-slate-200 rounded animate-pulse" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-6 w-16 bg-slate-200 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+              ))}
+            </>
+          ) : (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Leads</CardTitle>
+                </CardHeader>
+                <CardContent className="text-3xl font-bold">{backendLeads.length}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Upcoming Viewings</CardTitle>
+                </CardHeader>
+                <CardContent className="text-3xl font-bold">{(backendViewings || []).filter(v => new Date(v.when) > new Date()).length}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Active Properties</CardTitle>
+                </CardHeader>
+                <CardContent className="text-3xl font-bold">{(backendProperties || []).filter((p: any) => p.status !== 'rented').length}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Won Deals</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{(backendDeals || []).filter((d: any) => d.won).length}</div>
+                  <div className="text-sm text-slate-500">{money(((backendDeals || []).filter((d: any) => d.won)).reduce((s: number, d: any) => s + Number(d.offerPrice || 0), 0))} total</div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </section>
         )}
 
         {/* Commission card under KPI cards (hidden on Valuations page) */}
-        {!location.pathname.includes('/sales-dashboard/valuations') && (
+        {!location.pathname.includes('/sales-dashboard/valuations') && (company?.featureFlags?.commissionEnabled !== false) && (
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card>
             <CardHeader>
@@ -758,11 +808,11 @@ export default function CRM() {
 
         {/* Tab bar (hidden on Files and Valuations section) */}
         {!location.pathname.includes('/sales-dashboard/files') && !location.pathname.includes('/sales-dashboard/valuations') && (
-          <nav className="flex flex-wrap gap-2">
+          <nav className="flex gap-2 overflow-x-auto whitespace-nowrap">
             {[
               "Leads","Viewings","Buyers","Owners","Properties","Deals"
             ].map(t => (
-              <Button key={t} onClick={()=>setTab(t)} className={cls("", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
+              <Button key={t} onClick={()=>setTab(t)} className={cls("whitespace-nowrap", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
             ))}
             <div className="flex-1" />
             {/* Quick add menu */}
@@ -788,9 +838,9 @@ export default function CRM() {
         {location.pathname.endsWith('/sales-dashboard/files') && (
           <Card>
             <CardHeader className="flex items-center justify-between">
-              <CardTitle>Properties</CardTitle>
+              <CardTitle>Files</CardTitle>
               <div className="flex items-center gap-2">
-                <Input placeholder="Search properties" value={query} onChange={e=>setQuery(e.target.value)} className="max-w-xs" />
+                <Input placeholder="Search files" value={query} onChange={e=>setQuery(e.target.value)} className="max-w-xs" />
               </div>
             </CardHeader>
             <CardContent>
@@ -958,7 +1008,8 @@ export default function CRM() {
               <CardTitle>Leads</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-slate-600">
@@ -972,15 +1023,7 @@ export default function CRM() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered((backendLeads || []).map(l => ({
-                      id: l._id,
-                      name: l.name,
-                      source: l.source,
-                      interest: l.interest,
-                      phone: l.phone,
-                      email: l.email,
-                      status: l.status
-                    })), ["name","source","interest","email","phone"]).map(l => (
+                    {filtered((backendLeads || []).map(l => ({ id: l._id, name: l.name, source: l.source, interest: l.interest, phone: l.phone, email: l.email, status: l.status })), ["name","source","interest","email","phone"]).map(l => (
                       <tr key={l.id} className="border-t">
                         <td className="py-2 font-medium">{l.name}</td>
                         <td className="py-2">{l.source}</td>
@@ -992,17 +1035,29 @@ export default function CRM() {
                           {["New","Contacted","Qualified","Viewing","Offer","Won","Lost"].map(s=> (
                             <button key={s} className={cls("text-xs px-2 py-1 rounded-lg border", l.status===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={async ()=>{ await leadService.update(l.id, { status: s }); await refreshLeads(); }}>{s}</button>
                           ))}
-                          <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>{
-                            setShowViewingModal(true);
-                          }}>Schedule Viewing</button>
-                          <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>{
-                            setShowDealModal(true);
-                          }}>Create Deal</button>
+                          <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=> setShowViewingModal(true)}>Viewing</button>
+                          <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=> setShowDealModal(true)}>Deal</button>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+              {/* Mobile cards */}
+              <div className="md:hidden space-y-2">
+                {filtered((backendLeads || []).map(l => ({ id: l._id, name: l.name, source: l.source, interest: l.interest, phone: l.phone, email: l.email, status: l.status })), ["name","source","interest","email","phone"]).map(l => (
+                  <div key={l.id} className="rounded-xl border p-3 bg-white">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">{l.name}</div>
+                      <Badge className={leadColors[l.status]}>{l.status}</Badge>
+                    </div>
+                    <div className="text-xs text-slate-600 mt-1">{l.interest}</div>
+                    <div className="mt-2 flex gap-2">
+                      <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100" onClick={()=> setShowViewingModal(true)}>Viewing</button>
+                      <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100" onClick={()=> setShowDealModal(true)}>Deal</button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -1128,7 +1183,8 @@ export default function CRM() {
               <Button className="bg-slate-900 text-white border-slate-900" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-slate-600">
@@ -1189,6 +1245,28 @@ export default function CRM() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              {/* Mobile cards */}
+              <div className="md:hidden space-y-2">
+                {filtered(
+                  (backendProperties || []).map(bp => {
+                    const raw = (bp.status || 'available');
+                    const human = raw === 'available' ? 'Available' : raw === 'under_offer' ? 'Under Offer' : (raw === 'sold' || raw === 'rented') ? 'Sold' : 'Available';
+                    return ({ id: bp._id, title: bp.name, address: bp.address, price: bp.price ?? bp.rent, bedrooms: bp.bedrooms || 0, bathrooms: bp.bathrooms || 0, status: human });
+                  }),
+                  ["address","notes"]
+                ).map(p => (
+                  <div key={p.id} className="rounded-xl border p-3 bg-white">
+                    <div className="font-medium">{p.address}</div>
+                    <div className="text-xs text-slate-600">{p.bedrooms} / {p.bathrooms} · {money(p.price)}</div>
+                    <div className="mt-2 flex gap-2">
+                      <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100" onClick={()=>openEditProperty(p.id)}>Edit</button>
+                      {['Available','Under Offer','Sold'].map(s => (
+                        <button key={s} className={cls('text-xs px-2 py-1 rounded-lg border', p.status===s?'bg-transparent text-slate-900 border-slate-900':'bg-slate-100')} onClick={()=>markPropertyStatus(p.id, s)}>{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -1811,9 +1889,17 @@ function CommissionDrilldown() {
         setLoading(true);
         const u = user?._id || '';
         if (!u) return;
-        const resp = await fetch(`/api/users/${u}/commission?saleOnly=true&limit=10`, { credentials: 'include' });
-        const data = await resp.json();
-        const list = Array.isArray(data?.items) ? data.items : [];
+        // Fetch recent sales payments filtered by agent (logged-in user)
+        const resp = await paymentService.getAllPublic(user?.companyId, { paymentType: 'sale', agentId: u });
+        const payments = Array.isArray(resp?.data) ? resp.data : [];
+        // Map to minimal rows required by the table (Date, Reference, Agent Share)
+        const list = payments.map((p: any) => ({
+          id: String(p._id || p.id),
+          date: p.paymentDate,
+          referenceNumber: p.referenceNumber,
+          manualPropertyAddress: p.manualPropertyAddress,
+          agentShare: p?.commissionDetails?.agentShare || 0
+        }));
         setItems(list);
       } catch {
         setItems([]);

@@ -33,6 +33,23 @@ interface Company {
     agentPercentOfRemaining: number;
     agencyPercentOfRemaining: number;
   };
+  plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
+  propertyLimit?: number | null;
+  featureFlags?: {
+    commissionEnabled: boolean;
+    agentAccounts: boolean;
+    propertyAccounts: boolean;
+  };
+  fiscalConfig?: {
+    enabled?: boolean;
+    providerName?: string;
+    agentName?: string;
+    deviceSerial?: string;
+    fdmsBaseUrl?: string;
+    apiKey?: string;
+    apiUsername?: string;
+    apiPassword?: string;
+  };
   createdAt: string;
   updatedAt: string;
   __v: number;
@@ -81,6 +98,10 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
       subscriptionStatus: data.subscriptionStatus ?? 'trial',
       subscriptionEndDate: data.subscriptionEndDate,
       bankAccounts: data.bankAccounts || [],
+      plan: data.plan,
+      propertyLimit: data.propertyLimit,
+      featureFlags: data.featureFlags,
+      fiscalConfig: data.fiscalConfig,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
       __v: data.__v || 0
@@ -161,6 +182,10 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         subscriptionEndDate: companyData.subscriptionEndDate,
         bankAccounts: companyData.bankAccounts || [],
         commissionConfig: companyData.commissionConfig,
+        plan: companyData.plan,
+        propertyLimit: companyData.propertyLimit,
+        featureFlags: companyData.featureFlags,
+        fiscalConfig: companyData.fiscalConfig,
         createdAt: companyData.createdAt,
         updatedAt: companyData.updatedAt,
         __v: companyData.__v || 0

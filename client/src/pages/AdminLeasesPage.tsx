@@ -40,6 +40,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLeaseService } from '../services/leaseService';
 import { usePropertyService } from '../services/propertyService';
 import { useTenantService } from '../services/tenantService';
+import { useCompany } from '../contexts/CompanyContext';
 import { Lease, LeaseStatus, LeaseFormData } from '../types/lease';
 import { Property } from '../types/property';
 import { Tenant } from '../types/tenant';
@@ -50,6 +51,7 @@ const AdminLeasesPage: React.FC = () => {
   const leaseService = useLeaseService();
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
+  const { company: companyInfo } = useCompany();
 
   const [leases, setLeases] = useState<Lease[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
@@ -78,13 +80,15 @@ const AdminLeasesPage: React.FC = () => {
 
       const [leasesRes, propertiesRes, tenantsRes] = await Promise.all([
         leaseService.getAll(),
-        propertyService.getPublicProperties(),
-        tenantService.getAllPublic()
+        // For INDIVIDUAL plan, restrict to company-scoped properties
+        (companyInfo as any)?.plan === 'INDIVIDUAL' ? propertyService.getProperties() : propertyService.getPublicProperties(),
+        // For INDIVIDUAL plan, restrict to company-scoped tenants
+        (companyInfo as any)?.plan === 'INDIVIDUAL' ? tenantService.getAll() : tenantService.getAllPublic()
       ]);
 
       setLeases(leasesRes || []);
       setProperties(propertiesRes || []);
-      setTenants(tenantsRes?.tenants || []);
+      setTenants((tenantsRes as any)?.tenants || []);
     } catch (error) {
       console.error('Error loading lease data:', error);
       setError(error instanceof Error ? error.message : 'Failed to load lease data. Please try again later.');

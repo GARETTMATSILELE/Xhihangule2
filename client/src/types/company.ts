@@ -29,6 +29,23 @@ export interface Company {
     agentPercentOfRemaining: number;
     agencyPercentOfRemaining: number;
   };
+  plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
+  propertyLimit?: number | null;
+  featureFlags?: {
+    commissionEnabled: boolean;
+    agentAccounts: boolean;
+    propertyAccounts: boolean;
+  };
+  fiscalConfig?: {
+    enabled?: boolean;
+    providerName?: string; // Agent/Integrator name
+    agentName?: string; // Optional separate agent name
+    deviceSerial?: string; // Fiscal device serial/ID
+    fdmsBaseUrl?: string; // Agent/FDMS gateway base URL
+    apiKey?: string; // If applicable
+    apiUsername?: string; // If applicable
+    apiPassword?: string; // If applicable
+  };
   createdAt: Date;
   updatedAt: Date;
 }

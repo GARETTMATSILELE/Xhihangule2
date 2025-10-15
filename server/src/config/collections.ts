@@ -15,5 +15,15 @@ export const COLLECTIONS = {
   AGENT_ACCOUNTS: 'agentaccounts',
   VALUATIONS: 'valuations',
   DEVELOPMENTS: 'developments',
-  DEVELOPMENT_UNITS: 'developmentunits'
+  DEVELOPMENT_UNITS: 'developmentunits',
+  INSPECTIONS: 'inspections'
 } as const; 
+
+// Extend type to include inspections without breaking existing imports
+export type CollectionsKeys = keyof typeof COLLECTIONS | 'INSPECTIONS';
+
+// Backward-compatible augmentation for new collections
+export const ensureCollections = {
+  ...COLLECTIONS,
+  INSPECTIONS: (COLLECTIONS as any).INSPECTIONS || 'inspections'
+} as const;

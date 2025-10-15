@@ -63,6 +63,8 @@ const tenantSchema = new mongoose_1.Schema({
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Property'
     },
+    // Optional: multiple properties linkage
+    propertyIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Property' }],
     ownerId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'User',

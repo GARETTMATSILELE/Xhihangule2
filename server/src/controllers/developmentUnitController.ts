@@ -133,4 +133,34 @@ export const listUnits = async (req: Request, res: Response) => {
   }
 };
 
+export const setUnitBuyer = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const { unitId } = req.params as any;
+    const { buyerId } = req.body || {};
+    if (!buyerId || !mongoose.Types.ObjectId.isValid(String(buyerId))) throw new AppError('buyerId is required', 400);
+
+    const unit = await DevelopmentUnit.findById(unitId).lean();
+    if (!unit) throw new AppError('Unit not found', 404);
+
+    // Ensure unit belongs to the company
+    const dev = await Development.findById(unit.developmentId).lean();
+    if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
+
+    const buyer = await Buyer.findOne({ _id: buyerId, companyId: req.user!.companyId }).lean();
+    if (!buyer) throw new AppError('Buyer not found', 404);
+
+    const updated = await DevelopmentUnit.findByIdAndUpdate(
+      unitId,
+      { $set: { buyerId: buyer._id, buyerName: buyer.name } },
+      { new: true }
+    );
+    return res.json({ status: 'success', data: updated });
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error setting unit buyer';
+    return res.status(status).json({ message });
+  }
+};
+
 

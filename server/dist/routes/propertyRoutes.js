@@ -16,6 +16,7 @@ const express_1 = __importDefault(require("express"));
 const propertyController_1 = require("../controllers/propertyController");
 const auth_1 = require("../middleware/auth");
 const roles_1 = require("../middleware/roles");
+const limits_1 = require("../middleware/limits");
 const logger_1 = require("../utils/logger");
 const Property_1 = require("../models/Property");
 const router = express_1.default.Router();
@@ -113,7 +114,7 @@ router.get('/admin-dashboard', (req, res, next) => {
 router.get('/', auth_1.authWithCompany, propertyController_1.getProperties);
 router.get('/vacant', auth_1.authWithCompany, propertyController_1.getVacantProperties);
 router.get('/:id', auth_1.authWithCompany, propertyController_1.getProperty);
-router.post('/', auth_1.authWithCompany, roles_1.canCreateProperty, propertyController_1.createProperty);
+router.post('/', auth_1.authWithCompany, roles_1.canCreateProperty, limits_1.enforcePropertyLimit, propertyController_1.createProperty);
 // Sales route for creating property with sales fields
 router.post('/sales', auth_1.authWithCompany, propertyController_1.createSalesProperty);
 // Allow sales/agents to update their own sales properties (controller enforces ownership)

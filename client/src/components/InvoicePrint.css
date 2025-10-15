@@ -5,21 +5,29 @@
     display: none !important;
   }
   
-  /* Ensure proper page breaks */
+  /* Ensure proper page width and page breaks */
+  .invoice-container {
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: auto !important;
+  }
   .invoice-page {
+    width: 190mm; /* Fit within A4 printable area */
+    margin: 0 auto;
     page-break-after: always;
   }
   
   /* Set paper size and margins */
   @page {
     size: A4;
-    margin: 1cm;
+    margin: 10mm; /* tighter margins to fit on a single page */
   }
   
   /* Ensure text is readable */
   body {
-    font-size: 12pt;
-    line-height: 1.4;
+    font-size: 11pt; /* slightly smaller to fit */
+    line-height: 1.35;
     color: #000;
     background: #fff;
   }
@@ -32,17 +40,42 @@
   
   /* Ensure proper spacing */
   .invoice-header {
-    margin-bottom: 20px;
+    margin-bottom: 12px;
+    page-break-inside: avoid;
+    /* Force two-column layout with fixed right column */
+    display: grid !important;
+    grid-template-columns: 1fr 60mm; /* left fills, right fixed width */
+    column-gap: 8px;
   }
   
   .invoice-content {
-    margin-bottom: 30px;
+    margin-bottom: 16px;
+    page-break-inside: avoid;
+  }
+  /* Ensure QR box prints at exact size */
+  .fiscal-qr-box {
+    width: 35mm;
+    height: 35mm;
+    background: #fff !important;
   }
   
   .invoice-footer {
-    margin-top: 40px;
+    margin-top: 16px;
     border-top: 1px solid #ccc;
-    padding-top: 20px;
+    padding-top: 12px;
+    page-break-inside: avoid;
+  }
+
+  /* Ensure right column width remains fixed and aligned */
+  .invoice-details {
+    width: 60mm !important;
+    max-width: 60mm !important;
+    text-align: right;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .company-info {
+    min-width: 0; /* allow shrinking instead of pushing right column */
   }
   
   /* Ensure colors print properly */
@@ -69,7 +102,7 @@
   
   th, td {
     border: 1px solid #ddd;
-    padding: 8px;
+    padding: 6px; /* tighter cell padding */
     text-align: left;
   }
   
@@ -80,18 +113,28 @@
   
   /* Tax breakdown table styles */
   .tax-breakdown {
-    margin-bottom: 20px;
+    margin-bottom: 12px;
+    page-break-inside: avoid;
   }
   
   .tax-breakdown-box {
     border: 1px solid #ccc !important;
     background-color: #fafafa !important;
+    page-break-inside: avoid;
+  }
+
+  .client-section {
+    page-break-inside: avoid;
+  }
+
+  .company-logo {
+    max-height: 50px;
   }
 }
 
 /* Screen styles for better display */
 .invoice-container {
-  max-width: 800px;
+  max-width: 210mm; /* Fit within A4 width on screen preview */
   margin: 0 auto;
   padding: 20px;
   background: #fff;
@@ -103,7 +146,7 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
   padding-bottom: 20px;
   border-bottom: 2px solid #1976d2;
 }
@@ -119,9 +162,28 @@
   margin-bottom: 15px;
 }
 
+.company-name {
+  font-size: 1.75rem; /* reduce ~2 points from default h4 ~2rem */
+}
+
 .invoice-details {
   text-align: right;
   flex: 1;
+}
+/* Reserved Fiscal QR area */
+.fiscal-qr {
+  margin-top: 12px;
+  display: inline-block;
+}
+.fiscal-qr-box {
+  width: 90px; /* ~35mm */
+  height: 90px;
+  border: 1px dashed #9e9e9e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #fafafa;
 }
 
 .invoice-number {
@@ -140,6 +202,13 @@
 
 .invoice-content {
   margin-bottom: 25px;
+}
+
+/* Ensure page content width fits A4 in screen preview as well */
+.invoice-page {
+  max-width: 190mm;
+  width: 100%;
+  margin: 0 auto;
 }
 
 /* Items table styles */

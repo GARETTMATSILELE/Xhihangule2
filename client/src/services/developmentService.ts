@@ -2,8 +2,9 @@ import api from '../api/axios';
 
 export interface CreateDevelopmentInput {
   name: string;
-  type: 'stands' | 'apartments' | 'houses' | 'semidetached' | 'townhouses';
+  type: 'stands' | 'apartments' | 'houses' | 'semidetached' | 'townhouses' | 'land';
   description?: string;
+  address?: string;
   owner?: {
     firstName?: string;
     lastName?: string;
@@ -13,12 +14,16 @@ export interface CreateDevelopmentInput {
     phone?: string;
   };
   variations: Array<{ id: string; label: string; count: number; price?: number; size?: number }>;
+  // Commission structure for development-wide payments
+  commissionPercent?: number;
+  commissionPreaPercent?: number;
+  commissionAgencyPercentRemaining?: number;
+  commissionAgentPercentRemaining?: number;
 }
 
 export const developmentService = {
   async create(input: CreateDevelopmentInput) {
-    // Creating developments can take longer due to unit generation; extend timeout
-    const res = await api.post('/developments', input, { timeout: 60000 });
+    const res = await api.post('/developments', input);
     return res.data?.data || res.data;
   },
   async list() {

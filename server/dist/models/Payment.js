@@ -165,7 +165,7 @@ const PaymentSchema = new mongoose_1.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'completed', 'failed'],
+        enum: ['pending', 'completed', 'failed', 'reversed', 'refunded'],
         default: 'pending',
     },
     currency: {
@@ -238,6 +238,21 @@ const PaymentSchema = new mongoose_1.Schema({
         ref: 'SalesContract',
         required: false
     },
+    developmentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Development',
+        required: false
+    },
+    developmentUnitId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'DevelopmentUnit',
+        required: false
+    },
+    idempotencyKey: {
+        type: String,
+        required: false,
+        index: true
+    },
 }, {
     timestamps: true
 });
@@ -251,5 +266,8 @@ PaymentSchema.index({ status: 1 });
 // Add compound index for agent commission queries
 PaymentSchema.index({ agentId: 1, status: 1, paymentDate: -1 });
 PaymentSchema.index({ saleId: 1 });
+PaymentSchema.index({ developmentId: 1 });
+PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
+PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
 exports.Payment = mongoose_1.default.model('Payment', PaymentSchema, collections_1.COLLECTIONS.PAYMENTS);

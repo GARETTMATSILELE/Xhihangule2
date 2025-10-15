@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -62,6 +95,7 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
         });
         const properties = yield Property_1.Property.find(query)
             .populate('ownerId', 'firstName lastName email')
+            .populate('propertyOwnerId', 'firstName lastName email phone')
             .sort({ createdAt: -1 }); // Sort by newest first
         console.log('Found properties for agent:', {
             count: properties.length,
@@ -363,7 +397,7 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (req.user.role !== 'agent') {
             return res.status(403).json({ message: 'Only agents can create tenants via this endpoint.' });
         }
-        const { firstName, lastName, email, phone, propertyId, status, idNumber, emergencyContact } = req.body;
+        const { firstName, lastName, email, phone, propertyId, propertyIds, status, idNumber, emergencyContact } = req.body;
         // Validate required fields
         if (!firstName || !lastName || !email || !phone) {
             return res.status(400).json({ message: 'All fields are required' });
@@ -373,10 +407,24 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!emailRegex.test(email)) {
             return res.status(400).json({ message: 'Invalid email format' });
         }
-        // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
-        if (!property) {
-            return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
+        // Validate property ownership for single or multiple properties
+        if (Array.isArray(propertyIds) && propertyIds.length > 0) {
+            const ids = propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(String(id)));
+            const ownedCount = yield Property_1.Property.countDocuments({
+                _id: { $in: ids },
+                ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            });
+            if (ownedCount !== ids.length) {
+                return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
+            }
+        }
+        else {
+            // Ensure the property belongs to this agent (single)
+            const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+            if (!property) {
+                return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
+            }
         }
         // Check for existing tenant with same email in this company
         const existingTenant = yield Tenant_1.Tenant.findOne({ email, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
@@ -401,15 +449,25 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
             phone,
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             status: status || 'Active',
-            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+            propertyId: propertyId ? new mongoose_1.default.Types.ObjectId(propertyId) : undefined,
             ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Set the agent as the owner
             idNumber,
             emergencyContact
         };
+        if (Array.isArray(propertyIds) && propertyIds.length > 0) {
+            tenantData.propertyIds = propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(String(id)));
+            if (!propertyId)
+                delete tenantData.propertyId;
+        }
         const newTenant = new Tenant_1.Tenant(tenantData);
         yield newTenant.save();
-        // Mark property as rented
-        yield Property_1.Property.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(propertyId), { status: 'rented' });
+        // Mark property/properties as rented
+        if (Array.isArray(tenantData.propertyIds) && tenantData.propertyIds.length > 0) {
+            yield Property_1.Property.updateMany({ _id: { $in: tenantData.propertyIds } }, { status: 'rented' });
+        }
+        else if (propertyId) {
+            yield Property_1.Property.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(propertyId), { status: 'rented' });
+        }
         res.status(201).json(newTenant);
     }
     catch (error) {
@@ -564,7 +622,7 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.updateAgentProperty = updateAgentProperty;
 // Create a new payment for the agent
 const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'Authentication required' });
@@ -595,23 +653,8 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
         }
         // Calculate commission based on property's commission percentage and company-specific splits
-        const company = yield Company_1.Company.findById(new mongoose_1.default.Types.ObjectId(req.user.companyId)).lean();
         const commissionPercentage = Number(property.commission || 0);
-        const totalCommission = (amount * commissionPercentage) / 100;
-        const preaPercentOfTotal = Math.max(0, Math.min(1, (_d = (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.preaPercentOfTotal) !== null && _d !== void 0 ? _d : 0.03));
-        const agentPercentOfRemaining = Math.max(0, Math.min(1, (_f = (_e = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _e === void 0 ? void 0 : _e.agentPercentOfRemaining) !== null && _f !== void 0 ? _f : 0.6));
-        const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_h = (_g = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _g === void 0 ? void 0 : _g.agencyPercentOfRemaining) !== null && _h !== void 0 ? _h : 0.4));
-        const preaFee = totalCommission * preaPercentOfTotal;
-        const remainingCommission = totalCommission - preaFee;
-        const agentShare = remainingCommission * agentPercentOfRemaining;
-        const agencyShare = remainingCommission * agencyPercentOfRemaining;
-        const commissionDetails = {
-            totalCommission,
-            preaFee,
-            agentShare,
-            agencyShare,
-            ownerAmount: amount - totalCommission,
-        };
+        const commissionDetails = yield (yield Promise.resolve().then(() => __importStar(require('../services/commissionService')))).CommissionService.calculate(amount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
         // Create payment record
         const payment = new Payment_1.Payment({
             paymentType: paymentType || 'rental',

@@ -8,6 +8,8 @@ export interface ITenant extends Document {
   phone: string;
   companyId: mongoose.Types.ObjectId;
   propertyId?: mongoose.Types.ObjectId;
+  // Optional: link a tenant to multiple properties
+  propertyIds?: mongoose.Types.ObjectId[];
   ownerId?: mongoose.Types.ObjectId; // Agent who created this tenant
   status: string;
   idNumber?: string;
@@ -43,6 +45,8 @@ const tenantSchema = new Schema({
     type: Schema.Types.ObjectId,
     ref: 'Property'
   },
+  // Optional: multiple properties linkage
+  propertyIds: [{ type: Schema.Types.ObjectId, ref: 'Property' }],
   ownerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -16,11 +16,13 @@ import { useAuth } from '../../contexts/AuthContext';
 const Register: React.FC = () => {
   const navigate = useNavigate();
   const { signup } = useAuth();
+  const location = useLocation();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     confirmPassword: '',
     name: '',
+    plan: 'INDIVIDUAL' as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
   });
   const [error, setError] = useState('');
 
@@ -30,6 +32,14 @@ const Register: React.FC = () => {
       [e.target.name]: e.target.value,
     });
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const plan = params.get('plan');
+    if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
+      setFormData(prev => ({ ...prev, plan: plan as any }));
+    }
+  }, [location.search]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,7 +51,7 @@ const Register: React.FC = () => {
     }
 
     try {
-      await signup(formData.email, formData.password, formData.name);
+      await signup(formData.email, formData.password, formData.name, undefined, formData.plan);
       navigate('/login', { state: { message: 'Registration successful! Please log in.' } });
     } catch (err: any) {
       setError(err.message || 'An error occurred during registration');
@@ -80,6 +90,20 @@ const Register: React.FC = () => {
               value={formData.name}
               onChange={handleChange}
             />
+            <TextField
+              margin="normal"
+              select
+              fullWidth
+              name="plan"
+              label="Plan"
+              value={formData.plan}
+              onChange={handleChange}
+              SelectProps={{ native: true }}
+            >
+              <option value="INDIVIDUAL">Individual (up to 10 properties)</option>
+              <option value="SME">SME (up to 25 properties)</option>
+              <option value="ENTERPRISE">Enterprise (unlimited)</option>
+            </TextField>
             <TextField
               margin="normal"
               required

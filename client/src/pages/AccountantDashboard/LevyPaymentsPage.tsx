@@ -20,10 +20,12 @@ import {
   Tooltip,
   InputAdornment,
   Dialog,
-  DialogContent
+  DialogContent,
+  Button
 } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { Print as PrintIcon, Download as DownloadIcon } from '@mui/icons-material';
+import { Paid as PaidIcon } from '@mui/icons-material';
 import { 
   Search as SearchIcon, 
   FilterList as FilterIcon,
@@ -43,6 +45,9 @@ const LevyPaymentsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
+  const [payoutOpen, setPayoutOpen] = useState(false);
+  const [payoutRow, setPayoutRow] = useState<any>(null);
+  const [payoutForm, setPayoutForm] = useState({ paidToName: '', paidToAccount: '', paidToContact: '', payoutDate: '', payoutMethod: 'bank_transfer', payoutReference: '', notes: '' });
   
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,8 +218,19 @@ const LevyPaymentsPage: React.FC = () => {
     { 
       field: 'status', 
       headerName: 'Status', 
-      width: 100,
+      width: 130,
       renderCell: (params) => {
+        const paidOut = params.row?.payout?.paidOut;
+        if (paidOut) {
+          return (
+            <Chip
+              label="Paid Out"
+              color="success"
+              size="small"
+              variant="outlined"
+            />
+          );
+        }
         const status = params.row.status;
         const color = status === 'completed' ? 'success' : status === 'pending' ? 'warning' : 'error';
         return (
@@ -235,11 +251,29 @@ const LevyPaymentsPage: React.FC = () => {
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 160,
+      width: 230,
       sortable: false,
       filterable: false,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="Initiate Payout">
+            <IconButton
+              color="success"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPayoutRow(params.row);
+                const addr = (params.row?.propertyId && typeof params.row.propertyId === 'object') ? (params.row.propertyId.address || '') : '';
+                const baseRef = String(params.row.referenceNumber || params.row._id || '').toUpperCase();
+                const suffix = new Date().toISOString().slice(0,10).replace(/-/g, '');
+                const autoRef = `LPY-${baseRef.slice(-6)}-${suffix}`;
+                setPayoutForm({ paidToName: '', paidToAccount: addr, paidToContact: '', payoutDate: new Date().toISOString().slice(0,10), payoutMethod: 'bank_transfer', payoutReference: autoRef, notes: '' });
+                setPayoutOpen(true);
+              }}
+            >
+              <PaidIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Print Receipt">
             <IconButton
               color="primary"
@@ -462,6 +496,56 @@ const LevyPaymentsPage: React.FC = () => {
                 onClose={() => setPrintOpen(false)}
               />
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Payout Dialog */}
+        <Dialog open={payoutOpen} onClose={() => setPayoutOpen(false)} maxWidth="sm" fullWidth>
+          <DialogContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>Initiate Levy Payout</Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12}><TextField fullWidth label="Paid To (Association Name)" value={payoutForm.paidToName} onChange={(e)=>setPayoutForm(f=>({...f, paidToName: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth label="Account" value={payoutForm.paidToAccount} onChange={(e)=>setPayoutForm(f=>({...f, paidToAccount: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth label="Contact" value={payoutForm.paidToContact} onChange={(e)=>setPayoutForm(f=>({...f, paidToContact: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth type="date" label="Payout Date" InputLabelProps={{ shrink: true }} value={payoutForm.payoutDate} onChange={(e)=>setPayoutForm(f=>({...f, payoutDate: e.target.value}))} /></Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payout Method</InputLabel>
+                  <Select
+                    label="Payout Method"
+                    value={payoutForm.payoutMethod}
+                    onChange={(e)=>setPayoutForm(f=>({...f, payoutMethod: e.target.value as string}))}
+                  >
+                    <MenuItem value="cash">Cash</MenuItem>
+                    <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}><TextField fullWidth label="Payout Reference" value={payoutForm.payoutReference} onChange={(e)=>setPayoutForm(f=>({...f, payoutReference: e.target.value}))} /></Grid>
+              <Grid item xs={12}><TextField fullWidth label="Notes" value={payoutForm.notes} onChange={(e)=>setPayoutForm(f=>({...f, notes: e.target.value}))} /></Grid>
+            </Grid>
+            <Box sx={{ display:'flex', justifyContent:'flex-end', gap:1, mt:2 }}>
+              <Button onClick={()=>setPayoutOpen(false)}>Cancel</Button>
+              <Button variant="contained" onClick={async ()=>{
+                try {
+                  if (!payoutRow?._id) return;
+                  const updated = await paymentService.initiateLevyPayout(payoutRow._id, payoutForm);
+                  // refresh list
+                  if (user?.companyId) {
+                    const data = await paymentService.getLevyPayments(user.companyId);
+                    setRows(data.map((row: any, idx: number) => ({ id: row._id || idx, ...row })));
+                  }
+                  setPayoutOpen(false);
+                  // open acknowledgement
+                  const html = await paymentService.getLevyPayoutAcknowledgement(payoutRow._id, user?.companyId);
+                  const win = window.open('', '_blank');
+                  if (win) { win.document.write(html); win.document.close(); win.focus(); }
+                } catch (err) {
+                  console.error('Failed to initiate payout', err);
+                  alert('Failed to initiate payout');
+                }
+              }}>Save & Print Acknowledgement</Button>
+            </Box>
           </DialogContent>
         </Dialog>
       </Box>

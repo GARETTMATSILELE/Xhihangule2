@@ -43,13 +43,13 @@ export const apiService = {
   },
   
   // Properties
-  getProperties: () => publicApi.get('/properties/public/all'),
-  getProperty: (id: string) => publicApi.get(`/properties/public/${id}`),
-  createProperty: (data: any) => publicApi.post('/properties/public', data),
+  getProperties: () => apiInstance.get('/properties'),
+  getProperty: (id: string) => apiInstance.get(`/properties/${id}`),
+  createProperty: (data: any) => apiInstance.post('/properties', data),
   createPropertySales: (data: any) => apiInstance.post('/properties/sales', data),
-  updateProperty: (id: string, data: any) => publicApi.put(`/properties/${id}`, data),
-  deleteProperty: (id: string) => publicApi.delete(`/properties/${id}`),
-  getVacantProperties: () => publicApi.get('/properties/vacant'),
+  updateProperty: (id: string, data: any) => apiInstance.put(`/properties/${id}`, data),
+  deleteProperty: (id: string) => apiInstance.delete(`/properties/${id}`),
+  getVacantProperties: () => apiInstance.get('/properties/vacant'),
   getAdminDashboardProperties: () => publicApi.get('/properties/admin-dashboard'),
 
   // Public Properties (for admin dashboard)
@@ -69,6 +69,11 @@ export const apiService = {
   },
 
   // Property Owners
+  // Billing
+  createCheckout: (data: { plan: 'INDIVIDUAL'|'SME'|'ENTERPRISE'; cycle: 'monthly'|'yearly' }) => apiInstance.post('/billing/checkout', data),
+  getPaymentStatus: (id: string) => apiInstance.get(`/billing/payments/${id}/status`),
+  changeSubscriptionPlan: (data: { plan?: 'INDIVIDUAL'|'SME'|'ENTERPRISE'; cycle?: 'monthly'|'yearly' }) => apiInstance.post('/billing/subscriptions/change-plan', data),
+  redeemVoucher: (code: string, pin: string) => apiInstance.post('/billing/vouchers/redeem', { code, pin }),
   getPropertyOwners: () => apiInstance.get('/property-owners'),
   getPropertyOwner: (id: string) => apiInstance.get(`/property-owners/${id}`),
   createPropertyOwner: (data: any) => apiInstance.post('/property-owners', data),
@@ -76,11 +81,11 @@ export const apiService = {
   deletePropertyOwner: (id: string) => apiInstance.delete(`/property-owners/${id}`),
 
   // Tenants
-  getTenants: () => publicApi.get('/tenants/public/all'),
-  getTenant: (id: string) => publicApi.get(`/tenants/public/${id}`),
-  createTenant: (data: any) => publicApi.post('/tenants', data),
-  updateTenant: (id: string, data: any) => publicApi.put(`/tenants/${id}`, data),
-  deleteTenant: (id: string) => publicApi.delete(`/tenants/${id}`),
+  getTenants: (params?: any) => apiInstance.get('/tenants', { params }),
+  getTenant: (id: string) => apiInstance.get(`/tenants/${id}`),
+  createTenant: (data: any) => apiInstance.post('/tenants', data),
+  updateTenant: (id: string, data: any) => apiInstance.put(`/tenants/${id}`, data),
+  deleteTenant: (id: string) => apiInstance.delete(`/tenants/${id}`),
 
   // Public Tenants (for admin dashboard)
   getTenantsPublic: (companyId?: string) => {
@@ -106,11 +111,11 @@ export const apiService = {
   deleteLease: (id: string) => apiInstance.delete(`/leases/${id}`),
 
   // Payments
-  getPayments: () => publicApi.get('/payments/public/all'),
-  getPayment: (id: string) => publicApi.get(`/payments/public/${id}`),
-  createPayment: (data: any) => publicApi.post('/payments', data),
-  updatePayment: (id: string, data: any) => publicApi.put(`/payments/${id}`, data),
-  deletePayment: (id: string) => publicApi.delete(`/payments/${id}`),
+  getPayments: (params?: any) => apiInstance.get('/payments/company', { params }),
+  getPayment: (id: string) => apiInstance.get(`/payments/${id}`),
+  createPayment: (data: any) => apiInstance.post('/payments', data),
+  updatePayment: (id: string, data: any) => apiInstance.put(`/payments/${id}`, data),
+  deletePayment: (id: string) => apiInstance.delete(`/payments/${id}`),
 
   // Public Payments (for admin dashboard)
   getPaymentsPublic: (companyId?: string) => {

@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getLevyReceiptDownload = exports.getLevyReceiptPublic = exports.getLevyPayments = exports.createLevyPayment = void 0;
+exports.getLevyReceiptDownload = exports.getLevyPayoutAcknowledgement = exports.initiateLevyPayout = exports.getLevyReceiptPublic = exports.getLevyPayments = exports.createLevyPayment = void 0;
 const LevyPayment_1 = require("../models/LevyPayment");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -150,6 +150,121 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getLevyReceiptPublic = getLevyReceiptPublic;
+const initiateLevyPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || !((_b = req.user) === null || _b === void 0 ? void 0 : _b.userId)) {
+            throw new errorHandler_1.AppError('Authentication and company required', 401);
+        }
+        const { id } = req.params;
+        const { paidToName, paidToAccount, paidToContact, payoutDate, payoutMethod, payoutReference, notes } = req.body;
+        const levy = yield LevyPayment_1.LevyPayment.findOne({ _id: id, companyId: req.user.companyId });
+        if (!levy)
+            throw new errorHandler_1.AppError('Levy payment not found', 404);
+        const normalizedMethod = typeof payoutMethod === 'string'
+            ? payoutMethod.trim().toLowerCase().replace(/\s+/g, '_')
+            : undefined;
+        const allowedMethods = ['cash', 'bank_transfer', 'mobile_money', 'cheque'];
+        const methodToSave = normalizedMethod && allowedMethods.includes(normalizedMethod) ? normalizedMethod : undefined;
+        levy.set('payout', Object.assign(Object.assign({}, (levy.get('payout') || {})), { paidOut: true, paidToName,
+            paidToAccount,
+            paidToContact, payoutDate: payoutDate ? new Date(payoutDate) : new Date(), payoutMethod: methodToSave, payoutReference,
+            notes, processedBy: req.user.userId }));
+        // Update top-level status to paid_out for easier filtering
+        levy.set('status', 'paid_out');
+        yield levy.save();
+        const populated = yield LevyPayment_1.LevyPayment.findById(levy._id)
+            .populate('propertyId', 'name address')
+            .populate('processedBy', 'firstName lastName email');
+        res.json(populated);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError)
+            throw error;
+        console.error('Error initiating levy payout:', error);
+        throw new errorHandler_1.AppError('Error initiating levy payout', 500);
+    }
+});
+exports.initiateLevyPayout = initiateLevyPayout;
+const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    try {
+        const { id } = req.params;
+        const companyId = req.query.companyId || ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        const levy = yield LevyPayment_1.LevyPayment.findOne(Object.assign({ _id: id }, (companyId ? { companyId } : {})))
+            .populate('propertyId', 'name address')
+            .populate('processedBy', 'firstName lastName email');
+        if (!levy)
+            throw new errorHandler_1.AppError('Levy payment not found', 404);
+        const company = levy.companyId ? yield Company_1.Company.findById(levy.companyId).select('name address phone email logo') : null;
+        const html = `<!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8" /><title>Levy Payout Acknowledgement - ${levy.referenceNumber || levy._id}</title>
+      <style>
+        @page { size: A4; margin: 18mm; }
+        body { font-family: Arial, sans-serif; color: #333; }
+        .wrap { max-width: 720px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 18px; }
+        .logo { max-width: 160px; max-height: 70px; object-fit: contain; display:block; margin:0 auto 8px; }
+        .title { font-size: 22px; font-weight: bold; }
+        .line { font-size: 12px; color: #555; }
+        .section { margin-top: 16px; }
+        .row { display:flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; }
+        .label { font-weight: 600; color:#666; min-width: 180px; }
+        .value { text-align:right; }
+        .ack { margin-top: 24px; padding-top: 16px; border-top: 2px solid #333; }
+        .sig-line { margin-top: 32px; }
+        .sig { border-top: 1px solid #333; display:inline-block; min-width: 260px; padding-top: 4px; text-align:center; }
+        .note { margin-top: 12px; font-size: 12px; color: #666; }
+        @media print { .no-print { display:none; } }
+      </style></head>
+      <body>
+        <div class="wrap">
+          <div class="header">
+            ${(company === null || company === void 0 ? void 0 : company.logo) ? `<img class="logo" src="data:image/png;base64,${company.logo}" alt="Logo"/>` : ''}
+            <div class="title">Levy Payout Acknowledgement</div>
+            ${(company === null || company === void 0 ? void 0 : company.name) ? `<div class="line">${company.name}</div>` : ''}
+            ${(company === null || company === void 0 ? void 0 : company.address) ? `<div class="line">${company.address}</div>` : ''}
+            ${((company === null || company === void 0 ? void 0 : company.phone) || (company === null || company === void 0 ? void 0 : company.email)) ? `<div class="line">${company.phone || ''} ${company.phone && company.email ? ' | ' : ''} ${company.email || ''}</div>` : ''}
+          </div>
+          <div class="section">
+            <div class="row"><div class="label">Payout Reference</div><div class="value">${((_b = levy.payout) === null || _b === void 0 ? void 0 : _b.payoutReference) || '-'}</div></div>
+            <div class="row"><div class="label">Payout Date</div><div class="value">${((_c = levy.payout) === null || _c === void 0 ? void 0 : _c.payoutDate) ? new Date(levy.payout.payoutDate).toLocaleDateString() : new Date().toLocaleDateString()}</div></div>
+            <div class="row"><div class="label">Property</div><div class="value">${((_d = levy.propertyId) === null || _d === void 0 ? void 0 : _d.name) || 'N/A'}</div></div>
+            <div class="row"><div class="label">Amount</div><div class="value">${levy.currency || 'USD'} ${(levy.amount || 0).toFixed(2)}</div></div>
+            <div class="row"><div class="label">Payment Method</div><div class="value">${((_e = levy.payout) === null || _e === void 0 ? void 0 : _e.payoutMethod) || '-'}</div></div>
+          </div>
+          <div class="section">
+            <div class="row"><div class="label">Paid To (Association)</div><div class="value">${((_f = levy.payout) === null || _f === void 0 ? void 0 : _f.paidToName) || '-'}</div></div>
+            ${((_g = levy.payout) === null || _g === void 0 ? void 0 : _g.paidToAccount) ? `<div class="row"><div class="label">Account</div><div class="value">${levy.payout.paidToAccount}</div></div>` : ''}
+            ${((_h = levy.payout) === null || _h === void 0 ? void 0 : _h.paidToContact) ? `<div class="row"><div class="label">Contact</div><div class="value">${levy.payout.paidToContact}</div></div>` : ''}
+          </div>
+          ${((_j = levy.payout) === null || _j === void 0 ? void 0 : _j.notes) ? `<div class="section"><div class="label">Notes</div><div class="value">${levy.payout.notes}</div></div>` : ''}
+          <div class="ack">
+            <p>We acknowledge receipt of the above payout.</p>
+            <div class="sig-line">
+              <div class="sig">Payee Signature</div>
+            </div>
+            <div class="sig-line" style="margin-top: 24px;">
+              <div class="sig">Printed Name & Date</div>
+            </div>
+          </div>
+          <div class="no-print" style="text-align:center; margin-top:16px;">
+            <button onclick="window.print()" style="padding:8px 16px; background:#1976d2; color:#fff; border:none; border-radius:4px; cursor:pointer;">Print</button>
+          </div>
+        </div>
+      </body></html>`;
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError)
+            throw error;
+        console.error('Error generating payout acknowledgement:', error);
+        throw new errorHandler_1.AppError('Failed to generate payout acknowledgement', 500);
+    }
+});
+exports.getLevyPayoutAcknowledgement = getLevyPayoutAcknowledgement;
 // Public: Download levy receipt as HTML (formatted for A4 print/PDF)
 const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;

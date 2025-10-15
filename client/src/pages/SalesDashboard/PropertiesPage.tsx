@@ -1,6 +1,7 @@
 import React from 'react';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { usePropertyService } from '../../services/propertyService';
+import { usePropertyOwnerService } from '../../services/propertyOwnerService';
 
 const cls = (...s: any[]) => s.filter(Boolean).join(' ');
 
@@ -22,16 +23,18 @@ const Input = (props: any) => (
 
 export default function PropertiesPage() {
   const propertyService = usePropertyService();
+  const propertyOwnerService = usePropertyOwnerService();
   const [properties, setProperties] = React.useState<any[]>([]);
+  const [owners, setOwners] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState<string>('');
   const [editing, setEditing] = React.useState<any | null>(null);
-  const [form, setForm] = React.useState<any>({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '' });
-  const [createForm, setCreateForm] = React.useState<any>({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '' });
+  const [form, setForm] = React.useState<any>({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
+  const [createForm, setCreateForm] = React.useState<any>({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
 
   const load = React.useCallback(async () => {
-    try { setLoading(true); setError(null); const list = await propertyService.getProperties(); setProperties(Array.isArray(list)?list:[]); }
+    try { setLoading(true); setError(null); const [list, ownerRes] = await Promise.all([propertyService.getProperties(), propertyOwnerService.getAll()]); setProperties(Array.isArray(list)?list:[]); setOwners(Array.isArray(ownerRes?.owners)? ownerRes.owners : (Array.isArray(ownerRes)? ownerRes : [])); }
     catch (e:any) { setError(e?.message || 'Failed to load properties'); }
     finally { setLoading(false); }
   }, []);
@@ -44,9 +47,41 @@ export default function PropertiesPage() {
     return hay.includes(query.toLowerCase());
   });
 
-  const startEdit = (p: any) => { setEditing(p); setForm({ name: p.name||'', address: p.address||'', type: p.type||'house', price: p.price||'', bedrooms: p.bedrooms||'', bathrooms: p.bathrooms||'', description: p.description||'' }); };
-  const saveEdit = async () => { if (!editing?._id) return; try { setLoading(true); await propertyService.updateProperty(editing._id, { ...form, price: Number(form.price||0), bedrooms: Number(form.bedrooms||0), bathrooms: Number(form.bathrooms||0) }); setEditing(null); await load(); } catch(e:any){ setError(e?.message||'Failed to update'); } finally { setLoading(false);} };
-  const createProperty = async () => { if (!createForm.name?.trim() || !createForm.address?.trim()) { setError('Name and address are required'); return; } try { setLoading(true); setError(null); await propertyService.createPropertySales({ ...createForm, price: Number(createForm.price||0), bedrooms: Number(createForm.bedrooms||0), bathrooms: Number(createForm.bathrooms||0) }); setCreateForm({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '' }); await load(); } catch(e:any){ setError(e?.message||'Failed to create'); } finally { setLoading(false);} };
+  const startEdit = (p: any) => { setEditing(p); setForm({ name: p.name||'', address: p.address||'', type: p.type||'house', price: p.price||'', bedrooms: p.bedrooms||'', bathrooms: p.bathrooms||'', description: p.description||'', landArea: p.landArea||'', pricePerSqm: p.pricePerSqm||'', propertyOwnerId: (p as any).propertyOwnerId || '' }); };
+  const saveEdit = async () => {
+    if (!editing?._id) return;
+    try {
+      setLoading(true);
+      const isLand = form.type === 'land';
+      const computedPrice = isLand ? Number(form.landArea||0) * Number(form.pricePerSqm||0) : Number(form.price||0);
+      await propertyService.updateProperty(editing._id, {
+        ...form,
+        price: computedPrice,
+        landArea: isLand ? Number(form.landArea||0) : Number(form.landArea||0),
+        bedrooms: isLand ? 0 : Number(form.bedrooms||0),
+        bathrooms: isLand ? 0 : Number(form.bathrooms||0),
+        propertyOwnerId: form.propertyOwnerId || undefined
+      });
+      setEditing(null);
+      await load();
+    } catch(e:any){ setError(e?.message||'Failed to update'); } finally { setLoading(false);} };
+  const createProperty = async () => {
+    if (!createForm.name?.trim() || !createForm.address?.trim()) { setError('Name and address are required'); return; }
+    try {
+      setLoading(true); setError(null);
+      const isLand = createForm.type === 'land';
+      const computedPrice = isLand ? Number(createForm.landArea||0) * Number(createForm.pricePerSqm||0) : Number(createForm.price||0);
+      await propertyService.createPropertySales({
+        ...createForm,
+        price: computedPrice,
+        landArea: isLand ? Number(createForm.landArea||0) : Number(createForm.landArea||0),
+        bedrooms: isLand ? 0 : Number(createForm.bedrooms||0),
+        bathrooms: isLand ? 0 : Number(createForm.bathrooms||0),
+        propertyOwnerId: createForm.propertyOwnerId || undefined
+      });
+      setCreateForm({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
+      await load();
+    } catch(e:any){ setError(e?.message||'Failed to create'); } finally { setLoading(false);} };
   const deleteProperty = async (id: string) => { if (!id) return; if (!window.confirm('Delete this property?')) return; try { setLoading(true); await propertyService.deleteProperty(id); await load(); } catch(e:any){ setError(e?.message||'Failed to delete'); } finally { setLoading(false);} };
 
   return (
@@ -69,11 +104,30 @@ export default function PropertiesPage() {
                 <select className="px-3 py-2 rounded-xl border" value={createForm.type} onChange={(e)=>setCreateForm((f:any)=>({...f, type: e.target.value}))}>
                   <option value="house">House</option>
                   <option value="apartment">Apartment</option>
-                  <option value="townhouse">Townhouse</option>
+                  <option value="commercial">Commercial</option>
+                  <option value="land">Land</option>
                 </select>
-                <Input placeholder="Price" value={createForm.price} onChange={(e:any)=>setCreateForm((f:any)=>({...f, price: e.target.value}))} />
-                <Input placeholder="Bedrooms" value={createForm.bedrooms} onChange={(e:any)=>setCreateForm((f:any)=>({...f, bedrooms: e.target.value}))} />
-                <Input placeholder="Bathrooms" value={createForm.bathrooms} onChange={(e:any)=>setCreateForm((f:any)=>({...f, bathrooms: e.target.value}))} />
+                {/* Owner tie-in */}
+                <div className="md:col-span-1">
+                  <select className="px-3 py-2 rounded-xl border w-full" value={createForm.propertyOwnerId} onChange={(e)=>setCreateForm((f:any)=>({...f, propertyOwnerId: e.target.value}))}>
+                    <option value="">-- Select Owner (optional) --</option>
+                    {owners.map((o:any)=> (
+                      <option key={o._id} value={o._id}>{(`${o.firstName || ''} ${o.lastName || ''}`).trim() || o.name || o.email}</option>
+                    ))}
+                  </select>
+                </div>
+                {createForm.type === 'land' ? (
+                  <>
+                    <Input placeholder="Land size (sqm)" value={createForm.landArea} onChange={(e:any)=>setCreateForm((f:any)=>({...f, landArea: e.target.value}))} />
+                    <Input placeholder="Price per sqm" value={createForm.pricePerSqm} onChange={(e:any)=>setCreateForm((f:any)=>({...f, pricePerSqm: e.target.value}))} />
+                  </>
+                ) : (
+                  <>
+                    <Input placeholder="Price" value={createForm.price} onChange={(e:any)=>setCreateForm((f:any)=>({...f, price: e.target.value}))} />
+                    <Input placeholder="Bedrooms" value={createForm.bedrooms} onChange={(e:any)=>setCreateForm((f:any)=>({...f, bedrooms: e.target.value}))} />
+                    <Input placeholder="Bathrooms" value={createForm.bathrooms} onChange={(e:any)=>setCreateForm((f:any)=>({...f, bathrooms: e.target.value}))} />
+                  </>
+                )}
                 <Input placeholder="Description" value={createForm.description} onChange={(e:any)=>setCreateForm((f:any)=>({...f, description: e.target.value}))} />
                 <div><button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={createProperty} disabled={loading}>Create Property</button></div>
               </div>
@@ -124,11 +178,30 @@ export default function PropertiesPage() {
                   <select className="px-3 py-2 rounded-xl border" value={form.type} onChange={(e)=>setForm((f:any)=>({...f, type: e.target.value}))}>
                     <option value="house">House</option>
                     <option value="apartment">Apartment</option>
-                    <option value="townhouse">Townhouse</option>
+                    <option value="commercial">Commercial</option>
+                    <option value="land">Land</option>
                   </select>
-                  <Input placeholder="Price" value={form.price} onChange={(e:any)=>setForm((f:any)=>({...f, price: e.target.value}))} />
-                  <Input placeholder="Bedrooms" value={form.bedrooms} onChange={(e:any)=>setForm((f:any)=>({...f, bedrooms: e.target.value}))} />
-                  <Input placeholder="Bathrooms" value={form.bathrooms} onChange={(e:any)=>setForm((f:any)=>({...f, bathrooms: e.target.value}))} />
+                  {/* Owner tie-in */}
+                  <div className="md:col-span-1">
+                    <select className="px-3 py-2 rounded-xl border w-full" value={form.propertyOwnerId || ''} onChange={(e)=>setForm((f:any)=>({...f, propertyOwnerId: e.target.value}))}>
+                      <option value="">-- Select Owner (optional) --</option>
+                      {owners.map((o:any)=> (
+                        <option key={o._id} value={o._id}>{(`${o.firstName || ''} ${o.lastName || ''}`).trim() || o.name || o.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {form.type === 'land' ? (
+                    <>
+                      <Input placeholder="Land size (sqm)" value={form.landArea} onChange={(e:any)=>setForm((f:any)=>({...f, landArea: e.target.value}))} />
+                      <Input placeholder="Price per sqm" value={form.pricePerSqm} onChange={(e:any)=>setForm((f:any)=>({...f, pricePerSqm: e.target.value}))} />
+                    </>
+                  ) : (
+                    <>
+                      <Input placeholder="Price" value={form.price} onChange={(e:any)=>setForm((f:any)=>({...f, price: e.target.value}))} />
+                      <Input placeholder="Bedrooms" value={form.bedrooms} onChange={(e:any)=>setForm((f:any)=>({...f, bedrooms: e.target.value}))} />
+                      <Input placeholder="Bathrooms" value={form.bathrooms} onChange={(e:any)=>setForm((f:any)=>({...f, bathrooms: e.target.value}))} />
+                    </>
+                  )}
                   <Input placeholder="Description" value={form.description} onChange={(e:any)=>setForm((f:any)=>({...f, description: e.target.value}))} />
                 </div>
                 <div className="mt-3 flex gap-2">

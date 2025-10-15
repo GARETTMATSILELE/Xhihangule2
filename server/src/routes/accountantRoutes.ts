@@ -84,10 +84,10 @@ router.get('/prea-commission', canViewCommissions, (req, res) => {
   getPREACommission(req, res);
 });
 
-// Deposit ledger routes - require accountant role
-router.get('/property-accounts/:propertyId/deposits', isAccountant, getPropertyDepositLedger);
-router.get('/property-accounts/:propertyId/deposits/summary', isAccountant, getPropertyDepositSummary);
-router.post('/property-accounts/:propertyId/deposits/payout', isAccountant, createPropertyDepositPayout);
+// Deposit ledger routes - allow admin and accountant
+router.get('/property-accounts/:propertyId/deposits', canViewCommissions, getPropertyDepositLedger);
+router.get('/property-accounts/:propertyId/deposits/summary', canViewCommissions, getPropertyDepositSummary);
+router.post('/property-accounts/:propertyId/deposits/payout', canViewCommissions, createPropertyDepositPayout);
 
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', canManagePayments, getCompanyPayments);
@@ -146,21 +146,21 @@ router.post('/payments/finalize-bulk', canManagePayments, async (req: Request, r
   }
 });
 
-// Property Account routes - require accountant role
-router.get('/property-accounts', isAccountant, getCompanyPropertyAccounts);
-router.get('/property-accounts/:propertyId', isAccountant, (req, res) => {
+// Property Account routes - allow admin and accountant
+router.get('/property-accounts', canViewCommissions, getCompanyPropertyAccounts);
+router.get('/property-accounts/:propertyId', canViewCommissions, (req, res) => {
   console.log('Property account detail route hit:', req.params.propertyId);
   console.log('User role:', req.user?.role);
   getPropertyAccount(req, res);
 });
-router.get('/property-accounts/:propertyId/transactions', isAccountant, getPropertyTransactions);
-router.post('/property-accounts/:propertyId/expense', isAccountant, addExpense);
-router.post('/property-accounts/:propertyId/payout', isAccountant, createOwnerPayout);
-router.put('/property-accounts/:propertyId/payout/:payoutId/status', isAccountant, updatePayoutStatus);
-router.get('/property-accounts/:propertyId/payouts', isAccountant, getPayoutHistory);
-router.post('/property-accounts/sync', isAccountant, syncPropertyAccounts);
-router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', isAccountant, getPaymentRequestDocument);
-router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', isAccountant, getAcknowledgementDocument);
+router.get('/property-accounts/:propertyId/transactions', canViewCommissions, getPropertyTransactions);
+router.post('/property-accounts/:propertyId/expense', canViewCommissions, addExpense);
+router.post('/property-accounts/:propertyId/payout', canViewCommissions, createOwnerPayout);
+router.put('/property-accounts/:propertyId/payout/:payoutId/status', canViewCommissions, updatePayoutStatus);
+router.get('/property-accounts/:propertyId/payouts', canViewCommissions, getPayoutHistory);
+router.post('/property-accounts/sync', canViewCommissions, syncPropertyAccounts);
+router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', canViewCommissions, getPaymentRequestDocument);
+router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', canViewCommissions, getAcknowledgementDocument);
 
 // Company account routes
 router.get('/company-account/summary', isAccountant, getCompanyAccountSummary);

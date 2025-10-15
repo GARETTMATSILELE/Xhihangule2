@@ -34,6 +34,8 @@ const upload = multer({
 // Allow fetching current company even if none exists (returns 404 inside controller)
 router.get('/current', auth, getCurrentCompany);
 router.put('/current', authWithCompany, updateCurrentCompany);
+// Admin: change plan directly by company id (can be restricted later)
+router.put('/:id/plan', authWithCompany, updateCompany);
 
 // Public routes
 router.get('/', getCompanies);

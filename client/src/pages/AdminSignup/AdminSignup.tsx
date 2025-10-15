@@ -29,6 +29,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
     password: '',
     confirmPassword: '',
     name: '',
+    plan: 'INDIVIDUAL' as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
     // Company Details removed for initial signup
   });
   const [error, setError] = useState('');
@@ -70,7 +71,9 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
       await signup(
         formData.email,
         formData.password,
-        formData.name
+        formData.name,
+        undefined,
+        formData.plan
       );
       // Navigation is handled by AuthContext.signup (company-setup for admins without a company)
     } catch (err: any) {
@@ -129,6 +132,20 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
               value={formData.confirmPassword}
               onChange={handleChange}
             />
+            <TextField
+              margin="normal"
+              select
+              fullWidth
+              name="plan"
+              label="Plan"
+              value={formData.plan}
+              onChange={handleChange}
+              SelectProps={{ native: true }}
+            >
+              <option value="INDIVIDUAL">Individual (up to 10 properties)</option>
+              <option value="SME">SME (up to 25 properties)</option>
+              <option value="ENTERPRISE">Enterprise (unlimited)</option>
+            </TextField>
           </>
         );
       default:

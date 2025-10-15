@@ -119,7 +119,7 @@ export const createTenant = async (req: Request, res: Response) => {
       throw new AppError('Access denied. Admin, Owner, or Agent role required to create tenants.', 403);
     }
 
-    const { firstName, lastName, email, phone, propertyId, status, idNumber, emergencyContact } = req.body;
+    const { firstName, lastName, email, phone, propertyId, propertyIds, status, idNumber, emergencyContact } = req.body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !phone) {
@@ -135,7 +135,8 @@ export const createTenant = async (req: Request, res: Response) => {
     logger.info('Creating tenant', {
       email,
       companyId: req.user.companyId,
-      propertyId
+      propertyId,
+      propertyIdsCount: Array.isArray(propertyIds) ? propertyIds.length : 0
     });
 
     const existingTenant = await Tenant.findOne({
@@ -147,7 +148,7 @@ export const createTenant = async (req: Request, res: Response) => {
       throw new AppError('Tenant with this email already exists', 400);
     }
 
-    const tenantData = {
+    const tenantData: any = {
       firstName,
       lastName,
       email,
@@ -155,22 +156,38 @@ export const createTenant = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       status: status || 'Active',
       propertyId: propertyId ? new mongoose.Types.ObjectId(propertyId) : undefined,
+      // Ensure ownerId is captured for admin/owner flows as required by schema
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
       idNumber,
       emergencyContact
     };
 
+    // If propertyIds provided, normalize them to ObjectIds
+    if (Array.isArray(propertyIds) && propertyIds.length > 0) {
+      tenantData.propertyIds = propertyIds
+        .filter((id: any) => !!id)
+        .map((id: any) => new mongoose.Types.ObjectId(String(id)));
+      // If multi selected, clear single propertyId unless explicitly provided
+      if (!propertyId) {
+        delete tenantData.propertyId;
+      }
+    }
+
     const newTenant = new Tenant(tenantData);
     await newTenant.save();
 
-    // If property is assigned, update property status
-    if (propertyId) {
+    // If properties are assigned, update their statuses
+    if (Array.isArray(tenantData.propertyIds) && tenantData.propertyIds.length > 0) {
+      await Property.updateMany({ _id: { $in: tenantData.propertyIds } }, { status: 'rented' });
+    } else if (propertyId) {
       await Property.findByIdAndUpdate(propertyId, { status: 'rented' });
     }
 
     logger.info('Tenant created successfully', {
       tenantId: newTenant._id,
       email,
-      propertyId
+      propertyId,
+      propertyIdsCount: Array.isArray(tenantData.propertyIds) ? tenantData.propertyIds.length : 0
     });
 
     res.status(201).json(newTenant);
@@ -193,13 +210,14 @@ export const updateTenant = async (req: Request, res: Response) => {
     }
 
     const { id } = req.params;
-    const { email, propertyId, ...updateData } = req.body;
+    const { email, propertyId, propertyIds, ...updateData } = req.body;
 
     logger.info('Updating tenant', {
       tenantId: id,
       companyId: req.user.companyId,
       updateFields: Object.keys(updateData),
-      propertyId
+      propertyId,
+      propertyIdsCount: Array.isArray(propertyIds) ? propertyIds.length : 0
     });
 
     if (email) {
@@ -220,16 +238,33 @@ export const updateTenant = async (req: Request, res: Response) => {
       throw new AppError('Tenant not found', 404);
     }
 
-    // Handle property changes
-    if (propertyId !== currentTenant.propertyId?.toString()) {
-      // If tenant had a previous property, mark it as available
+    // Handle property changes for single propertyId
+    if (typeof propertyId !== 'undefined' && propertyId !== currentTenant.propertyId?.toString()) {
       if (currentTenant.propertyId) {
         await Property.findByIdAndUpdate(currentTenant.propertyId, { status: 'available' });
       }
-      // If new property is assigned, mark it as rented
       if (propertyId) {
         await Property.findByIdAndUpdate(propertyId, { status: 'rented' });
       }
+    }
+
+    // Handle propertyIds changes (multi)
+    if (Array.isArray(propertyIds)) {
+      const currentIds = (currentTenant as any).propertyIds || [];
+      const currentIdsStr = currentIds.map((id: mongoose.Types.ObjectId) => id.toString());
+      const nextIds = propertyIds.map((id: any) => String(id));
+
+      const removed = currentIdsStr.filter((id: string) => !nextIds.includes(id));
+      const added = nextIds.filter((id: string) => !currentIdsStr.includes(id));
+
+      if (removed.length > 0) {
+        await Property.updateMany({ _id: { $in: removed } }, { status: 'available' });
+      }
+      if (added.length > 0) {
+        await Property.updateMany({ _id: { $in: added } }, { status: 'rented' });
+      }
+      // Normalize updateData.propertyIds to ObjectIds
+      (updateData as any).propertyIds = nextIds.map((id: string) => new mongoose.Types.ObjectId(id));
     }
 
     const updatedTenant = await Tenant.findOneAndUpdate(
@@ -240,7 +275,7 @@ export const updateTenant = async (req: Request, res: Response) => {
       { 
         ...updateData, 
         ...(email && { email }),
-        ...(propertyId && { propertyId: new mongoose.Types.ObjectId(propertyId) })
+        ...(typeof propertyId !== 'undefined' && propertyId !== '' ? { propertyId: new mongoose.Types.ObjectId(propertyId) } : { propertyId: undefined })
       },
       { new: true, runValidators: true }
     );

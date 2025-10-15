@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listUnits = exports.updateUnitStatus = void 0;
+exports.setUnitBuyer = exports.listUnits = exports.updateUnitStatus = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
@@ -132,3 +132,30 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     }
 });
 exports.listUnits = listUnits;
+const setUnitBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const { unitId } = req.params;
+        const { buyerId } = req.body || {};
+        if (!buyerId || !mongoose_1.default.Types.ObjectId.isValid(String(buyerId)))
+            throw new errorHandler_1.AppError('buyerId is required', 400);
+        const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean();
+        if (!unit)
+            throw new errorHandler_1.AppError('Unit not found', 404);
+        // Ensure unit belongs to the company
+        const dev = yield Development_1.Development.findById(unit.developmentId).lean();
+        if (!dev || String(dev.companyId) !== String(req.user.companyId))
+            throw new errorHandler_1.AppError('Forbidden', 403);
+        const buyer = yield Buyer_1.Buyer.findOne({ _id: buyerId, companyId: req.user.companyId }).lean();
+        if (!buyer)
+            throw new errorHandler_1.AppError('Buyer not found', 404);
+        const updated = yield DevelopmentUnit_1.DevelopmentUnit.findByIdAndUpdate(unitId, { $set: { buyerId: buyer._id, buyerName: buyer.name } }, { new: true });
+        return res.json({ status: 'success', data: updated });
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error setting unit buyer';
+        return res.status(status).json({ message });
+    }
+});
+exports.setUnitBuyer = setUnitBuyer;

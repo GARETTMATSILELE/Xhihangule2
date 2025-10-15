@@ -17,9 +17,10 @@ const PropertyAccountsPage: React.FC = () => {
   const { getProperties } = usePropertyService();
   const { getAllPublic: getAllLeases } = useLeaseService();
   const { getAllPublic: getAllTenants } = useTenantService();
-  const { getAllPublic: getAllPropertyOwners } = usePropertyOwnerService();
+  const { getAllPublic: getAllPropertyOwners, getAll: getAllSalesOwners } = usePropertyOwnerService();
   const [tenantMap, setTenantMap] = useState<Record<string, string>>({});
   const [ownerMap, setOwnerMap] = useState<Record<string, string>>({});
+  const [saleOwnerMap, setSaleOwnerMap] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
@@ -28,14 +29,18 @@ const PropertyAccountsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         
-        // Fetch properties, leases, tenants, and property owners in parallel
-        const [props, leases, tenantsResp, propertyOwners] = await Promise.all([
+        // Fetch properties, leases, tenants, and owners (rental + sales) in parallel
+        const [props, leases, tenantsResp, rentalOwnersRaw, salesOwnersRaw] = await Promise.all([
           getProperties(),
           getAllLeases(),
           getAllTenants(),
           getAllPropertyOwners().catch(err => {
             console.error('Error fetching property owners:', err);
-            return [];
+            return [] as any;
+          }),
+          getAllSalesOwners().catch(err => {
+            console.error('Error fetching sales owners:', err);
+            return { owners: [] } as any;
           })
         ]);
         
@@ -54,12 +59,17 @@ const PropertyAccountsPage: React.FC = () => {
         });
         setTenantMap(tenantMap);
         
-        // Map propertyId to owner name using owner.properties array
+        // Normalize owners arrays from responses
+        const rentalOwners: PropertyOwner[] = Array.isArray((rentalOwnersRaw as any)?.owners)
+          ? (rentalOwnersRaw as any).owners
+          : (Array.isArray(rentalOwnersRaw as any) ? (rentalOwnersRaw as any) : []);
+        const salesOwners: PropertyOwner[] = Array.isArray((salesOwnersRaw as any)?.owners)
+          ? (salesOwnersRaw as any).owners
+          : (Array.isArray(salesOwnersRaw as any) ? (salesOwnersRaw as any) : []);
+
+        // Map propertyId to owner name for rental owners
         const ownerMap: Record<string, string> = {};
-        console.log('Property owners fetched:', propertyOwners.length);
-        console.log('Properties fetched:', props.length);
-        
-        propertyOwners.forEach((owner: PropertyOwner) => {
+        rentalOwners.forEach((owner: PropertyOwner) => {
           console.log(`Owner ${owner._id}: ${owner.firstName} ${owner.lastName}`);
           console.log('Owner properties:', owner.properties);
           
@@ -76,6 +86,18 @@ const PropertyAccountsPage: React.FC = () => {
         });
         console.log('Final owner map:', ownerMap);
         setOwnerMap(ownerMap);
+
+        // Map propertyId to owner name for sales owners (salesowners collection)
+        const saleOwnerMapLocal: Record<string, string> = {};
+        salesOwners.forEach((owner: PropertyOwner) => {
+          if (owner.properties && Array.isArray(owner.properties)) {
+            owner.properties.forEach((propertyId: any) => {
+              const propId = typeof propertyId === 'object' && (propertyId as any).$oid ? (propertyId as any).$oid : propertyId;
+              saleOwnerMapLocal[propId] = `${owner.firstName} ${owner.lastName}`;
+            });
+          }
+        });
+        setSaleOwnerMap(saleOwnerMapLocal);
         
       } catch (err: any) {
         console.error('Error fetching data:', err);
@@ -103,7 +125,9 @@ const PropertyAccountsPage: React.FC = () => {
     ? properties.filter((property) => {
         const name = (property.name || '').toString().toLowerCase();
         const address = (property.address || '').toString().toLowerCase();
-        const ownerName = (ownerMap[property._id] || '').toLowerCase();
+        const ownerName = (
+          (property.rentalType === 'sale' ? saleOwnerMap[property._id] : ownerMap[property._id]) || ''
+        ).toLowerCase();
         const tenantName = (tenantMap[property._id] || '').toLowerCase();
         return (
           name.includes(normalizedQuery) ||
@@ -138,9 +162,17 @@ const PropertyAccountsPage: React.FC = () => {
               <CardContent>
                 <Typography variant="h6">{property.name}</Typography>
                 <Typography variant="body2" color="text.secondary">{property.address}</Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>Owner: {ownerMap[property._id] || 'N/A'}</Typography>
-                <Typography variant="body2">Tenant: {tenantMap[property._id] || 'N/A'}</Typography>
-                <Typography variant="body2">Rental Amount: ${property.rent?.toLocaleString() || '0'}</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  Owner: {(property.rentalType === 'sale' ? saleOwnerMap[property._id] : ownerMap[property._id]) || 'N/A'}
+                </Typography>
+                <Typography variant="body2">
+                  {property.rentalType === 'sale' ? 'Buyer' : 'Tenant'}: {tenantMap[property._id] || 'N/A'}
+                </Typography>
+                <Typography variant="body2">
+                  {property.rentalType === 'sale'
+                    ? `Sale Price: $${Number(property.price ?? 0).toLocaleString()}`
+                    : `Rental Amount: $${Number(property.rent ?? 0).toLocaleString()}`}
+                </Typography>
               </CardContent>
             </Card>
           </Grid>

@@ -96,6 +96,9 @@ export interface PaymentFormData {
   // Provisional workflow
   isProvisional?: boolean;
   provisionalRelationshipType?: 'unknown' | 'management' | 'introduction';
+  // Sales development linkage (optional)
+  developmentId?: string;
+  developmentUnitId?: string;
 }
 
 export interface Payment {
@@ -137,6 +140,9 @@ export interface Payment {
   isInSuspense?: boolean;
   commissionFinalized?: boolean;
   provisionalRelationshipType?: 'unknown' | 'management' | 'introduction';
+  // Sales development linkage (optional)
+  developmentId?: string;
+  developmentUnitId?: string;
 }
 
 // Extended Payment interface for populated data from backend

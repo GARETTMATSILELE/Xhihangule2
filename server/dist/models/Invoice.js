@@ -39,5 +39,12 @@ const InvoiceSchema = new mongoose_1.Schema({
     saleDetails: { type: String },
     status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
     selectedBankAccount: { type: BankAccountSchema, required: false },
+    fiscalData: {
+        qrContent: { type: String },
+        fiscalNumber: { type: String },
+        deviceSerial: { type: String },
+        documentNumber: { type: String },
+        signature: { type: String }
+    }
 }, { timestamps: true });
 exports.Invoice = database_1.accountingConnection.model('Invoice', InvoiceSchema, 'invoices');

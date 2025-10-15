@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { Invoice } from '../models/Invoice';
 import { AppError } from '../middleware/errorHandler';
 import { accountingConnection } from '../config/database';
+import { tryFiscalizeInvoice } from '../services/fiscalizationService';
 
 // Function to generate unique item code
 const generateItemCode = async (): Promise<string> => {
@@ -82,6 +83,21 @@ export const createInvoice = async (req: Request, res: Response) => {
     };
 
     const invoice = new Invoice(invoiceData);
+    // Try to fiscalize; fail-open
+    try {
+      const fiscal = await tryFiscalizeInvoice(req.user.companyId, {
+        _id: (invoice as any)._id?.toString?.(),
+        totalAmount: (invoice as any).totalAmount,
+        taxAmount: (invoice as any).taxAmount,
+        taxPercentage: (invoice as any).taxPercentage,
+        amountExcludingTax: (invoice as any).amountExcludingTax,
+        createdAt: (invoice as any).createdAt
+      });
+      if (fiscal) {
+        (invoice as any).fiscalData = fiscal;
+      }
+    } catch {}
+
     await invoice.save();
     res.status(201).json(invoice);
   } catch (error) {

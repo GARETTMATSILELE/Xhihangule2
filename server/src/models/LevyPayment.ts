@@ -11,11 +11,25 @@ export interface ILevyPayment extends Document {
   referenceNumber: string;
   notes: string;
   processedBy: mongoose.Types.ObjectId;
-  status: 'pending' | 'completed' | 'failed';
+  status: 'pending' | 'completed' | 'failed' | 'paid_out';
   currency: 'USD' | 'ZWL';
   createdAt: Date;
   updatedAt: Date;
   monthlyLevies: number;
+  // payout fields
+  payout?: {
+    paidOut: boolean;
+    paidToName?: string;
+    paidToAccount?: string;
+    paidToContact?: string;
+    payoutDate?: Date;
+    payoutMethod?: 'cash' | 'bank_transfer' | 'mobile_money' | 'cheque';
+    payoutReference?: string;
+    acknowledgedBy?: string; // signature name captured
+    acknowledgedAt?: Date;
+    notes?: string;
+    processedBy?: mongoose.Types.ObjectId;
+  };
 }
 
 const LevyPaymentSchema: Schema = new Schema({
@@ -64,7 +78,7 @@ const LevyPaymentSchema: Schema = new Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed'],
+    enum: ['pending', 'completed', 'failed', 'paid_out'],
     default: 'pending',
   },
   currency: {
@@ -75,6 +89,19 @@ const LevyPaymentSchema: Schema = new Schema({
   monthlyLevies: {
     type: Number,
     required: false,
+  },
+  payout: {
+    paidOut: { type: Boolean, default: false },
+    paidToName: { type: String },
+    paidToAccount: { type: String },
+    paidToContact: { type: String },
+    payoutDate: { type: Date },
+    payoutMethod: { type: String, enum: ['cash', 'bank_transfer', 'mobile_money', 'cheque'] },
+    payoutReference: { type: String },
+    acknowledgedBy: { type: String },
+    acknowledgedAt: { type: Date },
+    notes: { type: String },
+    processedBy: { type: Schema.Types.ObjectId, ref: 'User' }
   },
 }, {
   timestamps: true

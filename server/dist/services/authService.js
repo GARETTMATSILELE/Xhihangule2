@@ -49,12 +49,12 @@ class AuthService {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.initialize();
             // First try to find in PropertyOwner collection
-            let propertyOwner = yield PropertyOwner_1.PropertyOwner.findById(userId);
+            let propertyOwner = yield PropertyOwner_1.PropertyOwner.findById(userId).maxTimeMS(5000);
             if (propertyOwner) {
                 return { user: propertyOwner, type: 'propertyOwner' };
             }
             // If not found, try User collection
-            let user = yield User_1.User.findById(userId);
+            let user = yield User_1.User.findById(userId).maxTimeMS(5000);
             if (user) {
                 return { user, type: 'user' };
             }
@@ -65,7 +65,7 @@ class AuthService {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.initialize();
             // Check only the User collection
-            let user = yield User_1.User.findOne({ email });
+            let user = yield User_1.User.findOne({ email }).maxTimeMS(5000);
             if (!user) {
                 throw new errorHandler_1.AppError('Invalid credentials', 401, 'AUTH_ERROR');
             }

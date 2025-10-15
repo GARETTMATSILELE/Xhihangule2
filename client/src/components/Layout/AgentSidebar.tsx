@@ -86,12 +86,12 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
       path: '/agent-dashboard/maintenance' 
     },
     { 
-      text: 'Communications', 
+      text: 'Inspection Reports', 
       icon: <MessageIcon />, 
-      path: '/agent-dashboard/communications' 
+      path: '/agent-dashboard/inspections' 
     },
     { 
-      text: 'Tasks', 
+      text: 'Leads', 
       icon: <AssignmentIcon />, 
       path: '/agent-dashboard/tasks' 
     },

@@ -7,7 +7,9 @@ export const Communications: React.FC = () => {
       <Typography variant="h4" gutterBottom>
         Communications
       </Typography>
-      {/* Add communications content here */}
+      <Typography color="text.secondary">
+        This page is reserved for communications features.
+      </Typography>
     </Box>
   );
-}; 
+};

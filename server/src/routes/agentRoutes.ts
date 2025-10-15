@@ -1,5 +1,6 @@
 import express from 'express';
 import { auth } from '../middleware/auth';
+import { enforcePropertyLimit } from '../middleware/limits';
 import { isAgent } from '../middleware/roles';
 import multer from 'multer';
 import {
@@ -62,7 +63,7 @@ router.get('/properties', (req, res) => {
   console.log('Agent properties route hit');
   getAgentProperties(req, res);
 });
-router.post('/properties', createAgentProperty);
+router.post('/properties', enforcePropertyLimit, createAgentProperty);
 router.put('/properties/:id', updateAgentProperty);
 router.get('/tenants', getAgentTenants);
 router.post('/tenants', createAgentTenant);

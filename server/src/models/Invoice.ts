@@ -40,6 +40,13 @@ export interface IInvoice extends Document {
   saleDetails?: string;
   status: 'paid' | 'unpaid' | 'overdue';
   selectedBankAccount?: BankAccount;
+  fiscalData?: {
+    qrContent?: string;
+    fiscalNumber?: string;
+    deviceSerial?: string;
+    documentNumber?: string;
+    signature?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -83,6 +90,13 @@ const InvoiceSchema: Schema = new Schema({
   saleDetails: { type: String },
   status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
   selectedBankAccount: { type: BankAccountSchema, required: false },
+  fiscalData: {
+    qrContent: { type: String },
+    fiscalNumber: { type: String },
+    deviceSerial: { type: String },
+    documentNumber: { type: String },
+    signature: { type: String }
+  }
 }, { timestamps: true });
 
 export const Invoice = accountingConnection.model<IInvoice>('Invoice', InvoiceSchema, 'invoices'); 

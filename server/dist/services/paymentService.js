@@ -20,11 +20,11 @@ const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const database_1 = require("../config/database");
-const commissionService_1 = require("./commissionService");
+// CommissionService is imported elsewhere in the codebase; this service does not need a singleton
 const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const dbService = databaseService_1.DatabaseService.getInstance();
-const commissionService = commissionService_1.CommissionService.getInstance();
+// Remove unused singleton reference; commission calculations are handled in controllers via CommissionService
 // Calculate commission based on property type and amount
 const calculateCommission = (amount, propertyType) => {
     const rates = {

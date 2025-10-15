@@ -7,12 +7,12 @@ import { AppError } from '../middleware/errorHandler';
 import { JwtPayload } from '../types/auth';
 import mongoose from 'mongoose';
 import { isDatabaseAvailable } from '../config/database';
-import { CommissionService } from './commissionService';
+// CommissionService is imported elsewhere in the codebase; this service does not need a singleton
 import { logger } from '../utils/logger';
 import { DatabaseService } from './databaseService';
 
 const dbService = DatabaseService.getInstance();
-const commissionService = CommissionService.getInstance();
+// Remove unused singleton reference; commission calculations are handled in controllers via CommissionService
 
 // Calculate commission based on property type and amount
 const calculateCommission = (amount: number, propertyType: string) => {

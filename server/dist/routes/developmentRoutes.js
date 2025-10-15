@@ -11,6 +11,7 @@ const router = express_1.default.Router();
 router.get('/', auth_1.authWithCompany, developmentController_1.listDevelopments);
 router.get('/:id', auth_1.authWithCompany, developmentController_1.getDevelopment);
 router.get('/:id/units', auth_1.authWithCompany, developmentController_1.listUnitsForDevelopment);
+router.get('/:id/payments', auth_1.authWithCompany, developmentController_1.listPaymentsForDevelopment);
 router.post('/', auth_1.authWithCompany, developmentController_1.createDevelopment);
 router.patch('/:id', auth_1.authWithCompany, developmentController_1.updateDevelopment);
 router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, developmentController_1.deleteDevelopment);

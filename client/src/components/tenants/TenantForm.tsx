@@ -15,7 +15,9 @@ import {
   DialogActions,
   Typography,
   Box,
-  Alert
+  Alert,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
 import { TenantFormData, TenantStatus } from '../../types/tenant';
 import { useAuth } from '../../contexts/AuthContext';
@@ -50,10 +52,15 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     phone: initialData?.phone || '',
     status: initialData?.status || 'Active',
     propertyId: initialData?.propertyId || '',
+    propertyIds: initialData?.propertyIds || [],
     idNumber: initialData?.idNumber || '',
     emergencyContact: initialData?.emergencyContact || '',
     companyId: company?._id || ''
   }));
+
+  const [useMultipleProperties, setUseMultipleProperties] = React.useState<boolean>(
+    Array.isArray(initialData?.propertyIds) && (initialData?.propertyIds || []).length > 0
+  );
 
   // Sync form state when initialData changes (e.g., when editing a tenant)
   useEffect(() => {
@@ -65,10 +72,12 @@ export const TenantForm: React.FC<TenantFormProps> = ({
       phone: initialData?.phone || '',
       status: initialData?.status || 'Active',
       propertyId: initialData?.propertyId || '',
+      propertyIds: initialData?.propertyIds || [],
       idNumber: initialData?.idNumber || '',
       emergencyContact: initialData?.emergencyContact || '',
       companyId: company?._id || ''
     }));
+    setUseMultipleProperties(Array.isArray(initialData?.propertyIds) && (initialData?.propertyIds || []).length > 0);
   }, [initialData]);
 
   // Fetch vacant properties when the form opens
@@ -140,6 +149,20 @@ export const TenantForm: React.FC<TenantFormProps> = ({
       return;
     }
 
+    // Validate property selection
+    if (!useMultipleProperties) {
+      if (!formData.propertyId) {
+        setError('Please select a property');
+        return;
+      }
+    } else {
+      const ids = formData.propertyIds || [];
+      if (!Array.isArray(ids) || ids.length === 0) {
+        setError('Please select at least one property');
+        return;
+      }
+    }
+
     console.log('TenantForm: Submitting form with user and company context:', {
       user: {
         _id: user._id,
@@ -179,6 +202,15 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     setFormData(prev => ({
       ...prev,
       [name]: value
+    }));
+  };
+
+  const handleMultiSelectChange = (e: SelectChangeEvent<string[]>) => {
+    const { value } = e.target;
+    const next = typeof value === 'string' ? (value as unknown as string).split(',') : value;
+    setFormData(prev => ({
+      ...prev,
+      propertyIds: next as string[]
     }));
   };
 
@@ -263,24 +295,75 @@ export const TenantForm: React.FC<TenantFormProps> = ({
               </FormControl>
             </Grid>
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Property</InputLabel>
-                <Select
-                  name="propertyId"
-                  value={formData.propertyId}
-                  onChange={handleSelectChange}
-                  label="Property"
-                  required
-                  disabled={loadingProperties}
-                >
-                  {properties.map((property) => (
-                    <MenuItem key={property._id} value={property._id}>
-                      {property.name} - {property.address}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={useMultipleProperties}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUseMultipleProperties(checked);
+                      setFormData(prev => ({
+                        ...prev,
+                        propertyId: checked ? '' : prev.propertyId,
+                        propertyIds: checked ? (Array.isArray(prev.propertyIds) ? prev.propertyIds : []) : []
+                      }));
+                    }}
+                  />
+                }
+                label="Link to multiple properties"
+              />
             </Grid>
+
+            {!useMultipleProperties && (
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Property</InputLabel>
+                  <Select
+                    name="propertyId"
+                    value={formData.propertyId || ''}
+                    onChange={handleSelectChange}
+                    label="Property"
+                    required
+                    disabled={loadingProperties}
+                  >
+                    {properties.map((property) => (
+                      <MenuItem key={property._id} value={property._id}>
+                        {property.name} - {property.address}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+
+            {useMultipleProperties && (
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Properties</InputLabel>
+                  <Select
+                    multiple
+                    name="propertyIds"
+                    value={formData.propertyIds || []}
+                    onChange={handleMultiSelectChange}
+                    label="Properties"
+                    disabled={loadingProperties}
+                    renderValue={(selected) => {
+                      const ids = selected as string[];
+                      const names = properties
+                        .filter(p => ids.includes(p._id))
+                        .map(p => p.name);
+                      return names.join(', ');
+                    }}
+                  >
+                    {properties.map((property) => (
+                      <MenuItem key={property._id} value={property._id}>
+                        {property.name} - {property.address}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
             <Grid item xs={12}>
               <TextField
                 fullWidth

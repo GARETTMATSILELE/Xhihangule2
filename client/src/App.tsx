@@ -18,6 +18,8 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const CompanySetup = lazy(() => import('./pages/admin/CompanySetup'));
 const Login = lazy(() => import('./components/Login'));
 const Signup = lazy(() => import('./pages/Signup'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AdminSignup = lazy(() => import('./pages/AdminSignup'));
 const UserManagement = lazy(() => import('./pages/UserManagement/UserManagement').then(m => ({ default: m.UserManagement })));
 const MaintenancePageWrapper = lazy(() => import('./components/maintenance/MaintenancePageWrapper'));
@@ -27,6 +29,7 @@ const OwnerDashboard = lazy(() => import('./components/owner/OwnerDashboard'));
 const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
 const AccountantDashboard = lazy(() => import('./pages/AccountantDashboard'));
 const SalesDashboard = lazy(() => import('./pages/SalesDashboard'));
+const BillingSetup = lazy(() => import('./pages/Billing/BillingSetup'));
 const SalesLeadsPage = lazy(() => import('./pages/SalesDashboard/LeadsPage'));
 const SalesViewingsPage = lazy(() => import('./pages/SalesDashboard/ViewingsPage'));
 const SalesBuyersPage = lazy(() => import('./pages/SalesDashboard/BuyersPage'));
@@ -103,7 +106,10 @@ const App: React.FC = () => {
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/admin-signup" element={<AdminSignup />} />
+              <Route path="/billing/setup" element={<BillingSetup />} />
               {/* Admin Dashboard Routes - Protected with authentication */}
               <Route path="/admin-dashboard/*" element={
                 <PropertyProvider>

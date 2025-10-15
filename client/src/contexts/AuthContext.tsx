@@ -31,7 +31,7 @@ interface AuthContextType {
   error: string | null;
   login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
-  signup: (email: string, password: string, name: string, company?: CreateCompany) => Promise<void>;
+  signup: (email: string, password: string, name: string, company?: CreateCompany, plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE') => Promise<void>;
   clearError: () => void;
   refreshUser: () => Promise<void>;
   impersonate: (userId: string) => Promise<void>;
@@ -116,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           try {
             // Validate the token by fetching user data (fail fast, don't block UI long)
-            const response = await api.get('/auth/me', { timeout: 3000 });
+            const response = await api.get('/auth/me');
             const userData = response.data.user;
             
             // Store user data in localStorage for other services to access
@@ -143,7 +143,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             // Try to refresh the token (short timeout as well)
             try {
-              const refreshResponse = await api.post('/auth/refresh-token', {}, { timeout: 5000 });
+              const refreshResponse = await api.post('/auth/refresh-token', {});
               
               const { token: newAccessToken, refreshToken: newRefreshToken } = refreshResponse.data;
               
@@ -156,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 
                 // Try to get user data again
-                const userResponse = await api.get('/auth/me', { timeout: 3000 });
+                const userResponse = await api.get('/auth/me');
                 const userData = userResponse.data.user;
                 
                 // Store user data in localStorage for other services to access
@@ -309,12 +309,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Login failed:', error);
       let message = 'Login failed';
       if (error instanceof AxiosError) {
-        if (error.code === 'ECONNABORTED') {
-          message = 'Server timeout. Please try again.';
-        } else if (!error.response) {
-          message = 'Cannot reach the server. Please ensure the backend is running.';
+        const isTimeout = error.code === 'ECONNABORTED';
+        const noResponse = !error.response;
+        if (isTimeout || noResponse) {
+          try {
+            // Friendly status while we auto-retry once
+            setError('Warming up the service… retrying now');
+            // Quick readiness ping (non-blocking for user)
+            try {
+              await api.get('/health/ready');
+            } catch {}
+            // Small backoff before one retry
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            const retryResp = await api.post('/auth/login', { email, password });
+            const { user: userData, company: companyData, token, refreshToken: newRefreshToken } = retryResp.data;
+            if (!token) throw new Error('No access token received');
+            setTokens(token, newRefreshToken);
+            localStorage.setItem('accessToken', token);
+            if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
+            localStorage.setItem('user', JSON.stringify(userData));
+            setUser(userData);
+            setCompany(companyData);
+            setIsAuthenticated(true);
+            setLoading(false);
+            const dashboardPath = getDashboardPath(userData.role);
+            navigate(dashboardPath);
+            return userData as any; // early return on successful retry
+          } catch (retryErr: any) {
+            // Final user-friendly message after retry failure
+            if (retryErr instanceof AxiosError && (retryErr.code === 'ECONNABORTED' || !retryErr.response)) {
+              message = 'The service is waking up. Please wait a moment and try again.';
+            } else {
+              message = retryErr?.response?.data?.message || 'Login failed. Please try again.';
+            }
+          }
         } else {
-          message = (error.response.data as any)?.message || 'Login failed';
+          message = (error.response as any)?.data?.message || 'Login failed';
         }
       }
       setError(message);
@@ -352,7 +382,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (email: string, password: string, name: string, company?: CreateCompany) => {
+  const signup = async (email: string, password: string, name: string, company?: CreateCompany, plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE') => {
     try {
       setError(null);
       setLoading(true);
@@ -361,6 +391,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const payload: any = { email, password, name };
       if (company && Object.keys(company).length > 0) {
         payload.company = company;
+      }
+      if (plan) {
+        payload.plan = plan;
       }
       // If this is the admin signup flow, mark it so the server assigns admin role
       if (window.location.pathname.includes('/admin-signup')) {

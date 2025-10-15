@@ -316,8 +316,8 @@ const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
             throw new errorHandler_1.AppError('Missing required fields: Name and address are required', 400);
         }
         // Validate property type if provided
-        if (propertyData.type && !['apartment', 'house', 'commercial'].includes(propertyData.type)) {
-            throw new errorHandler_1.AppError('Invalid property type: Must be one of: apartment, house, commercial', 400);
+        if (propertyData.type && !['apartment', 'house', 'commercial', 'land'].includes(propertyData.type)) {
+            throw new errorHandler_1.AppError('Invalid property type: Must be one of: apartment, house, commercial, land', 400);
         }
         console.log('Creating property with data:', propertyData);
         const property = new Property_1.Property(propertyData);
@@ -385,20 +385,25 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const { name, address, price, bedrooms, bathrooms, status, builtArea, landArea, description, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
+        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
         if (!name || !address) {
             throw new errorHandler_1.AppError('Missing required fields: name and address', 400);
         }
         // Map status from UI labels to backend enums if necessary
         const normalizedStatus = (status || 'available').toString().toLowerCase().replace(' ', '_');
+        const typeNormalized = String(type || '').toLowerCase();
+        const allowedTypes = ['apartment', 'house', 'commercial', 'land'];
+        const isLand = typeNormalized === 'land';
+        const computedPrice = isLand ? (Number(landArea || 0) * Number(pricePerSqm || 0)) : Number(price || 0);
         const property = new Property_1.Property({
             name,
             address,
-            type: 'house',
+            type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house'),
             status: normalizedStatus,
-            price: typeof price === 'number' ? price : Number(price || 0),
-            bedrooms: Number(bedrooms || 0),
-            bathrooms: Number(bathrooms || 0),
+            price: computedPrice,
+            pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0,
+            bedrooms: isLand ? 0 : Number(bedrooms || 0),
+            bathrooms: isLand ? 0 : Number(bathrooms || 0),
             builtArea: Number(builtArea || 0),
             landArea: Number(landArea || 0),
             description: description || '',

@@ -12,11 +12,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recomputeStats = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.listDevelopments = exports.createDevelopment = void 0;
+exports.recomputeStats = exports.listPaymentsForDevelopment = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.listDevelopments = exports.createDevelopment = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
+const Payment_1 = require("../models/Payment");
 const ensureAuthCompany = (req) => {
     var _a, _b;
     if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
@@ -48,11 +49,11 @@ const recalcCachedStats = (developmentId) => __awaiter(void 0, void 0, void 0, f
 const createDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         ensureAuthCompany(req);
-        const { name, type, description, owner, variations } = req.body || {};
+        const { name, type, description, address, owner, variations, commissionPercent, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
         if (!name || !type) {
             throw new errorHandler_1.AppError('Missing required fields: name and type', 400);
         }
-        const allowedTypes = ['stands', 'apartments', 'houses', 'semidetached', 'townhouses'];
+        const allowedTypes = ['stands', 'apartments', 'houses', 'semidetached', 'townhouses', 'land'];
         if (!allowedTypes.includes(String(type))) {
             throw new errorHandler_1.AppError('Invalid development type', 400);
         }
@@ -71,9 +72,14 @@ const createDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 name,
                 type,
                 description: description || '',
+                address: address || '',
                 companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
                 owner: owner || {},
                 variations,
+                commissionPercent: typeof commissionPercent === 'number' ? commissionPercent : undefined,
+                commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
+                commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
+                commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : undefined,
                 createdBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
                 updatedBy: new mongoose_1.default.Types.ObjectId(req.user.userId)
             });
@@ -112,9 +118,14 @@ const createDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                         name,
                         type,
                         description: description || '',
+                        address: address || '',
                         companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
                         owner: owner || {},
                         variations,
+                        commissionPercent: typeof commissionPercent === 'number' ? commissionPercent : undefined,
+                        commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
+                        commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
+                        commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : undefined,
                         createdBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
                         updatedBy: new mongoose_1.default.Types.ObjectId(req.user.userId)
                     }
@@ -202,15 +213,25 @@ const getDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, function*
 });
 exports.getDevelopment = getDevelopment;
 const updateDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
         ensureAuthCompany(req);
         const allowed = {
             name: (_a = req.body) === null || _a === void 0 ? void 0 : _a.name,
             type: (_b = req.body) === null || _b === void 0 ? void 0 : _b.type,
             description: (_c = req.body) === null || _c === void 0 ? void 0 : _c.description,
-            owner: (_d = req.body) === null || _d === void 0 ? void 0 : _d.owner
+            address: (_d = req.body) === null || _d === void 0 ? void 0 : _d.address,
+            owner: (_e = req.body) === null || _e === void 0 ? void 0 : _e.owner
         };
+        // Commission fields (optional)
+        if (typeof ((_f = req.body) === null || _f === void 0 ? void 0 : _f.commissionPercent) === 'number')
+            allowed.commissionPercent = req.body.commissionPercent;
+        if (typeof ((_g = req.body) === null || _g === void 0 ? void 0 : _g.commissionPreaPercent) === 'number')
+            allowed.commissionPreaPercent = req.body.commissionPreaPercent;
+        if (typeof ((_h = req.body) === null || _h === void 0 ? void 0 : _h.commissionAgencyPercentRemaining) === 'number')
+            allowed.commissionAgencyPercentRemaining = req.body.commissionAgencyPercentRemaining;
+        if (typeof ((_j = req.body) === null || _j === void 0 ? void 0 : _j.commissionAgentPercentRemaining) === 'number')
+            allowed.commissionAgentPercentRemaining = req.body.commissionAgentPercentRemaining;
         // Remove undefined keys
         Object.keys(allowed).forEach(k => allowed[k] === undefined && delete allowed[k]);
         const updated = yield Development_1.Development.findOneAndUpdate({ _id: req.params.id, companyId: req.user.companyId }, { $set: Object.assign(Object.assign({}, allowed), { updatedBy: req.user.userId }) }, { new: true });
@@ -284,6 +305,38 @@ const listUnitsForDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.listUnitsForDevelopment = listUnitsForDevelopment;
+const listPaymentsForDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const companyId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
+        const dev = yield Development_1.Development.findOne({ _id: req.params.id, companyId }).lean();
+        if (!dev)
+            throw new errorHandler_1.AppError('Development not found', 404);
+        const { unitId, saleMode } = req.query;
+        const query = {
+            companyId,
+            paymentType: 'sale',
+            developmentId: new mongoose_1.default.Types.ObjectId(req.params.id)
+        };
+        if (unitId && mongoose_1.default.Types.ObjectId.isValid(String(unitId))) {
+            query.developmentUnitId = new mongoose_1.default.Types.ObjectId(String(unitId));
+        }
+        if (saleMode && (String(saleMode) === 'quick' || String(saleMode) === 'installment')) {
+            query.saleMode = String(saleMode);
+        }
+        const payments = yield Payment_1.Payment.find(query)
+            .select('paymentDate amount currency commissionDetails buyerName sellerName saleMode manualPropertyAddress referenceNumber developmentId developmentUnitId')
+            .sort({ paymentDate: -1 })
+            .lean();
+        return res.json({ items: payments });
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error fetching development payments';
+        return res.status(status).json({ message });
+    }
+});
+exports.listPaymentsForDevelopment = listPaymentsForDevelopment;
 const recomputeStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         ensureAuthCompany(req);
