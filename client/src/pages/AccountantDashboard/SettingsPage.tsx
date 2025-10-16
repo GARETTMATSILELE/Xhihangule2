@@ -155,6 +155,11 @@ const SettingsPage: React.FC = () => {
         preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
         agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
         agencyPercentOfRemaining: company.commissionConfig?.agencyPercentOfRemaining ?? 0.4,
+        // Receivables cutover and opening balances
+        receivablesCutoverYear: (company as any)?.receivablesCutover?.year || new Date().getFullYear(),
+        receivablesCutoverMonth: (company as any)?.receivablesCutover?.month || (new Date().getMonth() + 1),
+        rentReceivableOpeningBalance: Number((company as any)?.rentReceivableOpeningBalance || 0),
+        levyReceivableOpeningBalance: Number((company as any)?.levyReceivableOpeningBalance || 0),
       }));
     }
   }, [company]);
@@ -256,6 +261,12 @@ const SettingsPage: React.FC = () => {
         website: settings.companyWebsite,
         bankAccounts: settings.bankAccounts,
         fiscalConfig: (settings as any).fiscalConfig,
+        receivablesCutover: {
+          year: Number((settings as any).receivablesCutoverYear),
+          month: Number((settings as any).receivablesCutoverMonth)
+        },
+        rentReceivableOpeningBalance: Number((settings as any).rentReceivableOpeningBalance || 0),
+        levyReceivableOpeningBalance: Number((settings as any).levyReceivableOpeningBalance || 0),
       };
 
       // Update plan/cycle at subscription level and company details
@@ -301,6 +312,12 @@ const SettingsPage: React.FC = () => {
             agentPercentOfRemaining: Number(settings.agentPercentOfRemaining),
             agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining)
           },
+          receivablesCutover: {
+            year: Number((settings as any).receivablesCutoverYear),
+            month: Number((settings as any).receivablesCutoverMonth)
+          },
+          rentReceivableOpeningBalance: Number((settings as any).rentReceivableOpeningBalance || 0),
+          levyReceivableOpeningBalance: Number((settings as any).levyReceivableOpeningBalance || 0),
         };
 
         await apiService.updateCompany(companyUpdateData);
@@ -624,6 +641,64 @@ const SettingsPage: React.FC = () => {
                 margin="normal"
                 placeholder="https://www.example.com"
               />
+              <Divider sx={{ my: 3 }} />
+              <Typography variant="h6" gutterBottom>
+                Receivables Cutover & Opening Balances
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <FormControl fullWidth margin="normal">
+                    <InputLabel>Cutover Month</InputLabel>
+                    <Select
+                      name="receivablesCutoverMonth"
+                      value={(settings as any).receivablesCutoverMonth || (new Date().getMonth() + 1)}
+                      onChange={handleSelectChange}
+                      label="Cutover Month"
+                    >
+                      {[
+                        'January','February','March','April','May','June','July','August','September','October','November','December'
+                      ].map((m, idx) => (
+                        <MenuItem key={m} value={idx + 1}>{m}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={6}>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Cutover Year"
+                    name="receivablesCutoverYear"
+                    value={(settings as any).receivablesCutoverYear || new Date().getFullYear()}
+                    onChange={handleInputChange}
+                    margin="normal"
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Rental Receivables Opening Balance"
+                    name="rentReceivableOpeningBalance"
+                    value={(settings as any).rentReceivableOpeningBalance || 0}
+                    onChange={handleInputChange}
+                    margin="normal"
+                    inputProps={{ step: 0.01, min: 0 }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Levy Receivables Opening Balance"
+                    name="levyReceivableOpeningBalance"
+                    value={(settings as any).levyReceivableOpeningBalance || 0}
+                    onChange={handleInputChange}
+                    margin="normal"
+                    inputProps={{ step: 0.01, min: 0 }}
+                  />
+                </Grid>
+              </Grid>
             </Grid>
 
             <Grid item xs={12}>

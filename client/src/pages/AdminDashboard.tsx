@@ -300,6 +300,9 @@ const AdminDashboard: React.FC = () => {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const cutY = (company as any)?.receivablesCutover?.year;
+      const cutM = (company as any)?.receivablesCutover?.month;
+      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
       const pushPaid = (propId: string, y: number, m: number) => {
@@ -350,8 +353,10 @@ const AdminDashboard: React.FC = () => {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
           if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
           const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          if (ns.getTime() > ne.getTime()) continue;
           iterateMonths(ns, ne, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missing.add(key);
@@ -359,15 +364,19 @@ const AdminDashboard: React.FC = () => {
         }
         total += missing.size * monthlyLevy;
       }
-      return total;
+      const opening = Number((company as any)?.levyReceivableOpeningBalance || 0);
+      return total + opening;
     } catch { return 0; }
-  }, [rentalProperties, leases, levyPayments]);
+  }, [rentalProperties, leases, levyPayments, company]);
 
   const computedOutstandingRentals = useMemo(() => {
     try {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const cutY = (company as any)?.receivablesCutover?.year;
+      const cutM = (company as any)?.receivablesCutover?.month;
+      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
       const pushPaid = (propId: string, y: number, m: number) => {
@@ -419,8 +428,10 @@ const AdminDashboard: React.FC = () => {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
           if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
           const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          if (ns.getTime() > ne.getTime()) continue;
           iterateMonths(ns, ne, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missing.add(key);
@@ -428,9 +439,10 @@ const AdminDashboard: React.FC = () => {
         }
         total += missing.size * monthlyRent;
       }
-      return total;
+      const opening = Number((company as any)?.rentReceivableOpeningBalance || 0);
+      return total + opening;
     } catch { return 0; }
-  }, [rentalProperties, leases, payments]);
+  }, [rentalProperties, leases, payments, company]);
 
   // If no company, show a setup prompt at the top of the dashboard
   const showCompanySetup = isAuthenticated && (!user?.companyId && !company);

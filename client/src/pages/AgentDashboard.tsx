@@ -34,6 +34,7 @@ import AgentPropertyOwnersPage from './agent/AgentPropertyOwnersPage';
 import PaymentsPage from './PaymentsPage';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import { Files } from './Files/Files';
 import { Maintenance } from './Maintenance/Maintenance';
 import { Inspections } from './Inspections/Inspections';
@@ -123,6 +124,7 @@ const AgentDashboard: React.FC = () => {
   }, []);
   const [activeTab, setActiveTab] = useState(0);
   const { user, company, isAuthenticated, loading: authLoading } = useAuth();
+  const { company: companyCtx } = useCompany();
   const maintenanceUser: User | undefined = user ?? undefined;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +163,9 @@ const AgentDashboard: React.FC = () => {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const cutY = (company as any)?.receivablesCutover?.year;
+      const cutM = (company as any)?.receivablesCutover?.month;
+      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
       const pushPaid = (propId: string, y: number, m: number) => {
@@ -226,8 +231,13 @@ const AgentDashboard: React.FC = () => {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
           if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          const normStart = new Date(start.getFullYear(), start.getMonth(), 1);
+          let normStart = new Date(start.getFullYear(), start.getMonth(), 1);
+          if (cutoverDate) {
+            // Use the later of lease start and cutover
+            if (normStart.getTime() < cutoverDate.getTime()) normStart = cutoverDate;
+          }
           const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          if (normStart.getTime() > normEnd.getTime()) continue;
           iterateMonths(normStart, normEnd, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missingKeys.add(key);
@@ -235,11 +245,12 @@ const AgentDashboard: React.FC = () => {
         }
         total += missingKeys.size * monthlyLevy;
       }
-      return total;
+      const opening = Number((companyCtx as any)?.levyReceivableOpeningBalance || 0);
+      return total + opening;
     } catch {
       return 0;
     }
-  }, [properties, leases, levyPayments]);
+  }, [properties, leases, levyPayments, companyCtx]);
 
   // Computed total outstanding rentals across all properties based on unpaid months in lease periods
   const computedOutstandingRentals = React.useMemo(() => {
@@ -247,6 +258,9 @@ const AgentDashboard: React.FC = () => {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const cutY = (companyCtx as any)?.receivablesCutover?.year;
+      const cutM = (companyCtx as any)?.receivablesCutover?.month;
+      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
       const pushPaid = (propId: string, y: number, m: number) => {
@@ -310,8 +324,12 @@ const AgentDashboard: React.FC = () => {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
           if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          const normStart = new Date(start.getFullYear(), start.getMonth(), 1);
+          let normStart = new Date(start.getFullYear(), start.getMonth(), 1);
+          if (cutoverDate) {
+            if (normStart.getTime() < cutoverDate.getTime()) normStart = cutoverDate;
+          }
           const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          if (normStart.getTime() > normEnd.getTime()) continue;
           iterateMonths(normStart, normEnd, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missingKeys.add(key);
@@ -319,11 +337,12 @@ const AgentDashboard: React.FC = () => {
         }
         total += missingKeys.size * monthlyRent;
       }
-      return total;
+      const opening = Number((companyCtx as any)?.rentReceivableOpeningBalance || 0);
+      return total + opening;
     } catch {
       return 0;
     }
-  }, [properties, leases, payments]);
+  }, [properties, leases, payments, companyCtx]);
 
   // Expand advance payments across covered months for per-month filtering
   const expandedCommissionPayments = React.useMemo(() => {
@@ -800,6 +819,9 @@ const AgentDashboard: React.FC = () => {
                                 const currentMonth = now.getMonth() + 1; // 1-12
                                 const currentYear = now.getFullYear();
                                 const ymKey = (y: number, m: number) => `${y}-${m}`;
+                                const cutY = (companyCtx as any)?.receivablesCutover?.year;
+                                const cutM = (companyCtx as any)?.receivablesCutover?.month;
+                                const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
                                 const paidByProperty: Record<string, Set<string>> = {};
                                 const pushPaid = (propId: string, y: number, m: number) => {
                                   const key = ymKey(y, m);
@@ -868,8 +890,10 @@ const AgentDashboard: React.FC = () => {
                                       if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
                                       // Normalize end to not exceed current month
                                       const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+                                      let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                                      if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
                                       const labels: string[] = [];
-                                      iterateMonths(new Date(start.getFullYear(), start.getMonth(), 1), new Date(normEnd.getFullYear(), normEnd.getMonth(), 1), (y, m, label) => {
+                                      iterateMonths(ns, new Date(normEnd.getFullYear(), normEnd.getMonth(), 1), (y, m, label) => {
                                         if (!paidKeys.has(ymKey(y, m))) labels.push(label);
                                       });
                                       if (labels.length > 0) {
@@ -1029,7 +1053,11 @@ const AgentDashboard: React.FC = () => {
                                       const start = l?.startDate ? new Date(l.startDate) : null;
                                       const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
                                       if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-                                      const normStart = new Date(start.getFullYear(), start.getMonth(), 1);
+                                      let normStart = new Date(start.getFullYear(), start.getMonth(), 1);
+                                      const cutY2 = (company as any)?.receivablesCutover?.year;
+                                      const cutM2 = (company as any)?.receivablesCutover?.month;
+                                      const cutoverDate2 = (cutY2 && cutM2) ? new Date(Number(cutY2), Number(cutM2) - 1, 1) : null;
+                                      if (cutoverDate2 && normStart.getTime() < cutoverDate2.getTime()) normStart = cutoverDate2;
                                       const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
                                       const labels: string[] = [];
                                       iterateMonths(normStart, normEnd, (y, m, label) => {

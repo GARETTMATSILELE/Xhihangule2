@@ -49,6 +49,13 @@ export interface ICompany extends Document {
     apiUsername?: string;
     apiPassword?: string;
   };
+  // Receivables cutover and opening balances
+  receivablesCutover?: {
+    year: number; // e.g., 2025
+    month: number; // 1-12
+  };
+  rentReceivableOpeningBalance?: number;
+  levyReceivableOpeningBalance?: number;
 }
 
 const bankAccountSchema = new Schema<IBankAccount>({
@@ -207,7 +214,14 @@ const companySchema = new Schema<ICompany>({
     apiKey: { type: String, trim: true },
     apiUsername: { type: String, trim: true },
     apiPassword: { type: String, trim: true }
-  }
+  },
+  // Receivables cutover month/year and opening balances
+  receivablesCutover: {
+    year: { type: Number, min: 1900, max: 2100 },
+    month: { type: Number, min: 1, max: 12 }
+  },
+  rentReceivableOpeningBalance: { type: Number, default: 0, min: 0 },
+  levyReceivableOpeningBalance: { type: Number, default: 0, min: 0 }
 }, {
   timestamps: true
 });

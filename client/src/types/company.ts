@@ -46,6 +46,12 @@ export interface Company {
     apiUsername?: string; // If applicable
     apiPassword?: string; // If applicable
   };
+  receivablesCutover?: {
+    year: number;
+    month: number; // 1-12
+  };
+  rentReceivableOpeningBalance?: number;
+  levyReceivableOpeningBalance?: number;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -50,6 +50,9 @@ interface Company {
     apiUsername?: string;
     apiPassword?: string;
   };
+  receivablesCutover?: { year: number; month: number };
+  rentReceivableOpeningBalance?: number;
+  levyReceivableOpeningBalance?: number;
   createdAt: string;
   updatedAt: string;
   __v: number;
@@ -186,6 +189,9 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         propertyLimit: companyData.propertyLimit,
         featureFlags: companyData.featureFlags,
         fiscalConfig: companyData.fiscalConfig,
+        receivablesCutover: companyData.receivablesCutover,
+        rentReceivableOpeningBalance: companyData.rentReceivableOpeningBalance,
+        levyReceivableOpeningBalance: companyData.levyReceivableOpeningBalance,
         createdAt: companyData.createdAt,
         updatedAt: companyData.updatedAt,
         __v: companyData.__v || 0

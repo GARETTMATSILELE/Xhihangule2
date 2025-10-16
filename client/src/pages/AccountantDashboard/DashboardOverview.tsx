@@ -29,6 +29,7 @@ import {
   PendingActions as PendingActionsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import paymentRequestService, { PaymentRequest } from '../../services/paymentRequestService';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -42,6 +43,7 @@ import { Payment } from '../../types/payment';
 
 const DashboardOverview: React.FC = () => {
   const { user } = useAuth();
+  const { company } = useCompany();
   const navigate = useNavigate();
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
@@ -174,6 +176,9 @@ const DashboardOverview: React.FC = () => {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const cutY = (company as any)?.receivablesCutover?.year;
+      const cutM = (company as any)?.receivablesCutover?.month;
+      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
       const pushPaid = (propId: string, y: number, m: number) => {
@@ -223,8 +228,10 @@ const DashboardOverview: React.FC = () => {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
           if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
           const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          if (ns.getTime() > ne.getTime()) continue;
           iterateMonths(ns, ne, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missing.add(key);
@@ -232,15 +239,19 @@ const DashboardOverview: React.FC = () => {
         }
         total += missing.size * monthlyLevy;
       }
-      return total;
+      const opening = Number(((company as any)?.levyReceivableOpeningBalance || 0));
+      return total + opening;
     } catch { return 0; }
-  }, [rentalProperties, leases, levyPayments]);
+  }, [rentalProperties, leases, levyPayments, company]);
 
   const computedOutstandingRentals = useMemo(() => {
     try {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const cutY = (company as any)?.receivablesCutover?.year;
+      const cutM = (company as any)?.receivablesCutover?.month;
+      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
       const pushPaid = (propId: string, y: number, m: number) => {
@@ -292,8 +303,10 @@ const DashboardOverview: React.FC = () => {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
           if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+          if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
           const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+          if (ns.getTime() > ne.getTime()) continue;
           iterateMonths(ns, ne, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missing.add(key);
@@ -301,9 +314,10 @@ const DashboardOverview: React.FC = () => {
         }
         total += missing.size * monthlyRent;
       }
-      return total;
+      const opening = Number(((company as any)?.rentReceivableOpeningBalance || 0));
+      return total + opening;
     } catch { return 0; }
-  }, [rentalProperties, leases, payments]);
+  }, [rentalProperties, leases, payments, company]);
 
   const pendingRequests = paymentRequests.filter(req => req.status === 'pending');
   const urgentRequests = pendingRequests.filter(req => 
@@ -529,8 +543,13 @@ const DashboardOverview: React.FC = () => {
                       const end = l?.endDate ? new Date(l.endDate) : now;
                       if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
                       const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+                      let ns2 = new Date(start.getFullYear(), start.getMonth(), 1);
+                      const cutY = (company as any)?.receivablesCutover?.year;
+                      const cutM = (company as any)?.receivablesCutover?.month;
+                      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
+                      if (cutoverDate && ns2.getTime() < cutoverDate.getTime()) ns2 = cutoverDate;
                       const labels: string[] = [];
-                      iterateMonths(new Date(start.getFullYear(), start.getMonth(), 1), new Date(normEnd.getFullYear(), normEnd.getMonth(), 1), (y, m, label) => {
+                      iterateMonths(ns2, new Date(normEnd.getFullYear(), normEnd.getMonth(), 1), (y, m, label) => {
                         if (!paidKeys.has(ymKey(y, m))) labels.push(label);
                       });
                       if (labels.length > 0) {
@@ -652,7 +671,11 @@ const DashboardOverview: React.FC = () => {
                       const start = l?.startDate ? new Date(l.startDate) : null;
                       const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
                       if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-                      const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                      let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                      const cutY2 = (company as any)?.receivablesCutover?.year;
+                      const cutM2 = (company as any)?.receivablesCutover?.month;
+                      const cutoverDate2 = (cutY2 && cutM2) ? new Date(Number(cutY2), Number(cutM2) - 1, 1) : null;
+                      if (cutoverDate2 && ns.getTime() < cutoverDate2.getTime()) ns = cutoverDate2;
                       const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
                       const labels: string[] = [];
                       iterateMonths(ns, ne, (y, m, label) => {

@@ -139,7 +139,7 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
 
 export const updateCompany = async (req: Request, res: Response) => {
   try {
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -154,6 +154,9 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
+    if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
+    if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
+    if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
     if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
       const cfg = PLAN_CONFIG[plan as Plan];
       (updateData as any).plan = plan as Plan;
@@ -335,7 +338,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     }
 
     // Update the company
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -350,6 +353,9 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
+    if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
+    if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
+    if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
     if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
       const cfg = PLAN_CONFIG[plan as Plan];
       (updateData as any).plan = plan as Plan;
@@ -434,6 +440,9 @@ export const getCompanyById = async (req: Request, res: Response) => {
         propertyLimit: (company as any).propertyLimit,
         featureFlags: (company as any).featureFlags,
         fiscalConfig: (company as any).fiscalConfig,
+        receivablesCutover: (company as any).receivablesCutover,
+        rentReceivableOpeningBalance: (company as any).rentReceivableOpeningBalance,
+        levyReceivableOpeningBalance: (company as any).levyReceivableOpeningBalance,
         createdAt: (company as any).createdAt,
         updatedAt: (company as any).updatedAt
       }
