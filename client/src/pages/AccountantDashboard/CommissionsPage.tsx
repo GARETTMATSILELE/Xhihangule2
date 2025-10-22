@@ -52,10 +52,7 @@ const CommissionsPage: React.FC = () => {
   const [agentSearchTerm, setAgentSearchTerm] = useState<string>('');
   const [preaSearchTerm, setPREASearchTerm] = useState<string>('');
   const [preaSelectedYear, setPREASelectedYear] = useState<number>(new Date().getFullYear());
-  const [preaSelectedMonth, setPREASelectedMonth] = useState<number | 'all'>(new Date().getMonth());
-  const [preaSelectedWeek, setPREASelectedWeek] = useState<number | 'all'>(1);
-  const [preaSelectedDay, setPREASelectedDay] = useState<number | 'all'>(new Date().getDate());
-  const [preaFilterType, setPREAFilterType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [preaSelectedMonth, setPREASelectedMonth] = useState<number>(new Date().getMonth());
 
   // Format currency helper function
   const formatCurrency = (amount: number) => {
@@ -241,7 +238,6 @@ const CommissionsPage: React.FC = () => {
   // Set initial week value when component mounts
   useEffect(() => {
     setAgencySelectedWeek(getCurrentWeekOfYear());
-    setPREASelectedWeek(getCurrentWeekOfYear());
   }, []);
 
   // Effect to refresh agency commission data when filters change
@@ -284,10 +280,8 @@ const CommissionsPage: React.FC = () => {
 
         const preaFilters = {
           year: preaSelectedYear,
-          month: preaSelectedMonth === 'all' ? undefined : preaSelectedMonth,
-          week: preaSelectedWeek === 'all' ? undefined : preaSelectedWeek,
-          day: preaSelectedDay === 'all' ? undefined : preaSelectedDay,
-          filterType: preaFilterType
+          month: preaSelectedMonth,
+          filterType: 'monthly' as const
         };
 
         const preaData = await accountantService.getPREACommission(preaFilters);
@@ -303,7 +297,7 @@ const CommissionsPage: React.FC = () => {
     if (preaCommission) {
       fetchPREACommissionData();
     }
-  }, [preaSelectedYear, preaSelectedMonth, preaSelectedWeek, preaSelectedDay, preaFilterType]);
+  }, [preaSelectedYear, preaSelectedMonth]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
@@ -448,6 +442,7 @@ const CommissionsPage: React.FC = () => {
       printContent += `
         <div class="summary">
           <h3>PREA Commission Report</h3>
+          <p>Period: ${getMonthName(preaSelectedMonth)} ${preaSelectedYear}</p>
           <p>Properties found: ${filteredDetails.length} / ${data.details.length}</p>
           <p>Total commission: ${formatCurrency(data.total)}</p>
         </div>
@@ -455,9 +450,7 @@ const CommissionsPage: React.FC = () => {
           <thead>
             <tr>
               <th>Property Name</th>
-              <th>Monthly</th>
-              <th>Yearly</th>
-              <th>Total</th>
+              <th>Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -468,8 +461,6 @@ const CommissionsPage: React.FC = () => {
           <tr>
             <td>${detail.propertyName}</td>
             <td>${formatCurrency(detail.commission)}</td>
-            <td>${formatCurrency(detail.commission * 12)}</td>
-            <td>${formatCurrency(detail.commission * 12)}</td>
           </tr>
         `;
       });
@@ -621,22 +612,52 @@ const CommissionsPage: React.FC = () => {
                   <TableCell align="right">
                     {filterType === 'monthly' ? 'Monthly Commission' : 'Yearly Commission'}
                   </TableCell>
-                  <TableCell align="right">Properties with Payments</TableCell>
                   <TableCell align="right">Total Properties</TableCell>
-                  <TableCell align="right">Total Commission</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {getFilteredAgentCommissions().map((agent) => (
-                  <TableRow key={agent.agentId}>
-                    <TableCell>{agent.agentName}</TableCell>
-                    <TableCell align="right">
-                      {formatCurrency(agent.filteredCommission)}
-                    </TableCell>
-                    <TableCell align="right">{agent.propertiesWithPayments}</TableCell>
-                    <TableCell align="right">{agent.totalProperties}</TableCell>
-                    <TableCell align="right">{formatCurrency(agent.commission * 12)}</TableCell>
-                  </TableRow>
+                  <React.Fragment key={agent.agentId}>
+                    <TableRow>
+                      <TableCell>
+                        <details>
+                          <summary style={{ cursor: 'pointer' }}>{agent.agentName}</summary>
+                          <div style={{ padding: '8px 0' }}>
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell>Property Name</TableCell>
+                                  <TableCell>Payment Date</TableCell>
+                                  <TableCell>Reference</TableCell>
+                                  <TableCell align="right">Amount</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {(agent as any).commissionEntries
+                                  ?.filter((e: any) => {
+                                    const matchesYear = e.year === selectedYear;
+                                    const matchesMonth = filterType === 'yearly' ? true : (selectedMonth === 'all' ? true : e.month === selectedMonth);
+                                    return matchesYear && matchesMonth;
+                                  })
+                                  ?.map((e: any) => (
+                                    <TableRow key={e.paymentId + '-' + e.year + '-' + e.month}>
+                                      <TableCell>{e.propertyName}</TableCell>
+                                      <TableCell>{new Date(e.paymentDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</TableCell>
+                                      <TableCell>{e.referenceNumber || '-'}</TableCell>
+                                      <TableCell align="right">{formatCurrency(e.amount)}</TableCell>
+                                    </TableRow>
+                                  ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </details>
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatCurrency(agent.filteredCommission)}
+                      </TableCell>
+                      <TableCell align="right">{agent.totalProperties}</TableCell>
+                    </TableRow>
+                  </React.Fragment>
                 ))}
                 <TableRow>
                   <TableCell><strong>Total</strong></TableCell>
@@ -649,16 +670,8 @@ const CommissionsPage: React.FC = () => {
                   </TableCell>
                   <TableCell align="right">
                     <strong>
-                      {getFilteredAgentCommissions().reduce((sum, agent) => sum + agent.propertiesWithPayments, 0)}
-                    </strong>
-                  </TableCell>
-                  <TableCell align="right">
-                    <strong>
                       {getFilteredAgentCommissions().reduce((sum, agent) => sum + agent.totalProperties, 0)}
                     </strong>
-                  </TableCell>
-                  <TableCell align="right">
-                    <strong>{formatCurrency(agentCommissions?.total || 0)}</strong>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -842,8 +855,8 @@ const CommissionsPage: React.FC = () => {
                   <TableCell><strong>Total</strong></TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(data.monthly)}</strong></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(data.total)}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(getFilteredAgencyCommissions().reduce((sum: number, d: any) => sum + (d.rentalAmount || 0), 0))}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(getFilteredAgencyCommissions().reduce((sum: number, d: any) => sum + (d.agencyShare || 0), 0))}</strong></TableCell>
                 </TableRow>
               </TableBody>
             </Table>
@@ -862,21 +875,6 @@ const CommissionsPage: React.FC = () => {
               Filter PREA Commission
             </Typography>
             <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={2}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>Filter Type</InputLabel>
-                  <Select
-                    value={preaFilterType}
-                    label="Filter Type"
-                    onChange={(e) => setPREAFilterType(e.target.value as 'daily' | 'weekly' | 'monthly' | 'yearly')}
-                  >
-                    <MenuItem value="daily">Daily</MenuItem>
-                    <MenuItem value="weekly">Weekly</MenuItem>
-                    <MenuItem value="monthly">Monthly</MenuItem>
-                    <MenuItem value="yearly">Yearly</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
               <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
@@ -904,98 +902,34 @@ const CommissionsPage: React.FC = () => {
                   </Select>
                 </FormControl>
               </Grid>
-              {preaFilterType === 'monthly' && (
-                <Grid item xs={12} sm={2}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Month</InputLabel>
-                    <Select
-                      value={preaSelectedMonth}
-                      label="Month"
-                      onChange={(e) => setPREASelectedMonth(e.target.value as number | 'all')}
-                    >
-                      <MenuItem value="all">All Months</MenuItem>
-                      {getMonthOptions().map((month) => (
-                        <MenuItem key={month.value} value={month.value}>
-                          {month.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              )}
-              {preaFilterType === 'weekly' && (
-                <Grid item xs={12} sm={2}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Week</InputLabel>
-                    <Select
-                      value={preaSelectedWeek}
-                      label="Week"
-                      onChange={(e) => setPREASelectedWeek(e.target.value as number | 'all')}
-                    >
-                      <MenuItem value="all">All Weeks</MenuItem>
-                      {getWeekOptions().map((week) => (
-                        <MenuItem key={week.value} value={week.value}>
-                          {week.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              )}
-              {preaFilterType === 'daily' && (
-                <>
-                  <Grid item xs={12} sm={2}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Month</InputLabel>
-                      <Select
-                        value={preaSelectedMonth}
-                        label="Month"
-                        onChange={(e) => setPREASelectedMonth(e.target.value as number | 'all')}
-                      >
-                        <MenuItem value="all">All Months</MenuItem>
-                        {getMonthOptions().map((month) => (
-                          <MenuItem key={month.value} value={month.value}>
-                            {month.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={2}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Day</InputLabel>
-                      <Select
-                        value={preaSelectedDay}
-                        label="Day"
-                        onChange={(e) => setPREASelectedDay(e.target.value as number | 'all')}
-                      >
-                        <MenuItem value="all">All Days</MenuItem>
-                        {getDayOptions().map((day) => (
-                          <MenuItem key={day.value} value={day.value}>
-                            {day.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                </>
-              )}
+              <Grid item xs={12} sm={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Month</InputLabel>
+                  <Select
+                    value={preaSelectedMonth}
+                    label="Month"
+                    onChange={(e) => setPREASelectedMonth(e.target.value as number)}
+                  >
+                    {getMonthOptions().map((month) => (
+                      <MenuItem key={month.value} value={month.value}>
+                        {month.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
             </Grid>
             
             {/* Summary */}
             <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
               <Typography variant="subtitle2" color="text.secondary">
-                Showing {preaFilterType} commissions for {preaSelectedYear}
-                {preaFilterType === 'monthly' && preaSelectedMonth !== 'all' && ` - ${getMonthName(preaSelectedMonth as number)}`}
-                {preaFilterType === 'weekly' && preaSelectedWeek !== 'all' && ` - Week ${preaSelectedWeek}`}
-                {preaFilterType === 'daily' && preaSelectedMonth !== 'all' && preaSelectedDay !== 'all' && 
-                  ` - ${getMonthName(preaSelectedMonth as number)} ${preaSelectedDay}`}
+                Showing PREA commission for {getMonthName(preaSelectedMonth)} {preaSelectedYear}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Properties found: {getFilteredPREACommissions().length} / {data.details.length}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total {preaFilterType} commission: {formatCurrency(data.total)}
+                Total commission: {formatCurrency(data.total)}
               </Typography>
             </Box>
           </Box>
@@ -1006,9 +940,7 @@ const CommissionsPage: React.FC = () => {
               <TableHead>
                 <TableRow>
                   <TableCell>Property Name</TableCell>
-                  <TableCell align="right">Monthly</TableCell>
-                  <TableCell align="right">Yearly</TableCell>
-                  <TableCell align="right">Total</TableCell>
+                  <TableCell align="right">Amount</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1016,15 +948,11 @@ const CommissionsPage: React.FC = () => {
                   <TableRow key={detail.propertyId}>
                     <TableCell>{detail.propertyName}</TableCell>
                     <TableCell align="right">{formatCurrency(detail.commission)}</TableCell>
-                    <TableCell align="right">{formatCurrency(detail.commission * 12)}</TableCell>
-                    <TableCell align="right">{formatCurrency(detail.commission * 12)}</TableCell>
                   </TableRow>
                 ))}
                 <TableRow>
                   <TableCell><strong>Total</strong></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(data.monthly)}</strong></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(data.yearly)}</strong></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(getFilteredPREACommissions().reduce((sum, d: any) => sum + (d.commission || 0), 0))}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(data.total)}</strong></TableCell>
                 </TableRow>
               </TableBody>
             </Table>
@@ -1053,14 +981,14 @@ const CommissionsPage: React.FC = () => {
     doc.setFontSize(10);
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
 
-    if (data) {
+      if (data) {
       const tableData: any[] = [];
       const headers: string[] = [];
 
       if (data && activeTab === 0 && 'details' in data) {
         // Agent Commissions with filtering
         const filteredAgents = getFilteredAgentCommissions();
-        headers.push('Agent Name', filterType === 'monthly' ? 'Monthly Commission' : 'Yearly Commission', 'Properties with Payments', 'Total Properties', 'Total Commission');
+        headers.push('Agent Name', filterType === 'monthly' ? 'Monthly Commission' : 'Yearly Commission', 'Total Properties');
         
         // Add filter info
         let filterInfo = `${filterType} for ${selectedYear}`;
@@ -1074,9 +1002,7 @@ const CommissionsPage: React.FC = () => {
           tableData.push([
             agent.agentName,
             formatCurrency(agent.filteredCommission),
-            agent.propertiesWithPayments,
-            agent.totalProperties,
-            formatCurrency(agent.commission * 12)
+            agent.totalProperties
           ]);
         });
         
@@ -1121,17 +1047,16 @@ const CommissionsPage: React.FC = () => {
           doc.text(`Search: "${agencySearchTerm}"`, 14, 50);
         }
       } else if (data && 'details' in data) {
-        headers.push('Property Name', 'Monthly', 'Yearly', 'Total');
+        headers.push('Property Name', 'Amount');
         const filteredDetails = getFilteredPREACommissions();
         
-        doc.text(`Properties found: ${filteredDetails.length} / ${data.details.length}`, 14, 40);
+        doc.text(`Period: ${getMonthName(preaSelectedMonth)} ${preaSelectedYear}`, 14, 40);
+        doc.text(`Properties found: ${filteredDetails.length} / ${data.details.length}`, 14, 45);
         
         filteredDetails.forEach((detail: any) => {
           tableData.push([
             detail.propertyName,
-            formatCurrency(detail.commission),
-            formatCurrency(detail.commission * 12),
-            formatCurrency(detail.commission * 12)
+            formatCurrency(detail.commission)
           ]);
         });
         
@@ -1206,9 +1131,7 @@ const CommissionsPage: React.FC = () => {
           ...filteredAgents.map((agent: any) => ({
             'Agent Name': agent.agentName,
             [filterType === 'monthly' ? 'Monthly Commission' : 'Yearly Commission']: agent.filteredCommission,
-            'Properties with Payments': agent.propertiesWithPayments,
-            'Total Properties': agent.totalProperties,
-            'Total Commission': agent.commission * 12
+            'Total Properties': agent.totalProperties
           }))
         ];
       } else if (activeTab === 1 && 'details' in data) {
@@ -1251,10 +1174,11 @@ const CommissionsPage: React.FC = () => {
           }))
         ];
       } else if ('details' in data) {
-        // PREA Commission
+        // PREA Commission (monthly only)
         const filteredDetails = getFilteredPREACommissions();
         
         metadata.push(
+          { 'Period': `${getMonthName(preaSelectedMonth)} ${preaSelectedYear}` },
           { 'Properties Found': `${filteredDetails.length} / ${data.details.length}` }
         );
         
@@ -1268,9 +1192,7 @@ const CommissionsPage: React.FC = () => {
           ...metadata,
           ...filteredDetails.map((detail: any) => ({
             'Property Name': detail.propertyName,
-            'Monthly': detail.commission,
-            'Yearly': detail.commission * 12,
-            'Total': detail.commission * 12
+            'Amount': detail.commission
           }))
         ];
       }

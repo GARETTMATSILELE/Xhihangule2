@@ -263,6 +263,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                   borderRadius: 1,
                   objectFit: 'contain'
                 }}
+                imgProps={{ decoding: 'async', loading: 'lazy' }}
                 variant="rounded"
               />
             </Box>

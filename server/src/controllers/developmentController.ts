@@ -187,13 +187,56 @@ export const createDevelopment = async (req: Request, res: Response) => {
 export const listDevelopments = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
-    const developments = await Development.find({ companyId: req.user!.companyId })
+    const userId = new mongoose.Types.ObjectId(req.user!.userId);
+    const companyId = new mongoose.Types.ObjectId(req.user!.companyId);
+    // Sales users see developments they created OR those shared with them as collaborators.
+    // Admin/accountant see all company developments.
+    const match = (req.user!.role === 'admin' || req.user!.role === 'accountant')
+      ? { companyId }
+      : { companyId, $or: [{ createdBy: userId }, { collaborators: userId }] } as any;
+    const developments = await Development.find(match)
       .sort({ createdAt: -1 })
       .lean();
     return res.json(developments);
   } catch (error: any) {
     const status = (error as any)?.statusCode || 500;
     const message = (error as any)?.message || 'Error fetching developments';
+    return res.status(status).json({ message });
+  }
+};
+
+export const addCollaborator = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId });
+    if (!dev) throw new AppError('Development not found', 404);
+    const { userId } = req.body || {};
+    if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) throw new AppError('Invalid userId', 400);
+    const uid = new mongoose.Types.ObjectId(String(userId));
+    await Development.updateOne({ _id: dev._id }, { $addToSet: { collaborators: uid }, $set: { updatedBy: req.user!.userId } });
+    const updated = await Development.findById(dev._id).lean();
+    return res.json(updated);
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error adding collaborator';
+    return res.status(status).json({ message });
+  }
+};
+
+export const removeCollaborator = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId });
+    if (!dev) throw new AppError('Development not found', 404);
+    const { userId } = req.body || {};
+    if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) throw new AppError('Invalid userId', 400);
+    const uid = new mongoose.Types.ObjectId(String(userId));
+    await Development.updateOne({ _id: dev._id }, { $pull: { collaborators: uid }, $set: { updatedBy: req.user!.userId } });
+    const updated = await Development.findById(dev._id).lean();
+    return res.json(updated);
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error removing collaborator';
     return res.status(status).json({ message });
   }
 };

@@ -109,6 +109,8 @@ const DatabaseSyncDashboard: React.FC = () => {
   const [syncSchedules, setSyncSchedules] = useState<SyncSchedule[]>([]);
   const [syncHealth, setSyncHealth] = useState<SyncHealth | null>(null);
   const [loading, setLoading] = useState(true);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [healthLoading, setHealthLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedSchedule, setSelectedSchedule] = useState<SyncSchedule | null>(null);
@@ -127,7 +129,7 @@ const DatabaseSyncDashboard: React.FC = () => {
 
   useEffect(() => {
     loadSyncData();
-    const interval = setInterval(loadSyncData, 30000); // Refresh every 30 seconds
+    const interval = setInterval(() => loadSyncData(true), 60000); // Background refresh every 60 seconds
     return () => clearInterval(interval);
   }, []);
 
@@ -154,23 +156,35 @@ const DatabaseSyncDashboard: React.FC = () => {
     // Run this when user changes (e.g., impersonation) or on first mount
   }, [user?.role]);
 
-  const loadSyncData = async () => {
+  const loadSyncData = async (background: boolean = false) => {
     try {
-      setLoading(true);
-      const [statusRes, schedulesRes, healthRes] = await Promise.all([
-        api.get('/sync/status'),
-        api.get('/sync/schedules'),
-        api.get('/sync/health')
-      ]);
+      if (!background) setLoading(true);
 
+      // Fast path: load status first
+      const statusRes = await api.get('/sync/status');
       setSyncStatus(statusRes.data.data);
-      setSyncSchedules(schedulesRes.data.data);
-      setSyncHealth(healthRes.data.data);
       setError(null);
+      if (!background) setLoading(false);
+
+      // Then load schedules and health without blocking initial paint
+      setSchedulesLoading(true);
+      setHealthLoading(true);
+      try {
+        const [schedulesRes, healthRes] = await Promise.all([
+          api.get('/sync/schedules'),
+          api.get('/sync/health')
+        ]);
+        setSyncSchedules(schedulesRes.data.data);
+        setSyncHealth(healthRes.data.data);
+      } catch (e: any) {
+        setError((e as any)?.message || 'Some sync data failed to load');
+      } finally {
+        setSchedulesLoading(false);
+        setHealthLoading(false);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load sync data');
-    } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
@@ -278,7 +292,7 @@ const DatabaseSyncDashboard: React.FC = () => {
     return new Date(date).toLocaleString();
   };
 
-  if (loading) {
+  if (loading && !syncStatus && !syncHealth && (syncSchedules || []).length === 0) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
@@ -299,7 +313,7 @@ const DatabaseSyncDashboard: React.FC = () => {
       )}
 
       {/* Health Status */}
-      {syncHealth && (
+      {syncHealth ? (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -338,7 +352,16 @@ const DatabaseSyncDashboard: React.FC = () => {
             </Grid>
           </CardContent>
         </Card>
-      )}
+      ) : healthLoading ? (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box display="flex" alignItems="center" justifyContent="space-between">
+              <Typography variant="h6">System Health</Typography>
+              <CircularProgress size={20} />
+            </Box>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Control Panel */}
       <Card sx={{ mb: 3 }}>
@@ -383,7 +406,7 @@ const DatabaseSyncDashboard: React.FC = () => {
               <Button
                 variant="outlined"
                 startIcon={<Refresh />}
-                onClick={loadSyncData}
+                onClick={() => loadSyncData(false)}
                 disabled={loading}
               >
                 Refresh
@@ -480,7 +503,14 @@ const DatabaseSyncDashboard: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {syncSchedules.map((schedule) => (
+                {schedulesLoading && syncSchedules.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8}>
+                      <Box display="flex" justifyContent="center"><CircularProgress size={20} /></Box>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                syncSchedules.map((schedule) => (
                   <TableRow key={schedule.name}>
                     <TableCell>{schedule.name}</TableCell>
                     <TableCell>{schedule.description}</TableCell>
@@ -536,7 +566,8 @@ const DatabaseSyncDashboard: React.FC = () => {
                       </Box>
                     </TableCell>
                   </TableRow>
-                ))}
+                ))
+                )}
               </TableBody>
             </Table>
           </TableContainer>

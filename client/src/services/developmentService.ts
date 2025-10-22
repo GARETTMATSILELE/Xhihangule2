@@ -29,6 +29,14 @@ export const developmentService = {
   async list() {
     const res = await api.get('/developments');
     return res.data?.data || res.data;
+  },
+  async addCollaborator(devId: string, userId: string) {
+    const res = await api.post(`/developments/${devId}/collaborators`, { userId });
+    return res.data?.data || res.data;
+  },
+  async removeCollaborator(devId: string, userId: string) {
+    const res = await api.delete(`/developments/${devId}/collaborators`, { data: { userId } as any });
+    return res.data?.data || res.data;
   }
 };
 

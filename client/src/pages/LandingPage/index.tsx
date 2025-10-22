@@ -14,6 +14,7 @@ import {
   Tabs,
   Tab,
   Link,
+  IconButton,
   ToggleButtonGroup,
   ToggleButton,
   List,
@@ -22,6 +23,10 @@ import {
   ListItemText
 } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import FacebookIcon from '@mui/icons-material/Facebook';
+import TwitterIcon from '@mui/icons-material/Twitter';
+import InstagramIcon from '@mui/icons-material/Instagram';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 
 const LandingPage: React.FC = () => {
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly');
@@ -31,11 +36,9 @@ const LandingPage: React.FC = () => {
     | 'PAYMENTS'
     | 'LEASING'
     | 'MAINTENANCE'
-    | 'MOBILE_APPS'
     | 'INTEGRATIONS'
     | 'SALES'
     | 'REPORTING'
-    | 'ROLES'
     | 'DASHBOARDS';
 
   const [active, setActive] = useState<FeatureKey>('ACCOUNTING');
@@ -101,21 +104,7 @@ const LandingPage: React.FC = () => {
       image:
         'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1200&q=80'
     },
-    {
-      key: 'MOBILE_APPS',
-      label: 'MOBILE APPS',
-      title: 'Mobile Access Anywhere',
-      description:
-        'Empower teams and tenants with mobile-friendly tools built for productivity.',
-      bullets: [
-        'Responsive dashboards',
-        'On-the-go inspections',
-        'Instant notifications'
-      ],
-      cta: 'View Mobile Features',
-      image:
-        'https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?auto=format&fit=crop&w=1200&q=80'
-    },
+    
     {
       key: 'INTEGRATIONS',
       label: 'INTEGRATIONS',
@@ -161,21 +150,7 @@ const LandingPage: React.FC = () => {
       image:
         'https://images.unsplash.com/photo-1551281044-8b29fbcb625a?auto=format&fit=crop&w=1200&q=80'
     },
-    {
-      key: 'ROLES',
-      label: 'ROLES & PERMISSIONS',
-      title: 'Roles & Permissions',
-      description:
-        'Granular access for Admin, Owner, Agent, Accountant, and Sales teams.',
-      bullets: [
-        'Role-based access control',
-        'Company and property scoping',
-        'Audit-friendly activity logs'
-      ],
-      cta: 'View Roles Features',
-      image:
-        'https://images.unsplash.com/photo-1507209696998-3c532be9b2b1?auto=format&fit=crop&w=1200&q=80'
-    },
+    
     {
       key: 'DASHBOARDS',
       label: 'DASHBOARDS & PORTALS',
@@ -224,7 +199,10 @@ const LandingPage: React.FC = () => {
                 Welcome to Xhihangule
               </Typography>
               <Typography variant="h5" paragraph>
-                Your all-in-one solution for business management
+                Your all-in-one solution for property management
+              </Typography>
+              <Typography variant="h6" paragraph sx={{ color: 'common.white', fontWeight: 600 }}>
+                🎉 Start your 14-day free trial today - No credit card required!
               </Typography>
               <Box sx={{ mt: 4 }}>
                 <Button
@@ -235,7 +213,7 @@ const LandingPage: React.FC = () => {
                   size="large"
                   sx={{ mr: 2 }}
                 >
-                  Get Started
+                  Start Free Trial
                 </Button>
                 <Button
                   component={RouterLink}
@@ -249,7 +227,20 @@ const LandingPage: React.FC = () => {
               </Box>
             </Grid>
             <Grid item xs={12} md={6}>
-              {/* Add hero image here */}
+              <Box
+                component="img"
+                src="/hero-laptop.png"
+                alt="Xhihangule agent dashboard on a laptop"
+                sx={{
+                  width: '100%',
+                  maxWidth: 460,
+                  display: 'block',
+                  mx: 'auto',
+                  
+              
+                }}
+                loading="lazy"
+              />
             </Grid>
           </Grid>
         </Container>
@@ -332,7 +323,7 @@ const LandingPage: React.FC = () => {
           PRICING
         </Typography>
         <Typography variant="h4" component="h2" align="center" gutterBottom>
-          Explore for free and unlock our additional features later on.
+          Start with a free trial, upgrade when you're ready.
         </Typography>
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
           <ToggleButtonGroup
@@ -347,6 +338,39 @@ const LandingPage: React.FC = () => {
         </Box>
 
         <Grid container spacing={3}>
+          {/* Free Trial Card */}
+          <Grid item xs={12} md={4}>
+            <Card elevation={0} sx={{ border: '2px solid', borderColor: 'success.main', borderRadius: 3, position: 'relative' }}>
+              <CardContent sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="h5">Free Trial</Typography>
+                  <Chip size="small" label="14 Days" color="success" sx={{ fontWeight: 700 }} />
+                </Box>
+                <Typography variant="h3" sx={{ fontWeight: 800, color: 'success.main' }}>
+                  FREE
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Full access to all features
+                </Typography>
+                <List dense sx={{ mt: 2 }}>
+                  {[ 'All core features', 'Up to 25 properties', 'Agent & property accounts', 'No credit card required', 'Cancel anytime' ].map((f) => (
+                    <ListItem key={f} sx={{ py: 0.5 }}>
+                      <ListItemIcon sx={{ minWidth: 28 }}>
+                        <CheckCircleOutlineIcon color="success" fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText primary={f} primaryTypographyProps={{ variant: 'body2' }} />
+                    </ListItem>
+                  ))}
+                </List>
+              </CardContent>
+              <CardActions sx={{ px: 3, pb: 3 }}>
+                <Button component={RouterLink} to="/admin-signup" variant="contained" color="success" fullWidth>
+                  Start Free Trial
+                </Button>
+              </CardActions>
+            </Card>
+          </Grid>
+
           {/* Individual */}
           <Grid item xs={12} md={4}>
             <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
@@ -479,9 +503,58 @@ const LandingPage: React.FC = () => {
       {/* Footer */}
       <Box component="footer" sx={{ bgcolor: 'background.paper', py: 6 }}>
         <Container maxWidth="lg">
-          <Typography variant="body2" color="text.secondary" align="center">
-            © {new Date().getFullYear()} Xhihangule. All rights reserved.
-          </Typography>
+          <Grid container spacing={4} justifyContent="center">
+            <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
+              <Typography variant="h6" gutterBottom>
+                Socials
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
+                <IconButton aria-label="Facebook" color="primary" component="a" href="#">
+                  <FacebookIcon />
+                </IconButton>
+                <IconButton aria-label="X" color="primary" component="a" href="#">
+                  <TwitterIcon />
+                </IconButton>
+                <IconButton aria-label="Instagram" color="primary" component="a" href="#">
+                  <InstagramIcon />
+                </IconButton>
+                <IconButton
+                  aria-label="WhatsApp"
+                  color="primary"
+                  component="a"
+                  href="https://wa.me/263783222010"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <WhatsAppIcon />
+                </IconButton>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
+              <Typography variant="h6" gutterBottom>
+                Contact Us
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Email: garett@kibycom.com
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Phone: +263783222010
+              </Typography>
+            </Grid>
+            <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
+              <Typography variant="h6" gutterBottom>
+                Address
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                8 Normandy Road Alexandra Park, Harare, Zimbabwe
+              </Typography>
+            </Grid>
+          </Grid>
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="body2" color="text.secondary" align="center">
+              © {new Date().getFullYear()} Xhihangule. All rights reserved.
+            </Typography>
+          </Box>
         </Container>
       </Box>
     </Box>

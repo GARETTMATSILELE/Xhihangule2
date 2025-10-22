@@ -49,7 +49,8 @@ const DashboardOverview: React.FC = () => {
   const tenantService = useTenantService();
   const leaseService = useLeaseService();
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // core loading for above-the-fold
+  const [deferredLoading, setDeferredLoading] = useState(true); // deferred data below-the-fold
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState<'month' | 'quarter' | 'year'>('month');
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -63,19 +64,73 @@ const DashboardOverview: React.FC = () => {
   const [levyPayments, setLevyPayments] = useState<any[]>([]);
   const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
   const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
+  // Helper to normalize possible id shapes (string, {$oid}, {_id}, or embedded doc)
+  function getId(id: any): string {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    if (typeof id === 'object') {
+      if ((id as any).$oid) return String((id as any).$oid);
+      if ((id as any)._id) {
+        const v = (id as any)._id;
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object' && (v as any).$oid) return String((v as any).$oid);
+      }
+      if ((id as any).id) {
+        const v = (id as any).id;
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object' && (v as any).$oid) return String((v as any).$oid);
+      }
+    }
+    return '';
+  }
 
   useEffect(() => {
-    loadPaymentRequests();
+    let cancelled = false;
+    (async () => {
+      await loadCore();
+      if (cancelled) return;
+      // Defer heavy/secondary fetches to next tick to let first paint occur
+      setTimeout(() => { if (!cancelled) loadDeferred(); }, 0);
+    })();
+    return () => { cancelled = true; };
     // Re-load when company context changes
   }, [user?.companyId]);
 
-  const loadPaymentRequests = async () => {
+  // Live refresh when payments change (to keep Outstanding cards in sync with agent dashboard)
+  useEffect(() => {
+    const onPaymentsChanged = () => {
+      // Refresh both core and deferred datasets that feed the outstanding cards
+      loadCore();
+      loadDeferred();
+    };
+    window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
+    return () => {
+      window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
+    };
+  }, []);
+
+  const loadCore = async () => {
     try {
       setLoading(true);
-      const response = await paymentRequestService.getPaymentRequests();
-      setPaymentRequests(response.data);
-      const paymentsData = await paymentService.getPayments();
+      const [prRes, paymentsData, summary] = await Promise.all([
+        paymentRequestService.getPaymentRequests(),
+        paymentService.getPayments(),
+        (async () => { try { return await companyAccountService.getSummary(); } catch { return null; } })()
+      ]);
+      setPaymentRequests(prRes.data || []);
       setPayments(Array.isArray(paymentsData) ? paymentsData : []);
+      if (summary) setCompanySummary(summary);
+    } catch (err: any) {
+      console.error('Error loading core dashboard data:', err);
+      setError('Failed to load dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadDeferred = async () => {
+    try {
+      setDeferredLoading(true);
       try {
         const props = await propertyService.getPublicProperties();
         setProperties(Array.isArray(props) ? props : []);
@@ -129,34 +184,31 @@ const DashboardOverview: React.FC = () => {
       } catch {
         // If summary fails, leave as null; UI defaults to zeros
       }
-
-      // Load company account summary and transactions
-      try {
-        const summary = await companyAccountService.getSummary();
-        setCompanySummary(summary);
-      } catch {
-        setCompanyTransactions([]);
-      }
       try {
         const tx = await companyAccountService.getTransactions();
         setCompanyTransactions(Array.isArray((tx as any)?.transactions) ? (tx as any).transactions : []);
       } catch {}
     } catch (err: any) {
-      console.error('Error loading payment requests:', err);
-      setError('Failed to load payment requests');
+      console.error('Error loading deferred dashboard data:', err);
     } finally {
-      setLoading(false);
+      setDeferredLoading(false);
     }
   };
-  // Filter out sale/sales properties for rental context
-  const rentalProperties = useMemo(() => (properties || []).filter((p: any) => {
-    const rt = (p?.rentalType || '').toString().toLowerCase();
-    return rt !== 'sale' && rt !== 'sales';
-  }), [properties]);
+  // Filter out sale/sales properties and restrict to current user's company
+  const rentalProperties = useMemo(() => {
+    const currentCompanyId = getId((user as any)?.companyId);
+    return (properties || []).filter((p: any) => {
+      const rt = (p?.rentalType || '').toString().toLowerCase();
+      if (rt === 'sale' || rt === 'sales') return false;
+      const pidCompany = getId((p as any).companyId);
+      // Only include properties belonging to the logged-in user's company
+      return currentCompanyId ? (pidCompany === currentCompanyId) : true;
+    });
+  }, [properties, user?.companyId]);
   const propertyById = useMemo(() => {
     const m: Record<string, any> = {};
     for (const p of rentalProperties) {
-      const id = (p && (p._id || p.id)) ? String(p._id || p.id) : '';
+      const id = getId((p as any)._id) || getId((p as any).id);
       if (id) m[id] = p;
     }
     return m;
@@ -164,14 +216,15 @@ const DashboardOverview: React.FC = () => {
   const tenantById = useMemo(() => {
     const m: Record<string, any> = {};
     for (const t of tenants || []) {
-      const id = (t && (t._id || t.id)) ? String(t._id || t.id) : '';
+      const id = getId((t as any)._id) || getId((t as any).id);
       if (id) m[id] = t;
     }
     return m;
   }, [tenants]);
 
   // Computed totals similar to AgentDashboard
-  const computedOutstandingLevies = useMemo(() => {
+  const computedOutstandingLevies = useMemo<number | null>(() => {
+    if (!company) return null;
     try {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
@@ -190,7 +243,7 @@ const DashboardOverview: React.FC = () => {
         const status = (p?.status || '').toString().toLowerCase();
         const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
         if (!isCompleted) continue;
-        const pid = String(p?.propertyId?._id || p?.propertyId || p?.property?._id || p?.property?.id || '');
+        const pid = getId((p as any).propertyId) || getId((p as any).property);
         if (!pid) continue;
         const monthsPaid: number = Number((p as any).advanceMonthsPaid || 1);
         const sy = Number((p as any)?.advancePeriodStart?.year);
@@ -217,13 +270,15 @@ const DashboardOverview: React.FC = () => {
       };
       for (const prop of rentalProperties || []) {
         if (prop?.levyOrMunicipalType !== 'levy') continue;
-        const pid = String(prop?._id || prop?.id || '');
+        const pid = getId((prop as any)._id) || getId((prop as any).id);
         if (!pid) continue;
         const monthlyLevy = Number(prop?.levyOrMunicipalAmount) || 0;
         if (!monthlyLevy) continue;
         const paidKeys = paidByProperty[pid] || new Set<string>();
         const missing = new Set<string>();
-        const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+        const leasesForProperty = (leases || [])
+          .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
+          .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
@@ -239,12 +294,13 @@ const DashboardOverview: React.FC = () => {
         }
         total += missing.size * monthlyLevy;
       }
-      const opening = Number(((company as any)?.levyReceivableOpeningBalance || 0));
-      return total + opening;
+      // Strict cutoff-based amount: do not include any opening balance
+      return total;
     } catch { return 0; }
   }, [rentalProperties, leases, levyPayments, company]);
 
-  const computedOutstandingRentals = useMemo(() => {
+  const computedOutstandingRentals = useMemo<number | null>(() => {
+    if (!company) return null;
     try {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
@@ -266,7 +322,7 @@ const DashboardOverview: React.FC = () => {
         const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
         if (!isCompleted) continue;
         const anyP: any = p as any;
-        const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+        const pid = getId(anyP?.propertyId) || getId(anyP?.property);
         if (!pid) continue;
         const monthsPaid: number = Number((p as any).advanceMonthsPaid || 1);
         const sy = Number((p as any)?.advancePeriodStart?.year);
@@ -292,13 +348,15 @@ const DashboardOverview: React.FC = () => {
         }
       };
       for (const prop of rentalProperties || []) {
-        const pid = String(prop?._id || prop?.id || '');
+        const pid = getId((prop as any)._id) || getId((prop as any).id);
         if (!pid) continue;
         const monthlyRent = Number(prop?.rent) || 0;
         if (!monthlyRent) continue;
         const paidKeys = paidByProperty[pid] || new Set<string>();
         const missing = new Set<string>();
-        const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+        const leasesForProperty = (leases || [])
+          .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
+          .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
@@ -314,8 +372,8 @@ const DashboardOverview: React.FC = () => {
         }
         total += missing.size * monthlyRent;
       }
-      const opening = Number(((company as any)?.rentReceivableOpeningBalance || 0));
-      return total + opening;
+      // Strict cutoff-based amount: do not include any opening balance
+      return total;
     } catch { return 0; }
   }, [rentalProperties, leases, payments, company]);
 
@@ -404,9 +462,9 @@ const DashboardOverview: React.FC = () => {
     { title: 'Expenses', value: expensesForPeriod, icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/property-accounts' },
     { title: 'Receivables (Rental)', value: receivablesRental, icon: <PendingActionsIcon />, color: 'warning.main', path: '/accountant-dashboard/revenue' },
     { title: 'Receivables (Sales)', value: receivablesSales, icon: <PendingActionsIcon />, color: 'warning.main', path: '/accountant-dashboard/revenue' },
-    { title: 'Outstanding rentals', value: computedOutstandingRentals, icon: <PaymentIcon />, color: 'error.main', path: '' },
+    { title: 'Outstanding rentals', value: (computedOutstandingRentals ?? 0), icon: <PaymentIcon />, color: 'error.main', path: '' },
     { title: 'Total Receipts', value: periodFilteredPayments.reduce((s, p) => s + p.amount, 0), icon: <TrendingUpIcon />, color: 'secondary.main', path: '/accountant-dashboard/revenue' },
-    { title: 'Outstanding levies', value: computedOutstandingLevies, icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
+    { title: 'Outstanding levies', value: (computedOutstandingLevies ?? 0), icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
     { title: 'Day Sales Outstanding', value: dso, icon: <TrendingUpIcon />, color: 'text.primary', path: '/accountant-dashboard/revenue' },
     { title: 'Bank Revenue', value: periodFilteredPayments.filter(p => p.paymentMethod === 'bank_transfer').reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' }
   ];
@@ -531,9 +589,11 @@ const DashboardOverview: React.FC = () => {
                 const items = (rentalProperties || [])
                   .filter((prop: any) => prop?.levyOrMunicipalType === 'levy')
                   .map((prop: any) => {
-                    const pid = String(prop?._id || prop?.id || '');
+                    const pid = getId((prop as any)._id) || getId((prop as any).id);
                     const paidKeys = paidByProperty[pid] || new Set<string>();
-                    const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+                    const leasesForProperty = (leases || [])
+                      .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
+                      .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
                     const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
                     let propertyTotalMissing = 0;
                     let propertyTotalAmount = 0;
@@ -553,7 +613,7 @@ const DashboardOverview: React.FC = () => {
                         if (!paidKeys.has(ymKey(y, m))) labels.push(label);
                       });
                       if (labels.length > 0) {
-                        const tid = String(l?.tenantId?._id || l?.tenantId || '');
+                        const tid = getId((l as any).tenantId);
                         const t = tenantById[tid];
                         const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
                         perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
@@ -632,7 +692,7 @@ const DashboardOverview: React.FC = () => {
                   const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
                   if (!isCompleted) continue;
                   const anyP: any = p as any;
-                  const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+                  const pid = getId(anyP?.propertyId) || getId(anyP?.property);
                   if (!pid) continue;
                   const monthsPaid: number = Number((p as any).advanceMonthsPaid || 1);
                   const sy = Number((p as any)?.advancePeriodStart?.year);
@@ -661,9 +721,11 @@ const DashboardOverview: React.FC = () => {
                 };
                 const items = (rentalProperties || [])
                   .map((prop: any) => {
-                    const pid = String(prop?._id || prop?.id || '');
+                    const pid = getId((prop as any)._id) || getId((prop as any).id);
                     const paidKeys = paidByProperty[pid] || new Set<string>();
-                    const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+                    const leasesForProperty = (leases || [])
+                      .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
+                      .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
                     const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
                     const missingSet = new Set<string>();
                     const missingLabels: string[] = [];
@@ -686,7 +748,7 @@ const DashboardOverview: React.FC = () => {
                         }
                       });
                       if (labels.length > 0) {
-                        const tid = String(l?.tenantId?._id || l?.tenantId || '');
+                        const tid = getId((l as any).tenantId);
                         const t = tenantById[tid];
                         const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
                         perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
@@ -747,7 +809,7 @@ const DashboardOverview: React.FC = () => {
       )}
 
       {/* Recent Tasks */}
-      <Grid container spacing={3}>
+      <Grid container spacing={3} sx={{ mt: 4 }}>
         <Grid item xs={12} md={6}>
           <Paper elevation={2} sx={{ p: 3 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>

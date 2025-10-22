@@ -14,6 +14,9 @@ export interface IUser extends Document {
   lastLogin?: Date;
   resetPasswordToken?: string;
   resetPasswordExpires?: Date;
+  // Running totals for accounting and commissions
+  commission?: number;
+  balance?: number;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -69,6 +72,13 @@ const userSchema = new Schema<IUser>({
   }
 }, {
   timestamps: true
+});
+
+// Numeric fields for balances/commissions with safe defaults
+// Using separate definitions to avoid changing ordering of existing schema fields
+userSchema.add({
+  commission: { type: Number, default: 0, min: 0 },
+  balance: { type: Number, default: 0 }
 });
 
 // Hash password before saving

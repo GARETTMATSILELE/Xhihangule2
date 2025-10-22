@@ -20,6 +20,8 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const chartController_1 = require("./chartController");
 const User_1 = require("../models/User");
+const subscriptionService_1 = require("../services/subscriptionService");
+const subscriptionService = subscriptionService_1.SubscriptionService.getInstance();
 const getCompanies = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companies = yield Company_1.Company.find().select('-__v');
@@ -111,6 +113,11 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
         console.log('Initializing chart data for company:', company._id);
         yield (0, chartController_1.updateChartMetrics)(company._id.toString());
         console.log('Chart data initialized successfully');
+        // Create trial subscription for the new company
+        console.log('Creating trial subscription for company:', company._id);
+        yield subscriptionService.createTrialSubscription(company._id.toString(), plan, 14 // 14-day trial
+        );
+        console.log('Trial subscription created successfully');
         // Verify the company was saved
         const savedCompany = yield Company_1.Company.findById(company._id);
         console.log('Verified saved company:', savedCompany);

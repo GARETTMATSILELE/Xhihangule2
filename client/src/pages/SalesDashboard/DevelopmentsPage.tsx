@@ -21,12 +21,14 @@ import {
   TableHead,
   Checkbox,
   FormControlLabel,
-  FormGroup
+  FormGroup,
+  TablePagination
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon, Print as PrintIcon, FileDownload as FileDownloadIcon } from '@mui/icons-material';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { buyerService } from '../../services/buyerService';
 import { developmentService } from '../../services/developmentService';
+import api from '../../api/axios';
 import { developmentUnitService } from '../../services/developmentUnitService';
 import paymentService from '../../services/paymentService';
 import { Payment } from '../../types/payment';
@@ -71,6 +73,7 @@ interface Development {
   name: string;
   type: DevelopmentType;
   description?: string;
+  collaborators?: string[];
   // Owner details (optional)
   ownerFirstName?: string;
   ownerLastName?: string;
@@ -149,8 +152,16 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [openUnit, setOpenUnit] = useState<Record<string, boolean>>({});
   const [unitPayments, setUnitPayments] = useState<Record<string, Payment[]>>({});
   const [unitPaymentsLoading, setUnitPaymentsLoading] = useState<Record<string, boolean>>({});
+  // Pagination per development id
+  const [pageByDev, setPageByDev] = useState<Record<string, number>>({});
+  const [rowsPerPageByDev, setRowsPerPageByDev] = useState<Record<string, number>>({});
   // Commission config for development
   const [commissionPercent, setCommissionPercent] = useState<number>(5);
+  const [salesUsers, setSalesUsers] = useState<any[]>([]);
+  const [salesSearch, setSalesSearch] = useState('');
+  // Collaborator management dialog
+  const [showCollab, setShowCollab] = useState<{ open: boolean; devId: string | null }>({ open: false, devId: null });
+  const [collabUserId, setCollabUserId] = useState<string>('');
   const [preaPercentOfCommission, setPreaPercentOfCommission] = useState<number>(3);
   const [agencyPercent, setAgencyPercent] = useState<number>(50);
   const [agentPercent, setAgentPercent] = useState<number>(50);
@@ -164,6 +175,7 @@ const SalesDevelopmentsPage: React.FC = () => {
           name: d.name,
           type: d.type,
           description: d.description,
+          collaborators: Array.isArray(d.collaborators) ? d.collaborators.map((x: any)=> String(x)) : [],
           ownerFirstName: d.owner?.firstName,
           ownerLastName: d.owner?.lastName,
           ownerCompanyName: d.owner?.companyName,
@@ -179,6 +191,19 @@ const SalesDevelopmentsPage: React.FC = () => {
     };
     loadDevs();
   }, []);
+
+  // Lazy-load sales users only when Collaborators dialog is opened
+  useEffect(() => {
+    if (showCollab.open && salesUsers.length === 0) {
+      (async () => {
+        try {
+          const res = await api.get('/users/agents', { params: { role: 'sales' } });
+          const list = (res.data?.data || res.data || []) as any[];
+          setSalesUsers(Array.isArray(list) ? list : []);
+        } catch (e) { setSalesUsers([]); }
+      })();
+    }
+  }, [showCollab.open, salesUsers.length]);
 
   const addVariation = () => setVariations(prev => [...prev, { id: uid(), label: '', count: 1 }]);
   const removeVariation = (id: string) => setVariations(prev => prev.filter(v => v.id !== id));
@@ -224,6 +249,7 @@ const SalesDevelopmentsPage: React.FC = () => {
         name: created.name,
         type: created.type,
         description: created.description,
+        collaborators: Array.isArray(created.collaborators) ? created.collaborators.map((x: any)=> String(x)) : [],
         ownerFirstName: created.owner?.firstName,
         ownerLastName: created.owner?.lastName,
         ownerCompanyName: created.owner?.companyName,
@@ -496,10 +522,12 @@ const SalesDevelopmentsPage: React.FC = () => {
                   <Box>
                     <Typography variant="h6">{dev.name} • {dev.type.toUpperCase()}</Typography>
                     {dev.description && <Typography variant="body2" color="text.secondary">{dev.description}</Typography>}
+                    <Typography variant="caption" color="text.secondary">Collaborators: {dev.collaborators?.length || 0}</Typography>
                   </Box>
                   {isOpen && (
                     <Box display="flex" gap={1}>
                       <Button size="small" startIcon={<FileDownloadIcon />} onClick={(e) => { e.stopPropagation(); exportUnitsCsv(dev); }}>Export CSV</Button>
+                      <Button size="small" onClick={(e)=>{ e.stopPropagation(); setShowCollab({ open: true, devId: dev.id }); }}>Collaborators</Button>
                       <Button size="small" startIcon={<DeleteIcon />} color="error" onClick={(e) => { e.stopPropagation(); removeDevelopment(dev.id); }}>Delete</Button>
                     </Box>
                   )}
@@ -550,13 +578,18 @@ const SalesDevelopmentsPage: React.FC = () => {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {(loadingUnits[dev.id] ? [] : dev.units).map(u => {
+                        {(() => {
+                          const page = pageByDev[dev.id] ?? 0;
+                          const rowsPerPage = rowsPerPageByDev[dev.id] ?? 25;
+                          const items = loadingUnits[dev.id] ? [] : dev.units;
+                          const paged = items.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+                          return paged;
+                        })().map(u => {
                           const variation = dev.variations.find(v => v.id === u.variationId);
                           const total = computeUnitPrice(dev, u, variation);
                           return (
-                            <>
+                            <React.Fragment key={u.id}>
                             <TableRow
-                              key={u.id}
                               hover
                               onClick={async () => {
                                 setOpenUnit(prev => ({ ...prev, [u.id]: !prev[u.id] }));
@@ -611,7 +644,7 @@ const SalesDevelopmentsPage: React.FC = () => {
                               </TableCell>
                             </TableRow>
                             {openUnit[u.id] && (
-                              <TableRow>
+                              <TableRow key={`${u.id}-details`}>
                                 <TableCell colSpan={6}>
                                   {unitPaymentsLoading[u.id] && (
                                     <Typography variant="body2" color="text.secondary">Loading payments…</Typography>
@@ -688,9 +721,9 @@ const SalesDevelopmentsPage: React.FC = () => {
                                     })()
                                   )}
                                 </TableCell>
-                              </TableRow>
+                            </TableRow>
                             )}
-                            </>
+                            </React.Fragment>
                           );
                         })}
                         {loadingUnits[dev.id] && (
@@ -702,6 +735,20 @@ const SalesDevelopmentsPage: React.FC = () => {
                         )}
                       </TableBody>
                     </Table>
+
+                    <TablePagination
+                      component="div"
+                      count={dev.units.length}
+                      page={pageByDev[dev.id] ?? 0}
+                      onPageChange={(_, newPage) => setPageByDev(prev => ({ ...prev, [dev.id]: newPage }))}
+                      rowsPerPage={rowsPerPageByDev[dev.id] ?? 25}
+                      onRowsPerPageChange={(e) => {
+                        const next = parseInt(e.target.value, 10);
+                        setRowsPerPageByDev(prev => ({ ...prev, [dev.id]: next }));
+                        setPageByDev(prev => ({ ...prev, [dev.id]: 0 }));
+                      }}
+                      rowsPerPageOptions={[10, 25, 50, 100]}
+                    />
 
                     {/* Payments inline editor */}
                   {/* Removed payments editor; buyer is captured via Add Buyer dialog */}
@@ -880,6 +927,82 @@ const SalesDevelopmentsPage: React.FC = () => {
               variations.filter(v => v.label && v.label.trim().length > 0 && (v.count || 0) >= 1).length === 0
             }
           >{creating ? 'Creating…' : 'Create'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Collaborators Dialog */}
+      <Dialog open={showCollab.open} onClose={()=>setShowCollab({ open:false, devId: null })} maxWidth="sm" fullWidth>
+        <DialogTitle>Manage Collaborators</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Add another agent's user ID to share this development. They will see units and can add buyers.
+          </Typography>
+          <TextField fullWidth label="Search sales users" value={salesSearch} onChange={(e)=>setSalesSearch(e.target.value)} sx={{ mb: 2 }} />
+          {showCollab.devId && (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" color="text.secondary">Current collaborators:</Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+                {(developments.find(d=>d.id===showCollab.devId)?.collaborators || []).map(cid => {
+                  const u = salesUsers.find(s=> String(s._id||s.id) === String(cid));
+                  const label = u ? `${u.firstName||''} ${u.lastName||''}`.trim() || u.email : cid;
+                  return <Chip key={cid} label={label} size="small" />;
+                })}
+                {((developments.find(d=>d.id===showCollab.devId)?.collaborators || []).length === 0) && (
+                  <Typography variant="caption" color="text.secondary">None</Typography>
+                )}
+              </Box>
+            </Box>
+          )}
+          <TextField select fullWidth label="Select Sales User" value={collabUserId} onChange={(e)=>setCollabUserId(e.target.value)}>
+            <MenuItem value="">None</MenuItem>
+            {salesUsers
+              .filter(u => {
+                const q = salesSearch.trim().toLowerCase();
+                if (!q) return true;
+                const name = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase();
+                return name.includes(q) || String(u.email||'').toLowerCase().includes(q);
+              })
+              .map(u => (
+                <MenuItem key={u._id || u.id} value={u._id || u.id}>
+                  {`${u.firstName || ''} ${u.lastName || ''}`.trim()} — {u.email}
+                </MenuItem>
+              ))}
+          </TextField>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={()=>setShowCollab({ open:false, devId: null })}>Close</Button>
+          <Button variant="contained" onClick={async ()=>{
+            if (!showCollab.devId || !collabUserId.trim()) return;
+            try {
+              await developmentService.addCollaborator(showCollab.devId, collabUserId.trim());
+              const items = await developmentService.list();
+              setDevelopments((items || []).map((d:any)=>({
+                id: d._id, name: d.name, type: d.type, description: d.description,
+                collaborators: Array.isArray(d.collaborators)? d.collaborators.map((x:any)=>String(x)) : [],
+                ownerFirstName: d.owner?.firstName, ownerLastName: d.owner?.lastName, ownerCompanyName: d.owner?.companyName,
+                ownerEmail: d.owner?.email, ownerIdNumber: d.owner?.idNumber, ownerPhone: d.owner?.phone,
+                variations: (d.variations||[]).map((v:any)=>({ id:v.id, label:v.label, count:v.count, price:v.price, sizeSqm:d.type==='stands'?v.size:undefined })),
+                units: [], createdAt: d.createdAt
+              })));
+              setCollabUserId('');
+            } catch (e) {}
+          }}>Add</Button>
+          <Button variant="outlined" color="error" onClick={async ()=>{
+            if (!showCollab.devId || !collabUserId.trim()) return;
+            try {
+              await developmentService.removeCollaborator(showCollab.devId, collabUserId.trim());
+              const items = await developmentService.list();
+              setDevelopments((items || []).map((d:any)=>({
+                id: d._id, name: d.name, type: d.type, description: d.description,
+                collaborators: Array.isArray(d.collaborators)? d.collaborators.map((x:any)=>String(x)) : [],
+                ownerFirstName: d.owner?.firstName, ownerLastName: d.owner?.lastName, ownerCompanyName: d.owner?.companyName,
+                ownerEmail: d.owner?.email, ownerIdNumber: d.owner?.idNumber, ownerPhone: d.owner?.phone,
+                variations: (d.variations||[]).map((v:any)=>({ id:v.id, label:v.label, count:v.count, price:v.price, sizeSqm:d.type==='stands'?v.size:undefined })),
+                units: [], createdAt: d.createdAt
+              })));
+              setCollabUserId('');
+            } catch (e) {}
+          }}>Remove</Button>
         </DialogActions>
       </Dialog>
 

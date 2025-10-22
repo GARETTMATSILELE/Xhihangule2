@@ -7,6 +7,9 @@ import { JwtPayload } from '../types/auth';
 import mongoose from 'mongoose';
 import { updateChartMetrics } from './chartController';
 import { User } from '../models/User';
+import { SubscriptionService } from '../services/subscriptionService';
+
+const subscriptionService = SubscriptionService.getInstance();
 
 export const getCompanies = async (req: Request, res: Response) => {
   try {
@@ -105,6 +108,15 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
     console.log('Initializing chart data for company:', company._id);
     await updateChartMetrics(company._id.toString());
     console.log('Chart data initialized successfully');
+
+    // Create trial subscription for the new company
+    console.log('Creating trial subscription for company:', company._id);
+    await subscriptionService.createTrialSubscription(
+      company._id.toString(), 
+      plan, 
+      14 // 14-day trial
+    );
+    console.log('Trial subscription created successfully');
 
     // Verify the company was saved
     const savedCompany = await Company.findById(company._id);

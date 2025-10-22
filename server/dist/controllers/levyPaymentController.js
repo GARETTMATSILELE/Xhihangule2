@@ -30,6 +30,9 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         // Validate required fields
         const { propertyId, paymentDate, paymentMethod, amount, currency = 'USD' } = req.body;
+        // Optional incoming period fields (allow using rentalPeriod* aliases for consistency)
+        const incomingMonth = Number(req.body.levyPeriodMonth || req.body.rentalPeriodMonth);
+        const incomingYear = Number(req.body.levyPeriodYear || req.body.rentalPeriodYear);
         if (!propertyId) {
             throw new errorHandler_1.AppError('Property ID is required', 400);
         }
@@ -44,6 +47,24 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         const levyPaymentData = Object.assign(Object.assign({}, req.body), { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId), paymentType: 'levy', status: 'completed' // Set as completed for accountant dashboard payments
          });
+        // Normalize and set levy period (month/year)
+        // If explicitly provided, use those; otherwise derive from paymentDate
+        try {
+            const baseDate = paymentDate ? new Date(paymentDate) : new Date();
+            if (Number.isFinite(incomingMonth) && incomingMonth >= 1 && incomingMonth <= 12) {
+                levyPaymentData.levyPeriodMonth = incomingMonth;
+            }
+            else if (levyPaymentData.levyPeriodMonth == null) {
+                levyPaymentData.levyPeriodMonth = baseDate.getMonth() + 1;
+            }
+            if (Number.isFinite(incomingYear) && incomingYear >= 1900 && incomingYear <= 2100) {
+                levyPaymentData.levyPeriodYear = incomingYear;
+            }
+            else if (levyPaymentData.levyPeriodYear == null) {
+                levyPaymentData.levyPeriodYear = baseDate.getFullYear();
+            }
+        }
+        catch (_c) { }
         const levyPayment = new LevyPayment_1.LevyPayment(levyPaymentData);
         yield levyPayment.save();
         // Populate the created levy payment for response

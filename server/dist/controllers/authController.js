@@ -53,7 +53,9 @@ const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const authService_1 = require("../services/authService");
 const emailService_1 = require("../services/emailService");
+const subscriptionService_1 = require("../services/subscriptionService");
 const authService = authService_1.AuthService.getInstance();
+const subscriptionService = subscriptionService_1.SubscriptionService.getInstance();
 // Signup with company details
 const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -128,6 +130,11 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                     createdUser.companyId = companyId;
                     yield createdUser.save({ session });
                     console.log('User updated with company ID');
+                    // Create trial subscription for the new company
+                    console.log('Creating trial subscription...');
+                    yield subscriptionService.createTrialSubscription(companyId.toString(), plan, 14 // 14-day trial
+                    );
+                    console.log('Trial subscription created successfully');
                 }
             }));
         }
@@ -182,6 +189,11 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                             createdUser.companyId = companyId;
                             yield createdUser.save();
                             console.log('User updated with company ID (fallback)');
+                            // Create trial subscription for the new company (fallback)
+                            console.log('Creating trial subscription (fallback)...');
+                            yield subscriptionService.createTrialSubscription(companyId.toString(), plan, 14 // 14-day trial
+                            );
+                            console.log('Trial subscription created successfully (fallback)');
                         }
                         catch (fallbackCompanyError) {
                             if ((fallbackCompanyError === null || fallbackCompanyError === void 0 ? void 0 : fallbackCompanyError.code) === 11000) {

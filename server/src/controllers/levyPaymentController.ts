@@ -19,6 +19,9 @@ export const createLevyPayment = async (req: Request, res: Response) => {
 
     // Validate required fields
     const { propertyId, paymentDate, paymentMethod, amount, currency = 'USD' } = req.body;
+    // Optional incoming period fields (allow using rentalPeriod* aliases for consistency)
+    const incomingMonth = Number((req.body as any).levyPeriodMonth || (req.body as any).rentalPeriodMonth);
+    const incomingYear = Number((req.body as any).levyPeriodYear || (req.body as any).rentalPeriodYear);
     
     if (!propertyId) {
       throw new AppError('Property ID is required', 400);
@@ -36,13 +39,29 @@ export const createLevyPayment = async (req: Request, res: Response) => {
       throw new AppError('Valid amount is required', 400);
     }
 
-    const levyPaymentData = {
+    const levyPaymentData: any = {
       ...req.body,
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       processedBy: new mongoose.Types.ObjectId(req.user.userId),
       paymentType: 'levy', // Ensure this is set
       status: 'completed' // Set as completed for accountant dashboard payments
     };
+
+    // Normalize and set levy period (month/year)
+    // If explicitly provided, use those; otherwise derive from paymentDate
+    try {
+      const baseDate = paymentDate ? new Date(paymentDate) : new Date();
+      if (Number.isFinite(incomingMonth) && incomingMonth >= 1 && incomingMonth <= 12) {
+        levyPaymentData.levyPeriodMonth = incomingMonth;
+      } else if (levyPaymentData.levyPeriodMonth == null) {
+        levyPaymentData.levyPeriodMonth = baseDate.getMonth() + 1;
+      }
+      if (Number.isFinite(incomingYear) && incomingYear >= 1900 && incomingYear <= 2100) {
+        levyPaymentData.levyPeriodYear = incomingYear;
+      } else if (levyPaymentData.levyPeriodYear == null) {
+        levyPaymentData.levyPeriodYear = baseDate.getFullYear();
+      }
+    } catch {}
 
     const levyPayment = new LevyPayment(levyPaymentData);
     await levyPayment.save();

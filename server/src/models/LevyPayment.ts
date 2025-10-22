@@ -16,6 +16,9 @@ export interface ILevyPayment extends Document {
   createdAt: Date;
   updatedAt: Date;
   monthlyLevies: number;
+  // Period fields to identify which month/year this levy covers
+  levyPeriodMonth?: number; // 1-12
+  levyPeriodYear?: number; // YYYY
   // payout fields
   payout?: {
     paidOut: boolean;
@@ -89,6 +92,33 @@ const LevyPaymentSchema: Schema = new Schema({
   monthlyLevies: {
     type: Number,
     required: false,
+  },
+  // Period fields: default to month/year derived from paymentDate when not provided
+  levyPeriodMonth: {
+    type: Number,
+    min: 1,
+    max: 12,
+    default: function(this: any) {
+      try {
+        const d = this.paymentDate instanceof Date ? this.paymentDate : (this.paymentDate ? new Date(this.paymentDate) : new Date());
+        return (d.getMonth() + 1);
+      } catch {
+        return (new Date().getMonth() + 1);
+      }
+    }
+  },
+  levyPeriodYear: {
+    type: Number,
+    min: 1900,
+    max: 2100,
+    default: function(this: any) {
+      try {
+        const d = this.paymentDate instanceof Date ? this.paymentDate : (this.paymentDate ? new Date(this.paymentDate) : new Date());
+        return d.getFullYear();
+      } catch {
+        return (new Date().getFullYear());
+      }
+    }
   },
   payout: {
     paidOut: { type: Boolean, default: false },

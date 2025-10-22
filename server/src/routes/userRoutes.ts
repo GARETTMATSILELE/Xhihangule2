@@ -112,8 +112,8 @@ router.get('/', authorize(['admin']), async (req: Request, res, next) => {
   }
 });
 
-// Get agents for current company - Admin, Accountant, and Agent
-router.get('/agents', authorize(['admin', 'accountant', 'agent']), async (req: Request, res, next) => {
+// Get agents for current company - Admin, Accountant, Agent, and Sales
+router.get('/agents', authorize(['admin', 'accountant', 'agent', 'sales']), async (req: Request, res, next) => {
   try {
     console.log('GET /agents route hit');
     const role = (req.query.role as string) || 'agent';

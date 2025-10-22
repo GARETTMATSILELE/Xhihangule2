@@ -110,6 +110,7 @@ const App: React.FC = () => {
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/admin-signup" element={<AdminSignup />} />
               <Route path="/billing/setup" element={<BillingSetup />} />
+              <Route path="/billing/upgrade" element={<BillingSetup />} />
               {/* Admin Dashboard Routes - Protected with authentication */}
               <Route path="/admin-dashboard/*" element={
                 <PropertyProvider>

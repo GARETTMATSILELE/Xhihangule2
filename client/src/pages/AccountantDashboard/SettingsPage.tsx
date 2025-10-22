@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   Box,
   Container,
@@ -46,7 +46,7 @@ interface TabPanelProps {
   value: number;
 }
 
-const TabPanel = (props: TabPanelProps) => {
+const TabPanel = memo((props: TabPanelProps) => {
   const { children, value, index, ...other } = props;
 
   return (
@@ -64,7 +64,7 @@ const TabPanel = (props: TabPanelProps) => {
       )}
     </div>
   );
-};
+});
 
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
@@ -135,6 +135,52 @@ const SettingsPage: React.FC = () => {
     importFormat: 'CSV'
   });
 
+  // Debounced nested updates to reduce INP and rerenders
+  const pendingPatchRef = useRef<any>({});
+  const debounceTimerRef = useRef<any>(null);
+
+  const deepMerge = useCallback((target: any, source: any): any => {
+    if (typeof source !== 'object' || source === null) return target;
+    const output: any = Array.isArray(target) ? [...target] : { ...target };
+    for (const key of Object.keys(source)) {
+      const sourceVal = source[key];
+      const targetVal = (output as any)[key];
+      if (sourceVal && typeof sourceVal === 'object' && !Array.isArray(sourceVal)) {
+        (output as any)[key] = deepMerge(targetVal && typeof targetVal === 'object' ? targetVal : {}, sourceVal);
+      } else {
+        (output as any)[key] = sourceVal;
+      }
+    }
+    return output;
+  }, []);
+
+  const buildNestedPatch = (path: string, value: any) => {
+    const parts = path.split('.');
+    const root: any = {};
+    let cur = root;
+    parts.forEach((p, idx) => {
+      if (idx === parts.length - 1) {
+        cur[p] = value;
+      } else {
+        cur[p] = cur[p] || {};
+        cur = cur[p];
+      }
+    });
+    return root;
+  };
+
+  const scheduleSettingsPatch = useCallback((patch: any) => {
+    pendingPatchRef.current = deepMerge(pendingPatchRef.current, patch);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      const toApply = pendingPatchRef.current;
+      pendingPatchRef.current = {};
+      setSettings(prev => deepMerge(prev, toApply));
+    }, 200);
+  }, [deepMerge]);
+
   // Update settings when company data is loaded
   useEffect(() => {
     if (company) {
@@ -182,19 +228,16 @@ const SettingsPage: React.FC = () => {
   };
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, checked } = event.target;
-    setSettings(prev => ({
-      ...prev,
-      [name]: event.target.type === 'checkbox' ? checked : value
-    }));
+    const { name, value, checked, type } = event.target as HTMLInputElement & { name: string };
+    const finalValue = type === 'checkbox' ? checked : value;
+    const patch = name.includes('.') ? buildNestedPatch(name, finalValue) : { [name]: finalValue } as any;
+    scheduleSettingsPatch(patch);
   };
 
   const handleSelectChange = (event: SelectChangeEvent) => {
-    const { name, value } = event.target;
-    setSettings(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    const { name, value } = event.target as HTMLInputElement & { name: string };
+    const patch = name.includes('.') ? buildNestedPatch(name, value) : { [name]: value } as any;
+    scheduleSettingsPatch(patch);
   };
 
   const handleBankAccountChange = (index: number, field: string, value: string) => {
@@ -349,19 +392,20 @@ const SettingsPage: React.FC = () => {
 
   return (
     <Box sx={{ width: '100%' }}>
-      <Typography variant="h4" gutterBottom>
+      <Typography variant="h4" gutterBottom sx={{ minHeight: 40 }}>
         Settings
       </Typography>
 
-      {message && (
-        <Alert 
-          severity={message.type} 
-          sx={{ mb: 2 }}
-          onClose={() => setMessage(null)}
-        >
-          {message.text}
-        </Alert>
-      )}
+      <Box sx={{ minHeight: 56, mb: 2 }}>
+        {message ? (
+          <Alert 
+            severity={message.type}
+            onClose={() => setMessage(null)}
+          >
+            {message.text}
+          </Alert>
+        ) : null}
+      </Box>
 
       <Paper sx={{ width: '100%', mb: 2 }}>
         <Tabs

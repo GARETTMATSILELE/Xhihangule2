@@ -111,6 +111,7 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
                       height: 100,
                       border: '0.1px solid rgba(255, 255, 255, 0.2)'
                     }}
+                    imgProps={{ decoding: 'async', loading: 'lazy' }}
                     variant="rounded"
                   />
                 </Box>

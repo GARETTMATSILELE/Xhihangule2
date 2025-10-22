@@ -197,6 +197,92 @@ const AgentAccountDetailPage: React.FC = () => {
     }
   };
 
+  const handlePrintPayoutAcknowledgement = (payout: AgentPayout) => {
+    try {
+      const companyName = (company as any)?.name || 'Company';
+      const companyAddress = (company as any)?.address || '';
+      const companyEmail = (company as any)?.email || '';
+      const companyPhone = (company as any)?.phone || '';
+      const logoRaw = (company as any)?.logo || '';
+      const logoSrc = logoRaw ? (logoRaw.startsWith('data:') ? logoRaw : `data:image/png;base64,${logoRaw}`) : '';
+      const agentName = account?.agentName || payout.recipientName || 'Agent';
+      const amountFmt = agentAccountService.formatCurrency(payout.amount);
+      const dateStr = new Date(payout.date).toLocaleDateString();
+      const ref = payout.referenceNumber || payout._id || '';
+      const methodLabel = agentAccountService.getPaymentMethodLabel(payout.paymentMethod);
+      const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Acknowledgment of Receipt</title>
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 24px; }
+      .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .logo { height: 56px; object-fit: contain; }
+      .brand { font-size: 20px; font-weight: 700; }
+      .sub { color: #666; font-size: 12px; }
+      .title { text-align: center; margin: 16px 0 24px; font-size: 18px; font-weight: 700; text-transform: uppercase; }
+      .row { display: flex; justify-content: space-between; margin: 8px 0; }
+      .label { color: #444; }
+      .box { border: 1px solid #ccc; padding: 16px; border-radius: 6px; }
+      .amount { font-size: 22px; font-weight: 700; color: #0a7; }
+      .mt24 { margin-top: 24px; }
+      .sign { margin-top: 48px; display: flex; gap: 48px; }
+      .line { margin-top: 40px; border-top: 1px solid #333; width: 260px; padding-top: 6px; font-size: 12px; }
+      @media print { .no-print { display: none; } body { margin: 0.6in; } }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div>
+        <div class="brand">${companyName}</div>
+        <div class="sub">${companyAddress}</div>
+        <div class="sub">${companyEmail}${companyPhone ? ' • ' + companyPhone : ''}</div>
+      </div>
+      ${logoSrc ? `<img class="logo" src="${logoSrc}" alt="Logo" />` : ''}
+    </div>
+    <div class="title">Acknowledgment of Receipt</div>
+    <div class="box">
+      <div class="row"><div class="label">Received From</div><div>${companyName}</div></div>
+      <div class="row"><div class="label">Received By (Agent)</div><div>${agentName}</div></div>
+      <div class="row"><div class="label">Date</div><div>${dateStr}</div></div>
+      <div class="row"><div class="label">Reference</div><div>${ref}</div></div>
+      <div class="row"><div class="label">Payment Method</div><div>${methodLabel}</div></div>
+      <div class="row"><div class="label">Amount</div><div class="amount">${amountFmt}</div></div>
+      <div class="row mt24"><div class="label">Notes</div><div>${(payout.notes || '').toString()}</div></div>
+    </div>
+    <div class="sign">
+      <div class="line">Agent Signature</div>
+      <div class="line">Authorized By</div>
+    </div>
+    <div class="no-print" style="margin-top:24px;">
+      <button onclick="window.print()" style="padding:8px 12px;">Print</button>
+    </div>
+  </body>
+</html>`;
+      const iframe = document.createElement('iframe') as HTMLIFrameElement;
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+      const cleanup = () => setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 500);
+      const triggerPrint = () => { try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch {} cleanup(); };
+      iframe.onload = triggerPrint;
+      try {
+        (iframe as any).srcdoc = html;
+      } catch {
+        const idoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (!idoc) return;
+        idoc.open(); idoc.write(html); idoc.close();
+      }
+    } catch (e) {
+      console.error('Failed to open print window', e);
+    }
+  };
+
   const handleSyncCommissions = async () => {
     if (!agentId) return;
     
@@ -481,6 +567,17 @@ const AgentAccountDetailPage: React.FC = () => {
                             </IconButton>
                           </Tooltip>
                         </>
+                      )}
+                      {payout.status === 'completed' && (
+                        <Tooltip title="Print acknowledgment">
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            onClick={() => handlePrintPayoutAcknowledgement(payout)}
+                          >
+                            <PrintIcon />
+                          </IconButton>
+                        </Tooltip>
                       )}
                     </Box>
                   </TableCell>

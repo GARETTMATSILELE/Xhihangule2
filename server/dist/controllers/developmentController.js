@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recomputeStats = exports.listPaymentsForDevelopment = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.listDevelopments = exports.createDevelopment = void 0;
+exports.recomputeStats = exports.listPaymentsForDevelopment = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.removeCollaborator = exports.addCollaborator = exports.listDevelopments = exports.createDevelopment = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
@@ -184,7 +184,14 @@ exports.createDevelopment = createDevelopment;
 const listDevelopments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         ensureAuthCompany(req);
-        const developments = yield Development_1.Development.find({ companyId: req.user.companyId })
+        const userId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        const companyId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
+        // Sales users see developments they created OR those shared with them as collaborators.
+        // Admin/accountant see all company developments.
+        const match = (req.user.role === 'admin' || req.user.role === 'accountant')
+            ? { companyId }
+            : { companyId, $or: [{ createdBy: userId }, { collaborators: userId }] };
+        const developments = yield Development_1.Development.find(match)
             .sort({ createdAt: -1 })
             .lean();
         return res.json(developments);
@@ -196,6 +203,48 @@ const listDevelopments = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.listDevelopments = listDevelopments;
+const addCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const dev = yield Development_1.Development.findOne({ _id: req.params.id, companyId: req.user.companyId });
+        if (!dev)
+            throw new errorHandler_1.AppError('Development not found', 404);
+        const { userId } = req.body || {};
+        if (!userId || !mongoose_1.default.Types.ObjectId.isValid(String(userId)))
+            throw new errorHandler_1.AppError('Invalid userId', 400);
+        const uid = new mongoose_1.default.Types.ObjectId(String(userId));
+        yield Development_1.Development.updateOne({ _id: dev._id }, { $addToSet: { collaborators: uid }, $set: { updatedBy: req.user.userId } });
+        const updated = yield Development_1.Development.findById(dev._id).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error adding collaborator';
+        return res.status(status).json({ message });
+    }
+});
+exports.addCollaborator = addCollaborator;
+const removeCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const dev = yield Development_1.Development.findOne({ _id: req.params.id, companyId: req.user.companyId });
+        if (!dev)
+            throw new errorHandler_1.AppError('Development not found', 404);
+        const { userId } = req.body || {};
+        if (!userId || !mongoose_1.default.Types.ObjectId.isValid(String(userId)))
+            throw new errorHandler_1.AppError('Invalid userId', 400);
+        const uid = new mongoose_1.default.Types.ObjectId(String(userId));
+        yield Development_1.Development.updateOne({ _id: dev._id }, { $pull: { collaborators: uid }, $set: { updatedBy: req.user.userId } });
+        const updated = yield Development_1.Development.findById(dev._id).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error removing collaborator';
+        return res.status(status).json({ message });
+    }
+});
+exports.removeCollaborator = removeCollaborator;
 const getDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         ensureAuthCompany(req);

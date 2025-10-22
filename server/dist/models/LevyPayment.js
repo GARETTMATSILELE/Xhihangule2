@@ -94,6 +94,35 @@ const LevyPaymentSchema = new mongoose_1.Schema({
         type: Number,
         required: false,
     },
+    // Period fields: default to month/year derived from paymentDate when not provided
+    levyPeriodMonth: {
+        type: Number,
+        min: 1,
+        max: 12,
+        default: function () {
+            try {
+                const d = this.paymentDate instanceof Date ? this.paymentDate : (this.paymentDate ? new Date(this.paymentDate) : new Date());
+                return (d.getMonth() + 1);
+            }
+            catch (_a) {
+                return (new Date().getMonth() + 1);
+            }
+        }
+    },
+    levyPeriodYear: {
+        type: Number,
+        min: 1900,
+        max: 2100,
+        default: function () {
+            try {
+                const d = this.paymentDate instanceof Date ? this.paymentDate : (this.paymentDate ? new Date(this.paymentDate) : new Date());
+                return d.getFullYear();
+            }
+            catch (_a) {
+                return (new Date().getFullYear());
+            }
+        }
+    },
     payout: {
         paidOut: { type: Boolean, default: false },
         paidToName: { type: String },

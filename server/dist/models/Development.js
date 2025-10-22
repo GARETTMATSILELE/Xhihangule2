@@ -65,6 +65,7 @@ const DevelopmentSchema = new mongoose_1.Schema({
         required: true,
         index: true
     },
+    collaborators: [{ type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User', default: [] }],
     owner: {
         firstName: { type: String, trim: true },
         lastName: { type: String, trim: true },

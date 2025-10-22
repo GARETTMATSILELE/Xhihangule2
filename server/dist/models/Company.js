@@ -197,7 +197,8 @@ const companySchema = new mongoose_1.Schema({
         month: { type: Number, min: 1, max: 12 }
     },
     rentReceivableOpeningBalance: { type: Number, default: 0, min: 0 },
-    levyReceivableOpeningBalance: { type: Number, default: 0, min: 0 }
+    levyReceivableOpeningBalance: { type: Number, default: 0, min: 0 },
+    revenue: { type: Number, default: 0, min: 0 }
 }, {
     timestamps: true
 });

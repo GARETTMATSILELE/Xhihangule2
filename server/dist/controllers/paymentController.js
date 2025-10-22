@@ -1371,7 +1371,9 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             sellerName: payment.sellerName,
             paymentType: payment.paymentType,
             saleId: payment.saleId,
-            referenceNumber: payment.referenceNumber
+            referenceNumber: payment.referenceNumber,
+            levyPeriodMonth: payment.levyPeriodMonth,
+            levyPeriodYear: payment.levyPeriodYear
         };
         console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });
         res.json({

@@ -9,7 +9,9 @@ import {
   deleteDevelopment,
   listUnitsForDevelopment,
   recomputeStats,
-  listPaymentsForDevelopment
+  listPaymentsForDevelopment,
+  addCollaborator,
+  removeCollaborator
 } from '../controllers/developmentController';
 
 const router = express.Router();
@@ -22,6 +24,8 @@ router.post('/', authWithCompany, createDevelopment);
 router.patch('/:id', authWithCompany, updateDevelopment);
 router.delete('/:id', authWithCompany, isAdmin, deleteDevelopment);
 router.post('/:id/recompute-stats', authWithCompany, recomputeStats);
+router.post('/:id/collaborators', authWithCompany, addCollaborator);
+router.delete('/:id/collaborators', authWithCompany, removeCollaborator);
 
 export default router;
 

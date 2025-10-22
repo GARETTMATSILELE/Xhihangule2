@@ -113,8 +113,8 @@ router.get('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(
         next(error);
     }
 }));
-// Get agents for current company - Admin, Accountant, and Agent
-router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+// Get agents for current company - Admin, Accountant, Agent, and Sales
+router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent', 'sales']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
         console.log('GET /agents route hit');

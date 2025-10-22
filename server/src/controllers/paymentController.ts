@@ -1522,7 +1522,9 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       sellerName: (payment as any).sellerName,
       paymentType: (payment as any).paymentType,
       saleId: (payment as any).saleId,
-      referenceNumber: payment.referenceNumber
+      referenceNumber: payment.referenceNumber,
+      levyPeriodMonth: (payment as any).levyPeriodMonth,
+      levyPeriodYear: (payment as any).levyPeriodYear
     };
 
     console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });

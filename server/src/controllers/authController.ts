@@ -8,8 +8,10 @@ import { AppError } from '../middleware/errorHandler';
 import { SignUpData, UserRole } from '../types/auth';
 import { AuthService } from '../services/authService';
 import { sendMail } from '../services/emailService';
+import { SubscriptionService } from '../services/subscriptionService';
 
 const authService = AuthService.getInstance();
+const subscriptionService = SubscriptionService.getInstance();
 
 // Signup with company details
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
@@ -99,6 +101,15 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
           createdUser.companyId = companyId;
           await createdUser.save({ session });
           console.log('User updated with company ID');
+
+          // Create trial subscription for the new company
+          console.log('Creating trial subscription...');
+          await subscriptionService.createTrialSubscription(
+            companyId.toString(), 
+            plan as any, 
+            14 // 14-day trial
+          );
+          console.log('Trial subscription created successfully');
         }
       });
     } catch (txError: any) {
@@ -162,6 +173,15 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
               createdUser.companyId = companyId;
               await createdUser.save();
               console.log('User updated with company ID (fallback)');
+
+              // Create trial subscription for the new company (fallback)
+              console.log('Creating trial subscription (fallback)...');
+              await subscriptionService.createTrialSubscription(
+                companyId.toString(), 
+                plan as any, 
+                14 // 14-day trial
+              );
+              console.log('Trial subscription created successfully (fallback)');
             } catch (fallbackCompanyError: any) {
               if (fallbackCompanyError?.code === 11000) {
                 const dupMsg = String(fallbackCompanyError?.message || 'Duplicate key error');

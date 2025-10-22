@@ -131,6 +131,8 @@ const PropertyDetail: React.FC<PropertyDetailProps> = ({
                     src={image} 
                     alt={`Property ${index + 1}`}
                     style={{ width: '100%', height: 'auto', borderRadius: 4 }}
+                    loading="lazy"
+                    decoding="async"
                   />
                 </Grid>
               ))}

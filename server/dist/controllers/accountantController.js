@@ -38,8 +38,8 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
         const { year, month } = req.query;
         const filterYear = year ? parseInt(year) : new Date().getFullYear();
         const filterMonth = month !== undefined ? parseInt(month) : null;
-        // Get all agents for the company
-        const agents = yield User_1.User.find({ companyId, role: 'agent' });
+        // Get all agents for the company (include sales as agents)
+        const agents = yield User_1.User.find({ companyId, role: { $in: ['agent', 'sales'] } });
         const commissionData = {
             monthly: 0,
             yearly: 0,
@@ -55,6 +55,7 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 agentName: `${agent.firstName} ${agent.lastName}`,
                 commission: 0,
                 monthlyCommissions: [],
+                commissionEntries: [],
                 properties: []
             };
             // Get all leases where this agent is the owner (agent who created/manages the lease)
@@ -111,8 +112,8 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 const totalAgentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
                 const perMonthAgentShare = coveredMonths.length > 0 ? totalAgentShare / coveredMonths.length : 0;
                 coveredMonths.forEach(({ year, month }) => {
-                    const propKey = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || 'unknown');
-                    const key = `${propKey}-${year}-${month}`;
+                    const propKeyRental = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || 'unknown');
+                    const key = `${propKeyRental}-${year}-${month}`;
                     paymentMap.set(key, true);
                     const commissionKey = `${year}-${month}`;
                     if (agentCommissionMap.has(commissionKey)) {
@@ -121,6 +122,59 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                     else {
                         agentCommissionMap.set(commissionKey, perMonthAgentShare);
                     }
+                    // Push commission entry per month covered
+                    const propObj = payment.propertyId;
+                    agentDetails.commissionEntries.push({
+                        paymentId: payment._id.toString(),
+                        propertyId: propKeyRental,
+                        propertyName: (propObj && propObj.name) || payment.manualPropertyAddress || 'Manual Entry',
+                        propertyAddress: (propObj && propObj.address) || payment.manualPropertyAddress,
+                        paymentDate: payment.paymentDate,
+                        referenceNumber: payment.referenceNumber,
+                        year,
+                        month,
+                        amount: perMonthAgentShare
+                    });
+                });
+            });
+            // Include sales payments commissions for users with role 'sales' (and agents who make sales)
+            const salesPayments = yield Payment_1.Payment.find({
+                companyId,
+                status: 'completed',
+                commissionFinalized: true,
+                paymentType: 'sale',
+                agentId: agent._id
+            }).populate('propertyId', 'name address');
+            salesPayments.forEach(payment => {
+                var _a;
+                const paymentDate = new Date(payment.paymentDate);
+                const y = paymentDate.getFullYear();
+                const m0 = paymentDate.getMonth();
+                const totalAgentShare = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0;
+                const perMonthAgentShare = totalAgentShare; // sales are one-off; allocate to payment month
+                // Mark payment presence for this property-month to support filtered views
+                const propKey = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || 'unknown');
+                const presenceKey = `${propKey}-${y}-${m0}`;
+                paymentMap.set(presenceKey, true);
+                const commissionKey = `${y}-${m0}`;
+                if (agentCommissionMap.has(commissionKey)) {
+                    agentCommissionMap.set(commissionKey, agentCommissionMap.get(commissionKey) + perMonthAgentShare);
+                }
+                else {
+                    agentCommissionMap.set(commissionKey, perMonthAgentShare);
+                }
+                // Push commission entry for the sales payment month
+                const propObj = payment.propertyId;
+                agentDetails.commissionEntries.push({
+                    paymentId: payment._id.toString(),
+                    propertyId: propKey,
+                    propertyName: (propObj && propObj.name) || payment.manualPropertyAddress || 'Manual Entry',
+                    propertyAddress: (propObj && propObj.address) || payment.manualPropertyAddress,
+                    paymentDate: payment.paymentDate,
+                    referenceNumber: payment.referenceNumber,
+                    year: y,
+                    month: m0,
+                    amount: perMonthAgentShare
                 });
             });
             // Process each lease to build property details
@@ -421,13 +475,33 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
             const key = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? payment.propertyId.toString() : String(payment.propertyId || '');
             const name = (property === null || property === void 0 ? void 0 : property.name) || payment.manualPropertyAddress || 'Manual Entry';
             const rentAmount = typeof payment.amount === 'number' ? payment.amount : 0;
-            if (propertyMap.has(key)) {
-                const agg = propertyMap.get(key);
-                agg.commission += preaFee;
-                agg.rent = rentAmount || agg.rent;
+            // Compute contribution for the selected filter period to align detail rows with totals
+            let contributionForFilter = 0;
+            if (filterPeriod === 'yearly') {
+                coveredMonths.forEach(({ year }) => {
+                    if (year === filterYear)
+                        contributionForFilter += perMonthPreaFee;
+                });
+            }
+            else if (filterPeriod === 'monthly') {
+                coveredMonths.forEach(({ year, month }) => {
+                    if (year === filterYear && (filterMonth === null || month === filterMonth)) {
+                        contributionForFilter += perMonthPreaFee;
+                    }
+                });
             }
             else {
-                propertyMap.set(key, { propertyId: key, propertyName: name, rent: rentAmount, commission: preaFee });
+                contributionForFilter = preaFee;
+            }
+            if (contributionForFilter > 0) {
+                if (propertyMap.has(key)) {
+                    const agg = propertyMap.get(key);
+                    agg.commission += contributionForFilter;
+                    agg.rent = rentAmount || agg.rent;
+                }
+                else {
+                    propertyMap.set(key, { propertyId: key, propertyName: name, rent: rentAmount, commission: contributionForFilter });
+                }
             }
             // Monthly/Yearly/Total using rental period months for current and filtered periods
             coveredMonths.forEach(({ year, month }) => {

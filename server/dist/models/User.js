@@ -100,6 +100,12 @@ const userSchema = new mongoose_1.Schema({
 }, {
     timestamps: true
 });
+// Numeric fields for balances/commissions with safe defaults
+// Using separate definitions to avoid changing ordering of existing schema fields
+userSchema.add({
+    commission: { type: Number, default: 0, min: 0 },
+    balance: { type: Number, default: 0 }
+});
 // Hash password before saving
 userSchema.pre('save', function (next) {
     return __awaiter(this, void 0, void 0, function* () {

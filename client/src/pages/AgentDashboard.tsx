@@ -158,13 +158,14 @@ const AgentDashboard: React.FC = () => {
   const [outstandingLevies, setOutstandingLevies] = useState<number>(0);
 
   // Computed total outstanding levies across all properties based on unpaid months in lease periods
-  const computedOutstandingLevies = React.useMemo(() => {
+  const computedOutstandingLevies = React.useMemo<number | null>(() => {
+    if (!companyCtx) return null;
     try {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
-      const cutY = (company as any)?.receivablesCutover?.year;
-      const cutM = (company as any)?.receivablesCutover?.month;
+      const cutY = (companyCtx as any)?.receivablesCutover?.year;
+      const cutM = (companyCtx as any)?.receivablesCutover?.month;
       const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
       const ymKey = (y: number, m: number) => `${y}-${m}`;
       const paidByProperty: Record<string, Set<string>> = {};
@@ -245,15 +246,16 @@ const AgentDashboard: React.FC = () => {
         }
         total += missingKeys.size * monthlyLevy;
       }
-      const opening = Number((companyCtx as any)?.levyReceivableOpeningBalance || 0);
-      return total + opening;
+      // Strictly from cutoff onward: do not include any opening balance
+      return total;
     } catch {
       return 0;
     }
   }, [properties, leases, levyPayments, companyCtx]);
 
   // Computed total outstanding rentals across all properties based on unpaid months in lease periods
-  const computedOutstandingRentals = React.useMemo(() => {
+  const computedOutstandingRentals = React.useMemo<number | null>(() => {
+    if (!companyCtx) return null;
     try {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
@@ -337,8 +339,8 @@ const AgentDashboard: React.FC = () => {
         }
         total += missingKeys.size * monthlyRent;
       }
-      const opening = Number((companyCtx as any)?.rentReceivableOpeningBalance || 0);
-      return total + opening;
+      // Strictly from cutoff onward: do not include any opening balance
+      return total;
     } catch {
       return 0;
     }
@@ -535,7 +537,17 @@ const AgentDashboard: React.FC = () => {
       setError('Access denied. Agent role required.');
       setLoading(false);
     }
-  }, [user]);
+    // Listen for payment changes to refresh data live
+    const onPaymentsChanged = () => {
+      fetchDashboardData();
+      // Also refresh commission series so Monthly Commission reflects new payments
+      fetchCommissionPaymentsForYear(selectedYear);
+    };
+    window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
+    return () => {
+      window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
+    };
+  }, [user, selectedYear]);
 
   // Helper resolvers
   const resolvePropertyForTenant = (tenant: any) => {
@@ -585,21 +597,21 @@ const AgentDashboard: React.FC = () => {
                       }}
                     />
                     <Box sx={{ mt: 2 }}>
-                      <StatCard
-                        title="Outstanding rentals"
-                        value={`$${(computedOutstandingRentals || outstandingRentals || 0).toLocaleString()}`}
-                        icon={<PaymentIcon />}
-                        color="#F5365C"
-                        loading={loading}
-                        onClick={() => {
-                          setShowOutstandingRentals(true);
-                          setShowOutstandingLevies(false);
-                          setShowCommissionDetails(false);
-                          setShowLeaseInsights(false);
-                          setShowActiveTenants(false);
-                          setShowPropertiesList(false);
-                        }}
-                      />
+                    <StatCard
+                      title="Outstanding rentals"
+                      value={`$${Number((computedOutstandingRentals ?? 0) || 0).toLocaleString()}`}
+                      icon={<PaymentIcon />}
+                      color="#F5365C"
+                      loading={loading}
+                      onClick={() => {
+                        setShowOutstandingRentals(true);
+                        setShowOutstandingLevies(false);
+                        setShowCommissionDetails(false);
+                        setShowLeaseInsights(false);
+                        setShowActiveTenants(false);
+                        setShowPropertiesList(false);
+                      }}
+                    />
                     </Box>
                   </Grid>
                   <Grid item xs={12} md={6} lg={3}>
@@ -619,21 +631,21 @@ const AgentDashboard: React.FC = () => {
                       }}
                     />
                     <Box sx={{ mt: 2 }}>
-                      <StatCard
-                        title="Outstanding levies"
-                        value={`$${(computedOutstandingLevies || outstandingLevies || 0).toLocaleString()}`}
-                        icon={<ReceiptLongIcon />}
-                        color="#FFA534"
-                        loading={loading}
-                        onClick={() => {
-                          setShowOutstandingLevies(true);
-                          setShowOutstandingRentals(false);
-                          setShowCommissionDetails(false);
-                          setShowLeaseInsights(false);
-                          setShowActiveTenants(false);
-                          setShowPropertiesList(false);
-                        }}
-                      />
+                    <StatCard
+                      title="Outstanding levies"
+                      value={`$${Number((computedOutstandingLevies ?? 0) || 0).toLocaleString()}`}
+                      icon={<ReceiptLongIcon />}
+                      color="#FFA534"
+                      loading={loading}
+                      onClick={() => {
+                        setShowOutstandingLevies(true);
+                        setShowOutstandingRentals(false);
+                        setShowCommissionDetails(false);
+                        setShowLeaseInsights(false);
+                        setShowActiveTenants(false);
+                        setShowPropertiesList(false);
+                      }}
+                    />
                     </Box>
                   </Grid>
                   <Grid item xs={12} md={6} lg={3}>
@@ -1054,8 +1066,8 @@ const AgentDashboard: React.FC = () => {
                                       const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
                                       if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
                                       let normStart = new Date(start.getFullYear(), start.getMonth(), 1);
-                                      const cutY2 = (company as any)?.receivablesCutover?.year;
-                                      const cutM2 = (company as any)?.receivablesCutover?.month;
+                                      const cutY2 = (companyCtx as any)?.receivablesCutover?.year;
+                                      const cutM2 = (companyCtx as any)?.receivablesCutover?.month;
                                       const cutoverDate2 = (cutY2 && cutM2) ? new Date(Number(cutY2), Number(cutM2) - 1, 1) : null;
                                       if (cutoverDate2 && normStart.getTime() < cutoverDate2.getTime()) normStart = cutoverDate2;
                                       const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));

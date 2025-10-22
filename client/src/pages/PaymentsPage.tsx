@@ -368,6 +368,7 @@ const PaymentsPage: React.FC = () => {
         const created = (response && (response.data ?? response)) as any;
         if (created) {
           setPayments(prev => [...prev, created]);
+          try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
         }
       }
       setShowCreateDialog(false);
@@ -397,7 +398,9 @@ const PaymentsPage: React.FC = () => {
         response = await paymentService.updatePayment(id, data);
       }
       
-      setPayments(prev => prev.map(p => p._id === id ? (response.data || response) : p));
+      const updated = (response.data || response);
+      setPayments(prev => prev.map(p => p._id === id ? updated : p));
+      try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'updated', payment: updated } })); } catch {}
       setShowEditDialog(false);
       setSuccessMessage('Payment updated successfully');
     } catch (err: any) {
@@ -419,6 +422,7 @@ const PaymentsPage: React.FC = () => {
       setError(null);
       await paymentService.deletePayment(id);
       setPayments(prev => prev.filter(p => p._id !== id));
+      try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'deleted', id } })); } catch {}
       setSuccessMessage('Payment deleted successfully');
     } catch (err: any) {
       console.error('Error deleting payment:', err);
@@ -453,28 +457,42 @@ const PaymentsPage: React.FC = () => {
         if (user.role === 'agent') {
           const response = await agentService.updatePayment(selectedPayment._id, paymentData, properties, user?._id);
           setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response.data : p));
+          try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'updated', payment: response.data } })); } catch {}
         } else {
           const response = await paymentService.updatePayment(selectedPayment._id, paymentData);
           setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response : p));
+          try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'updated', payment: response } })); } catch {}
         }
       } else {
         if (paymentData.paymentType === 'levy') {
           const response = await paymentService.createLevyPayment(paymentData);
           const created = (response && (response.data ?? response)) as any;
-          if (created) setPayments(prev => [...prev, created]);
+          if (created) {
+            setPayments(prev => [...prev, created]);
+            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
+          }
         } else if (paymentData.paymentType === 'municipal') {
           const response = await paymentService.createMunicipalPayment(paymentData);
           const created = (response && (response.data ?? response)) as any;
-          if (created) setPayments(prev => [...prev, created]);
+          if (created) {
+            setPayments(prev => [...prev, created]);
+            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
+          }
         } else if (user.role === 'agent') {
           const response = await agentService.createPayment(paymentData, properties, user?._id);
           const created = (response && (response.data ?? response)) as any;
-          if (created) setPayments(prev => [...prev, created]);
+          if (created) {
+            setPayments(prev => [...prev, created]);
+            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
+          }
         } else {
           // Use accountant endpoint for admin dashboard payments
           const response = await paymentService.createPaymentAccountant(paymentData);
           const created = (response && (response.data ?? response)) as any;
-          if (created) setPayments(prev => [...prev, created]);
+          if (created) {
+            setPayments(prev => [...prev, created]);
+            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
+          }
         }
       }
       setShowForm(false);
@@ -546,6 +564,7 @@ const PaymentsPage: React.FC = () => {
       });
       const updated = (resp as any).payment || (resp as any).data || resp;
       setPayments(prev => prev.map(p => p._id === (updated._id || finalizePaymentTarget._id) ? updated : p));
+      try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'finalized', payment: updated } })); } catch {}
       setSuccessMessage('Payment finalized successfully');
       setFinalizeOpen(false);
       setFinalizePaymentTarget(null);

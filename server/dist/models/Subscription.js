@@ -39,12 +39,15 @@ const subscriptionSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
     plan: { type: String, enum: ['INDIVIDUAL', 'SME', 'ENTERPRISE'], required: true },
     cycle: { type: String, enum: ['monthly', 'yearly'], required: true },
-    status: { type: String, enum: ['trial', 'active', 'past_due', 'canceled'], default: 'trial' },
+    status: { type: String, enum: ['trial', 'active', 'past_due', 'canceled', 'expired'], default: 'trial' },
     currentPeriodStart: { type: Date },
     currentPeriodEnd: { type: Date },
     nextPaymentAt: { type: Date },
     paynowRef: { type: String },
-    pollUrl: { type: String }
+    pollUrl: { type: String },
+    trialStartDate: { type: Date },
+    trialEndDate: { type: Date },
+    trialDurationDays: { type: Number, default: 14 }
 }, { timestamps: true });
 exports.Subscription = mongoose_1.default.model('Subscription', subscriptionSchema);
 exports.default = exports.Subscription;

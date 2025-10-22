@@ -13,6 +13,17 @@ export interface CommissionData {
       year: number;
       commission: number;
     }[];
+    commissionEntries: {
+      paymentId: string;
+      propertyId: string;
+      propertyName: string;
+      propertyAddress?: string;
+      paymentDate: string;
+      referenceNumber?: string;
+      year: number;
+      month: number; // 0-based
+      amount: number;
+    }[];
     properties: {
       propertyId: string;
       propertyName: string;

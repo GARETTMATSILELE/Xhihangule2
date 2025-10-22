@@ -56,6 +56,7 @@ export interface ICompany extends Document {
   };
   rentReceivableOpeningBalance?: number;
   levyReceivableOpeningBalance?: number;
+  revenue?: number;
 }
 
 const bankAccountSchema = new Schema<IBankAccount>({
@@ -222,6 +223,8 @@ const companySchema = new Schema<ICompany>({
   },
   rentReceivableOpeningBalance: { type: Number, default: 0, min: 0 },
   levyReceivableOpeningBalance: { type: Number, default: 0, min: 0 }
+  ,
+  revenue: { type: Number, default: 0, min: 0 }
 }, {
   timestamps: true
 });

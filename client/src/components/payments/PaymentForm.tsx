@@ -702,15 +702,15 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </Grid>
           )}
 
-          {/* Rental Period Selection */}
+          {/* Period Selection (used for rentals and levies) */}
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth>
-              <InputLabel>Rental Month</InputLabel>
+              <InputLabel>{formData.paymentType === 'levy' ? 'Levy Month' : 'Rental Month'}</InputLabel>
               <Select
                 name="rentalPeriodMonth"
                 value={formData.rentalPeriodMonth.toString()}
                 onChange={handleInputChange}
-                label="Rental Month"
+                label={formData.paymentType === 'levy' ? 'Levy Month' : 'Rental Month'}
                 required
               >
                 {[...Array(12)].map((_, i) => (
@@ -724,7 +724,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
-              label="Rental Year"
+              label={formData.paymentType === 'levy' ? 'Levy Year' : 'Rental Year'}
               name="rentalPeriodYear"
               type="number"
               value={formData.rentalPeriodYear}

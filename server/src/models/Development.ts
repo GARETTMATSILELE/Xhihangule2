@@ -17,6 +17,7 @@ export interface IDevelopment extends Document {
   description?: string;
   address?: string;
   companyId: mongoose.Types.ObjectId;
+  collaborators?: mongoose.Types.ObjectId[]; // additional agent users who can access this development
   owner?: {
     firstName?: string;
     lastName?: string;
@@ -72,6 +73,7 @@ const DevelopmentSchema: Schema = new Schema({
     required: true,
     index: true
   },
+  collaborators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
   owner: {
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
