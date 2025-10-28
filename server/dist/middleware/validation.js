@@ -33,6 +33,8 @@ exports.createTenantSchema = zod_1.z.object({
     phone: zod_1.z.string().min(10, 'Phone number must be at least 10 digits'),
     status: zod_1.z.enum(['Active', 'Inactive', 'Pending']).optional(),
     propertyId: zod_1.z.string().optional(),
+    // Allow linking a tenant to multiple properties
+    propertyIds: zod_1.z.array(zod_1.z.string()).optional(),
     idNumber: zod_1.z.string().optional(),
     emergencyContact: zod_1.z.string().optional(),
     companyId: zod_1.z.string().optional() // Made optional since it's extracted from JWT token

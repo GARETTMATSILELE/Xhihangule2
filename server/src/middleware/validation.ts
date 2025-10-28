@@ -30,6 +30,8 @@ export const createTenantSchema = z.object({
   phone: z.string().min(10, 'Phone number must be at least 10 digits'),
   status: z.enum(['Active', 'Inactive', 'Pending']).optional(),
   propertyId: z.string().optional(),
+  // Allow linking a tenant to multiple properties
+  propertyIds: z.array(z.string()).optional(),
   idNumber: z.string().optional(),
   emergencyContact: z.string().optional(),
   companyId: z.string().optional() // Made optional since it's extracted from JWT token

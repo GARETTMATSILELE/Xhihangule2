@@ -6,6 +6,8 @@ interface InvoiceItem {
   description: string;
   taxPercentage: number;
   netPrice: number;
+  quantity?: number;
+  unitPrice?: number;
 }
 
 interface ClientDetails {
@@ -13,6 +15,7 @@ interface ClientDetails {
   address: string;
   tinNumber?: string;
   vatNumber?: string;
+  bpNumber?: string;
 }
 
 interface BankAccount {
@@ -28,6 +31,7 @@ export interface IInvoice extends Document {
   companyId: Types.ObjectId;
   property: string;
   client: ClientDetails;
+  currency?: 'USD' | 'ZiG' | 'ZAR';
   subtotal: number;
   discount: number;
   amountExcludingTax: number;
@@ -55,14 +59,17 @@ const InvoiceItemSchema = new Schema<InvoiceItem>({
   code: { type: String, required: true },
   description: { type: String, required: true },
   taxPercentage: { type: Number, required: true, default: 15 },
-  netPrice: { type: Number, required: true }
+  netPrice: { type: Number, required: true },
+  quantity: { type: Number, required: false, default: 1 },
+  unitPrice: { type: Number, required: false, default: 0 }
 });
 
 const ClientDetailsSchema = new Schema<ClientDetails>({
   name: { type: String, required: true },
   address: { type: String, required: true },
   tinNumber: { type: String, required: false },
-  vatNumber: { type: String, required: false }
+  vatNumber: { type: String, required: false },
+  bpNumber: { type: String, required: false }
 });
 
 const BankAccountSchema = new Schema<BankAccount>({
@@ -78,6 +85,7 @@ const InvoiceSchema: Schema = new Schema({
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
   property: { type: String, required: true },
   client: { type: ClientDetailsSchema, required: true },
+  currency: { type: String, enum: ['USD', 'ZiG', 'ZAR'], default: 'USD' },
   subtotal: { type: Number, required: true, default: 0 },
   discount: { type: Number, required: true, default: 0 },
   amountExcludingTax: { type: Number, required: true, default: 0 },

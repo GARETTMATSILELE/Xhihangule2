@@ -19,6 +19,9 @@ export interface CreateDevelopmentInput {
   commissionPreaPercent?: number;
   commissionAgencyPercentRemaining?: number;
   commissionAgentPercentRemaining?: number;
+  // Agent commission split when collaborator sells
+  collabOwnerAgentPercent?: number;
+  collabCollaboratorAgentPercent?: number;
 }
 
 export const developmentService = {

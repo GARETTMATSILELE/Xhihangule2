@@ -7,7 +7,8 @@ import {
   getPREACommission,
   getPropertyDepositLedger,
   getPropertyDepositSummary,
-  createPropertyDepositPayout
+  createPropertyDepositPayout,
+  getCompanyDepositSummaries
 } from '../controllers/accountantController';
 import {
   createPayment,
@@ -47,6 +48,7 @@ import {
   syncAgentCommissions,
   getAcknowledgementDocument as getAgentAcknowledgementDocument
 } from '../controllers/agentAccountController';
+import AgentAccountService from '../services/agentAccountService';
 
 const router = express.Router();
 
@@ -88,6 +90,8 @@ router.get('/prea-commission', canViewCommissions, (req, res) => {
 router.get('/property-accounts/:propertyId/deposits', canViewCommissions, getPropertyDepositLedger);
 router.get('/property-accounts/:propertyId/deposits/summary', canViewCommissions, getPropertyDepositSummary);
 router.post('/property-accounts/:propertyId/deposits/payout', canViewCommissions, createPropertyDepositPayout);
+// Company trust accounts summary
+router.get('/trust-accounts/deposits', canViewCommissions, getCompanyDepositSummaries);
 
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', canManagePayments, getCompanyPayments);
@@ -185,5 +189,30 @@ router.put('/agent-accounts/:agentId/payout/:payoutId/status', isAccountant, upd
 router.post('/agent-accounts/sync', isAccountant, syncAgentAccounts);
 router.post('/agent-accounts/:agentId/sync-commissions', isAccountant, syncAgentCommissions);
 router.get('/agent-accounts/:agentId/payout/:payoutId/acknowledgement', isAccountant, getAgentAcknowledgementDocument);
+
+// Agent self-access summary (limited) - authenticated any role
+router.get('/agents/me/account', async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) return res.status(401).json({ message: 'Unauthorized' });
+    const service = AgentAccountService as any;
+    const account = await service.getAgentAccount(req.user.userId);
+    // Return limited summary only
+    const payload = {
+      agentId: account.agentId,
+      agentName: account.agentName,
+      runningBalance: account.runningBalance,
+      totalCommissions: account.totalCommissions,
+      totalPayouts: account.totalPayouts,
+      totalPenalties: account.totalPenalties,
+      lastCommissionDate: account.lastCommissionDate,
+      lastPayoutDate: account.lastPayoutDate,
+      lastPenaltyDate: account.lastPenaltyDate
+    };
+    return res.json({ status: 'success', data: payload });
+  } catch (e: any) {
+    console.error('Error fetching agent self account:', e);
+    return res.status(500).json({ message: 'Failed to fetch agent account' });
+  }
+});
 
 export default router; 

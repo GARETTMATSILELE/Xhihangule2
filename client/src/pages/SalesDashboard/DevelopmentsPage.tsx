@@ -165,6 +165,9 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [preaPercentOfCommission, setPreaPercentOfCommission] = useState<number>(3);
   const [agencyPercent, setAgencyPercent] = useState<number>(50);
   const [agentPercent, setAgentPercent] = useState<number>(50);
+  // Collaborator agent split
+  const [collabOwnerAgentPercent, setCollabOwnerAgentPercent] = useState<number>(50);
+  const [collabCollaboratorAgentPercent, setCollabCollaboratorAgentPercent] = useState<number>(50);
 
   useEffect(() => {
     const loadDevs = async () => {
@@ -240,7 +243,9 @@ const SalesDevelopmentsPage: React.FC = () => {
         commissionPercent,
         commissionPreaPercent: preaPercentOfCommission,
         commissionAgencyPercentRemaining: agencyPercent,
-        commissionAgentPercentRemaining: agentPercent
+        commissionAgentPercentRemaining: agentPercent,
+        collabOwnerAgentPercent,
+        collabCollaboratorAgentPercent
       });
 
       // Map server response to local Development shape
@@ -287,6 +292,8 @@ const SalesDevelopmentsPage: React.FC = () => {
       setPreaPercentOfCommission(3);
       setAgencyPercent(50);
       setAgentPercent(50);
+      setCollabOwnerAgentPercent(50);
+      setCollabCollaboratorAgentPercent(50);
     } catch (e) {
       // Optionally surface error via snackbar/toast
     } finally {
@@ -665,7 +672,12 @@ const SalesDevelopmentsPage: React.FC = () => {
                                         return null;
                                       };
                                       const parsedTotals = list.map(p => parseTotal((p as any).notes)).filter((n): n is number => n != null);
-                                      const totalSale = parsedTotals.length > 0 ? parsedTotals[0] : undefined;
+                                      let totalSale = parsedTotals.length > 0 ? parsedTotals[0] : undefined;
+                                      // Fallback: use computed unit price when not available in payment notes
+                                      if (totalSale == null || !(totalSale > 0)) {
+                                        const unitTotal = Number(total);
+                                        if (Number.isFinite(unitTotal) && unitTotal > 0) totalSale = unitTotal;
+                                      }
                                       const currency = (list[0] as any).currency || 'USD';
                                       if (!isInstallment) {
                                         const amountPaid = list.reduce((s, p: any) => s + (p.amount || 0), 0);
@@ -857,6 +869,39 @@ const SalesDevelopmentsPage: React.FC = () => {
           </Grid>
           <Typography variant="caption" color="text.secondary">
             Commission structure applies to all variations and units in this development. PREA is taken off the top, then the remaining commission is split between agency and agent.
+          </Typography>
+        </Box>
+        <Divider sx={{ my: 2 }} />
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Collaborator Agent Split</Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Owner's % of Agent Share (when collaborator sells)"
+                value={collabOwnerAgentPercent}
+                onChange={(e)=>{
+                  const v = Math.max(0, Math.min(100, Number(e.target.value)||0));
+                  setCollabOwnerAgentPercent(v);
+                  setCollabCollaboratorAgentPercent(Number((100 - v).toFixed(2)));
+                }}
+                inputProps={{ min: 0, max: 100, step: 1 }}
+                helperText="Default 50%. The remainder goes to the collaborator."
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Collaborator's % of Agent Share"
+                value={collabCollaboratorAgentPercent}
+                InputProps={{ readOnly: true }}
+              />
+            </Grid>
+          </Grid>
+          <Typography variant="caption" color="text.secondary">
+            When a collaborator sells a unit, the development owner's share of the agent commission is applied here. Collaborators cannot add other collaborators.
           </Typography>
         </Box>
           <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>

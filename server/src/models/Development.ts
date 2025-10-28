@@ -18,6 +18,10 @@ export interface IDevelopment extends Document {
   address?: string;
   companyId: mongoose.Types.ObjectId;
   collaborators?: mongoose.Types.ObjectId[]; // additional agent users who can access this development
+  // The user who owns this development operationally is the creator (createdBy)
+  // Collaborator sales split configuration for agent commission
+  collabOwnerAgentPercent?: number; // percent of agentShare to the development owner when a collaborator sells
+  collabCollaboratorAgentPercent?: number; // percent of agentShare to the collaborator when they sell
   owner?: {
     firstName?: string;
     lastName?: string;
@@ -74,6 +78,8 @@ const DevelopmentSchema: Schema = new Schema({
     index: true
   },
   collaborators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
+  collabOwnerAgentPercent: { type: Number, min: 0, max: 100, default: 50 },
+  collabCollaboratorAgentPercent: { type: Number, min: 0, max: 100, default: 50 },
   owner: {
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },

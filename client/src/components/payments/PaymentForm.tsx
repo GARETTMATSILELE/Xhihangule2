@@ -63,6 +63,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [agents, setAgents] = useState<any[]>([]);
   const [internalProperties, setInternalProperties] = useState<Property[]>([]);
   const [internalTenants, setInternalTenants] = useState<Tenant[]>([]);
+  const [filteredTenants, setFilteredTenants] = useState<Tenant[]>([]);
   
   // New state for manual entry
   const [useManualProperty, setUseManualProperty] = useState(false);
@@ -88,6 +89,38 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     rentalPeriodMonth: initialData?.rentalPeriodMonth || (new Date().getMonth() + 1),
     rentalPeriodYear: initialData?.rentalPeriodYear || (new Date().getFullYear()),
   }));
+  // Normalize various ID shapes to string
+  function getId(id: any): string {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    if (typeof id === 'object') {
+      if ((id as any).$oid) return (id as any).$oid as string;
+      if ((id as any)._id) return String((id as any)._id);
+    }
+    return '';
+  }
+
+  // Filter tenants when property changes and auto-pick a linked tenant
+  useEffect(() => {
+    const pid = String(formData.propertyId || '');
+    if (!pid) {
+      setFilteredTenants(internalTenants);
+      return;
+    }
+    const linked = (internalTenants || []).filter((t: any) => {
+      const singleId = getId(t?.propertyId);
+      const multiIds = Array.isArray(t?.propertyIds) ? (t.propertyIds as any[]).map(getId) : [];
+      return singleId === pid || multiIds.includes(pid);
+    });
+    setFilteredTenants(linked.length > 0 ? linked : internalTenants);
+
+    const stillValid = linked.some((t: Tenant) => String(t._id) === String(formData.tenantId));
+    if (!stillValid) {
+      const preferred = linked.find((t: any) => t.status === 'Active') || linked[0];
+      setFormData(prev => ({ ...prev, tenantId: preferred ? String(preferred._id) : '' }));
+    }
+  }, [formData.propertyId, internalTenants]);
+
   const [isAdvance, setIsAdvance] = useState(false);
   const [advanceMonths, setAdvanceMonths] = useState(1);
   const [advanceStartMonth, setAdvanceStartMonth] = useState(formData.rentalPeriodMonth);
@@ -521,8 +554,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                   let autoTenantId = '';
                   let autoAgentId = '';
                   if (newPropertyId) {
-                    const tenantsForProperty = internalTenants.filter((t) => String(t.propertyId || '') === newPropertyId);
-                    const selectedTenant = tenantsForProperty.find((t) => t.status === 'Active') || tenantsForProperty[0];
+                    const tenantsForProperty = internalTenants.filter((t: any) => {
+                      const singleId = getId(t?.propertyId);
+                      const multiIds = Array.isArray(t?.propertyIds) ? (t.propertyIds as any[]).map(getId) : [];
+                      return singleId === newPropertyId || multiIds.includes(newPropertyId);
+                    });
+                    const selectedTenant = tenantsForProperty.find((t: any) => t.status === 'Active') || tenantsForProperty[0];
                     if (selectedTenant) {
                       autoTenantId = String(selectedTenant._id);
                       if (selectedTenant.ownerId) {
@@ -574,7 +611,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <Grid item xs={12}>
               <Autocomplete
-                options={internalTenants}
+                options={filteredTenants.length ? filteredTenants : internalTenants}
                 getOptionLabel={(option: Tenant) => `${option.firstName} ${option.lastName} - ${option.email}`}
                 value={internalTenants.find((t) => String(t._id) === String(formData.tenantId)) || null}
                 onChange={(_, newValue: Tenant | null) => {

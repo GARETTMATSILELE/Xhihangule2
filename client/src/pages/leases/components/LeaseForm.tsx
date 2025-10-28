@@ -56,6 +56,8 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
     gracePeriod: 0,
   });
 
+  const [filteredTenants, setFilteredTenants] = useState<Tenant[]>(tenants);
+
   useEffect(() => {
     if (initialData) {
       // Ensure dates are properly formatted strings or empty strings
@@ -67,17 +69,91 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
         endDate: initialData.endDate && !isNaN(new Date(initialData.endDate).getTime()) 
           ? initialData.endDate 
           : '',
+        // Ensure rentAmount and depositAmount are synced with monthlyRent and securityDeposit
+        rentAmount: initialData.monthlyRent || initialData.rentAmount || 0,
+        depositAmount: initialData.securityDeposit || initialData.depositAmount || 0,
       };
       setFormData(formattedData);
     }
   }, [initialData]);
 
+  // Helper to normalize various ID shapes to a string
+  function getId(id: any): string {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    if (typeof id === 'object') {
+      if ((id as any).$oid) return (id as any).$oid as string;
+      if ((id as any)._id) return String((id as any)._id);
+    }
+    return '';
+  }
+
+  // Filter tenants by selected property and auto-select a linked tenant
+  useEffect(() => {
+    const propertyId = formData.propertyId;
+    if (!propertyId) {
+      setFilteredTenants(tenants);
+      return;
+    }
+
+    const linked = (tenants || []).filter((t: any) => {
+      const singleId = getId(t?.propertyId);
+      const multiIds = Array.isArray(t?.propertyIds) ? (t.propertyIds as any[]).map(getId) : [];
+      return singleId === propertyId || multiIds.includes(propertyId);
+    });
+
+    setFilteredTenants(linked.length > 0 ? linked : tenants);
+
+    // If current tenant isn't linked, auto-select an active one if available
+    const stillValid = linked.some((t: Tenant) => t._id === formData.tenantId);
+    if (!stillValid) {
+      const preferred = linked.find((t: any) => t.status === 'Active') || linked[0];
+      setFormData((prev) => ({ ...prev, tenantId: preferred ? preferred._id : '' }));
+    }
+  }, [formData.propertyId, tenants]);
+
+  // Filter tenants by selected property and auto-select a linked tenant
+  useEffect(() => {
+    const propertyId = formData.propertyId;
+    if (!propertyId) {
+      setFilteredTenants(tenants);
+      return;
+    }
+
+    const linked = (tenants || []).filter((t: any) => {
+      const matchesSingle = t?.propertyId === propertyId;
+      const matchesMulti = Array.isArray(t?.propertyIds) && (t.propertyIds as string[]).includes(propertyId);
+      return matchesSingle || matchesMulti;
+    });
+
+    setFilteredTenants(linked.length > 0 ? linked : tenants);
+
+    // If current tenant isn't linked, auto-select an active one if available
+    const stillValid = linked.some((t) => t._id === formData.tenantId);
+    if (!stillValid) {
+      const preferred = linked.find((t: Tenant) => (t as any).status === 'Active') || linked[0];
+      setFormData((prev) => ({ ...prev, tenantId: preferred ? preferred._id : '' }));
+    }
+  }, [formData.propertyId, tenants]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name as string]: value,
-    }));
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        [name as string]: value,
+      };
+      
+      // Sync monthlyRent with rentAmount and securityDeposit with depositAmount
+      if (name === 'monthlyRent') {
+        updated.rentAmount = Number(value);
+      }
+      if (name === 'securityDeposit') {
+        updated.depositAmount = Number(value);
+      }
+      
+      return updated;
+    });
   };
 
   const handleSwitchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,7 +204,7 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
                   onChange={handleChange}
                   required
                 >
-                  {tenants.map((tenant) => (
+                  {(filteredTenants || tenants).map((tenant) => (
                     <MenuItem key={tenant._id} value={tenant._id}>
                       {tenant.firstName} {tenant.lastName}
                     </MenuItem>

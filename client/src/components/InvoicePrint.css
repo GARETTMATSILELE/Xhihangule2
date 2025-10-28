@@ -52,6 +52,13 @@
     margin-bottom: 16px;
     page-break-inside: avoid;
   }
+  .invoice-content.no-gap-below {
+    margin-bottom: 6px !important; /* tighter gap under items block */
+  }
+  /* Keep items and tax breakdown together */
+  .line-items-block {
+    page-break-inside: avoid;
+  }
   /* Ensure QR box prints at exact size */
   .fiscal-qr-box {
     width: 35mm;
@@ -105,17 +112,21 @@
     padding: 6px; /* tighter cell padding */
     text-align: left;
   }
+  /* Code column smaller font and no wrap for print */
+  .code-cell, .code-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 10pt;
+    white-space: nowrap;
+  }
   
   th {
     background-color: #f2f2f2 !important;
     font-weight: bold;
   }
   
-  /* Tax breakdown table styles */
-  .tax-breakdown {
-    margin-bottom: 12px;
-    page-break-inside: avoid;
-  }
+  /* Hide separate tax-breakdown when printing because we render an inline version under items */
+  .tax-breakdown { display: none !important; }
+  .tax-breakdown-inline { display: block !important; page-break-inside: avoid; margin-top: 0; }
   
   .tax-breakdown-box {
     border: 1px solid #ccc !important;
@@ -213,7 +224,7 @@
 
 /* Items table styles */
 .items-table {
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 
 .items-table th {

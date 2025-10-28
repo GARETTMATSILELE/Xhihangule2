@@ -6,6 +6,7 @@ export interface ListUnitsParams {
   variationId?: string;
   page?: number;
   limit?: number;
+  requireBuyer?: boolean;
 }
 
 export const developmentUnitService = {

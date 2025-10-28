@@ -157,9 +157,14 @@ export const Properties: React.FC = () => {
     // Agent routes: if marked rented but there is no active tenant, show as available
     if (isAgentRoute && property.status === 'rented') {
       const pid = getId(property._id);
-      const hasActiveTenant = agentTenants.some(
-        (t) => getId((t as any).propertyId) === pid && t.status === 'Active'
-      );
+      const hasActiveTenant = agentTenants.some((t) => {
+        const singlePropertyId = getId((t as any).propertyId);
+        const multiPropertyIds = Array.isArray((t as any).propertyIds)
+          ? ((t as any).propertyIds as any[]).map((id) => getId(id))
+          : [];
+        const isLinked = singlePropertyId === pid || multiPropertyIds.includes(pid);
+        return isLinked && t.status === 'Active';
+      });
       if (!hasActiveTenant) return 'available';
     }
     return property.status;

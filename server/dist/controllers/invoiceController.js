@@ -37,7 +37,7 @@ const generateItemCode = () => __awaiter(void 0, void 0, void 0, function* () {
 });
 // Function to calculate tax breakdown
 const calculateTaxBreakdown = (items, discount = 0, taxPercentage = 15) => {
-    const subtotal = items.reduce((sum, item) => sum + item.netPrice, 0);
+    const subtotal = items.reduce((sum, item) => sum + (item.netPrice || 0), 0);
     const amountExcludingTax = subtotal - discount;
     const taxAmount = (amountExcludingTax * taxPercentage) / 100;
     const totalAmount = amountExcludingTax + taxAmount;
@@ -50,7 +50,7 @@ const calculateTaxBreakdown = (items, discount = 0, taxPercentage = 15) => {
 };
 // Function to validate client details
 const validateClientDetails = (client) => {
-    var _a, _b;
+    var _a, _b, _c;
     if (!client || typeof client !== 'object') {
         throw new errorHandler_1.AppError('Client details are required', 400);
     }
@@ -65,7 +65,8 @@ const validateClientDetails = (client) => {
         name: client.name.trim(),
         address: client.address.trim(),
         tinNumber: ((_a = client.tinNumber) === null || _a === void 0 ? void 0 : _a.trim()) || undefined,
-        vatNumber: ((_b = client.vatNumber) === null || _b === void 0 ? void 0 : _b.trim()) || undefined
+        vatNumber: ((_b = client.vatNumber) === null || _b === void 0 ? void 0 : _b.trim()) || undefined,
+        bpNumber: ((_c = client.bpNumber) === null || _c === void 0 ? void 0 : _c.trim()) || undefined
     };
 };
 const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -74,16 +75,22 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const _d = req.body, { items, discount = 0, taxPercentage = 15, client } = _d, otherData = __rest(_d, ["items", "discount", "taxPercentage", "client"]);
+        const _d = req.body, { items, discount = 0, taxPercentage = 15, client, currency = 'USD' } = _d, otherData = __rest(_d, ["items", "discount", "taxPercentage", "client", "currency"]);
         // Validate client details
         const validatedClient = validateClientDetails(client);
         // Generate codes for items if not provided
         const processedItems = yield Promise.all(items.map((item) => __awaiter(void 0, void 0, void 0, function* () {
-            return (Object.assign(Object.assign({}, item), { code: item.code || (yield generateItemCode()), taxPercentage: item.taxPercentage || taxPercentage }));
+            var _a, _b, _c, _d;
+            const quantity = Number((_a = item.quantity) !== null && _a !== void 0 ? _a : 1) || 1;
+            const unitPrice = Number((_c = (_b = item.unitPrice) !== null && _b !== void 0 ? _b : item.netPrice) !== null && _c !== void 0 ? _c : 0) || 0;
+            const netPrice = Number((_d = item.netPrice) !== null && _d !== void 0 ? _d : (quantity * unitPrice));
+            return (Object.assign(Object.assign({}, item), { quantity,
+                unitPrice,
+                netPrice, code: item.code || (yield generateItemCode()), taxPercentage: item.taxPercentage || taxPercentage }));
         })));
         // Calculate tax breakdown
         const breakdown = calculateTaxBreakdown(processedItems, discount, taxPercentage);
-        const invoiceData = Object.assign(Object.assign(Object.assign(Object.assign({}, otherData), { client: validatedClient, items: processedItems, discount,
+        const invoiceData = Object.assign(Object.assign(Object.assign(Object.assign({}, otherData), { client: validatedClient, currency, items: processedItems, discount,
             taxPercentage }), breakdown), { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         const invoice = new Invoice_1.Invoice(invoiceData);
         // Try to fiscalize; fail-open

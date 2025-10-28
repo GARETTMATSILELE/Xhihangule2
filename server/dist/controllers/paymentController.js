@@ -607,6 +607,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.createPaymentAccountant = createPaymentAccountant;
 // Create a sales payment explicitly (no rental validations, paymentType fixed to 'introduction')
 const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     if (!req.user) {
         return res.status(401).json({ message: 'Authentication required' });
     }
@@ -630,6 +631,16 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             const dev = yield (yield Promise.resolve().then(() => __importStar(require('../models/Development')))).Development.findOne({ _id: devId, companyId: new mongoose_1.default.Types.ObjectId(user.companyId) }).lean();
             if (!dev) {
                 return res.status(400).json({ message: 'Invalid developmentId' });
+            }
+            // Enforce createdBy exists (owner) and the agent is either owner or collaborator
+            const devOwnerUserId = dev.createdBy ? new mongoose_1.default.Types.ObjectId(dev.createdBy) : undefined;
+            if (!devOwnerUserId) {
+                return res.status(400).json({ message: 'Development owner not set; cannot process sales payment' });
+            }
+            const isOwnerAgent = String(devOwnerUserId) === String(agId);
+            const isCollabAgent = Array.isArray(dev.collaborators) && dev.collaborators.map(String).includes(String(agId));
+            if (!isOwnerAgent && !isCollabAgent) {
+                return res.status(400).json({ message: 'Agent must be development owner or collaborator to process sale for this development' });
             }
             devAddressForManual = [dev.name, dev.address].filter(Boolean).join(' - ');
             if (unitId) {
@@ -662,7 +673,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 }
                 finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
             }
-            catch (_a) {
+            catch (_c) {
                 const base = (amount * 0.15);
                 const prea = base * 0.03;
                 const remaining = base - prea;
@@ -673,6 +684,53 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                     agencyShare: remaining * 0.4,
                     ownerAmount: amount - base,
                 };
+            }
+        }
+        // If development and agent are provided, and the agent is a collaborator on that development,
+        // split the agentShare between development owner (creator) and the collaborator using development's split config.
+        // If the agent is the owner, 100% of agentShare goes to owner by default.
+        let ownerAgentIncrement = 0;
+        let collaboratorAgentIncrement = 0;
+        if (devId && agId) {
+            const dev = yield (yield Promise.resolve().then(() => __importStar(require('../models/Development')))).Development.findOne({ _id: devId, companyId: new mongoose_1.default.Types.ObjectId(user.companyId) }).lean();
+            if (dev) {
+                const devOwnerUserId = dev.createdBy ? new mongoose_1.default.Types.ObjectId(dev.createdBy) : undefined;
+                const isOwnerAgent = devOwnerUserId && (String(devOwnerUserId) === String(agId));
+                const isCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.map(String).includes(String(agId));
+                if (isOwnerAgent) {
+                    // Entire agentShare to owner
+                    const agentShare = finalCommissionDetails.agentShare || 0;
+                    finalCommissionDetails.agentSplit = {
+                        ownerAgentShare: agentShare,
+                        collaboratorAgentShare: 0,
+                        ownerUserId: devOwnerUserId,
+                        collaboratorUserId: undefined,
+                        splitPercentOwner: 100,
+                        splitPercentCollaborator: 0
+                    };
+                    ownerAgentIncrement = agentShare;
+                    collaboratorAgentIncrement = 0;
+                }
+                else if (isCollaborator && devOwnerUserId) {
+                    const agentShare = finalCommissionDetails.agentShare || 0;
+                    const ownerPct = Math.max(0, Math.min(100, Number((_a = dev.collabOwnerAgentPercent) !== null && _a !== void 0 ? _a : 50)));
+                    const collabPct = Math.max(0, Math.min(100, Number((_b = dev.collabCollaboratorAgentPercent) !== null && _b !== void 0 ? _b : (100 - ownerPct))));
+                    const ownerShare = agentShare * (ownerPct / 100);
+                    const collaboratorShare = agentShare * (collabPct / 100);
+                    // Record split details
+                    finalCommissionDetails.agentSplit = {
+                        ownerAgentShare: ownerShare,
+                        collaboratorAgentShare: collaboratorShare,
+                        ownerUserId: devOwnerUserId,
+                        collaboratorUserId: agId,
+                        splitPercentOwner: ownerPct,
+                        splitPercentCollaborator: collabPct
+                    };
+                    ownerAgentIncrement = ownerShare;
+                    collaboratorAgentIncrement = collaboratorShare;
+                    // Ensure agentShare stays the same total (owner+collaborator)
+                    finalCommissionDetails.agentShare = ownerShare + collaboratorShare;
+                }
             }
         }
         const manualProperty = !propId && manualPropertyAddress;
@@ -714,7 +772,17 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
         // Post company and agent shares
         try {
             yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare || 0 } });
-            yield User_1.User.findByIdAndUpdate(agId, { $inc: { commission: finalCommissionDetails.agentShare || 0 } });
+            // If split is present, credit both the development owner and the collaborator accordingly
+            if (finalCommissionDetails.agentSplit && ownerAgentIncrement > 0) {
+                const split = finalCommissionDetails.agentSplit;
+                if (split.ownerUserId) {
+                    yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(split.ownerUserId), { $inc: { commission: ownerAgentIncrement } });
+                }
+                yield User_1.User.findByIdAndUpdate(agId, { $inc: { commission: collaboratorAgentIncrement } });
+            }
+            else {
+                yield User_1.User.findByIdAndUpdate(agId, { $inc: { commission: finalCommissionDetails.agentShare || 0 } });
+            }
         }
         catch (e) {
             console.warn('Non-fatal: commission posting failed', e);

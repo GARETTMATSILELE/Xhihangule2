@@ -66,6 +66,8 @@ const DevelopmentSchema = new mongoose_1.Schema({
         index: true
     },
     collaborators: [{ type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User', default: [] }],
+    collabOwnerAgentPercent: { type: Number, min: 0, max: 100, default: 50 },
+    collabCollaboratorAgentPercent: { type: Number, min: 0, max: 100, default: 50 },
     owner: {
         firstName: { type: String, trim: true },
         lastName: { type: String, trim: true },

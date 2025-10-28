@@ -162,6 +162,14 @@ const PaymentSchema = new mongoose_1.Schema({
             type: Number,
             required: true,
         },
+        agentSplit: {
+            ownerAgentShare: { type: Number, required: false, default: 0 },
+            collaboratorAgentShare: { type: Number, required: false, default: 0 },
+            ownerUserId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
+            collaboratorUserId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
+            splitPercentOwner: { type: Number, required: false, min: 0, max: 100 },
+            splitPercentCollaborator: { type: Number, required: false, min: 0, max: 100 },
+        }
     },
     status: {
         type: String,

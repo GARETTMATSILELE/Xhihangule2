@@ -123,13 +123,26 @@ export const getAgentTenants = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 400);
     }
 
-    // Get tenants created by this agent (using ownerId)
-    const tenants = await Tenant.find({ 
+    // Fetch properties managed by this agent
+    const ownedProperties = await Property.find({
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Filter by agent who created the tenant
+      ownerId: new mongoose.Types.ObjectId(req.user.userId)
     })
-    .populate('propertyId', 'name address')
-    .sort({ createdAt: -1 });
+      .select('_id')
+      .lean();
+    const ownedPropertyIds = ownedProperties.map((p: any) => p._id);
+
+    // Get tenants either created by this agent OR linked to the agent's properties
+    const tenants = await Tenant.find({
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      $or: [
+        { ownerId: new mongoose.Types.ObjectId(req.user.userId) },
+        { propertyId: { $in: ownedPropertyIds } },
+        { propertyIds: { $in: ownedPropertyIds } }
+      ]
+    })
+      .populate('propertyId', 'name address')
+      .sort({ createdAt: -1 });
 
     res.json(tenants);
   } catch (error) {

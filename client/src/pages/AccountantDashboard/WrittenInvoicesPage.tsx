@@ -12,6 +12,8 @@ interface InvoiceItem {
   description: string;
   taxPercentage: number;
   netPrice: number;
+  quantity?: number;
+  unitPrice?: number;
 }
 
 interface ClientDetails {
@@ -19,6 +21,7 @@ interface ClientDetails {
   address: string;
   tinNumber?: string;
   vatNumber?: string;
+  bpNumber?: string;
 }
 
 const WrittenInvoicesPage: React.FC = () => {
@@ -36,11 +39,13 @@ const WrittenInvoicesPage: React.FC = () => {
     name: '',
     address: '',
     tinNumber: '',
-    vatNumber: ''
+    vatNumber: '',
+    bpNumber: ''
   });
   const [items, setItems] = useState<InvoiceItem[]>([
-    { description: '', taxPercentage: 15, netPrice: 0 }
+    { description: '', taxPercentage: 15, netPrice: 0, quantity: 1, unitPrice: 0 }
   ]);
+  const [invoiceCurrency, setInvoiceCurrency] = useState<'USD'|'ZiG'|'ZAR'>('USD');
   const [form, setForm] = useState({
     property: '',
     dueDate: '',
@@ -89,6 +94,7 @@ const WrittenInvoicesPage: React.FC = () => {
     setDiscount(0);
     setTaxPercentage(15);
     setSelectedBankAccount('');
+    setInvoiceCurrency('USD');
   };
 
   const handleTypeChange = (e: SelectChangeEvent) => {
@@ -111,7 +117,7 @@ const WrittenInvoicesPage: React.FC = () => {
   };
 
   const addItem = () => {
-    setItems([...items, { description: '', taxPercentage: taxPercentage, netPrice: 0 }]);
+    setItems([...items, { description: '', taxPercentage: taxPercentage, netPrice: 0, quantity: 1, unitPrice: 0 }]);
   };
 
   const removeItem = (index: number) => {
@@ -121,7 +127,12 @@ const WrittenInvoicesPage: React.FC = () => {
   };
 
   const calculateTotals = () => {
-    const subtotal = items.reduce((sum, item) => sum + (item.netPrice || 0), 0);
+    const subtotal = items.reduce((sum, item) => {
+      const qty = item.quantity ?? 1;
+      const unit = item.unitPrice ?? item.netPrice ?? 0;
+      const line = qty * unit;
+      return sum + line;
+    }, 0);
     const amountExcludingTax = subtotal - discount;
     const taxAmount = (amountExcludingTax * taxPercentage) / 100;
     const totalAmount = amountExcludingTax + taxAmount;
@@ -145,19 +156,27 @@ const WrittenInvoicesPage: React.FC = () => {
       }
 
       // Validate items
-      if (items.some(item => !item.description || item.netPrice <= 0)) {
-        alert('Please fill in all item descriptions and ensure net prices are greater than 0');
+      if (items.some(item => !item.description || (item.unitPrice ?? item.netPrice) <= 0 || (item.quantity ?? 1) <= 0)) {
+        alert('Please fill in all item descriptions and ensure quantity and unit price are greater than 0');
         return;
       }
+
+      const itemsForApi = items.map(it => {
+        const qty = it.quantity ?? 1;
+        const unit = it.unitPrice ?? it.netPrice ?? 0;
+        const netPrice = qty * unit;
+        return { ...it, netPrice };
+      });
 
       const invoiceData = {
         ...form,
         type: invoiceType,
         status: 'unpaid',
         client: clientDetails,
-        items,
+        items: itemsForApi,
         discount,
         taxPercentage,
+        currency: invoiceCurrency,
         selectedBankAccount: selectedBankAccount !== '' ? company?.bankAccounts[parseInt(selectedBankAccount)] : null,
       };
 
@@ -324,7 +343,7 @@ const WrittenInvoicesPage: React.FC = () => {
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={3}>
                 <TextField
                   fullWidth
                   label="Tax Percentage (%)"
@@ -333,6 +352,20 @@ const WrittenInvoicesPage: React.FC = () => {
                   onChange={(e) => setTaxPercentage(Number(e.target.value))}
                   inputProps={{ min: 0, max: 100, step: 0.01 }}
                 />
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Currency</InputLabel>
+                  <Select
+                    value={invoiceCurrency}
+                    label="Currency"
+                    onChange={(e) => setInvoiceCurrency(e.target.value as any)}
+                  >
+                    <MenuItem value="USD">USD</MenuItem>
+                    <MenuItem value="ZiG">ZiG</MenuItem>
+                    <MenuItem value="ZAR">Rand (ZAR)</MenuItem>
+                  </Select>
+                </FormControl>
               </Grid>
             </Grid>
 
@@ -375,6 +408,14 @@ const WrittenInvoicesPage: React.FC = () => {
                   label="VAT Number"
                   value={clientDetails.vatNumber}
                   onChange={(e) => handleClientChange('vatNumber', e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="BP Number"
+                  value={clientDetails.bpNumber}
+                  onChange={(e) => handleClientChange('bpNumber', e.target.value)}
                 />
               </Grid>
             </Grid>
@@ -492,8 +533,10 @@ const WrittenInvoicesPage: React.FC = () => {
                 <TableHead>
                   <TableRow>
                     <TableCell>Description</TableCell>
+                    <TableCell align="center">Qty</TableCell>
+                    <TableCell align="right">Unit Price</TableCell>
                     <TableCell align="center">Tax %</TableCell>
-                    <TableCell align="right">Net Price</TableCell>
+                    <TableCell align="right">Line Total</TableCell>
                     <TableCell align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -513,6 +556,26 @@ const WrittenInvoicesPage: React.FC = () => {
                         <TextField
                           size="small"
                           type="number"
+                          value={item.quantity ?? 1}
+                          onChange={(e) => handleItemChange(index, 'quantity', Number(e.target.value))}
+                          inputProps={{ min: 1, step: 1 }}
+                          sx={{ width: 90 }}
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={item.unitPrice ?? item.netPrice}
+                          onChange={(e) => handleItemChange(index, 'unitPrice', Number(e.target.value))}
+                          inputProps={{ min: 0, step: 0.01 }}
+                          sx={{ width: 120 }}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <TextField
+                          size="small"
+                          type="number"
                           value={item.taxPercentage}
                           onChange={(e) => handleItemChange(index, 'taxPercentage', Number(e.target.value))}
                           inputProps={{ min: 0, max: 100, step: 0.01 }}
@@ -520,14 +583,12 @@ const WrittenInvoicesPage: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell align="right">
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={item.netPrice}
-                          onChange={(e) => handleItemChange(index, 'netPrice', Number(e.target.value))}
-                          inputProps={{ min: 0, step: 0.01 }}
-                          sx={{ width: 120 }}
-                        />
+                        {(() => {
+                          const qty = item.quantity ?? 1;
+                          const unit = item.unitPrice ?? item.netPrice ?? 0;
+                          const line = qty * unit;
+                          return `$${line.toFixed(2)}`;
+                        })()}
                       </TableCell>
                       <TableCell align="center">
                         <IconButton

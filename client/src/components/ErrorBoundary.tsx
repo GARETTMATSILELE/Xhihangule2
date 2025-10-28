@@ -24,7 +24,9 @@ class ErrorBoundary extends Component<Props, State> {
     console.error('Uncaught error:', error, errorInfo);
 
     // Auto-recover from chunk load errors by forcing a hard reload once
-    const isChunkLoadError = /ChunkLoadError|Loading chunk \d+ failed|failed to fetch dynamically imported module/i.test(error.message || '');
+    // Detect via both name and message, as environments differ in wording
+    const errorText = `${error?.name ?? ''} ${error?.message ?? ''}`;
+    const isChunkLoadError = /ChunkLoadError|Loading chunk|failed to fetch dynamically imported module|import\(\) failed/i.test(errorText);
     if (isChunkLoadError) {
       const alreadyReloaded = sessionStorage.getItem('reloadedAfterChunkError');
       if (!alreadyReloaded) {

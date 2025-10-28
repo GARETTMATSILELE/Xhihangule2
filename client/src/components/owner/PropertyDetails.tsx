@@ -254,7 +254,7 @@ const PropertyDetails: React.FC = () => {
               </Grid>
               <Grid item xs={12} md={4}>
                 <Typography variant="subtitle1" color="text.secondary">Units</Typography>
-                <Typography variant="body1">{property.units || 1} ({property.occupiedUnits || 0} occupied)</Typography>
+                <Typography variant="body1">{property.units || 1} ({(property.occupiedUnits ?? (property.status === 'rented' ? 1 : 0))} occupied)</Typography>
               </Grid>
             </Grid>
           </Paper>

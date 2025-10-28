@@ -12,9 +12,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPropertyDepositPayout = exports.getPropertyDepositSummary = exports.getPropertyDepositLedger = exports.getPREACommission = exports.getAgencyCommission = exports.getAgentCommissions = void 0;
+exports.getCompanyDepositSummaries = exports.createPropertyDepositPayout = exports.getPropertyDepositSummary = exports.getPropertyDepositLedger = exports.getPREACommission = exports.getAgencyCommission = exports.getAgentCommissions = void 0;
 const User_1 = require("../models/User");
 const Lease_1 = require("../models/Lease");
+const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
 const Payment_1 = require("../models/Payment"); // Added import for Payment
 const rentalDeposit_1 = require("../models/rentalDeposit");
@@ -636,3 +637,76 @@ const createPropertyDepositPayout = (req, res) => __awaiter(void 0, void 0, void
     }
 });
 exports.createPropertyDepositPayout = createPropertyDepositPayout;
+// Deposits: Company-wide trust accounts summary (per property) with payouts
+const getCompanyDepositSummaries = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ success: false, message: 'Unauthorized' });
+        }
+        const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
+        // Aggregate totals per property by type (payment vs payout)
+        const totals = yield rentalDeposit_1.RentalDeposit.aggregate([
+            { $match: { companyId: companyObjectId } },
+            {
+                $group: {
+                    _id: { propertyId: '$propertyId', type: '$type' },
+                    total: { $sum: '$depositAmount' }
+                }
+            }
+        ]);
+        const perProperty = {};
+        for (const row of totals) {
+            const propId = String(row._id.propertyId);
+            if (!perProperty[propId]) {
+                perProperty[propId] = { propertyId: propId, totalPaid: 0, totalPayout: 0 };
+            }
+            if (row._id.type === 'payment')
+                perProperty[propId].totalPaid += Number(row.total || 0);
+            if (row._id.type === 'payout')
+                perProperty[propId].totalPayout += Number(row.total || 0);
+        }
+        const propertyIds = Object.keys(perProperty).map((id) => new mongoose_1.default.Types.ObjectId(id));
+        const properties = yield Property_1.Property.find({ _id: { $in: propertyIds } }, 'name address').lean();
+        const propertyInfo = new Map();
+        properties.forEach((p) => propertyInfo.set(String(p._id), { name: p.name, address: p.address }));
+        // Fetch payouts list per property (latest first)
+        const payouts = yield rentalDeposit_1.RentalDeposit.find({ companyId: companyObjectId, type: 'payout' })
+            .sort({ depositDate: -1 })
+            .lean();
+        const payoutMap = new Map();
+        payouts.forEach((p) => {
+            const key = String(p.propertyId);
+            const list = payoutMap.get(key) || [];
+            list.push({
+                amount: Number(p.depositAmount || 0),
+                depositDate: p.depositDate,
+                recipientName: p.recipientName,
+                referenceNumber: p.referenceNumber,
+                notes: p.notes
+            });
+            payoutMap.set(key, list);
+        });
+        const result = Object.values(perProperty).map((pp) => {
+            const info = propertyInfo.get(pp.propertyId) || {};
+            const held = (pp.totalPaid || 0) - (pp.totalPayout || 0);
+            const propPayouts = (payoutMap.get(pp.propertyId) || []).slice(0, 5); // last 5 payouts
+            return {
+                propertyId: pp.propertyId,
+                propertyName: info.name || 'Unknown Property',
+                propertyAddress: info.address || '',
+                totalPaid: pp.totalPaid || 0,
+                totalPayout: pp.totalPayout || 0,
+                held,
+                payouts: propPayouts
+            };
+        }).sort((a, b) => b.held - a.held);
+        return res.json({ success: true, data: result });
+    }
+    catch (error) {
+        console.error('Error getting company deposit summaries:', error);
+        return res.status(500).json({ success: false, message: 'Failed to get trust accounts summary' });
+    }
+});
+exports.getCompanyDepositSummaries = getCompanyDepositSummaries;

@@ -21,6 +21,7 @@ const PropertyOwner_1 = require("../models/PropertyOwner");
 const ownerController_1 = require("../controllers/ownerController");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Tenant_1 = require("../models/Tenant");
+const Lease_1 = require("../models/Lease");
 const router = express_1.default.Router();
 console.log('OwnerRoutes: Registering owner routes...');
 // Only protect property routes, not maintenance-requests
@@ -46,15 +47,52 @@ router.get('/properties/:id/tenants', auth_1.propertyOwnerAuth, (req, res) => __
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'Authentication required' });
         }
-        // Ensure the property belongs to this owner (by presence in PropertyOwner context or fallback by ownerId)
-        const ownerId = req.user.userId;
         // Filter by company if present on token
         const tenantQuery = { propertyId: id };
         if (req.user.companyId) {
             tenantQuery.companyId = req.user.companyId;
         }
         const tenants = yield Tenant_1.Tenant.find(tenantQuery).select('firstName lastName email phone status propertyId companyId');
-        return res.json(tenants);
+        if (!tenants || tenants.length === 0) {
+            return res.json([]);
+        }
+        // Fetch leases for these tenants on this property, prefer active; otherwise latest by endDate
+        const tenantIds = tenants.map(t => t._id);
+        const leaseQuery = { propertyId: id, tenantId: { $in: tenantIds } };
+        if (req.user.companyId) {
+            leaseQuery.companyId = req.user.companyId;
+        }
+        const leases = yield Lease_1.Lease.find(leaseQuery)
+            .select('startDate endDate status tenantId propertyId')
+            .lean();
+        const tenantIdToBestLease = new Map();
+        for (const lease of leases) {
+            const key = lease.tenantId.toString();
+            const existing = tenantIdToBestLease.get(key);
+            if (!existing) {
+                tenantIdToBestLease.set(key, lease);
+                continue;
+            }
+            const existingIsActive = existing.status === 'active';
+            const leaseIsActive = lease.status === 'active';
+            if (leaseIsActive && !existingIsActive) {
+                tenantIdToBestLease.set(key, lease);
+                continue;
+            }
+            if (leaseIsActive === existingIsActive) {
+                const existingEnd = existing.endDate ? new Date(existing.endDate).getTime() : 0;
+                const currentEnd = lease.endDate ? new Date(lease.endDate).getTime() : 0;
+                if (currentEnd > existingEnd) {
+                    tenantIdToBestLease.set(key, lease);
+                }
+            }
+        }
+        const response = tenants.map(t => {
+            const tenantObj = t.toObject();
+            const lease = tenantIdToBestLease.get(t._id.toString());
+            return Object.assign(Object.assign({}, tenantObj), { leaseStartDate: (lease === null || lease === void 0 ? void 0 : lease.startDate) || null, leaseEndDate: (lease === null || lease === void 0 ? void 0 : lease.endDate) || null, leaseStatus: (lease === null || lease === void 0 ? void 0 : lease.status) || null, leaseId: (lease === null || lease === void 0 ? void 0 : lease._id) || null });
+        });
+        return res.json(response);
     }
     catch (err) {
         console.error('OwnerRoutes: Error fetching tenants for property', err);

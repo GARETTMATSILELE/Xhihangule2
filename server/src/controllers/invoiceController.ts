@@ -14,7 +14,7 @@ const generateItemCode = async (): Promise<string> => {
 
 // Function to calculate tax breakdown
 const calculateTaxBreakdown = (items: any[], discount: number = 0, taxPercentage: number = 15) => {
-  const subtotal = items.reduce((sum, item) => sum + item.netPrice, 0);
+  const subtotal = items.reduce((sum, item) => sum + (item.netPrice || 0), 0);
   const amountExcludingTax = subtotal - discount;
   const taxAmount = (amountExcludingTax * taxPercentage) / 100;
   const totalAmount = amountExcludingTax + taxAmount;
@@ -45,7 +45,8 @@ const validateClientDetails = (client: any) => {
     name: client.name.trim(),
     address: client.address.trim(),
     tinNumber: client.tinNumber?.trim() || undefined,
-    vatNumber: client.vatNumber?.trim() || undefined
+    vatNumber: client.vatNumber?.trim() || undefined,
+    bpNumber: client.bpNumber?.trim() || undefined
   };
 };
 
@@ -55,18 +56,26 @@ export const createInvoice = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
-    const { items, discount = 0, taxPercentage = 15, client, ...otherData } = req.body;
+    const { items, discount = 0, taxPercentage = 15, client, currency = 'USD', ...otherData } = req.body;
 
     // Validate client details
     const validatedClient = validateClientDetails(client);
 
     // Generate codes for items if not provided
     const processedItems = await Promise.all(
-      items.map(async (item: any) => ({
-        ...item,
-        code: item.code || await generateItemCode(),
-        taxPercentage: item.taxPercentage || taxPercentage
-      }))
+      items.map(async (item: any) => {
+        const quantity = Number(item.quantity ?? 1) || 1;
+        const unitPrice = Number(item.unitPrice ?? item.netPrice ?? 0) || 0;
+        const netPrice = Number(item.netPrice ?? (quantity * unitPrice));
+        return ({
+          ...item,
+          quantity,
+          unitPrice,
+          netPrice,
+          code: item.code || await generateItemCode(),
+          taxPercentage: item.taxPercentage || taxPercentage
+        });
+      })
     );
 
     // Calculate tax breakdown
@@ -75,6 +84,7 @@ export const createInvoice = async (req: Request, res: Response) => {
     const invoiceData = {
       ...otherData,
       client: validatedClient,
+      currency,
       items: processedItems,
       discount,
       taxPercentage,

@@ -189,9 +189,10 @@ const SalesPaymentsPage: React.FC = () => {
                 setPrefill(undefined);
                 if (id) {
                   try {
-                    // Load units
-                    const data = await developmentUnitService.list({ developmentId: id, limit: 500 });
-                    setUnits(Array.isArray(data) ? data : data?.items || []);
+                    // Load only sold units and include only those with a buyer set
+                    const data = await developmentUnitService.list({ developmentId: id, requireBuyer: true, limit: 500 });
+                    const list = Array.isArray(data) ? data : (data?.items || []);
+                    setUnits(list as any[]);
                     // Apply commission defaults
                     const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(id));
                     if (dev) {

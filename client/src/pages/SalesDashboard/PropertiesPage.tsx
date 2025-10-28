@@ -32,6 +32,7 @@ export default function PropertiesPage() {
   const [editing, setEditing] = React.useState<any | null>(null);
   const [form, setForm] = React.useState<any>({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
   const [createForm, setCreateForm] = React.useState<any>({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
+  const [showCreateModal, setShowCreateModal] = React.useState<boolean>(false);
 
   const load = React.useCallback(async () => {
     try { setLoading(true); setError(null); const [list, ownerRes] = await Promise.all([propertyService.getProperties(), propertyOwnerService.getAll()]); setProperties(Array.isArray(list)?list:[]); setOwners(Array.isArray(ownerRes?.owners)? ownerRes.owners : (Array.isArray(ownerRes)? ownerRes : [])); }
@@ -81,6 +82,7 @@ export default function PropertiesPage() {
       });
       setCreateForm({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
       await load();
+      setShowCreateModal(false);
     } catch(e:any){ setError(e?.message||'Failed to create'); } finally { setLoading(false);} };
   const deleteProperty = async (id: string) => { if (!id) return; if (!window.confirm('Delete this property?')) return; try { setLoading(true); await propertyService.deleteProperty(id); await load(); } catch(e:any){ setError(e?.message||'Failed to delete'); } finally { setLoading(false);} };
 
@@ -94,43 +96,15 @@ export default function PropertiesPage() {
             <div className="w-full max-w-sm"><Input placeholder="Search properties" value={query} onChange={(e:any)=>setQuery(e.target.value)} /></div>
           </div>
           <Card>
-            <CardHeader><CardTitle>Properties</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Properties</CardTitle>
+                <a className="px-3 py-2 rounded-xl border bg-slate-900 text-white" href="/sales-dashboard?add=property">+ Property</a>
+              </div>
+            </CardHeader>
             <CardContent>
               {error && <div className="text-sm text-rose-600 mb-2">{error}</div>}
-              {/* Create */}
-              <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Input placeholder="Name" value={createForm.name} onChange={(e:any)=>setCreateForm((f:any)=>({...f, name: e.target.value}))} />
-                <Input placeholder="Address" value={createForm.address} onChange={(e:any)=>setCreateForm((f:any)=>({...f, address: e.target.value}))} />
-                <select className="px-3 py-2 rounded-xl border" value={createForm.type} onChange={(e)=>setCreateForm((f:any)=>({...f, type: e.target.value}))}>
-                  <option value="house">House</option>
-                  <option value="apartment">Apartment</option>
-                  <option value="commercial">Commercial</option>
-                  <option value="land">Land</option>
-                </select>
-                {/* Owner tie-in */}
-                <div className="md:col-span-1">
-                  <select className="px-3 py-2 rounded-xl border w-full" value={createForm.propertyOwnerId} onChange={(e)=>setCreateForm((f:any)=>({...f, propertyOwnerId: e.target.value}))}>
-                    <option value="">-- Select Owner (optional) --</option>
-                    {owners.map((o:any)=> (
-                      <option key={o._id} value={o._id}>{(`${o.firstName || ''} ${o.lastName || ''}`).trim() || o.name || o.email}</option>
-                    ))}
-                  </select>
-                </div>
-                {createForm.type === 'land' ? (
-                  <>
-                    <Input placeholder="Land size (sqm)" value={createForm.landArea} onChange={(e:any)=>setCreateForm((f:any)=>({...f, landArea: e.target.value}))} />
-                    <Input placeholder="Price per sqm" value={createForm.pricePerSqm} onChange={(e:any)=>setCreateForm((f:any)=>({...f, pricePerSqm: e.target.value}))} />
-                  </>
-                ) : (
-                  <>
-                    <Input placeholder="Price" value={createForm.price} onChange={(e:any)=>setCreateForm((f:any)=>({...f, price: e.target.value}))} />
-                    <Input placeholder="Bedrooms" value={createForm.bedrooms} onChange={(e:any)=>setCreateForm((f:any)=>({...f, bedrooms: e.target.value}))} />
-                    <Input placeholder="Bathrooms" value={createForm.bathrooms} onChange={(e:any)=>setCreateForm((f:any)=>({...f, bathrooms: e.target.value}))} />
-                  </>
-                )}
-                <Input placeholder="Description" value={createForm.description} onChange={(e:any)=>setCreateForm((f:any)=>({...f, description: e.target.value}))} />
-                <div><button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={createProperty} disabled={loading}>Create Property</button></div>
-              </div>
+              {/* Create handled by main Sales Dashboard modal */}
 
               {loading ? (
                 <div className="py-8 text-center text-sm text-slate-500">Loading…</div>
@@ -167,6 +141,8 @@ export default function PropertiesPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Creation handled via main Sales Dashboard modal using ?add=property */}
 
           {editing && (
             <Card className="mt-4">

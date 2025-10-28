@@ -124,6 +124,20 @@ class AgentAccountService {
   }
 
   /**
+   * Get current logged-in agent limited account summary
+   */
+  async getMyAccountSummary(): Promise<{ runningBalance: number; totalCommissions: number; totalPayouts: number; totalPenalties: number; agentId: string; agentName?: string }>
+  {
+    try {
+      const response = await api.get('/accountants/agents/me/account');
+      return response.data.data;
+    } catch (error) {
+      console.error('Error fetching my agent account summary:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Add penalty to agent account
    */
   async addPenalty(agentId: string, penaltyData: PenaltyData): Promise<AgentAccount> {

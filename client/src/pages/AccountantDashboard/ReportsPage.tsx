@@ -61,6 +61,8 @@ const ReportsPage: React.FC = () => {
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [trustAccounts, setTrustAccounts] = useState<Array<{ propertyId: string; propertyName?: string; propertyAddress?: string; totalPaid: number; totalPayout: number; held: number; payouts: Array<{ amount: number; depositDate: string; recipientName?: string; referenceNumber?: string; notes?: string }> }>>([]);
+  const [trustSearch, setTrustSearch] = useState<string>('');
 
   // Helpers: use rental period month/year for rentals, payment date for others
   function getEffectiveDateForFilter(p: any): Date {
@@ -84,11 +86,12 @@ const ReportsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         // Use same source as dashboard cards for consistency
-        const [all, accounts, summary, tx] = await Promise.all([
+        const [all, accounts, summary, tx, deposits] = await Promise.all([
           paymentService.getPayments(),
           propertyAccountService.getCompanyPropertyAccounts().catch(() => []),
           companyAccountService.getSummary().catch(() => null),
-          companyAccountService.getTransactions().catch(() => null)
+          companyAccountService.getTransactions().catch(() => null),
+          paymentService.getCompanyDepositSummaries().catch(() => [])
         ]);
         setPayments(Array.isArray(all) ? all : []);
         try {
@@ -101,6 +104,7 @@ const ReportsPage: React.FC = () => {
         } catch {}
         setCompanySummary(summary as any);
         setCompanyTransactions(Array.isArray((tx as any)?.transactions) ? (tx as any).transactions : (Array.isArray(tx as any) ? (tx as any) : []));
+        setTrustAccounts(Array.isArray(deposits) ? deposits : []);
       } catch (e: any) {
         setError(e?.message || 'Failed to load data');
       } finally {
@@ -668,7 +672,7 @@ const ReportsPage: React.FC = () => {
             <h2 className="text-lg font-semibold">Trust Accounts (Rental Deposits)</h2>
             <div className="flex items-center gap-2">
               <label className="text-xs text-slate-500">Search</label>
-              <input className="border rounded px-2 py-1" placeholder="Property or Tenant" />
+              <input className="border rounded px-2 py-1" placeholder="Property" value={trustSearch} onChange={(e)=>setTrustSearch(e.target.value)} />
               <button onClick={printReport} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
             </div>
           </div>
@@ -677,14 +681,54 @@ const ReportsPage: React.FC = () => {
               <thead className="text-slate-500">
                 <tr>
                   <th className="py-2">Property</th>
-                  <th>Tenant</th>
-                  <th className="text-right">Deposit Held</th>
+                  <th>Address</th>
+                  <th className="text-right">Held</th>
+                  <th className="text-right">Total Paid</th>
+                  <th className="text-right">Total Payout</th>
+                  <th>Payouts (recent)</th>
                 </tr>
               </thead>
               <tbody>
-                <tr><td className="py-2">14 Baker St</td><td>John Doe</td><td className="text-right">{currency(500)}</td></tr>
-                <tr><td className="py-2">Unit 4, Hillside</td><td>Mary P.</td><td className="text-right">{currency(650)}</td></tr>
-                <tr className="font-semibold"><td className="py-2">Total Held</td><td></td><td className="text-right">{currency(1150)}</td></tr>
+                {trustAccounts
+                  .filter((r)=>{
+                    if (!trustSearch.trim()) return true;
+                    const t = trustSearch.trim().toLowerCase();
+                    return (r.propertyName||'').toLowerCase().includes(t) || (r.propertyAddress||'').toLowerCase().includes(t);
+                  })
+                  .map((row) => (
+                  <tr key={row.propertyId}>
+                    <td className="py-2">{row.propertyName || row.propertyId}</td>
+                    <td>{row.propertyAddress || '-'}</td>
+                    <td className="text-right">{currency(row.held || 0)}</td>
+                    <td className="text-right">{currency(row.totalPaid || 0)}</td>
+                    <td className="text-right">{currency(row.totalPayout || 0)}</td>
+                    <td>
+                      <div className="flex flex-col gap-1">
+                        {(row.payouts||[]).slice(0,3).map((p, idx)=> (
+                          <div key={idx} className="text-xs text-slate-600">
+                            {new Date(p.depositDate).toLocaleDateString()} — {currency(p.amount)} {p.recipientName ? `to ${p.recipientName}` : ''}
+                          </div>
+                        ))}
+                        {(row.payouts||[]).length === 0 && <div className="text-xs text-slate-400">No payouts</div>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {trustAccounts.length > 0 && (
+                  <tr className="font-semibold">
+                    <td className="py-2">Total</td>
+                    <td></td>
+                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.held||0), 0))}</td>
+                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.totalPaid||0), 0))}</td>
+                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.totalPayout||0), 0))}</td>
+                    <td></td>
+                  </tr>
+                )}
+                {trustAccounts.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-500">No rental deposits found.</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

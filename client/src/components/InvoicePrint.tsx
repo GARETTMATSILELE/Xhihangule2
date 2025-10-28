@@ -9,6 +9,8 @@ interface InvoiceItem {
   description: string;
   taxPercentage: number;
   netPrice: number;
+  quantity?: number;
+  unitPrice?: number;
 }
 
 interface ClientDetails {
@@ -16,12 +18,14 @@ interface ClientDetails {
   address: string;
   tinNumber?: string;
   vatNumber?: string;
+  bpNumber?: string;
 }
 
 interface Invoice {
   _id: string;
   property: string;
   client: ClientDetails | string; // Support both old (string) and new (object) formats
+  currency?: 'USD' | 'ZiG' | 'ZAR';
   subtotal: number;
   discount: number;
   amountExcludingTax: number;
@@ -63,11 +67,26 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
     window.print();
   };
 
+  const deriveCurrency = () => {
+    // Prefer explicit invoice currency if present, otherwise derive from bank account, fallback to USD
+    if (invoice.currency === 'USD' || invoice.currency === 'ZiG' || invoice.currency === 'ZAR') return invoice.currency;
+    const acctType = invoice.selectedBankAccount?.accountType;
+    if (acctType === 'USD NOSTRO') return 'USD';
+    if (acctType === 'ZiG') return 'ZiG';
+    return 'USD';
+  };
+
+  const currencyCode = deriveCurrency();
+
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
+    if (currencyCode === 'USD') {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+    }
+    if (currencyCode === 'ZAR') {
+      return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(amount);
+    }
+    // ZiG formatting (no official ISO code in Intl), prefix with label
+    return `ZiG ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
   };
 
   const formatDate = (date: Date) => {
@@ -76,6 +95,11 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
       month: 'long',
       day: 'numeric',
     });
+  };
+
+  const formatDateTime = (date: Date) => {
+    const d = new Date(date);
+    return `${d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
   };
 
   const getStatusClass = (status: string) => {
@@ -151,7 +175,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               </Typography>
             )}
             {/* Tax/Registration details at top alongside company details */}
-            {(company?.registrationNumber || company?.tinNumber || (company as any)?.vatNumber) && (
+            {(company?.registrationNumber || company?.tinNumber || (company as any)?.vatNumber || (company as any)?.bpNumber) && (
               <Box sx={{ mt: 1 }}>
                 {company?.registrationNumber && (
                   <Typography variant="body2" color="text.secondary">
@@ -168,6 +192,11 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
                     VAT No: {(company as any).vatNumber}
                   </Typography>
                 )}
+                {(company as any)?.bpNumber && (
+                  <Typography variant="body2" color="text.secondary">
+                    BP No: {(company as any).bpNumber}
+                  </Typography>
+                )}
               </Box>
             )}
           </div>
@@ -175,16 +204,19 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
           {/* Invoice Details */}
           <div className="invoice-details">
             <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-              TAX INVOICE
+              FISCAL TAX INVOICE
             </Typography>
             <div className="invoice-number">
-              Invoice #: {invoice._id.slice(-8).toUpperCase()}
+              Invoice #: {invoice.fiscalData?.documentNumber ? invoice.fiscalData.documentNumber : invoice._id.slice(-8).toUpperCase()}
             </div>
             <Typography variant="body2" color="text.secondary">
-              Date: {formatDate(invoice.createdAt)}
+              Date/Time of Supply: {formatDateTime(invoice.createdAt)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Due Date: {formatDate(invoice.dueDate)}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Currency: {currencyCode}
             </Typography>
             <div className={`status-badge ${getStatusClass(invoice.status)}`}>
               {invoice.status.toUpperCase()}
@@ -230,41 +262,86 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               <Typography variant="body2" color="text.secondary">
                 <strong>VAT Number:</strong> {clientDetails.vatNumber || 'N/A'}
               </Typography>
+              <Typography variant="body2" color="text.secondary">
+                <strong>BP Number:</strong> {clientDetails.bpNumber || 'N/A'}
+              </Typography>
             </Grid>
           </Grid>
         </div>
 
         {/* Invoice Items Table */}
-        <div className="invoice-content">
+        <div className="invoice-content line-items-block no-gap-below">
           <Typography variant="h6" gutterBottom>
             Invoice Items:
           </Typography>
-          <TableContainer component={Paper} sx={{ mb: 3 }}>
-            <Table>
+          <TableContainer component={Paper} sx={{ mb: 1 }}>
+            <Table className="items-table">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: 'bold', width: '15%' }}>Code</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', width: '50%' }}>Description</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', width: '15%', textAlign: 'center' }}>Tax %</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold', width: '20%', textAlign: 'right' }}>Net Price</TableCell>
+                  <TableCell className="code-cell" sx={{ fontWeight: 'bold', width: '12%' }}>Code</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', width: '38%' }}>Description</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', width: '10%', textAlign: 'center' }}>Qty</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', width: '15%', textAlign: 'right' }}>Unit Price</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', width: '10%', textAlign: 'center' }}>Tax %</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', width: '15%', textAlign: 'right' }}>Line Total</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {invoice.items?.map((item, index) => (
                   <TableRow key={index}>
-                    <TableCell>{item.code}</TableCell>
+                    <TableCell className="code-value">{item.code}</TableCell>
                     <TableCell>{item.description}</TableCell>
+                    <TableCell sx={{ textAlign: 'center' }}>{item.quantity ?? 1}</TableCell>
+                    <TableCell sx={{ textAlign: 'right' }}>{formatCurrency(item.unitPrice ?? item.netPrice)}</TableCell>
                     <TableCell sx={{ textAlign: 'center' }}>{item.taxPercentage}%</TableCell>
-                    <TableCell sx={{ textAlign: 'right' }}>{formatCurrency(item.netPrice)}</TableCell>
+                    <TableCell sx={{ textAlign: 'right' }}>{formatCurrency((item.quantity ?? 1) * (item.unitPrice ?? item.netPrice))}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </TableContainer>
+          {/* Inline Tax Breakdown (print-visible) */}
+          <Box className="tax-breakdown-inline" sx={{ p: 2, pt: 1, border: '1px solid #e0e0e0', borderRadius: 1, bgcolor: '#fafafa', mt: 0 }}>
+            <Typography variant="h6" gutterBottom sx={{ borderBottom: '1px solid #e0e0e0', pb: 1 }}>
+              Tax Breakdown
+            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="body2">Subtotal:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                {formatCurrency(invoice.subtotal)}
+              </Typography>
+            </Box>
+            {invoice.discount > 0 && (
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2">Discount:</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'red' }}>
+                  -{formatCurrency(invoice.discount)}
+                </Typography>
+              </Box>
+            )}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="body2">Amount Excluding Tax:</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                {formatCurrency(invoice.amountExcludingTax)}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="body2">VAT ({invoice.taxPercentage}%):</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                {formatCurrency(invoice.taxAmount)}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2, pt: 1, borderTop: '2px solid #1976d2' }}>
+              <Typography variant="h6">Total Amount:</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
+                {formatCurrency(invoice.totalAmount)}
+              </Typography>
+            </Box>
+          </Box>
         </div>
 
         {/* Tax Breakdown */}
-        <div className="tax-breakdown">
+        <div className="tax-breakdown line-items-block">
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} md={12}>
               <Box sx={{ 
@@ -384,6 +461,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               {invoice.fiscalData.fiscalNumber ? `Fiscal No: ${invoice.fiscalData.fiscalNumber}  ` : ''}
               {invoice.fiscalData.deviceSerial ? `Device: ${invoice.fiscalData.deviceSerial}  ` : ''}
               {invoice.fiscalData.documentNumber ? `Doc No: ${invoice.fiscalData.documentNumber}  ` : ''}
+              {invoice.fiscalData.signature ? `Signature: ${invoice.fiscalData.signature}` : ''}
             </Typography>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

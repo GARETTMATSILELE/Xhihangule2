@@ -7,13 +7,16 @@ const InvoiceItemSchema = new mongoose_1.Schema({
     code: { type: String, required: true },
     description: { type: String, required: true },
     taxPercentage: { type: Number, required: true, default: 15 },
-    netPrice: { type: Number, required: true }
+    netPrice: { type: Number, required: true },
+    quantity: { type: Number, required: false, default: 1 },
+    unitPrice: { type: Number, required: false, default: 0 }
 });
 const ClientDetailsSchema = new mongoose_1.Schema({
     name: { type: String, required: true },
     address: { type: String, required: true },
     tinNumber: { type: String, required: false },
-    vatNumber: { type: String, required: false }
+    vatNumber: { type: String, required: false },
+    bpNumber: { type: String, required: false }
 });
 const BankAccountSchema = new mongoose_1.Schema({
     accountNumber: { type: String, required: true },
@@ -27,6 +30,7 @@ const InvoiceSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true },
     property: { type: String, required: true },
     client: { type: ClientDetailsSchema, required: true },
+    currency: { type: String, enum: ['USD', 'ZiG', 'ZAR'], default: 'USD' },
     subtotal: { type: Number, required: true, default: 0 },
     discount: { type: Number, required: true, default: 0 },
     amountExcludingTax: { type: Number, required: true, default: 0 },

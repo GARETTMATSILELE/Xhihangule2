@@ -40,7 +40,7 @@ export const createDevelopment = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
 
-    const { name, type, description, address, owner, variations, commissionPercent, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
+    const { name, type, description, address, owner, variations, commissionPercent, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining, collabOwnerAgentPercent, collabCollaboratorAgentPercent } = req.body || {};
 
     if (!name || !type) {
       throw new AppError('Missing required fields: name and type', 400);
@@ -75,6 +75,8 @@ export const createDevelopment = async (req: Request, res: Response) => {
         commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
         commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
         commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : undefined,
+        collabOwnerAgentPercent: typeof collabOwnerAgentPercent === 'number' ? collabOwnerAgentPercent : undefined,
+        collabCollaboratorAgentPercent: typeof collabCollaboratorAgentPercent === 'number' ? collabCollaboratorAgentPercent : undefined,
         createdBy: new mongoose.Types.ObjectId(req.user!.userId),
         updatedBy: new mongoose.Types.ObjectId(req.user!.userId)
       });
@@ -125,6 +127,8 @@ export const createDevelopment = async (req: Request, res: Response) => {
             commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
             commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
             commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : undefined,
+            collabOwnerAgentPercent: typeof collabOwnerAgentPercent === 'number' ? collabOwnerAgentPercent : undefined,
+            collabCollaboratorAgentPercent: typeof collabCollaboratorAgentPercent === 'number' ? collabCollaboratorAgentPercent : undefined,
             createdBy: new mongoose.Types.ObjectId(req.user!.userId),
             updatedBy: new mongoose.Types.ObjectId(req.user!.userId)
           }
@@ -210,8 +214,18 @@ export const addCollaborator = async (req: Request, res: Response) => {
     ensureAuthCompany(req);
     const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId });
     if (!dev) throw new AppError('Development not found', 404);
+    // Only development creator (owner) or admin/accountant can add collaborators
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    if (!isPrivileged && !isOwner) {
+      throw new AppError('Only the development owner or admin can add collaborators', 403);
+    }
     const { userId } = req.body || {};
     if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) throw new AppError('Invalid userId', 400);
+  // Prevent adding the owner (createdBy) as a collaborator
+  if (String(dev.createdBy) === String(userId)) {
+    throw new AppError('Owner cannot be added as a collaborator', 400);
+  }
     const uid = new mongoose.Types.ObjectId(String(userId));
     await Development.updateOne({ _id: dev._id }, { $addToSet: { collaborators: uid }, $set: { updatedBy: req.user!.userId } });
     const updated = await Development.findById(dev._id).lean();
@@ -228,8 +242,17 @@ export const removeCollaborator = async (req: Request, res: Response) => {
     ensureAuthCompany(req);
     const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId });
     if (!dev) throw new AppError('Development not found', 404);
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    if (!isPrivileged && !isOwner) {
+      throw new AppError('Only the development owner or admin can remove collaborators', 403);
+    }
     const { userId } = req.body || {};
     if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) throw new AppError('Invalid userId', 400);
+  // Do nothing if attempting to remove owner from collaborators (owner should never be a collaborator)
+  if (String(dev.createdBy) === String(userId)) {
+    return res.json(await Development.findById(dev._id).lean());
+  }
     const uid = new mongoose.Types.ObjectId(String(userId));
     await Development.updateOne({ _id: dev._id }, { $pull: { collaborators: uid }, $set: { updatedBy: req.user!.userId } });
     const updated = await Development.findById(dev._id).lean();
@@ -259,6 +282,16 @@ export const getDevelopment = async (req: Request, res: Response) => {
 export const updateDevelopment = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
+    // If attempting to change collaborator split fields, require owner or admin/accountant
+    if (['collabOwnerAgentPercent','collabCollaboratorAgentPercent'].some(k => Object.prototype.hasOwnProperty.call(req.body || {}, k))) {
+      const existing = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId }).lean();
+      if (!existing) throw new AppError('Development not found', 404);
+      const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+      const isOwner = String((existing as any).createdBy) === String(req.user!.userId);
+      if (!isPrivileged && !isOwner) {
+        throw new AppError('Only the development owner or admin can modify collaborator split settings', 403);
+      }
+    }
     const allowed: Partial<IDevelopment> = {
       name: req.body?.name,
       type: req.body?.type,
@@ -272,6 +305,8 @@ export const updateDevelopment = async (req: Request, res: Response) => {
     if (typeof req.body?.commissionPreaPercent === 'number') (allowed as any).commissionPreaPercent = req.body.commissionPreaPercent;
     if (typeof req.body?.commissionAgencyPercentRemaining === 'number') (allowed as any).commissionAgencyPercentRemaining = req.body.commissionAgencyPercentRemaining;
     if (typeof req.body?.commissionAgentPercentRemaining === 'number') (allowed as any).commissionAgentPercentRemaining = req.body.commissionAgentPercentRemaining;
+    if (typeof req.body?.collabOwnerAgentPercent === 'number') (allowed as any).collabOwnerAgentPercent = req.body.collabOwnerAgentPercent;
+    if (typeof req.body?.collabCollaboratorAgentPercent === 'number') (allowed as any).collabCollaboratorAgentPercent = req.body.collabCollaboratorAgentPercent;
 
     // Remove undefined keys
     Object.keys(allowed).forEach(k => (allowed as any)[k] === undefined && delete (allowed as any)[k]);

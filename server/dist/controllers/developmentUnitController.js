@@ -101,7 +101,7 @@ exports.updateUnitStatus = updateUnitStatus;
 const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         ensureAuthCompany(req);
-        const { developmentId, status, variationId, page = '1', limit = '50' } = req.query;
+        const { developmentId, status, variationId, page = '1', limit = '50', requireBuyer } = req.query;
         if (!developmentId)
             throw new errorHandler_1.AppError('developmentId is required', 400);
         // Ensure development belongs to company
@@ -115,6 +115,15 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             query.status = String(status);
         if (variationId)
             query.variationId = String(variationId);
+        // Optionally require a buyer and sold status
+        const mustRequireBuyer = String(requireBuyer || '').toLowerCase() === 'true';
+        if (mustRequireBuyer) {
+            query.status = 'sold';
+            query.$or = [
+                { buyerName: { $exists: true, $type: 'string', $ne: '' } },
+                { buyerId: { $exists: true } }
+            ];
+        }
         const [items, total] = yield Promise.all([
             DevelopmentUnit_1.DevelopmentUnit.find(query)
                 .sort({ variationId: 1, unitNumber: 1 })

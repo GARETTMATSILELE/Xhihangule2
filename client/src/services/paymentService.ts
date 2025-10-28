@@ -120,7 +120,25 @@ class PaymentService {
         return await api.get('/accountants/sales-payments', { params: filters });
       });
       const raw = response.data as any;
-      return Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+      const list: any[] = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+      // Normalize agent commission for collaboration: prefer split amounts for sale payments
+      const agentIdFilter = (filters as any)?.agentId;
+      const normalized = list.map((p: any) => {
+        if (p?.paymentType === 'sale' && p?.commissionDetails?.agentSplit) {
+          const split = p.commissionDetails.agentSplit;
+          // If an agentId filter is applied, attach the relevant distributed share for that agent
+          if (agentIdFilter) {
+            const agentIdStr = String(agentIdFilter);
+            if (split?.collaboratorUserId && String(split.collaboratorUserId) === agentIdStr) {
+              (p as any)._distributedAgentShare = Number(split.collaboratorAgentShare || 0);
+            } else if (split?.ownerUserId && String(split.ownerUserId) === agentIdStr) {
+              (p as any)._distributedAgentShare = Number(split.ownerAgentShare || 0);
+            }
+          }
+        }
+        return p;
+      });
+      return normalized as Payment[];
     } catch (error: any) {
       return this.handleAuthError(error);
     }
@@ -237,7 +255,23 @@ class PaymentService {
       }
       
       const response = await publicApi.get('/payments/public', config);
-      return response.data;
+      const out = response.data as { data: any[] };
+      const list = Array.isArray(out?.data) ? out.data : [];
+      const agentIdFilter = config?.params?.agentId ? String(config.params.agentId) : undefined;
+      const normalized = list.map((p: any) => {
+        if (p?.paymentType === 'sale' && p?.commissionDetails?.agentSplit) {
+          const split = p.commissionDetails.agentSplit;
+          if (agentIdFilter) {
+            if (split?.collaboratorUserId && String(split.collaboratorUserId) === agentIdFilter) {
+              (p as any)._distributedAgentShare = Number(split.collaboratorAgentShare || 0);
+            } else if (split?.ownerUserId && String(split.ownerUserId) === agentIdFilter) {
+              (p as any)._distributedAgentShare = Number(split.ownerAgentShare || 0);
+            }
+          }
+        }
+        return p;
+      });
+      return { data: normalized as Payment[] };
     } catch (error: any) {
       console.error('Error fetching payments (public):', error);
       // Don't throw auth errors for public endpoints, just return empty data
@@ -391,6 +425,13 @@ class PaymentService {
   async createPropertyDepositPayout(propertyId: string, data: { amount: number; paymentMethod?: string; notes?: string; tenantId?: string; recipientName?: string }) {
     const response = await api.post(`/accountants/property-accounts/${propertyId}/deposits/payout`, data);
     return response.data.data;
+  }
+
+  // Company trust accounts: list deposits held and payouts per property
+  async getCompanyDepositSummaries(): Promise<Array<{ propertyId: string; propertyName?: string; propertyAddress?: string; totalPaid: number; totalPayout: number; held: number; payouts: Array<{ amount: number; depositDate: string; recipientName?: string; referenceNumber?: string; notes?: string }> }>> {
+    const response = await api.get('/accountants/trust-accounts/deposits');
+    const data = response.data?.data;
+    return Array.isArray(data) ? data : [];
   }
 
   async createLevyPayment(paymentData: any): Promise<any> {

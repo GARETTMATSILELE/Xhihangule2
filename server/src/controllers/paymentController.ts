@@ -698,6 +698,16 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       if (!dev) {
         return res.status(400).json({ message: 'Invalid developmentId' });
       }
+      // Enforce createdBy exists (owner) and the agent is either owner or collaborator
+      const devOwnerUserId = (dev as any).createdBy ? new mongoose.Types.ObjectId((dev as any).createdBy) : undefined;
+      if (!devOwnerUserId) {
+        return res.status(400).json({ message: 'Development owner not set; cannot process sales payment' });
+      }
+      const isOwnerAgent = String(devOwnerUserId) === String(agId);
+      const isCollabAgent = Array.isArray((dev as any).collaborators) && (dev as any).collaborators.map(String).includes(String(agId));
+      if (!isOwnerAgent && !isCollabAgent) {
+        return res.status(400).json({ message: 'Agent must be development owner or collaborator to process sale for this development' });
+      }
       devAddressForManual = [dev.name, (dev as any).address].filter(Boolean).join(' - ');
       if (unitId) {
         const unit = await (await import('../models/DevelopmentUnit')).DevelopmentUnit.findOne({ _id: unitId, developmentId: devId }).lean();
@@ -746,6 +756,53 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     }
 
+    // If development and agent are provided, and the agent is a collaborator on that development,
+    // split the agentShare between development owner (creator) and the collaborator using development's split config.
+    // If the agent is the owner, 100% of agentShare goes to owner by default.
+    let ownerAgentIncrement = 0;
+    let collaboratorAgentIncrement = 0;
+    if (devId && agId) {
+      const dev = await (await import('../models/Development')).Development.findOne({ _id: devId, companyId: new mongoose.Types.ObjectId(user.companyId) }).lean();
+      if (dev) {
+        const devOwnerUserId = (dev as any).createdBy ? new mongoose.Types.ObjectId((dev as any).createdBy) : undefined;
+        const isOwnerAgent = devOwnerUserId && (String(devOwnerUserId) === String(agId));
+        const isCollaborator = Array.isArray((dev as any).collaborators) && (dev as any).collaborators.map(String).includes(String(agId));
+        if (isOwnerAgent) {
+          // Entire agentShare to owner
+          const agentShare = (finalCommissionDetails as any).agentShare || 0;
+          (finalCommissionDetails as any).agentSplit = {
+            ownerAgentShare: agentShare,
+            collaboratorAgentShare: 0,
+            ownerUserId: devOwnerUserId!,
+            collaboratorUserId: undefined,
+            splitPercentOwner: 100,
+            splitPercentCollaborator: 0
+          };
+          ownerAgentIncrement = agentShare;
+          collaboratorAgentIncrement = 0;
+        } else if (isCollaborator && devOwnerUserId) {
+          const agentShare = (finalCommissionDetails as any).agentShare || 0;
+          const ownerPct = Math.max(0, Math.min(100, Number((dev as any).collabOwnerAgentPercent ?? 50)));
+          const collabPct = Math.max(0, Math.min(100, Number((dev as any).collabCollaboratorAgentPercent ?? (100 - ownerPct))));
+          const ownerShare = agentShare * (ownerPct / 100);
+          const collaboratorShare = agentShare * (collabPct / 100);
+          // Record split details
+          (finalCommissionDetails as any).agentSplit = {
+            ownerAgentShare: ownerShare,
+            collaboratorAgentShare: collaboratorShare,
+            ownerUserId: devOwnerUserId,
+            collaboratorUserId: agId,
+            splitPercentOwner: ownerPct,
+            splitPercentCollaborator: collabPct
+          };
+          ownerAgentIncrement = ownerShare;
+          collaboratorAgentIncrement = collaboratorShare;
+          // Ensure agentShare stays the same total (owner+collaborator)
+          (finalCommissionDetails as any).agentShare = ownerShare + collaboratorShare;
+        }
+      }
+    }
+
     const manualProperty = !propId && manualPropertyAddress;
     const manualTenant = !tenId && manualTenantName;
 
@@ -789,7 +846,16 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
     // Post company and agent shares
     try {
       await Company.findByIdAndUpdate(new mongoose.Types.ObjectId(user.companyId), { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } });
-      await User.findByIdAndUpdate(agId, { $inc: { commission: (finalCommissionDetails as any).agentShare || 0 } });
+      // If split is present, credit both the development owner and the collaborator accordingly
+      if ((finalCommissionDetails as any).agentSplit && ownerAgentIncrement > 0) {
+        const split = (finalCommissionDetails as any).agentSplit;
+        if (split.ownerUserId) {
+          await User.findByIdAndUpdate(new mongoose.Types.ObjectId(split.ownerUserId), { $inc: { commission: ownerAgentIncrement } });
+        }
+        await User.findByIdAndUpdate(agId, { $inc: { commission: collaboratorAgentIncrement } });
+      } else {
+        await User.findByIdAndUpdate(agId, { $inc: { commission: (finalCommissionDetails as any).agentShare || 0 } });
+      }
     } catch (e) {
       console.warn('Non-fatal: commission posting failed', e);
     }

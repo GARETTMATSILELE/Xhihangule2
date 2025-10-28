@@ -332,41 +332,74 @@ class AgentAccountService {
      */
     syncCommissionTransactions(agentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
+            var _a, _b;
             try {
                 console.log('Syncing commission transactions for agent:', agentId);
                 // Determine agent role to filter payment types
                 const agentUser = yield User_1.User.findById(agentId).select('role');
                 const paymentTypeFilter = ((agentUser === null || agentUser === void 0 ? void 0 : agentUser.role) === 'sales') ? 'sale' : 'rental';
-                // Get all completed payments for this agent
+                // Get all completed payments where this agent is either:
+                // - the recorded agentId on the payment, or
+                // - the owner or collaborator in a sales split
+                const agentObjId = new mongoose_1.default.Types.ObjectId(agentId);
                 const payments = yield Payment_1.Payment.find({
-                    agentId: new mongoose_1.default.Types.ObjectId(agentId),
                     status: 'completed',
-                    paymentType: paymentTypeFilter
+                    paymentType: paymentTypeFilter,
+                    $or: [
+                        { agentId: agentObjId },
+                        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                    ]
                 }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
                 const account = yield this.getOrCreateAgentAccount(agentId);
                 let newTransactionsAdded = 0;
                 for (const payment of payments) {
-                    if (((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) && payment.commissionDetails.agentShare > 0) {
+                    // Determine the applicable commission amount for this agent
+                    const split = (_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentSplit;
+                    let applicableAmount = 0;
+                    let roleLabel = 'agent';
+                    if (split && payment.paymentType === 'sale') {
+                        const ownerId = (split === null || split === void 0 ? void 0 : split.ownerUserId) ? String(split.ownerUserId) : undefined;
+                        const collabId = (split === null || split === void 0 ? void 0 : split.collaboratorUserId) ? String(split.collaboratorUserId) : undefined;
+                        if (ownerId === agentId) {
+                            applicableAmount = Number((split === null || split === void 0 ? void 0 : split.ownerAgentShare) || 0);
+                            roleLabel = 'owner';
+                        }
+                        else if (collabId === agentId) {
+                            applicableAmount = Number((split === null || split === void 0 ? void 0 : split.collaboratorAgentShare) || 0);
+                            roleLabel = 'collaborator';
+                        }
+                        else {
+                            applicableAmount = 0;
+                        }
+                    }
+                    else {
+                        applicableAmount = Number(((_b = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.agentShare) || 0);
+                        roleLabel = 'agent';
+                    }
+                    if (applicableAmount && applicableAmount > 0) {
+                        // Use a role-qualified reference to avoid duplicates for same payment across owner/collaborator
+                        const baseRef = String(payment.referenceNumber || '');
+                        const uniqueRef = split ? `${baseRef}-${roleLabel}` : baseRef;
                         // Check if this commission transaction already exists
                         const existingTransaction = account.transactions.find(t => t.type === 'commission' &&
-                            t.reference === payment.referenceNumber);
+                            t.reference === uniqueRef);
                         if (!existingTransaction) {
                             // Add commission transaction
                             const transaction = {
                                 type: 'commission',
-                                amount: payment.commissionDetails.agentShare,
+                                amount: applicableAmount,
                                 date: payment.paymentDate,
-                                description: `Commission from payment ${payment.referenceNumber}`,
-                                reference: payment.referenceNumber,
+                                description: `Commission (${roleLabel}) from payment ${baseRef}`,
+                                reference: uniqueRef,
                                 status: 'completed',
                                 notes: `Property: ${payment.propertyId}, Tenant: ${payment.tenantId}`
                             };
                             account.transactions.push(transaction);
-                            account.totalCommissions += payment.commissionDetails.agentShare;
+                            account.totalCommissions += applicableAmount;
                             account.lastCommissionDate = payment.paymentDate;
                             newTransactionsAdded++;
-                            console.log(`Added commission transaction: ${payment.commissionDetails.agentShare} for payment ${payment.referenceNumber}`);
+                            console.log(`Added commission transaction (${roleLabel}): ${applicableAmount} for payment ${baseRef}`);
                         }
                     }
                 }

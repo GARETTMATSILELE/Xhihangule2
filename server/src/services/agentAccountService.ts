@@ -397,42 +397,73 @@ export class AgentAccountService {
       const agentUser = await User.findById(agentId).select('role');
       const paymentTypeFilter = (agentUser?.role === 'sales') ? 'sale' : 'rental';
 
-      // Get all completed payments for this agent
+      // Get all completed payments where this agent is either:
+      // - the recorded agentId on the payment, or
+      // - the owner or collaborator in a sales split
+      const agentObjId = new mongoose.Types.ObjectId(agentId);
       const payments = await Payment.find({
-        agentId: new mongoose.Types.ObjectId(agentId),
         status: 'completed',
-        paymentType: paymentTypeFilter
+        paymentType: paymentTypeFilter,
+        $or: [
+          { agentId: agentObjId },
+          { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+          { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+        ]
       }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
 
       const account = await this.getOrCreateAgentAccount(agentId);
       let newTransactionsAdded = 0;
 
       for (const payment of payments) {
-        if (payment.commissionDetails?.agentShare && payment.commissionDetails.agentShare > 0) {
+        // Determine the applicable commission amount for this agent
+        const split = (payment as any)?.commissionDetails?.agentSplit;
+        let applicableAmount = 0;
+        let roleLabel: 'owner' | 'collaborator' | 'agent' = 'agent';
+        if (split && payment.paymentType === 'sale') {
+          const ownerId = split?.ownerUserId ? String(split.ownerUserId) : undefined;
+          const collabId = split?.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
+          if (ownerId === agentId) {
+            applicableAmount = Number(split?.ownerAgentShare || 0);
+            roleLabel = 'owner';
+          } else if (collabId === agentId) {
+            applicableAmount = Number(split?.collaboratorAgentShare || 0);
+            roleLabel = 'collaborator';
+          } else {
+            applicableAmount = 0;
+          }
+        } else {
+          applicableAmount = Number((payment as any)?.commissionDetails?.agentShare || 0);
+          roleLabel = 'agent';
+        }
+
+        if (applicableAmount && applicableAmount > 0) {
+          // Use a role-qualified reference to avoid duplicates for same payment across owner/collaborator
+          const baseRef = String((payment as any).referenceNumber || '');
+          const uniqueRef = split ? `${baseRef}-${roleLabel}` : baseRef;
           // Check if this commission transaction already exists
           const existingTransaction = account.transactions.find(t => 
             t.type === 'commission' && 
-            t.reference === payment.referenceNumber
+            t.reference === uniqueRef
           );
           
           if (!existingTransaction) {
             // Add commission transaction
             const transaction: Transaction = {
               type: 'commission',
-              amount: payment.commissionDetails.agentShare,
-              date: payment.paymentDate,
-              description: `Commission from payment ${payment.referenceNumber}`,
-              reference: payment.referenceNumber,
+              amount: applicableAmount,
+              date: (payment as any).paymentDate,
+              description: `Commission (${roleLabel}) from payment ${baseRef}`,
+              reference: uniqueRef,
               status: 'completed',
-              notes: `Property: ${payment.propertyId}, Tenant: ${payment.tenantId}`
+              notes: `Property: ${(payment as any).propertyId}, Tenant: ${(payment as any).tenantId}`
             };
 
             account.transactions.push(transaction);
-            account.totalCommissions += payment.commissionDetails.agentShare;
-            account.lastCommissionDate = payment.paymentDate;
+            account.totalCommissions += applicableAmount;
+            account.lastCommissionDate = (payment as any).paymentDate;
             newTransactionsAdded++;
             
-            console.log(`Added commission transaction: ${payment.commissionDetails.agentShare} for payment ${payment.referenceNumber}`);
+            console.log(`Added commission transaction (${roleLabel}): ${applicableAmount} for payment ${baseRef}`);
           }
         }
       }

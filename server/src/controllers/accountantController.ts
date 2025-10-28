@@ -723,3 +723,79 @@ export const createPropertyDepositPayout = async (req: Request, res: Response) =
     res.status(500).json({ success: false, message: 'Failed to create deposit payout' });
   }
 };
+
+// Deposits: Company-wide trust accounts summary (per property) with payouts
+export const getCompanyDepositSummaries = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const companyObjectId = new mongoose.Types.ObjectId(companyId as string);
+
+    // Aggregate totals per property by type (payment vs payout)
+    const totals = await RentalDeposit.aggregate([
+      { $match: { companyId: companyObjectId } },
+      {
+        $group: {
+          _id: { propertyId: '$propertyId', type: '$type' },
+          total: { $sum: '$depositAmount' }
+        }
+      }
+    ]);
+
+    const perProperty: Record<string, { propertyId: string; totalPaid: number; totalPayout: number }> = {};
+    for (const row of totals) {
+      const propId = String(row._id.propertyId);
+      if (!perProperty[propId]) {
+        perProperty[propId] = { propertyId: propId, totalPaid: 0, totalPayout: 0 };
+      }
+      if (row._id.type === 'payment') perProperty[propId].totalPaid += Number(row.total || 0);
+      if (row._id.type === 'payout') perProperty[propId].totalPayout += Number(row.total || 0);
+    }
+
+    const propertyIds = Object.keys(perProperty).map((id) => new mongoose.Types.ObjectId(id));
+    const properties = await Property.find({ _id: { $in: propertyIds } }, 'name address').lean();
+    const propertyInfo = new Map<string, { name?: string; address?: string }>();
+    properties.forEach((p: any) => propertyInfo.set(String(p._id), { name: p.name, address: p.address }));
+
+    // Fetch payouts list per property (latest first)
+    const payouts = await RentalDeposit.find({ companyId: companyObjectId, type: 'payout' })
+      .sort({ depositDate: -1 })
+      .lean();
+    const payoutMap = new Map<string, Array<{ amount: number; depositDate: Date; recipientName?: string; referenceNumber?: string; notes?: string }>>();
+    payouts.forEach((p: any) => {
+      const key = String(p.propertyId);
+      const list = payoutMap.get(key) || [];
+      list.push({
+        amount: Number(p.depositAmount || 0),
+        depositDate: p.depositDate,
+        recipientName: p.recipientName,
+        referenceNumber: p.referenceNumber,
+        notes: p.notes
+      });
+      payoutMap.set(key, list);
+    });
+
+    const result = Object.values(perProperty).map((pp) => {
+      const info = propertyInfo.get(pp.propertyId) || {};
+      const held = (pp.totalPaid || 0) - (pp.totalPayout || 0);
+      const propPayouts = (payoutMap.get(pp.propertyId) || []).slice(0, 5); // last 5 payouts
+      return {
+        propertyId: pp.propertyId,
+        propertyName: info.name || 'Unknown Property',
+        propertyAddress: info.address || '',
+        totalPaid: pp.totalPaid || 0,
+        totalPayout: pp.totalPayout || 0,
+        held,
+        payouts: propPayouts
+      };
+    }).sort((a, b) => b.held - a.held);
+
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Error getting company deposit summaries:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get trust accounts summary' });
+  }
+};

@@ -23,6 +23,7 @@ const salesContractController_1 = require("../controllers/salesContractControlle
 const Payment_1 = require("../models/Payment");
 const mongoose_1 = __importDefault(require("mongoose"));
 const agentAccountController_1 = require("../controllers/agentAccountController");
+const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const router = express_1.default.Router();
 // Debug middleware
 router.use((req, res, next) => {
@@ -56,6 +57,8 @@ router.get('/prea-commission', roles_1.canViewCommissions, (req, res) => {
 router.get('/property-accounts/:propertyId/deposits', roles_1.canViewCommissions, accountantController_1.getPropertyDepositLedger);
 router.get('/property-accounts/:propertyId/deposits/summary', roles_1.canViewCommissions, accountantController_1.getPropertyDepositSummary);
 router.post('/property-accounts/:propertyId/deposits/payout', roles_1.canViewCommissions, accountantController_1.createPropertyDepositPayout);
+// Company trust accounts summary
+router.get('/trust-accounts/deposits', roles_1.canViewCommissions, accountantController_1.getCompanyDepositSummaries);
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', roles_1.canManagePayments, paymentController_1.getCompanyPayments);
 // Sales-specific payment endpoints
@@ -152,4 +155,31 @@ router.put('/agent-accounts/:agentId/payout/:payoutId/status', roles_1.isAccount
 router.post('/agent-accounts/sync', roles_1.isAccountant, agentAccountController_1.syncAgentAccounts);
 router.post('/agent-accounts/:agentId/sync-commissions', roles_1.isAccountant, agentAccountController_1.syncAgentCommissions);
 router.get('/agent-accounts/:agentId/payout/:payoutId/acknowledgement', roles_1.isAccountant, agentAccountController_1.getAcknowledgementDocument);
+// Agent self-access summary (limited) - authenticated any role
+router.get('/agents/me/account', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId))
+            return res.status(401).json({ message: 'Unauthorized' });
+        const service = agentAccountService_1.default;
+        const account = yield service.getAgentAccount(req.user.userId);
+        // Return limited summary only
+        const payload = {
+            agentId: account.agentId,
+            agentName: account.agentName,
+            runningBalance: account.runningBalance,
+            totalCommissions: account.totalCommissions,
+            totalPayouts: account.totalPayouts,
+            totalPenalties: account.totalPenalties,
+            lastCommissionDate: account.lastCommissionDate,
+            lastPayoutDate: account.lastPayoutDate,
+            lastPenaltyDate: account.lastPenaltyDate
+        };
+        return res.json({ status: 'success', data: payload });
+    }
+    catch (e) {
+        console.error('Error fetching agent self account:', e);
+        return res.status(500).json({ message: 'Failed to fetch agent account' });
+    }
+}));
 exports.default = router;

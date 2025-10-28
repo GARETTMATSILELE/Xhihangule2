@@ -30,6 +30,15 @@ export interface IPayment extends Document {
     agentShare: number;
     agencyShare: number;
     ownerAmount: number;
+    // Optional breakdown when a collaborator sells in a development
+    agentSplit?: {
+      ownerAgentShare: number; // portion of agentShare to development owner
+      collaboratorAgentShare: number; // portion of agentShare to collaborator
+      ownerUserId?: mongoose.Types.ObjectId;
+      collaboratorUserId?: mongoose.Types.ObjectId;
+      splitPercentOwner?: number; // percent applied to agentShare for owner
+      splitPercentCollaborator?: number; // percent applied to agentShare for collaborator
+    };
   };
   status: 'pending' | 'completed' | 'failed' | 'reversed' | 'refunded';
   currency: 'USD' | 'ZWL';
@@ -186,6 +195,14 @@ const PaymentSchema: Schema = new Schema({
       type: Number,
       required: true,
     },
+    agentSplit: {
+      ownerAgentShare: { type: Number, required: false, default: 0 },
+      collaboratorAgentShare: { type: Number, required: false, default: 0 },
+      ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+      collaboratorUserId: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+      splitPercentOwner: { type: Number, required: false, min: 0, max: 100 },
+      splitPercentCollaborator: { type: Number, required: false, min: 0, max: 100 },
+    }
   },
   status: {
     type: String,

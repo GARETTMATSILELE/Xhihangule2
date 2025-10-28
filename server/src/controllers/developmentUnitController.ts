@@ -102,7 +102,7 @@ export const updateUnitStatus = async (req: Request, res: Response) => {
 export const listUnits = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
-    const { developmentId, status, variationId, page = '1', limit = '50' } = req.query as any;
+    const { developmentId, status, variationId, page = '1', limit = '50', requireBuyer } = req.query as any;
     if (!developmentId) throw new AppError('developmentId is required', 400);
 
     // Ensure development belongs to company
@@ -115,6 +115,15 @@ export const listUnits = async (req: Request, res: Response) => {
     const query: any = { developmentId: new mongoose.Types.ObjectId(developmentId) };
     if (status) query.status = String(status);
     if (variationId) query.variationId = String(variationId);
+    // Optionally require a buyer and sold status
+    const mustRequireBuyer = String(requireBuyer || '').toLowerCase() === 'true';
+    if (mustRequireBuyer) {
+      query.status = 'sold';
+      query.$or = [
+        { buyerName: { $exists: true, $type: 'string', $ne: '' } },
+        { buyerId: { $exists: true } }
+      ];
+    }
 
     const [items, total] = await Promise.all([
       DevelopmentUnit.find(query)
