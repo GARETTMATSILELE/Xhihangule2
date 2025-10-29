@@ -374,23 +374,42 @@ class AgentAccountService {
                         }
                     }
                     else {
+                        // Rentals and introductions: a single agent commission applies
                         applicableAmount = Number(((_b = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.agentShare) || 0);
                         roleLabel = 'agent';
                     }
                     if (applicableAmount && applicableAmount > 0) {
-                        // Use a role-qualified reference to avoid duplicates for same payment across owner/collaborator
+                        // Use a role-qualified reference ONLY for sales splits to distinguish entries
                         const baseRef = String(payment.referenceNumber || '');
-                        const uniqueRef = split ? `${baseRef}-${roleLabel}` : baseRef;
-                        // Check if this commission transaction already exists
-                        const existingTransaction = account.transactions.find(t => t.type === 'commission' &&
-                            t.reference === uniqueRef);
+                        const isSalesSplit = !!split && payment.paymentType === 'sale';
+                        const uniqueRef = isSalesSplit ? `${baseRef}-${roleLabel}` : baseRef;
+                        // Check if this commission transaction already exists.
+                        // Older rental transactions may have missing reference or a description without role tag,
+                        // so we perform a broader match for non-sales payments to avoid duplicates.
+                        const existingTransaction = account.transactions.find(t => {
+                            if (t.type !== 'commission')
+                                return false;
+                            if (t.reference === uniqueRef)
+                                return true;
+                            if (!isSalesSplit) {
+                                if (t.reference === baseRef)
+                                    return true;
+                                if (typeof t.description === 'string' && baseRef && t.description.includes(baseRef))
+                                    return true;
+                            }
+                            return false;
+                        });
                         if (!existingTransaction) {
                             // Add commission transaction
+                            // For rentals/introductions: keep legacy description to prevent duplicates.
+                            const description = isSalesSplit
+                                ? `Commission (${roleLabel}) from payment ${baseRef}`
+                                : `Commission from payment ${baseRef}`;
                             const transaction = {
                                 type: 'commission',
                                 amount: applicableAmount,
                                 date: payment.paymentDate,
-                                description: `Commission (${roleLabel}) from payment ${baseRef}`,
+                                description,
                                 reference: uniqueRef,
                                 status: 'completed',
                                 notes: `Property: ${payment.propertyId}, Tenant: ${payment.tenantId}`
@@ -399,7 +418,7 @@ class AgentAccountService {
                             account.totalCommissions += applicableAmount;
                             account.lastCommissionDate = payment.paymentDate;
                             newTransactionsAdded++;
-                            console.log(`Added commission transaction (${roleLabel}): ${applicableAmount} for payment ${baseRef}`);
+                            console.log(`Added commission transaction (${isSalesSplit ? roleLabel : 'agent'}): ${applicableAmount} for payment ${baseRef}`);
                         }
                     }
                 }

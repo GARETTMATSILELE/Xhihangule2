@@ -213,6 +213,7 @@ const AdminDashboard: React.FC = () => {
   const [levyPayments, setLevyPayments] = useState<any[]>([]);
   const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
   const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
+  const [propertyListFilter, setPropertyListFilter] = useState<null | 'total' | 'vacant' | 'tenanted' | 'maintenance'>(null);
 
   // Update active tab based on current route
   useEffect(() => {
@@ -561,7 +562,9 @@ const AdminDashboard: React.FC = () => {
               icon={<BusinessIcon />}
               color="#1976d2"
               theme={theme}
-              onClick={() => handleNavigation('/admin/properties')}
+              onClick={() => {
+                setPropertyListFilter('total');
+              }}
             />
           </Grid>
           <Grid item xs={12} md={6} lg={3}>
@@ -571,7 +574,9 @@ const AdminDashboard: React.FC = () => {
               icon={<BusinessIcon />}
               color="#dc004e"
               theme={theme}
-              onClick={() => handleNavigation('/admin/properties')}
+              onClick={() => {
+                setPropertyListFilter('vacant');
+              }}
             />
           </Grid>
           <Grid item xs={12} md={6} lg={3}>
@@ -581,7 +586,9 @@ const AdminDashboard: React.FC = () => {
               icon={<PeopleIcon />}
               color="#4caf50"
               theme={theme}
-              onClick={() => handleNavigation('/admin/tenants')}
+              onClick={() => {
+                setPropertyListFilter('tenanted');
+              }}
             />
           </Grid>
           <Grid item xs={12} md={6} lg={3}>
@@ -591,7 +598,9 @@ const AdminDashboard: React.FC = () => {
               icon={<WarningIcon />}
               color="#ff9800"
               theme={theme}
-              onClick={() => handleNavigation('/admin/maintenance')}
+              onClick={() => {
+                setPropertyListFilter('maintenance');
+              }}
             />
           </Grid>
         </Grid>
@@ -619,6 +628,61 @@ const AdminDashboard: React.FC = () => {
             />
           </Grid>
         </Grid>
+
+        {/* Click-through lists for property cards */}
+        {propertyListFilter && (
+          <Box sx={{ mt: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Typography variant="h6">
+                {propertyListFilter === 'total' && 'All Properties'}
+                {propertyListFilter === 'vacant' && 'Vacant Properties'}
+                {propertyListFilter === 'tenanted' && 'Tenanted Properties'}
+                {propertyListFilter === 'maintenance' && 'Maintenance Properties'}
+              </Typography>
+              <Button size="small" onClick={() => setPropertyListFilter(null)}>Hide</Button>
+            </Box>
+            {(() => {
+              const list = (properties || []).filter((p) => {
+                if (propertyListFilter === 'total') return true;
+                if (propertyListFilter === 'vacant') return p.status === 'available';
+                if (propertyListFilter === 'tenanted') return p.status === 'rented';
+                if (propertyListFilter === 'maintenance') return p.status === 'maintenance';
+                return false;
+              });
+              if (!list.length) {
+                return (
+                  <Typography color="textSecondary">No properties found for this category.</Typography>
+                );
+              }
+              return (
+                <Grid container spacing={2}>
+                  {list.map((p: any) => (
+                    <Grid item xs={12} key={String(p._id || p.id)}>
+                      <Card>
+                        <CardContent>
+                          <Grid container alignItems="center" justifyContent="space-between" spacing={2}>
+                            <Grid item xs={12} md={8}>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{p.name || 'Unnamed Property'}</Typography>
+                              <Typography color="textSecondary">{p.address || ''}</Typography>
+                            </Grid>
+                            <Grid item xs={12} md={4}>
+                              <Box sx={{ display: 'flex', gap: 1, justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
+                                <Chip label={p.status || 'unknown'} size="small" color={p.status === 'rented' ? 'success' : p.status === 'available' ? 'default' : p.status === 'maintenance' ? 'warning' : 'default'} />
+                                {typeof p.rent === 'number' && p.rent > 0 && (
+                                  <Chip label={`$${Number(p.rent).toLocaleString()}/mo`} size="small" />
+                                )}
+                              </Box>
+                            </Grid>
+                          </Grid>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              );
+            })()}
+          </Box>
+        )}
 
         <Grid container spacing={3} sx={{ mt: 2 }}>
           <Grid item xs={12} md={6}>
@@ -696,6 +760,9 @@ const AdminDashboard: React.FC = () => {
                   const currentMonth = now.getMonth() + 1;
                   const currentYear = now.getFullYear();
                   const ymKey = (y: number, m: number) => `${y}-${m}`;
+                  const cutY = (company as any)?.receivablesCutover?.year;
+                  const cutM = (company as any)?.receivablesCutover?.month;
+                  const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
                   const paidByProperty: Record<string, Set<string>> = {};
                   const pushPaid = (propId: string, y: number, m: number) => {
                     const key = ymKey(y, m);
@@ -750,7 +817,10 @@ const AdminDashboard: React.FC = () => {
                         if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
                         const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
                         const labels: string[] = [];
-                        iterateMonths(new Date(start.getFullYear(), start.getMonth(), 1), new Date(normEnd.getFullYear(), normEnd.getMonth(), 1), (y, m, label) => {
+                        let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                        if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
+                        const ne = new Date(normEnd.getFullYear(), normEnd.getMonth(), 1);
+                        iterateMonths(ns, ne, (y, m, label) => {
                           if (!paidKeys.has(ymKey(y, m))) labels.push(label);
                         });
                         if (labels.length > 0) {
@@ -820,6 +890,9 @@ const AdminDashboard: React.FC = () => {
                   const currentMonth = now.getMonth() + 1;
                   const currentYear = now.getFullYear();
                   const ymKey = (y: number, m: number) => `${y}-${m}`;
+                  const cutY = (company as any)?.receivablesCutover?.year;
+                  const cutM = (company as any)?.receivablesCutover?.month;
+                  const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
                   const paidByProperty: Record<string, Set<string>> = {};
                   const pushPaid = (propId: string, y: number, m: number) => {
                     const key = ymKey(y, m);
@@ -872,7 +945,8 @@ const AdminDashboard: React.FC = () => {
                         const start = l?.startDate ? new Date(l.startDate) : null;
                         const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
                         if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-                        const ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                        let ns = new Date(start.getFullYear(), start.getMonth(), 1);
+                        if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
                         const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
                         const labels: string[] = [];
                         iterateMonths(ns, ne, (y, m, label) => {
