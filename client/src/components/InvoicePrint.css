@@ -15,7 +15,9 @@
   .invoice-page {
     width: 190mm; /* Fit within A4 printable area */
     margin: 0 auto;
-    page-break-after: always;
+    /* Avoid forcing an extra trailing blank page */
+    page-break-after: auto;
+    page-break-inside: auto;
   }
   
   /* Set paper size and margins */
@@ -55,9 +57,15 @@
   .invoice-content.no-gap-below {
     margin-bottom: 6px !important; /* tighter gap under items block */
   }
-  /* Keep items and tax breakdown together */
+  /* Allow items table to break across pages to avoid large gaps */
   .line-items-block {
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  /* Keep bank details with totals and prevent orphan blank page */
+  .bank-details {
     page-break-inside: avoid;
+    margin-top: 8px;
   }
   /* Ensure QR box prints at exact size */
   .fiscal-qr-box {
@@ -80,6 +88,12 @@
     text-align: right;
     word-break: break-word;
     overflow-wrap: anywhere;
+  }
+  /* Keep client details split into two columns on print (left: name/address, right: tax IDs) */
+  .client-section .MuiGrid-container {
+    display: grid !important;
+    grid-template-columns: 1fr 60mm;
+    column-gap: 8px;
   }
   .company-info {
     min-width: 0; /* allow shrinking instead of pushing right column */

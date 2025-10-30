@@ -74,6 +74,7 @@ const paymentRequestRoutes_1 = __importDefault(require("./routes/paymentRequestR
 const invoiceRoutes_1 = __importDefault(require("./routes/invoiceRoutes"));
 const syncRoutes_1 = __importDefault(require("./routes/syncRoutes"));
 const subscriptionRoutes_1 = __importDefault(require("./routes/subscriptionRoutes"));
+const fiscalRoutes_1 = __importDefault(require("./routes/fiscalRoutes"));
 const dealRoutes_1 = __importDefault(require("./routes/dealRoutes"));
 const buyerRoutes_1 = __importDefault(require("./routes/buyerRoutes"));
 const leadRoutes_1 = __importDefault(require("./routes/leadRoutes"));
@@ -169,6 +170,7 @@ app.use('/api/invoices', invoiceRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
 app.use('/api/billing', billingRoutes_1.default);
 app.use('/api/subscription', subscriptionRoutes_1.default);
+app.use('/api/fiscal', fiscalRoutes_1.default);
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express_1.default.Router();
 sessionRouter.use('/properties', propertyRoutes_1.default);
@@ -200,6 +202,7 @@ sessionRouter.use('/municipal-payments', municipalPaymentRoutes_1.default);
 sessionRouter.use('/payment-requests', paymentRequestRoutes_1.default);
 sessionRouter.use('/invoices', invoiceRoutes_1.default);
 sessionRouter.use('/sync', syncRoutes_1.default);
+sessionRouter.use('/fiscal', fiscalRoutes_1.default);
 app.use('/api/s/:sessionId', sessionRouter);
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {

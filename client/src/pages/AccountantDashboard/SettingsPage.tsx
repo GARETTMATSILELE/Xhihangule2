@@ -135,6 +135,22 @@ const SettingsPage: React.FC = () => {
     importFormat: 'CSV'
   });
 
+  const [fiscalHealth, setFiscalHealth] = useState<any>(null);
+  const [checkingFiscal, setCheckingFiscal] = useState<boolean>(false);
+
+  const checkFiscalConnection = useCallback(async () => {
+    if (!company?._id) return;
+    try {
+      setCheckingFiscal(true);
+      const res = await apiService.getFiscalHealth(company._id);
+      setFiscalHealth(res.data);
+    } catch (e: any) {
+      setFiscalHealth({ status: 'error', message: e?.response?.data?.message || e?.message || 'Failed to check' });
+    } finally {
+      setCheckingFiscal(false);
+    }
+  }, [company?._id]);
+
   // Debounced nested updates to reduce INP and rerenders
   const pendingPatchRef = useRef<any>({});
   const debounceTimerRef = useRef<any>(null);
@@ -201,9 +217,9 @@ const SettingsPage: React.FC = () => {
         preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
         agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
         agencyPercentOfRemaining: company.commissionConfig?.agencyPercentOfRemaining ?? 0.4,
-        // Receivables cutover and opening balances
-        receivablesCutoverYear: (company as any)?.receivablesCutover?.year || new Date().getFullYear(),
-        receivablesCutoverMonth: (company as any)?.receivablesCutover?.month || (new Date().getMonth() + 1),
+        // Receivables cutover and opening balances (do not default if not set)
+        receivablesCutoverYear: (company as any)?.receivablesCutover?.year ?? undefined,
+        receivablesCutoverMonth: (company as any)?.receivablesCutover?.month ?? undefined,
         rentReceivableOpeningBalance: Number((company as any)?.rentReceivableOpeningBalance || 0),
         levyReceivableOpeningBalance: Number((company as any)?.levyReceivableOpeningBalance || 0),
       }));
@@ -226,6 +242,12 @@ const SettingsPage: React.FC = () => {
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
   };
+
+  useEffect(() => {
+    if (activeTab === 7 && company?._id) {
+      checkFiscalConnection();
+    }
+  }, [activeTab, company?._id, checkFiscalConnection]);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, checked, type } = event.target as HTMLInputElement & { name: string };
@@ -291,7 +313,11 @@ const SettingsPage: React.FC = () => {
       setLoading(true);
       setMessage(null);
       
-      const companyUpdateData = {
+      const cutoverYearVal = Number((settings as any).receivablesCutoverYear);
+      const cutoverMonthVal = Number((settings as any).receivablesCutoverMonth);
+      const includeCutover = Number.isFinite(cutoverYearVal) && cutoverYearVal > 0 && Number.isFinite(cutoverMonthVal) && cutoverMonthVal >= 1 && cutoverMonthVal <= 12;
+
+      const companyUpdateData: any = {
         name: settings.companyName,
         plan: (settings as any).plan,
         cycle: (settings as any).cycle,
@@ -304,13 +330,13 @@ const SettingsPage: React.FC = () => {
         website: settings.companyWebsite,
         bankAccounts: settings.bankAccounts,
         fiscalConfig: (settings as any).fiscalConfig,
-        receivablesCutover: {
-          year: Number((settings as any).receivablesCutoverYear),
-          month: Number((settings as any).receivablesCutoverMonth)
-        },
         rentReceivableOpeningBalance: Number((settings as any).rentReceivableOpeningBalance || 0),
         levyReceivableOpeningBalance: Number((settings as any).levyReceivableOpeningBalance || 0),
       };
+
+      if (includeCutover) {
+        companyUpdateData.receivablesCutover = { year: cutoverYearVal, month: cutoverMonthVal };
+      }
 
       // Update plan/cycle at subscription level and company details
       await apiService.changeSubscriptionPlan({ plan: (settings as any).plan, cycle: (settings as any).cycle });
@@ -339,7 +365,11 @@ const SettingsPage: React.FC = () => {
       
       // Save company data including bank accounts
       if (company?._id) {
-        const companyUpdateData = {
+        const cutoverYearVal2 = Number((settings as any).receivablesCutoverYear);
+        const cutoverMonthVal2 = Number((settings as any).receivablesCutoverMonth);
+        const includeCutover2 = Number.isFinite(cutoverYearVal2) && cutoverYearVal2 > 0 && Number.isFinite(cutoverMonthVal2) && cutoverMonthVal2 >= 1 && cutoverMonthVal2 <= 12;
+
+        const companyUpdateData: any = {
           name: settings.companyName,
           registrationNumber: settings.registrationNumber,
           tinNumber: settings.tinNumber,
@@ -355,13 +385,13 @@ const SettingsPage: React.FC = () => {
             agentPercentOfRemaining: Number(settings.agentPercentOfRemaining),
             agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining)
           },
-          receivablesCutover: {
-            year: Number((settings as any).receivablesCutoverYear),
-            month: Number((settings as any).receivablesCutoverMonth)
-          },
           rentReceivableOpeningBalance: Number((settings as any).rentReceivableOpeningBalance || 0),
           levyReceivableOpeningBalance: Number((settings as any).levyReceivableOpeningBalance || 0),
         };
+
+        if (includeCutover2) {
+          companyUpdateData.receivablesCutover = { year: cutoverYearVal2, month: cutoverMonthVal2 };
+        }
 
         await apiService.updateCompany(companyUpdateData);
         await refreshCompany(); // Refresh company data
@@ -695,10 +725,13 @@ const SettingsPage: React.FC = () => {
                     <InputLabel>Cutover Month</InputLabel>
                     <Select
                       name="receivablesCutoverMonth"
-                      value={(settings as any).receivablesCutoverMonth || (new Date().getMonth() + 1)}
+                      value={(settings as any).receivablesCutoverMonth ?? ''}
                       onChange={handleSelectChange}
                       label="Cutover Month"
                     >
+                      <MenuItem value="">
+                        <em>None</em>
+                      </MenuItem>
                       {[
                         'January','February','March','April','May','June','July','August','September','October','November','December'
                       ].map((m, idx) => (
@@ -713,7 +746,7 @@ const SettingsPage: React.FC = () => {
                     type="number"
                     label="Cutover Year"
                     name="receivablesCutoverYear"
-                    value={(settings as any).receivablesCutoverYear || new Date().getFullYear()}
+                    value={(settings as any).receivablesCutoverYear ?? ''}
                     onChange={handleInputChange}
                     margin="normal"
                   />
@@ -1112,6 +1145,29 @@ const SettingsPage: React.FC = () => {
                 }
                 label="Enable Fiscalization"
               />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                <Button variant="outlined" size="small" onClick={checkFiscalConnection} disabled={checkingFiscal || !company?._id}>
+                  {checkingFiscal ? 'Testing...' : 'Test Connection'}
+                </Button>
+              </Box>
+              <Box sx={{ mt: 2 }}>
+                {fiscalHealth && fiscalHealth.status !== 'error' && (
+                  <Alert severity={!((settings as any)?.fiscalConfig?.enabled) ? 'warning' : (fiscalHealth.connected ? 'success' : (fiscalHealth.reason ? 'warning' : 'error'))}>
+                    {!(settings as any)?.fiscalConfig?.enabled && 'Fiscalization is disabled.'}
+                    {(settings as any)?.fiscalConfig?.enabled && (
+                      <>
+                        {fiscalHealth.connected ? 'Connected to fiscal agent.' : 'Not connected to fiscal agent.'}
+                        {fiscalHealth.details?.fdmsBaseUrl ? ` Agent: ${fiscalHealth.details.fdmsBaseUrl}` : ''}
+                        {fiscalHealth.details?.deviceSerial ? ` Device: ${fiscalHealth.details.deviceSerial}` : ''}
+                        {fiscalHealth.details?.error ? ` (${fiscalHealth.details.error})` : ''}
+                      </>
+                    )}
+                  </Alert>
+                )}
+                {fiscalHealth && fiscalHealth.status === 'error' && (
+                  <Alert severity="error">{fiscalHealth.message || 'Failed to check fiscal health'}</Alert>
+                )}
+              </Box>
               <TextField
                 fullWidth
                 label="Provider/Integrator Name"

@@ -27,6 +27,7 @@ import paymentRequestRoutes from './routes/paymentRequestRoutes';
 import invoiceRoutes from './routes/invoiceRoutes';
 import syncRoutes from './routes/syncRoutes';
 import subscriptionRoutes from './routes/subscriptionRoutes';
+import fiscalRoutes from './routes/fiscalRoutes';
 import dealRoutes from './routes/dealRoutes';
 import buyerRoutes from './routes/buyerRoutes';
 import leadRoutes from './routes/leadRoutes';
@@ -131,6 +132,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/fiscal', fiscalRoutes);
 
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express.Router();
@@ -163,6 +165,7 @@ sessionRouter.use('/municipal-payments', municipalPaymentRoutes);
 sessionRouter.use('/payment-requests', paymentRequestRoutes);
 sessionRouter.use('/invoices', invoiceRoutes);
 sessionRouter.use('/sync', syncRoutes);
+sessionRouter.use('/fiscal', fiscalRoutes);
 
 app.use('/api/s/:sessionId', sessionRouter);
 

@@ -137,23 +137,35 @@ const DashboardOverview: React.FC = () => {
     try {
       setDeferredLoading(true);
       try {
-        const props = await propertyService.getPublicProperties();
+        // Prefer authenticated endpoints for accuracy and company scoping
+        const props = await propertyService.getProperties();
         setProperties(Array.isArray(props) ? props : []);
       } catch {
-        setProperties([]);
+        // Fallback to public list if auth call fails
+        try {
+          const ppub = await propertyService.getPublicProperties();
+          setProperties(Array.isArray(ppub) ? ppub : []);
+        } catch { setProperties([]); }
       }
       try {
-        const tpub = await tenantService.getAllPublic();
-        const tlist = Array.isArray(tpub?.tenants) ? tpub.tenants : [];
+        const tall = await tenantService.getAll();
+        const tlist = Array.isArray(tall?.tenants) ? tall.tenants : [];
         setTenants(tlist);
       } catch {
-        setTenants([]);
+        try {
+          const tpub = await tenantService.getAllPublic();
+          const tlist = Array.isArray(tpub?.tenants) ? tpub.tenants : [];
+          setTenants(tlist);
+        } catch { setTenants([]); }
       }
       try {
-        const l = await leaseService.getAllPublic();
-        setLeases(Array.isArray(l) ? l : []);
+        const lall = await leaseService.getAll();
+        setLeases(Array.isArray(lall) ? lall : []);
       } catch {
-        setLeases([]);
+        try {
+          const lpub = await leaseService.getAllPublic();
+          setLeases(Array.isArray(lpub) ? lpub : []);
+        } catch { setLeases([]); }
       }
       try {
         if (user?.companyId) {

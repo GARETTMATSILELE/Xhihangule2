@@ -352,71 +352,10 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               </Typography>
             </Box>
           </Box>
-        </div>
 
-        {/* Tax Breakdown */}
-        <div className="tax-breakdown line-items-block">
-          <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={12} md={12}>
-              <Box sx={{ 
-                border: '1px solid #e0e0e0', 
-                borderRadius: 1, 
-                p: 2,
-                bgcolor: '#fafafa'
-              }}>
-                <Typography variant="h6" gutterBottom sx={{ borderBottom: '1px solid #e0e0e0', pb: 1 }}>
-                  Tax Breakdown
-                </Typography>
-                
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Subtotal:</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    {formatCurrency(invoice.subtotal)}
-                  </Typography>
-                </Box>
-                
-                {invoice.discount > 0 && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2">Discount:</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'red' }}>
-                      -{formatCurrency(invoice.discount)}
-                    </Typography>
-                  </Box>
-                )}
-                
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Amount Excluding Tax:</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    {formatCurrency(invoice.amountExcludingTax)}
-                  </Typography>
-                </Box>
-                
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">VAT ({invoice.taxPercentage}%):</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    {formatCurrency(invoice.taxAmount)}
-                  </Typography>
-                </Box>
-                
-                <Box sx={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  mt: 2, 
-                  pt: 1, 
-                  borderTop: '2px solid #1976d2' 
-                }}>
-                  <Typography variant="h6">Total Amount:</Typography>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-                    {formatCurrency(invoice.totalAmount)}
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-          </Grid>
-
-          {/* Bank Account Details BELOW totals */}
+          {/* Bank Account Details (moved here to ensure it prints on page with totals) */}
           {invoice.selectedBankAccount && (
-            <Box sx={{ 
+            <Box className="bank-details" sx={{ 
               border: '1px solid #e0e0e0', 
               borderRadius: 1, 
               p: 2,
@@ -447,6 +386,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
             </Box>
           )}
         </div>
+        
 
         {/* Additional Details */}
         {invoice.saleDetails && invoice.type === 'sale' && (
@@ -478,9 +418,6 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               {invoice.fiscalData.signature ? `Signature: ${invoice.fiscalData.signature}` : ''}
             </Typography>
           )}
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            This is a valid tax invoice for VAT purposes
-          </Typography>
         </div>
       </div>
     </div>

@@ -30,6 +30,15 @@ export const apiService = {
   // Health check
   checkHealth,
 
+  // Fiscal
+  getFiscalHealth: (companyId?: string) => {
+    const config: any = {};
+    if (companyId) {
+      config.params = { companyId };
+    }
+    return publicApi.get('/fiscal/health', config);
+  },
+
   // Companies
   getCurrentCompany: () => apiInstance.get('/companies/current'),
   createCompany: (data: any) => apiInstance.post('/companies', data),
