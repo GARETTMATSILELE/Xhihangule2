@@ -54,7 +54,9 @@ export const useTenantService = () => {
   // Public API version for admin dashboard
   const getAllPublic = async (): Promise<{ tenants: Tenant[] }> => {
     try {
-      const response = await publicApi.get('/tenants/public');
+      const params: any = {};
+      if (user?.companyId) params.companyId = user.companyId;
+      const response = await publicApi.get('/tenants/public', { params });
       return response.data;
     } catch (error: any) {
       console.error('Error fetching tenants (public):', error);

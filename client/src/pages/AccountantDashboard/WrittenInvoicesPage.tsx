@@ -88,7 +88,8 @@ const WrittenInvoicesPage: React.FC = () => {
       name: '',
       address: '',
       tinNumber: '',
-      vatNumber: ''
+      vatNumber: '',
+      bpNumber: ''
     });
     setItems([{ description: '', taxPercentage: 15, netPrice: 0 }]);
     setDiscount(0);

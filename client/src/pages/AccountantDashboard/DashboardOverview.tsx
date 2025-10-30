@@ -80,6 +80,11 @@ const DashboardOverview: React.FC = () => {
         if (typeof v === 'string') return v;
         if (v && typeof v === 'object' && (v as any).$oid) return String((v as any).$oid);
       }
+      // Fallback: handle raw ObjectId instances (mongoose) via toString if it looks like a 24-hex string
+      try {
+        const s = typeof (id as any).toString === 'function' ? (id as any).toString() : '';
+        if (typeof s === 'string' && /^[0-9a-fA-F]{24}$/.test(s)) return s;
+      } catch {}
     }
     return '';
   }

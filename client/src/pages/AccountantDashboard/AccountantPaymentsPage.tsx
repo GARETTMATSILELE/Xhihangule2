@@ -212,9 +212,11 @@ const AccountantPaymentsPage: React.FC = () => {
       if (data.paymentType === 'levy') {
         response = await paymentService.createLevyPayment(data);
         setSuccessMessage('Levy payment created successfully');
+        try { window.dispatchEvent(new Event('payments:changed')); } catch {}
       } else if (data.paymentType === 'municipal') {
         response = await paymentService.createMunicipalPayment(data);
         setSuccessMessage('Municipal payment created successfully');
+        try { window.dispatchEvent(new Event('payments:changed')); } catch {}
       } else {
         // Use accountant endpoint that accepts PaymentFormData
         const resp = await paymentService.createPaymentAccountant(data);
@@ -223,6 +225,7 @@ const AccountantPaymentsPage: React.FC = () => {
           setPayments(prev => [...prev, created as Payment]);
         }
         setSuccessMessage('Payment created successfully');
+        try { window.dispatchEvent(new Event('payments:changed')); } catch {}
       }
       setShowForm(false);
     } catch (err: any) {

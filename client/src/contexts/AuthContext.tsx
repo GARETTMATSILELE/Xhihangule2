@@ -65,6 +65,7 @@ const clearAllTokens = () => {
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('token');
+  try { localStorage.setItem('auth:event', `logout:${Date.now()}`); } catch {}
   
   // Clear any cookies that might exist
   document.cookie.split(";").forEach(function(c) { 
@@ -253,6 +254,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [navigate, hasInitialized]);
 
+  // Cross-tab auth sync (login/logout) via storage events
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key !== 'auth:event' || !e.newValue) return;
+      const [type] = e.newValue.split(':');
+      if (type === 'logout') {
+        setUser(null);
+        setCompany(null);
+        setIsAuthenticated(false);
+        setTokens(null, null);
+        try {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('user');
+        } catch {}
+        if (window.location.pathname !== '/login') {
+          navigate('/login');
+        }
+      } else if (type === 'login') {
+        // Pick up new session without a full reload
+        api.get('/auth/me')
+          .then((resp) => {
+            const userData = resp.data.user;
+            try { localStorage.setItem('user', JSON.stringify(userData)); } catch {}
+            setUser(userData);
+            setIsAuthenticated(true);
+          })
+          .catch(() => {
+            // if it fails, direct to login
+            if (window.location.pathname !== '/login') navigate('/login');
+          });
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [navigate]);
+
   const login = async (email: string, password: string): Promise<User> => {
     try {
       setError(null);
@@ -290,6 +328,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(userData);
       setCompany(companyData);
       setIsAuthenticated(true);
+      try { localStorage.setItem('auth:event', `login:${Date.now()}`); } catch {}
       
       console.log('User state updated:', { 
         isAuthenticated: true, 
@@ -378,6 +417,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('impersonating');
       setIsImpersonating(false);
       setLoading(false);
+      try { localStorage.setItem('auth:event', `logout:${Date.now()}`); } catch {}
       navigate('/login');
     }
   };

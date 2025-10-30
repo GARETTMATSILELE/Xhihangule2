@@ -66,6 +66,67 @@ router.get('/public/agents', (req, res) => __awaiter(void 0, void 0, void 0, fun
         });
     }
 }));
+// Update current user's own profile (no company required)
+router.put('/me', auth_1.auth, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('User not authenticated', 401);
+        }
+        // Whitelist updatable fields for self-update
+        const { firstName, lastName, phone, language, timezone, notifications, twoFactorEnabled } = req.body || {};
+        const updates = {};
+        if (typeof firstName === 'string')
+            updates.firstName = firstName;
+        if (typeof lastName === 'string')
+            updates.lastName = lastName;
+        if (typeof phone === 'string')
+            updates.phone = phone;
+        if (typeof language === 'string')
+            updates.language = language;
+        if (typeof timezone === 'string')
+            updates.timezone = timezone;
+        if (typeof twoFactorEnabled === 'boolean')
+            updates.twoFactorEnabled = twoFactorEnabled;
+        if (notifications && typeof notifications === 'object')
+            updates.notifications = notifications;
+        const updated = yield User_1.User.findByIdAndUpdate(req.user.userId, { $set: updates }, { new: true }).select('-password');
+        if (!updated) {
+            throw new errorHandler_1.AppError('User not found', 404);
+        }
+        res.json({ status: 'success', data: updated });
+    }
+    catch (error) {
+        next(error);
+    }
+}));
+// Update current user's password (no company required)
+router.put('/me/password', auth_1.auth, (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('User not authenticated', 401);
+        }
+        const { currentPassword, newPassword } = req.body || {};
+        if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+            throw new errorHandler_1.AppError('Current and new passwords are required', 400);
+        }
+        const user = yield User_1.User.findById(req.user.userId);
+        if (!user) {
+            throw new errorHandler_1.AppError('User not found', 404);
+        }
+        const isMatch = yield user.comparePassword(currentPassword);
+        if (!isMatch) {
+            throw new errorHandler_1.AppError('Current password is incorrect', 400);
+        }
+        user.password = newPassword;
+        yield user.save();
+        res.json({ status: 'success' });
+    }
+    catch (error) {
+        next(error);
+    }
+}));
 // Apply auth middleware to all routes below this point
 router.use(auth_1.authWithCompany);
 // Test route to verify user routes are working

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Typography, Button, Grid, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { Print as PrintIcon } from '@mui/icons-material';
 import { useCompany } from '../contexts/CompanyContext';
@@ -48,7 +48,12 @@ interface Invoice {
     branchCode: string;
   } | null;
   fiscalData?: {
-    qrContent?: string; // payload to encode in QR
+    // Preferred: image or URL provided by fiscal machine
+    qrImage?: string; // full data URL or absolute URL
+    qrImageBase64?: string; // raw base64 image data from device
+    qrUrl?: string; // absolute URL served by device/integrator
+    // Legacy placeholder field (no longer used to generate QR):
+    qrContent?: string;
     fiscalNumber?: string;
     deviceSerial?: string;
     documentNumber?: string;
@@ -130,6 +135,14 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
   };
 
   const clientDetails = getClientDetails();
+
+  // Derive QR image source strictly from what the fiscal machine provided
+  const qrImageSrc: string | undefined =
+    (invoice.fiscalData as any)?.qrImage
+      || ((invoice.fiscalData as any)?.qrImageBase64 ? `data:image/png;base64,${(invoice.fiscalData as any).qrImageBase64}` : undefined)
+      || (invoice.fiscalData as any)?.qrUrl;
+
+  const [qrError, setQrError] = useState(false);
 
   return (
     <div className="invoice-container">
@@ -222,13 +235,14 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               {invoice.status.toUpperCase()}
             </div>
 
-            {/* Fiscal QR Code: show QR if available, else placeholder */}
+            {/* Fiscal QR Code: only show if an image/URL is provided by the fiscal device */}
             <div className="fiscal-qr">
-              {invoice.fiscalData?.qrContent ? (
+              {qrImageSrc && !qrError ? (
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(invoice.fiscalData.qrContent)}`}
+                  src={qrImageSrc}
                   alt="Fiscal QR Code"
                   className="fiscal-qr-box"
+                  onError={() => setQrError(true)}
                 />
               ) : (
                 <div className="fiscal-qr-box">

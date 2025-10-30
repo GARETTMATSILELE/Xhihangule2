@@ -19,9 +19,12 @@ export const createLevyPayment = async (req: Request, res: Response) => {
 
     // Validate required fields
     const { propertyId, paymentDate, paymentMethod, amount, currency = 'USD' } = req.body;
-    // Optional incoming period fields (allow using rentalPeriod* aliases for consistency)
+    // Optional incoming period and advance fields (allow rentalPeriod* aliases for consistency)
     const incomingMonth = Number((req.body as any).levyPeriodMonth || (req.body as any).rentalPeriodMonth);
     const incomingYear = Number((req.body as any).levyPeriodYear || (req.body as any).rentalPeriodYear);
+    const advanceMonthsPaid = Number((req.body as any).advanceMonthsPaid || 1);
+    const incomingAdvanceStart = (req.body as any).advancePeriodStart as { month?: number; year?: number } | undefined;
+    const incomingAdvanceEnd = (req.body as any).advancePeriodEnd as { month?: number; year?: number } | undefined;
     
     if (!propertyId) {
       throw new AppError('Property ID is required', 400);
@@ -60,6 +63,28 @@ export const createLevyPayment = async (req: Request, res: Response) => {
         levyPaymentData.levyPeriodYear = incomingYear;
       } else if (levyPaymentData.levyPeriodYear == null) {
         levyPaymentData.levyPeriodYear = baseDate.getFullYear();
+      }
+      // Advance coverage: if client indicates multiple months, set start/end
+      if (advanceMonthsPaid > 1) {
+        const sMonth = Number(incomingAdvanceStart?.month || levyPaymentData.levyPeriodMonth);
+        const sYear = Number(incomingAdvanceStart?.year || levyPaymentData.levyPeriodYear);
+        let eMonth: number;
+        let eYear: number;
+        try {
+          const start = new Date(sYear, sMonth - 1, 1);
+          const end = new Date(start);
+          end.setMonth(start.getMonth() + (advanceMonthsPaid - 1));
+          eMonth = end.getMonth() + 1;
+          eYear = end.getFullYear();
+        } catch {
+          eMonth = sMonth;
+          eYear = sYear;
+        }
+        levyPaymentData.advanceMonthsPaid = advanceMonthsPaid;
+        levyPaymentData.advancePeriodStart = { month: sMonth, year: sYear };
+        levyPaymentData.advancePeriodEnd = { month: Number(incomingAdvanceEnd?.month || eMonth), year: Number(incomingAdvanceEnd?.year || eYear) };
+      } else {
+        levyPaymentData.advanceMonthsPaid = 1;
       }
     } catch {}
 

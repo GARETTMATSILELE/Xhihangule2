@@ -1096,7 +1096,7 @@ const SettingsPage: React.FC = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={Boolean((company as any)?.fiscalConfig?.enabled)}
+                    checked={Boolean((settings as any)?.fiscalConfig?.enabled)}
                     onChange={(e) => {
                       const enabled = e.target.checked;
                       setSettings(prev => ({

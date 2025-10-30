@@ -123,6 +123,21 @@ const LevyPaymentSchema = new mongoose_1.Schema({
             }
         }
     },
+    // Advance fields (optional)
+    advanceMonthsPaid: {
+        type: Number,
+        required: false,
+        min: 1,
+        default: 1
+    },
+    advancePeriodStart: {
+        month: { type: Number, min: 1, max: 12 },
+        year: { type: Number }
+    },
+    advancePeriodEnd: {
+        month: { type: Number, min: 1, max: 12 },
+        year: { type: Number }
+    },
     payout: {
         paidOut: { type: Boolean, default: false },
         paidToName: { type: String },

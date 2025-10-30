@@ -19,6 +19,10 @@ export interface ILevyPayment extends Document {
   // Period fields to identify which month/year this levy covers
   levyPeriodMonth?: number; // 1-12
   levyPeriodYear?: number; // YYYY
+  // Optional advance coverage (UI may pay multiple months at once)
+  advanceMonthsPaid?: number;
+  advancePeriodStart?: { month: number; year: number };
+  advancePeriodEnd?: { month: number; year: number };
   // payout fields
   payout?: {
     paidOut: boolean;
@@ -119,6 +123,21 @@ const LevyPaymentSchema: Schema = new Schema({
         return (new Date().getFullYear());
       }
     }
+  },
+  // Advance fields (optional)
+  advanceMonthsPaid: {
+    type: Number,
+    required: false,
+    min: 1,
+    default: 1
+  },
+  advancePeriodStart: {
+    month: { type: Number, min: 1, max: 12 },
+    year: { type: Number }
+  },
+  advancePeriodEnd: {
+    month: { type: Number, min: 1, max: 12 },
+    year: { type: Number }
   },
   payout: {
     paidOut: { type: Boolean, default: false },

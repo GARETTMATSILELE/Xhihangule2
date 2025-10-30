@@ -81,7 +81,12 @@ export const usePropertyService = () => {
   // Public method for fetching all properties
   const getPublicProperties = async (): Promise<Property[]> => {
     try {
-      const response = await publicApi.get('/properties/public-filtered');
+      // Prefer company-scoped public fetch when user context is available
+      const params: any = {};
+      if (user?._id) params.userId = user._id;
+      if (user?.companyId) params.companyId = user.companyId;
+      if (user?.role) params.userRole = user.role as any;
+      const response = await publicApi.get('/properties/public-filtered', { params });
       return Array.isArray(response.data) ? response.data : response.data.data;
     } catch (error: any) {
       console.error('Error fetching properties (public):', error);

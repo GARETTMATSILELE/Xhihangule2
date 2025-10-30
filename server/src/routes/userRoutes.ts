@@ -3,7 +3,7 @@ import { createUser, getCurrentUser, updateUserById } from '../controllers/userC
 import { getUserCommissionSummary } from '../controllers/userController';
 import { User } from '../models/User';
 import { Request, Response, NextFunction } from 'express';
-import { authWithCompany, authorize } from '../middleware/auth';
+import { auth, authWithCompany, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = express.Router();
@@ -60,6 +60,75 @@ router.get('/public/agents', async (req: Request, res: Response) => {
       message: 'Error fetching agents',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
+  }
+});
+
+// Update current user's own profile (no company required)
+router.put('/me', auth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    // Whitelist updatable fields for self-update
+    const {
+      firstName,
+      lastName,
+      phone,
+      language,
+      timezone,
+      notifications,
+      twoFactorEnabled
+    } = req.body || {};
+
+    const updates: any = {};
+    if (typeof firstName === 'string') updates.firstName = firstName;
+    if (typeof lastName === 'string') updates.lastName = lastName;
+    if (typeof phone === 'string') updates.phone = phone;
+    if (typeof language === 'string') updates.language = language;
+    if (typeof timezone === 'string') updates.timezone = timezone;
+    if (typeof twoFactorEnabled === 'boolean') updates.twoFactorEnabled = twoFactorEnabled;
+    if (notifications && typeof notifications === 'object') updates.notifications = notifications;
+
+    const updated = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: updates },
+      { new: true }
+    ).select('-password');
+
+    if (!updated) {
+      throw new AppError('User not found', 404);
+    }
+
+    res.json({ status: 'success', data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update current user's password (no company required)
+router.put('/me/password', auth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('User not authenticated', 401);
+    }
+    const { currentPassword, newPassword } = req.body || {};
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+      throw new AppError('Current and new passwords are required', 400);
+    }
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      throw new AppError('Current password is incorrect', 400);
+    }
+    user.password = newPassword;
+    await user.save();
+    res.json({ status: 'success' });
+  } catch (error) {
+    next(error);
   }
 });
 

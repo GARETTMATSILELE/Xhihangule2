@@ -109,7 +109,12 @@ const AdminPropertyOwnersPage: React.FC = () => {
       });
       const mergedOwners = Array.from(map.values());
       setOwners(mergedOwners);
-      const props = await propertyService.getPublicProperties();
+      let props: any[] = [];
+      if (user?._id && user?.companyId) {
+        props = await propertyService.getPropertiesForUser(user._id, user.companyId, user.role);
+      } else {
+        props = [];
+      }
       setProperties(props);
     } catch (err: any) {
       setError(err.message || 'Failed to load property owners');

@@ -167,6 +167,7 @@ api.interceptors.response.use(
         isRefreshing = false;
         
         // Dispatch auth error event for the AuthContext to handle
+        try { localStorage.setItem('auth:event', `logout:${Date.now()}`); } catch {}
         window.dispatchEvent(new CustomEvent('authError', { 
           detail: 'Session expired. Please log in again.' 
         }));

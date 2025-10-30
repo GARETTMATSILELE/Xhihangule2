@@ -16,6 +16,7 @@ exports.createPropertyPublic = exports.getAdminDashboardProperties = exports.get
 const Property_1 = require("../models/Property");
 const SalesOwner_1 = require("../models/SalesOwner");
 const chartController_1 = require("./chartController");
+const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 // Helper function to extract user context from request
@@ -336,6 +337,13 @@ const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
             console.log('Property created successfully:', property._id);
             // Update chart metrics
             yield (0, chartController_1.updateChartMetrics)(req.user.companyId);
+            // Ensure a property account exists for this property (Individual plan and others)
+            try {
+                yield propertyAccountService_1.default.getOrCreatePropertyAccount(property._id.toString());
+            }
+            catch (acctErr) {
+                console.warn('Failed to ensure property account exists for new property:', acctErr === null || acctErr === void 0 ? void 0 : acctErr.message);
+            }
             res.status(201).json(property);
         }
         catch (saveError) {
@@ -459,6 +467,13 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }, Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId }), { new: true });
         if (!property) {
             throw new errorHandler_1.AppError('Property not found', 404);
+        }
+        // Ensure a property account exists/updated after property changes (e.g., owner link)
+        try {
+            yield propertyAccountService_1.default.getOrCreatePropertyAccount(property._id.toString());
+        }
+        catch (acctErr) {
+            console.warn('Failed to ensure property account exists after update:', acctErr === null || acctErr === void 0 ? void 0 : acctErr.message);
         }
         res.json(property);
     }
@@ -651,6 +666,13 @@ const createPropertyPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
             console.log('Property created successfully via public API:', property._id);
             // Update chart metrics
             yield (0, chartController_1.updateChartMetrics)(userContext.companyId);
+            // Ensure property account exists for this property
+            try {
+                yield propertyAccountService_1.default.getOrCreatePropertyAccount(property._id.toString());
+            }
+            catch (acctErr) {
+                console.warn('Failed to ensure property account exists for new public property:', acctErr === null || acctErr === void 0 ? void 0 : acctErr.message);
+            }
             res.status(201).json({
                 status: 'success',
                 message: 'Property created successfully',

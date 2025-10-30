@@ -30,9 +30,12 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         // Validate required fields
         const { propertyId, paymentDate, paymentMethod, amount, currency = 'USD' } = req.body;
-        // Optional incoming period fields (allow using rentalPeriod* aliases for consistency)
+        // Optional incoming period and advance fields (allow rentalPeriod* aliases for consistency)
         const incomingMonth = Number(req.body.levyPeriodMonth || req.body.rentalPeriodMonth);
         const incomingYear = Number(req.body.levyPeriodYear || req.body.rentalPeriodYear);
+        const advanceMonthsPaid = Number(req.body.advanceMonthsPaid || 1);
+        const incomingAdvanceStart = req.body.advancePeriodStart;
+        const incomingAdvanceEnd = req.body.advancePeriodEnd;
         if (!propertyId) {
             throw new errorHandler_1.AppError('Property ID is required', 400);
         }
@@ -63,8 +66,32 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             else if (levyPaymentData.levyPeriodYear == null) {
                 levyPaymentData.levyPeriodYear = baseDate.getFullYear();
             }
+            // Advance coverage: if client indicates multiple months, set start/end
+            if (advanceMonthsPaid > 1) {
+                const sMonth = Number((incomingAdvanceStart === null || incomingAdvanceStart === void 0 ? void 0 : incomingAdvanceStart.month) || levyPaymentData.levyPeriodMonth);
+                const sYear = Number((incomingAdvanceStart === null || incomingAdvanceStart === void 0 ? void 0 : incomingAdvanceStart.year) || levyPaymentData.levyPeriodYear);
+                let eMonth;
+                let eYear;
+                try {
+                    const start = new Date(sYear, sMonth - 1, 1);
+                    const end = new Date(start);
+                    end.setMonth(start.getMonth() + (advanceMonthsPaid - 1));
+                    eMonth = end.getMonth() + 1;
+                    eYear = end.getFullYear();
+                }
+                catch (_c) {
+                    eMonth = sMonth;
+                    eYear = sYear;
+                }
+                levyPaymentData.advanceMonthsPaid = advanceMonthsPaid;
+                levyPaymentData.advancePeriodStart = { month: sMonth, year: sYear };
+                levyPaymentData.advancePeriodEnd = { month: Number((incomingAdvanceEnd === null || incomingAdvanceEnd === void 0 ? void 0 : incomingAdvanceEnd.month) || eMonth), year: Number((incomingAdvanceEnd === null || incomingAdvanceEnd === void 0 ? void 0 : incomingAdvanceEnd.year) || eYear) };
+            }
+            else {
+                levyPaymentData.advanceMonthsPaid = 1;
+            }
         }
-        catch (_c) { }
+        catch (_d) { }
         const levyPayment = new LevyPayment_1.LevyPayment(levyPaymentData);
         yield levyPayment.save();
         // Populate the created levy payment for response

@@ -28,7 +28,15 @@ const PropertyAccountsPage: React.FC = () => {
         setError(null);
         // Company-scoped property accounts list
         const res = await api.get('/accountants/property-accounts');
-        const data = Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
+        let data = Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
+        // If none found, try syncing accounts from payments and retry once
+        if ((!data || data.length === 0)) {
+          try {
+            await api.post('/accountants/property-accounts/sync');
+            const retry = await api.get('/accountants/property-accounts');
+            data = Array.isArray(retry.data?.data) ? retry.data.data : Array.isArray(retry.data) ? retry.data : [];
+          } catch {}
+        }
         setRows(data);
       } catch (e: any) {
         setError(e?.response?.data?.message || e?.message || 'Failed to load property accounts');

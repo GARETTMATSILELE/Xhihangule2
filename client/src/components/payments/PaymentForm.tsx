@@ -182,9 +182,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           }
           if (!tenantList.length) {
             try {
-              const resp = await publicApi.get('/tenants/public');
-              const raw = resp.data as any;
-              tenantList = Array.isArray(raw?.tenants) ? raw.tenants : Array.isArray(raw?.data?.tenants) ? raw.data.tenants : Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
+              const resp = await tenantService.getAllPublic();
+              tenantList = Array.isArray(resp?.tenants) ? resp.tenants : [];
             } catch {}
           }
         }

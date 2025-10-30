@@ -4,6 +4,7 @@ import { SalesOwner } from '../models/SalesOwner';
 import { ChartData } from '../models/ChartData';
 import { JwtPayload } from '../types/auth';
 import { updateChartMetrics } from './chartController';
+import propertyAccountService from '../services/propertyAccountService';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 
@@ -371,6 +372,13 @@ export const createProperty = async (req: Request, res: Response) => {
       
       // Update chart metrics
       await updateChartMetrics(req.user.companyId);
+
+      // Ensure a property account exists for this property (Individual plan and others)
+      try {
+        await propertyAccountService.getOrCreatePropertyAccount(property._id.toString());
+      } catch (acctErr) {
+        console.warn('Failed to ensure property account exists for new property:', (acctErr as any)?.message);
+      }
       
       res.status(201).json(property);
     } catch (saveError: any) {
@@ -534,6 +542,13 @@ export const updateProperty = async (req: Request, res: Response) => {
       throw new AppError('Property not found', 404);
     }
     
+    // Ensure a property account exists/updated after property changes (e.g., owner link)
+    try {
+      await propertyAccountService.getOrCreatePropertyAccount(property._id.toString());
+    } catch (acctErr) {
+      console.warn('Failed to ensure property account exists after update:', (acctErr as any)?.message);
+    }
+
     res.json(property);
   } catch (error) {
     if (error instanceof AppError) {
@@ -749,6 +764,12 @@ export const createPropertyPublic = async (req: Request, res: Response) => {
       
       // Update chart metrics
       await updateChartMetrics(userContext.companyId);
+      // Ensure property account exists for this property
+      try {
+        await propertyAccountService.getOrCreatePropertyAccount(property._id.toString());
+      } catch (acctErr) {
+        console.warn('Failed to ensure property account exists for new public property:', (acctErr as any)?.message);
+      }
       
       res.status(201).json({
         status: 'success',
