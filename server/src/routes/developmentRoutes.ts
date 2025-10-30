@@ -11,7 +11,9 @@ import {
   recomputeStats,
   listPaymentsForDevelopment,
   addCollaborator,
-  removeCollaborator
+  removeCollaborator,
+  addVariations,
+  updateVariation
 } from '../controllers/developmentController';
 
 const router = express.Router();
@@ -26,6 +28,8 @@ router.delete('/:id', authWithCompany, isAdmin, deleteDevelopment);
 router.post('/:id/recompute-stats', authWithCompany, recomputeStats);
 router.post('/:id/collaborators', authWithCompany, addCollaborator);
 router.delete('/:id/collaborators', authWithCompany, removeCollaborator);
+router.post('/:id/variations', authWithCompany, addVariations);
+router.patch('/:id/variations/:variationId', authWithCompany, updateVariation);
 
 export default router;
 

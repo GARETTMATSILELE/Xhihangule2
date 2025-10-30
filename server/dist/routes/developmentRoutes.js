@@ -18,4 +18,6 @@ router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, developmentContro
 router.post('/:id/recompute-stats', auth_1.authWithCompany, developmentController_1.recomputeStats);
 router.post('/:id/collaborators', auth_1.authWithCompany, developmentController_1.addCollaborator);
 router.delete('/:id/collaborators', auth_1.authWithCompany, developmentController_1.removeCollaborator);
+router.post('/:id/variations', auth_1.authWithCompany, developmentController_1.addVariations);
+router.patch('/:id/variations/:variationId', auth_1.authWithCompany, developmentController_1.updateVariation);
 exports.default = router;

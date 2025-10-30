@@ -40,6 +40,14 @@ export const developmentService = {
   async removeCollaborator(devId: string, userId: string) {
     const res = await api.delete(`/developments/${devId}/collaborators`, { data: { userId } as any });
     return res.data?.data || res.data;
+  },
+  async addVariations(devId: string, variations: Array<{ id: string; label: string; count: number; price?: number; size?: number }>) {
+    const res = await api.post(`/developments/${devId}/variations`, { variations });
+    return res.data?.data || res.data;
+  },
+  async updateVariation(devId: string, variationId: string, body: { label?: string; price?: number; size?: number; addUnits?: number }) {
+    const res = await api.patch(`/developments/${devId}/variations/${variationId}`, body);
+    return res.data?.data || res.data;
   }
 };
 

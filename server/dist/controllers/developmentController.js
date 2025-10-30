@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recomputeStats = exports.listPaymentsForDevelopment = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.removeCollaborator = exports.addCollaborator = exports.listDevelopments = exports.createDevelopment = void 0;
+exports.updateVariation = exports.addVariations = exports.recomputeStats = exports.listPaymentsForDevelopment = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.removeCollaborator = exports.addCollaborator = exports.listDevelopments = exports.createDevelopment = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
@@ -441,3 +441,112 @@ const recomputeStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.recomputeStats = recomputeStats;
+const addVariations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const dev = yield Development_1.Development.findOne({ _id: req.params.id, companyId: req.user.companyId });
+        if (!dev)
+            throw new errorHandler_1.AppError('Development not found', 404);
+        const { variations } = req.body || {};
+        if (!Array.isArray(variations) || variations.length === 0) {
+            throw new errorHandler_1.AppError('variations array is required', 400);
+        }
+        for (const v of variations) {
+            if (!(v === null || v === void 0 ? void 0 : v.id) || !(v === null || v === void 0 ? void 0 : v.label) || !(v === null || v === void 0 ? void 0 : v.count) || v.count < 1) {
+                throw new errorHandler_1.AppError('Each variation must include id, label, and count >= 1', 400);
+            }
+            if (dev.variations.some((ex) => String(ex.id) === String(v.id))) {
+                throw new errorHandler_1.AppError(`Variation id already exists: ${v.id}`, 400);
+            }
+        }
+        // Append variations
+        const toAppend = variations.map((v) => ({ id: String(v.id), label: String(v.label), count: Number(v.count), price: typeof v.price === 'number' ? v.price : undefined, size: typeof v.size === 'number' ? v.size : undefined }));
+        dev.variations = [...(dev.variations || []), ...toAppend];
+        dev.updatedBy = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        yield dev.save();
+        // Create units for each new variation
+        const unitDocs = [];
+        for (const v of toAppend) {
+            for (let i = 1; i <= Number(v.count); i++) {
+                unitDocs.push({
+                    developmentId: dev._id,
+                    variationId: v.id,
+                    unitNumber: i,
+                    status: 'available',
+                    price: typeof v.price === 'number' ? v.price : undefined
+                });
+            }
+        }
+        if (unitDocs.length > 0)
+            yield DevelopmentUnit_1.DevelopmentUnit.insertMany(unitDocs);
+        yield recalcCachedStats(new mongoose_1.default.Types.ObjectId(String(dev._id)));
+        const updated = yield Development_1.Development.findById(dev._id).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error adding variations';
+        return res.status(status).json({ message });
+    }
+});
+exports.addVariations = addVariations;
+const updateVariation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        ensureAuthCompany(req);
+        const devId = String(req.params.id);
+        const variationId = String(req.params.variationId);
+        const companyId = String(req.user.companyId);
+        const existing = yield Development_1.Development.findOne({ _id: devId, companyId }).lean();
+        if (!existing)
+            throw new errorHandler_1.AppError('Development not found', 404);
+        const exists = (existing.variations || []).some((v) => String(v.id) === variationId);
+        if (!exists)
+            throw new errorHandler_1.AppError('Variation not found', 404);
+        const body = req.body || {};
+        const setOps = { updatedBy: new mongoose_1.default.Types.ObjectId(req.user.userId) };
+        if (typeof body.label === 'string')
+            setOps['variations.$.label'] = body.label;
+        if (typeof body.price === 'number')
+            setOps['variations.$.price'] = body.price;
+        if (typeof body.size === 'number')
+            setOps['variations.$.size'] = body.size;
+        if (Object.keys(setOps).length > 1) {
+            yield Development_1.Development.updateOne({ _id: devId, companyId, 'variations.id': variationId }, { $set: setOps });
+        }
+        const addUnits = Number(body.addUnits || 0);
+        if (addUnits > 0) {
+            // Determine current max unitNumber for this variation
+            const last = yield DevelopmentUnit_1.DevelopmentUnit.find({ developmentId: new mongoose_1.default.Types.ObjectId(devId), variationId })
+                .sort({ unitNumber: -1 })
+                .limit(1)
+                .lean();
+            const start = last && last[0] ? Number(last[0].unitNumber || 0) : 0;
+            const docs = [];
+            // Find latest price for this variation from DB after possible update
+            const devNow = yield Development_1.Development.findOne({ _id: devId, companyId, 'variations.id': variationId }, { 'variations.$': 1 }).lean();
+            const currentPrice = Number((_b = (_a = devNow === null || devNow === void 0 ? void 0 : devNow.variations) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.price);
+            for (let i = 1; i <= addUnits; i++) {
+                docs.push({
+                    developmentId: new mongoose_1.default.Types.ObjectId(devId),
+                    variationId,
+                    unitNumber: start + i,
+                    status: 'available',
+                    price: Number.isFinite(currentPrice) ? currentPrice : undefined
+                });
+            }
+            if (docs.length > 0)
+                yield DevelopmentUnit_1.DevelopmentUnit.insertMany(docs);
+            yield Development_1.Development.updateOne({ _id: devId, companyId, 'variations.id': variationId }, { $inc: { 'variations.$.count': addUnits }, $set: { updatedBy: new mongoose_1.default.Types.ObjectId(req.user.userId) } });
+        }
+        yield recalcCachedStats(new mongoose_1.default.Types.ObjectId(devId));
+        const updated = yield Development_1.Development.findById(devId).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error updating variation';
+        return res.status(status).json({ message });
+    }
+});
+exports.updateVariation = updateVariation;
