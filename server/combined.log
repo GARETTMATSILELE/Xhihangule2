@@ -11179,3 +11179,30 @@
 {"level":"info","message":"Syncing changes since 2025-11-03T05:00:00.018Z","timestamp":"2025-11-03T06:00:00.019Z"}
 {"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-03T06:00:00.465Z"}
 {"level":"info","message":"Completed scheduled sync: hourly_sync in 460ms","timestamp":"2025-11-03T06:00:00.469Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-11-03T06:20:30.157Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Tue Nov 04 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-03T06:20:30.467Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-11-03T06:20:30.478Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Mon Nov 03 2025 09:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-03T06:20:30.492Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-11-03T06:20:30.558Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Nov 09 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-03T06:20:30.608Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-11-03T06:20:30.644Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Mon Dec 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-03T06:20:30.742Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-11-03T06:20:30.764Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-11-03T06:20:30.807Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-11-03T06:20:30.905Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-11-03T06:20:30.922Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-11-03T06:20:30.961Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-11-03T06:20:31.027Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-11-03T06:20:31.103Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-11-03T06:20:31.177Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-11-03T06:20:31.231Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-11-03T07:00:00.054Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-11-03T07:00:00.069Z"}
+{"level":"info","message":"Syncing changes since 2025-11-03T06:00:00.071Z","timestamp":"2025-11-03T07:00:00.071Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-03T07:00:00.401Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 350ms","timestamp":"2025-11-03T07:00:00.404Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-11-03T08:00:00.043Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-11-03T08:00:00.054Z"}
+{"level":"info","message":"Syncing changes since 2025-11-03T07:00:00.055Z","timestamp":"2025-11-03T08:00:00.055Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-03T08:00:00.444Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 406ms","timestamp":"2025-11-03T08:00:00.447Z"}
