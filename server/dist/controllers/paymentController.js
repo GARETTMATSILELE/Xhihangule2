@@ -607,7 +607,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.createPaymentAccountant = createPaymentAccountant;
 // Create a sales payment explicitly (no rental validations, paymentType fixed to 'introduction')
 const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d;
     if (!req.user) {
         return res.status(401).json({ message: 'Authentication required' });
     }
@@ -673,7 +673,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 }
                 finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
             }
-            catch (_c) {
+            catch (_e) {
                 const base = (amount * 0.15);
                 const prea = base * 0.03;
                 const remaining = base - prea;
@@ -685,6 +685,16 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                     ownerAmount: amount - base,
                 };
             }
+        }
+        // Apply VAT on commission for sales using company-configured rate (default 15%)
+        {
+            const company = yield Company_1.Company.findById(new mongoose_1.default.Types.ObjectId(user.companyId)).lean();
+            const configuredVat = Number((_b = (_a = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _a === void 0 ? void 0 : _a.vatPercentOnCommission) !== null && _b !== void 0 ? _b : 0.15);
+            const vatRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.15));
+            const commissionBase = Number((finalCommissionDetails === null || finalCommissionDetails === void 0 ? void 0 : finalCommissionDetails.totalCommission) || 0);
+            const vatOnCommission = Number((commissionBase * vatRate).toFixed(2));
+            finalCommissionDetails.vatOnCommission = vatOnCommission;
+            finalCommissionDetails.ownerAmount = Number((amount - commissionBase - vatOnCommission).toFixed(2));
         }
         // If development and agent are provided, and the agent is a collaborator on that development,
         // split the agentShare between development owner (creator) and the collaborator using development's split config.
@@ -713,8 +723,8 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 }
                 else if (isCollaborator && devOwnerUserId) {
                     const agentShare = finalCommissionDetails.agentShare || 0;
-                    const ownerPct = Math.max(0, Math.min(100, Number((_a = dev.collabOwnerAgentPercent) !== null && _a !== void 0 ? _a : 50)));
-                    const collabPct = Math.max(0, Math.min(100, Number((_b = dev.collabCollaboratorAgentPercent) !== null && _b !== void 0 ? _b : (100 - ownerPct))));
+                    const ownerPct = Math.max(0, Math.min(100, Number((_c = dev.collabOwnerAgentPercent) !== null && _c !== void 0 ? _c : 50)));
+                    const collabPct = Math.max(0, Math.min(100, Number((_d = dev.collabCollaboratorAgentPercent) !== null && _d !== void 0 ? _d : (100 - ownerPct))));
                     const ownerShare = agentShare * (ownerPct / 100);
                     const collaboratorShare = agentShare * (collabPct / 100);
                     // Record split details

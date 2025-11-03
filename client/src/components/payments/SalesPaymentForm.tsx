@@ -17,6 +17,7 @@ import { PaymentFormData, PaymentMethod, Currency } from '../../types/payment';
 import paymentService from '../../services/paymentService';
 import { salesContractService } from '../../services/accountantService';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import { usePropertyService } from '../../services/propertyService';
 import { Property } from '../../types/property';
 import api from '../../api/axios';
@@ -43,6 +44,7 @@ const CURRENCIES: Currency[] = ['USD', 'ZWL'];
 
 const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, prefill }) => {
   const { user } = useAuth();
+  const { company } = useCompany();
   const [buyerName, setBuyerName] = useState('');
   const [sellerName, setSellerName] = useState('');
   const [agentId, setAgentId] = useState('');
@@ -175,13 +177,17 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
 
   const sellerRevenue = useMemo(() => {
     const price = Number(totalSalePrice) || 0;
-    return Math.max(0, price - totalCommission);
-  }, [totalSalePrice, totalCommission]);
+    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.15)));
+    const vatOnCommission = vatRate * totalCommission;
+    return Math.max(0, price - totalCommission - vatOnCommission);
+  }, [totalSalePrice, totalCommission, company?.commissionConfig?.vatPercentOnCommission]);
 
   const ownerAmountForThisPayment = useMemo(() => {
     const paid = Number(amountPaid) || 0;
-    return Math.max(0, paid - commissionOnPaid);
-  }, [amountPaid, commissionOnPaid]);
+    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.15)));
+    const vatOnCommission = vatRate * commissionOnPaid;
+    return Math.max(0, paid - commissionOnPaid - vatOnCommission);
+  }, [amountPaid, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
 
   const handleSubmit = async () => {
     try {
@@ -402,7 +408,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
                 <TextField fullWidth label="PREA Share" type="number" value={preaShare} onChange={(e) => setPreaShare(Number(e.target.value))} inputProps={{ min: 0, step: '0.01' }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="Seller Revenue (price - commission)" value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField fullWidth label={`Seller Revenue (price - commission - VAT ${Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.15) * 100).toFixed(2))}% on commission)`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
                 <TextField fullWidth label="Agency % of Remaining" type="number" value={agencyPercent} onChange={(e) => handleAgencyPercentChange(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />

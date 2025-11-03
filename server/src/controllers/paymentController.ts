@@ -756,6 +756,17 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     }
 
+    // Apply VAT on commission for sales using company-configured rate (default 15%)
+    {
+      const company = await Company.findById(new mongoose.Types.ObjectId(user.companyId)).lean();
+      const configuredVat = Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.15);
+      const vatRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.15));
+      const commissionBase = Number(((finalCommissionDetails as any)?.totalCommission) || 0);
+      const vatOnCommission = Number((commissionBase * vatRate).toFixed(2));
+      (finalCommissionDetails as any).vatOnCommission = vatOnCommission;
+      (finalCommissionDetails as any).ownerAmount = Number((amount - commissionBase - vatOnCommission).toFixed(2));
+    }
+
     // If development and agent are provided, and the agent is a collaborator on that development,
     // split the agentShare between development owner (creator) and the collaborator using development's split config.
     // If the agent is the owner, 100% of agentShare goes to owner by default.

@@ -151,7 +151,7 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
 exports.createCompany = createCompany;
 const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance } = req.body;
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -177,6 +177,8 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             updateData.bankAccounts = bankAccounts;
         if (fiscalConfig !== undefined)
             updateData.fiscalConfig = fiscalConfig;
+        if (commissionConfig !== undefined)
+            updateData.commissionConfig = commissionConfig;
         if (receivablesCutover !== undefined)
             updateData.receivablesCutover = receivablesCutover;
         if (rentReceivableOpeningBalance !== undefined)
@@ -347,7 +349,7 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             throw new errorHandler_1.AppError('Company not found', 404);
         }
         // Update the company
-        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance } = req.body;
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -373,6 +375,8 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             updateData.bankAccounts = bankAccounts;
         if (fiscalConfig !== undefined)
             updateData.fiscalConfig = fiscalConfig;
+        if (commissionConfig !== undefined)
+            updateData.commissionConfig = commissionConfig;
         if (receivablesCutover !== undefined)
             updateData.receivablesCutover = receivablesCutover;
         if (rentReceivableOpeningBalance !== undefined)

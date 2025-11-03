@@ -121,6 +121,7 @@ const SettingsPage: React.FC = () => {
     preaPercentOfTotal: 0.03,
     agentPercentOfRemaining: 0.6,
     agencyPercentOfRemaining: 0.4,
+    vatPercentOnCommission: 0.15,
     // Reporting Settings
     defaultReportPeriod: 'monthly',
     autoGenerateReports: false,
@@ -217,6 +218,7 @@ const SettingsPage: React.FC = () => {
         preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
         agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
         agencyPercentOfRemaining: company.commissionConfig?.agencyPercentOfRemaining ?? 0.4,
+        vatPercentOnCommission: (company as any).commissionConfig?.vatPercentOnCommission ?? 0.15,
         // Receivables cutover and opening balances (do not default if not set)
         receivablesCutoverYear: (company as any)?.receivablesCutover?.year ?? undefined,
         receivablesCutoverMonth: (company as any)?.receivablesCutover?.month ?? undefined,
@@ -383,7 +385,8 @@ const SettingsPage: React.FC = () => {
           commissionConfig: {
             preaPercentOfTotal: Number(settings.preaPercentOfTotal),
             agentPercentOfRemaining: Number(settings.agentPercentOfRemaining),
-            agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining)
+            agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining),
+            vatPercentOnCommission: Number((settings as any).vatPercentOnCommission)
           },
           rentReceivableOpeningBalance: Number((settings as any).rentReceivableOpeningBalance || 0),
           levyReceivableOpeningBalance: Number((settings as any).levyReceivableOpeningBalance || 0),
@@ -973,6 +976,17 @@ const SettingsPage: React.FC = () => {
                 inputProps={{ step: 0.01, min: 0, max: 1 }}
                 helperText="Agent + Agency of remaining must equal 1.0"
               />
+          <TextField
+            fullWidth
+            type="number"
+            label="VAT on commission (0-1)"
+            name="vatPercentOnCommission"
+            value={(settings as any).vatPercentOnCommission}
+            onChange={handleInputChange}
+            margin="normal"
+            inputProps={{ step: 0.01, min: 0, max: 1 }}
+            helperText="Applied to total commission for sales owner payout"
+          />
             </Grid>
           </Grid>
           <Alert severity="info" sx={{ mt: 2 }}>

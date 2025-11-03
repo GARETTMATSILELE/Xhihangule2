@@ -151,7 +151,7 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
 
 export const updateCompany = async (req: Request, res: Response) => {
   try {
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -166,6 +166,7 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
+    if (commissionConfig !== undefined) (updateData as any).commissionConfig = commissionConfig;
     if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
@@ -350,7 +351,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     }
 
     // Update the company
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -365,6 +366,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
+    if (commissionConfig !== undefined) (updateData as any).commissionConfig = commissionConfig;
     if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);

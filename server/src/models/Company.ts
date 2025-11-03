@@ -31,6 +31,7 @@ export interface ICompany extends Document {
     preaPercentOfTotal: number; // 0.0 - 1.0
     agentPercentOfRemaining: number; // 0.0 - 1.0
     agencyPercentOfRemaining: number; // 0.0 - 1.0 (agent + agency should equal 1.0)
+    vatPercentOnCommission?: number; // 0.0 - 1.0, e.g., 0.15 for 15%
   };
   plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
   propertyLimit?: number | null;
@@ -180,6 +181,12 @@ const companySchema = new Schema<ICompany>({
       min: 0,
       max: 1,
       default: 0.4
+    },
+    vatPercentOnCommission: {
+      type: Number,
+      min: 0,
+      max: 1,
+      default: 0.15
     }
   },
   plan: {

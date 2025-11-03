@@ -28,6 +28,7 @@ export interface Company {
     preaPercentOfTotal: number;
     agentPercentOfRemaining: number;
     agencyPercentOfRemaining: number;
+    vatPercentOnCommission?: number;
   };
   plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
   propertyLimit?: number | null;

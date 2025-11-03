@@ -156,6 +156,12 @@ const companySchema = new mongoose_1.Schema({
             min: 0,
             max: 1,
             default: 0.4
+        },
+        vatPercentOnCommission: {
+            type: Number,
+            min: 0,
+            max: 1,
+            default: 0.15
         }
     },
     plan: {
