@@ -63,6 +63,11 @@ const ReportsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [trustAccounts, setTrustAccounts] = useState<Array<{ propertyId: string; propertyName?: string; propertyAddress?: string; totalPaid: number; totalPayout: number; held: number; payouts: Array<{ amount: number; depositDate: string; recipientName?: string; referenceNumber?: string; notes?: string }> }>>([]);
   const [trustSearch, setTrustSearch] = useState<string>('');
+  const [agentsById, setAgentsById] = useState<Record<string, string>>({});
+  const [salePayments, setSalePayments] = useState<Payment[]>([]);
+  const [saleAgentId, setSaleAgentId] = useState<string>('all');
+  const [buyerFilter, setBuyerFilter] = useState<string>('');
+  const [sellerFilter, setSellerFilter] = useState<string>('');
 
   // Helpers: use rental period month/year for rentals, payment date for others
   function getEffectiveDateForFilter(p: any): Date {
@@ -86,14 +91,16 @@ const ReportsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         // Use same source as dashboard cards for consistency
-        const [all, accounts, summary, tx, deposits] = await Promise.all([
+        const [all, accounts, summary, tx, deposits, saleOnly] = await Promise.all([
           paymentService.getPayments(),
           propertyAccountService.getCompanyPropertyAccounts().catch(() => []),
           companyAccountService.getSummary().catch(() => null),
           companyAccountService.getTransactions().catch(() => null),
-          paymentService.getCompanyDepositSummaries().catch(() => [])
+          paymentService.getCompanyDepositSummaries().catch(() => []),
+          paymentService.getPayments({ paymentType: 'sale', status: 'completed', startDate: new Date(from), endDate: new Date(to) }).catch(() => [])
         ]);
         setPayments(Array.isArray(all) ? all : []);
+        setSalePayments(Array.isArray(saleOnly) ? saleOnly : []);
         try {
           const totals = (accounts as any[]).reduce((acc: any, a: any) => {
             acc.totalIncome += Number(a.totalIncome || 0);
@@ -113,6 +120,29 @@ const ReportsPage: React.FC = () => {
     };
     load();
   }, [from, to]);
+
+  // Load agents once to resolve owner/collaborator names in commission splits
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const agents = await paymentService.getAgents('sales').catch(() => []);
+        if (!mounted) return;
+        const map: Record<string, string> = {};
+        (Array.isArray(agents) ? agents : []).forEach((a: any) => {
+          const id = String(a._id || a.id || '');
+          const name = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.name || a.email || id;
+          if (id) map[id] = name;
+        });
+        setAgentsById(map);
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const agentOptions = useMemo(() => {
+    return Object.entries(agentsById).map(([id, name]) => ({ id, name })).sort((a,b)=> a.name.localeCompare(b.name));
+  }, [agentsById]);
 
   const agentsAgg = useMemo(() => {
     const start = new Date(from);
@@ -241,6 +271,215 @@ const ReportsPage: React.FC = () => {
     return filtered.sort((a,b)=> new Date(b.date).getTime()-new Date(a.date).getTime()).slice(0, 25);
   }, [payments, from, to, selectedAgent]);
 
+  // Recent sale transactions (completed) with commission breakdown
+  const recentSaleTransactions = useMemo(() => {
+    const start = new Date(from);
+    const end = new Date(to);
+    end.setHours(23, 59, 59, 999);
+    const startMs = start.getTime();
+    const endMs = end.getTime();
+    const rows = (salePayments || [])
+      .filter((p: any) => p.paymentType === 'sale' && (p.status === 'completed'))
+      .filter((p: any) => {
+        const t = getEffectiveDateForFilter(p).getTime();
+        return t >= startMs && t <= endMs;
+      })
+      .filter((p: any) => {
+        // Agent filter (matches primary agentId or split owner/collaborator)
+        if (saleAgentId === 'all') return true;
+        const primaryId = p.agentId && typeof p.agentId === 'object' ? String(p.agentId._id || p.agentId.id || '') : String(p.agentId || '');
+        const split = (p.commissionDetails || (p as any).commissionDetails || {})?.agentSplit || {};
+        const ownerId = split.ownerUserId ? String(split.ownerUserId) : undefined;
+        const collabId = split.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
+        return saleAgentId === primaryId || saleAgentId === ownerId || saleAgentId === collabId;
+      })
+      .filter((p: any) => {
+        // Buyer filter
+        const needle = buyerFilter.trim().toLowerCase();
+        if (!needle) return true;
+        const buyer = p.buyerName || p.manualTenantName || ((p.tenantId && typeof p.tenantId === 'object') ? `${p.tenantId.firstName || ''} ${p.tenantId.lastName || ''}`.trim() : '');
+        return String(buyer).toLowerCase().includes(needle);
+      })
+      .filter((p: any) => {
+        // Seller filter
+        const needle = sellerFilter.trim().toLowerCase();
+        if (!needle) return true;
+        const seller = p.sellerName || '';
+        return String(seller).toLowerCase().includes(needle);
+      })
+      .map((p: any) => {
+        const effectiveDate = getEffectiveDateForFilter(p);
+        const propertyObj = p.propertyId;
+        const propertyAddress = (propertyObj && typeof propertyObj === 'object')
+          ? (propertyObj.address || propertyObj.name || p.manualPropertyAddress || 'Unknown')
+          : (p.manualPropertyAddress || 'Unknown');
+        const buyer = p.buyerName || p.manualTenantName || ((p.tenantId && typeof p.tenantId === 'object') ? `${p.tenantId.firstName || ''} ${p.tenantId.lastName || ''}`.trim() : '');
+        const seller = p.sellerName || '';
+        const amount = Number(p.amount || 0);
+        const referenceNumber = String(p.referenceNumber || p._id || '');
+        const paymentMethod = String(p.paymentMethod || '');
+        const currencyCode = String(p.currency || 'USD');
+        const primaryAgentId = p.agentId && typeof p.agentId === 'object' ? String(p.agentId._id || p.agentId.id || '') : String(p.agentId || '');
+        const primaryAgentName = primaryAgentId ? (agentsById[primaryAgentId] || ((p.agentId && typeof p.agentId === 'object') ? `${p.agentId.firstName || ''} ${p.agentId.lastName || ''}`.trim() : '')) : '';
+        const cd = (p.commissionDetails || {}) as any;
+        const totalCommission = Number(cd.totalCommission || 0);
+        const preafee = Number(cd.preaFee || 0);
+        const agentShare = Number(cd.agentShare || 0);
+        const agencyShare = Number(cd.agencyShare || 0);
+        const vatOnCommission = Number(cd.vatOnCommission || 0);
+        const ownerBeforeVat = Number((amount - totalCommission));
+        const ownerAfterVat = Number((cd.ownerAmount != null ? cd.ownerAmount : (amount - totalCommission - vatOnCommission)));
+        const pct = amount ? Number(((totalCommission / amount) * 100).toFixed(2)) : 0;
+        const split = (cd.agentSplit || {}) as any;
+        const splitOwnerPct = Number(split.splitPercentOwner || 0);
+        const splitCollabPct = Number(split.splitPercentCollaborator || 0);
+        const ownerAgentShare = Number(split.ownerAgentShare || 0);
+        const collaboratorAgentShare = Number(split.collaboratorAgentShare || 0);
+        const ownerUserId = split.ownerUserId ? String(split.ownerUserId) : undefined;
+        const collaboratorUserId = split.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
+        const ownerAgentName = ownerUserId ? (agentsById[ownerUserId] || ownerUserId) : '';
+        const collaboratorAgentName = collaboratorUserId ? (agentsById[collaboratorUserId] || collaboratorUserId) : '';
+        return {
+          id: p._id,
+          date: effectiveDate.toISOString().slice(0,10),
+          referenceNumber,
+          paymentMethod,
+          currencyCode,
+          primaryAgentName,
+          propertyAddress,
+          buyer,
+          seller,
+          amount,
+          pct,
+          totalCommission,
+          preafee,
+          agentShare,
+          agencyShare,
+          vatOnCommission,
+          ownerBeforeVat,
+          ownerAfterVat,
+          hasSplit: Boolean(split && (ownerAgentShare || collaboratorAgentShare)),
+          splitOwnerPct,
+          splitCollabPct,
+          ownerAgentShare,
+          collaboratorAgentShare,
+          ownerAgentName,
+          collaboratorAgentName,
+        };
+      })
+      .sort((a: any,b: any)=> new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 25);
+    return rows;
+  }, [payments, from, to, agentsById]);
+
+  function printDisbursementReport(t: any) {
+    try {
+      const html = `<!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Disbursement Report — ${t.referenceNumber || t.id}</title>
+            <style>
+              body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 24px; color: #0f172a; }
+              h1 { font-size: 18px; margin: 0 0 4px; }
+              h2 { font-size: 14px; margin: 16px 0 8px; }
+              .muted { color: #64748b; font-size: 12px; margin-bottom: 16px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+              th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+              .right { text-align: right; }
+              .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+              .section { margin-top: 16px; }
+              .total { font-weight: 600; }
+              .brand { font-weight: 700; font-size: 16px; }
+              @media print { button { display: none; } }
+            </style>
+          </head>
+          <body>
+            <div class="brand">${(companySummary as any)?.companyName || 'Company'}</div>
+            <h1>Disbursement Report</h1>
+            <div class="muted">Reference: ${t.referenceNumber || t.id} • Date: ${t.date} • Currency: ${t.currencyCode || 'USD'}</div>
+
+            <div class="grid">
+              <div>
+                <h2>Property & Parties</h2>
+                <table>
+                  <tr><td>Property</td><td>${(t.propertyAddress || '').toString()}</td></tr>
+                  <tr><td>Buyer</td><td>${(t.buyer || '-').toString()}</td></tr>
+                  <tr><td>Seller</td><td>${(t.seller || '-').toString()}</td></tr>
+                  <tr><td>Agent</td><td>${(t.primaryAgentName || '-').toString()}</td></tr>
+                </table>
+              </div>
+              <div>
+                <h2>Sale Summary</h2>
+                <table>
+                  <tr><td>Total Sale Amount</td><td class="right">${currency(t.amount)}</td></tr>
+                  <tr><td>Commission %</td><td class="right">${t.pct}%</td></tr>
+                  <tr><td>Total Commission</td><td class="right">${currency(t.totalCommission)}</td></tr>
+                  <tr><td>Prea Fee</td><td class="right">${currency(t.preafee)}</td></tr>
+                  <tr><td>Net Commission (after Prea)</td><td class="right">${currency(Math.max(0, (t.totalCommission || 0) - (t.preafee || 0)))}</td></tr>
+                  <tr><td>Payment Method</td><td class="right">${(t.paymentMethod || '-').toString()}</td></tr>
+                </table>
+              </div>
+            </div>
+
+            <div class="section">
+              <h2>Commission Disbursement</h2>
+              <table>
+                <thead>
+                  <tr><th>Recipient</th><th class="right">Amount</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Agent Share${t.hasSplit ? ' (Total)' : ''}</td><td class="right">${currency(t.agentShare)}</td></tr>
+                  ${t.hasSplit ? `<tr><td>• Owner Agent (${t.splitOwnerPct || 0}%${t.ownerAgentName ? ', ' + t.ownerAgentName : ''})</td><td class=\"right\">${currency(t.ownerAgentShare)}</td></tr>` : ''}
+                  ${t.hasSplit ? `<tr><td>• Collaborator Agent (${t.splitCollabPct || 0}%${t.collaboratorAgentName ? ', ' + t.collaboratorAgentName : ''})</td><td class=\"right\">${currency(t.collaboratorAgentShare)}</td></tr>` : ''}
+                  <tr><td>Agency Share</td><td class="right">${currency(t.agencyShare)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="section">
+              <h2>Owner Settlement</h2>
+              <table>
+                <tr><td>Owner Amount (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
+                <tr><td>VAT on Commission</td><td class="right">${currency(t.vatOnCommission)}</td></tr>
+                <tr class="total"><td>Owner Amount (after VAT on commission)</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
+              </table>
+            </div>
+
+            <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 300); };</script>
+          </body>
+        </html>`;
+      const iframe = document.createElement('iframe') as HTMLIFrameElement;
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      const onLoad = () => {
+        try {
+          iframe.contentDocument?.defaultView?.focus();
+          iframe.contentDocument?.defaultView?.print();
+        } finally {
+          setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 500);
+        }
+      };
+      iframe.onload = onLoad as any;
+      try {
+        (iframe as any).srcdoc = html;
+        document.body.appendChild(iframe);
+      } catch {
+        document.body.appendChild(iframe);
+        const doc = iframe.contentDocument as (Document | null);
+        doc?.open();
+        doc?.write(html);
+        doc?.close();
+        setTimeout(onLoad, 50);
+      }
+    } catch {}
+  }
+
   // Drill handlers
   function handlePieClick(entry: any) {
     setDrill({ type: 'revenue-split', filter: { kind: entry.name } });
@@ -326,10 +565,33 @@ const ReportsPage: React.FC = () => {
             <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 200); };</script>
           </body>
         </html>`;
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
-      win.focus();
+      const iframe = document.createElement('iframe') as HTMLIFrameElement;
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      const onLoad = () => {
+        try {
+          iframe.contentDocument?.defaultView?.focus();
+          iframe.contentDocument?.defaultView?.print();
+        } finally {
+          setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 500);
+        }
+      };
+      iframe.onload = onLoad as any;
+      try {
+        (iframe as any).srcdoc = html;
+        document.body.appendChild(iframe);
+      } catch {
+        document.body.appendChild(iframe);
+        const doc = iframe.contentDocument as (Document | null);
+        doc?.open();
+        doc?.write(html);
+        doc?.close();
+        setTimeout(onLoad, 50);
+      }
     } catch {}
   }
 
@@ -445,44 +707,81 @@ const ReportsPage: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="col-span-2 bg-white p-4 rounded-2xl shadow">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Recent transactions</h2>
+            <h2 className="text-lg font-semibold">Recent sale transactions</h2>
             <div className="flex items-center gap-2">
+              <label className="text-sm">Buyer</label>
+              <input value={buyerFilter} onChange={(e)=>setBuyerFilter(e.target.value)} placeholder="Search buyer" className="border rounded px-2 py-1" />
+              <label className="text-sm">Seller</label>
+              <input value={sellerFilter} onChange={(e)=>setSellerFilter(e.target.value)} placeholder="Search seller" className="border rounded px-2 py-1" />
               <label className="text-sm">Agent</label>
-              <select value={selectedAgent} onChange={(e) => setSelectedAgent(e.target.value)} className="border rounded px-2 py-1">
+              <select value={saleAgentId} onChange={(e) => setSaleAgentId(e.target.value)} className="border rounded px-2 py-1">
                 <option value="all">All agents</option>
-                {SAMPLE_DATA.agents.map((a) => (
-                  <option key={a.name} value={a.name}>{a.name}</option>
+                {agentOptions.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left">
+            <table className="min-w-full text-left text-sm">
               <thead>
                 <tr className="text-sm text-slate-500">
-                  <th className="py-2">ID</th>
-                  <th>Date</th>
-                  <th>Type</th>
+                  <th className="py-2">Date</th>
+                  <th>Property address</th>
+                  <th>Buyer</th>
+                  <th>Seller</th>
                   <th>Agent</th>
-                  <th>Property</th>
-                  <th className="text-right">Amount</th>
+                  <th className="text-right">Total sale</th>
+                  <th className="text-right">Commission %</th>
+                  <th className="text-right">Total commission</th>
+                  <th className="text-right">Prea fee</th>
+                  <th className="text-right">Agent share</th>
+                  <th className="text-right">Agency share</th>
+                  <th className="text-right">Owner before VAT</th>
+                  <th className="text-right">VAT on commission</th>
+                  <th className="text-right">Owner after VAT</th>
+                  <th>Split</th>
+                  <th className="text-right">Owner agent share</th>
+                  <th className="text-right">Collaborator agent share</th>
+                  <th className="text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredTransactions.map((tx) => (
-                  <tr key={tx.id} tabIndex={0} onClick={() => handleRowClick(tx)} className="cursor-pointer hover:bg-slate-50 focus:bg-slate-50">
-                    <td className="py-2">{tx.id}</td>
-                    <td>{tx.date}</td>
-                    <td>{tx.type}</td>
-                    <td>{tx.agent}</td>
-                    <td>{tx.property}</td>
-                    <td className="text-right">{currency(tx.amount)}</td>
+                {recentSaleTransactions.map((t) => (
+                  <tr key={t.id} className="border-t">
+                    <td className="py-2 whitespace-nowrap">{t.date}</td>
+                    <td className="whitespace-nowrap">{t.propertyAddress}</td>
+                    <td className="whitespace-nowrap">{t.buyer || '-'}</td>
+                    <td className="whitespace-nowrap">{t.seller || '-'}</td>
+                    <td className="whitespace-nowrap">{t.primaryAgentName || '-'}</td>
+                    <td className="text-right">{currency(t.amount)}</td>
+                    <td className="text-right">{t.pct}%</td>
+                    <td className="text-right">{currency(t.totalCommission)}</td>
+                    <td className="text-right">{currency(t.preafee)}</td>
+                    <td className="text-right">{currency(t.agentShare)}</td>
+                    <td className="text-right">{currency(t.agencyShare)}</td>
+                    <td className="text-right">{currency(t.ownerBeforeVat)}</td>
+                    <td className="text-right">{currency(t.vatOnCommission)}</td>
+                    <td className="text-right">{currency(t.ownerAfterVat)}</td>
+                    <td>
+                      {t.hasSplit ? (
+                        <div className="text-xs text-slate-600">
+                          <div>Owner {t.splitOwnerPct || 0}% — {t.ownerAgentName || 'Owner agent'}</div>
+                          <div>Collaborator {t.splitCollabPct || 0}% — {t.collaboratorAgentName || 'Collaborator'}</div>
+                        </div>
+                      ) : (<span className="text-slate-400 text-xs">-</span>)}
+                    </td>
+                    <td className="text-right">{t.hasSplit ? currency(t.ownerAgentShare) : <span className="text-slate-400">-</span>}</td>
+                    <td className="text-right">{t.hasSplit ? currency(t.collaboratorAgentShare) : <span className="text-slate-400">-</span>}</td>
+                    <td className="text-right">
+                      <button onClick={() => printDisbursementReport(t)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
+                    </td>
                   </tr>
                 ))}
-                {filteredTransactions.length === 0 && (
+                {recentSaleTransactions.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-500">No transactions for the selected range.</td>
+                    <td colSpan={18} className="py-6 text-center text-slate-500">No sale transactions for the selected range.</td>
                   </tr>
                 )}
               </tbody>

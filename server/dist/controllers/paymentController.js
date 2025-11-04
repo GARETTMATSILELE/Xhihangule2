@@ -52,6 +52,7 @@ const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
+const SalesContract_1 = require("../models/SalesContract");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 // List sales-only payments for a company
 const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1453,6 +1454,64 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             levyPeriodMonth: payment.levyPeriodMonth,
             levyPeriodYear: payment.levyPeriodYear
         };
+        // For sale payments, compute totals for consistency with UI outstanding column
+        try {
+            const isSale = payment.paymentType === 'sale';
+            if (isSale) {
+                let totalSalePrice = null;
+                let saleCurrency = null;
+                // Prefer linked sales contract
+                if (payment.saleId) {
+                    const sc = yield SalesContract_1.SalesContract.findOne({ _id: payment.saleId, companyId: payment.companyId });
+                    if (sc) {
+                        totalSalePrice = Number(sc.totalSalePrice || 0);
+                        saleCurrency = sc.currency || null;
+                    }
+                }
+                // Fallback: parse from notes (e.g., "Total Sale Price 280,000 USD")
+                if (totalSalePrice == null && typeof payment.notes === 'string') {
+                    const match = payment.notes.match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+                    if (match && match[1]) {
+                        const n = Number(match[1].replace(/,/g, ''));
+                        if (Number.isFinite(n))
+                            totalSalePrice = n;
+                    }
+                }
+                // Derive currency from payment if not provided by sale
+                if (!saleCurrency) {
+                    saleCurrency = payment.currency || 'USD';
+                }
+                // Compute paid to date for this sale group (include current payment)
+                let paidToDate = 0;
+                const match = {
+                    companyId: payment.companyId,
+                    paymentType: 'sale',
+                    status: 'completed'
+                };
+                if (payment.saleId) {
+                    match.saleId = payment.saleId;
+                }
+                else {
+                    match.$or = [
+                        { referenceNumber: payment.referenceNumber || null },
+                        { manualPropertyAddress: payment.manualPropertyAddress || null }
+                    ];
+                }
+                const related = yield Payment_1.Payment.find(match).select('amount');
+                paidToDate = related.reduce((sum, p) => sum + (p.amount || 0), 0);
+                if (totalSalePrice != null) {
+                    const outstanding = Math.max(0, totalSalePrice - paidToDate);
+                    receipt.totalSalePrice = totalSalePrice;
+                    receipt.paidToDate = paidToDate;
+                    receipt.outstanding = outstanding;
+                    if (saleCurrency)
+                        receipt.currency = saleCurrency;
+                }
+            }
+        }
+        catch (calcErr) {
+            console.warn('Failed to compute sale totals for receipt', calcErr === null || calcErr === void 0 ? void 0 : calcErr.message);
+        }
         console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });
         res.json({
             status: 'success',

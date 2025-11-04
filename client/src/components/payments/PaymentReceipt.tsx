@@ -11,6 +11,7 @@ import {
 } from '@mui/material';
 import { Print as PrintIcon, Close as CloseIcon } from '@mui/icons-material';
 import paymentService from '../../services/paymentService';
+import { salesContractService } from '../../services/accountantService';
 
 interface PaymentReceiptProps {
   receipt: any;
@@ -19,6 +20,8 @@ interface PaymentReceiptProps {
 
 const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => {
   const [paidToDate, setPaidToDate] = useState<number | null>(null);
+  const [saleTotal, setSaleTotal] = useState<number | null>(null);
+  const [saleCurrency, setSaleCurrency] = useState<string | null>(null);
   const isSale = useMemo(() => (receipt?.paymentType || receipt?.type) === 'sale', [receipt]);
   const groupRef = useMemo(() => receipt?.saleId || receipt?.referenceNumber || receipt?.manualPropertyAddress || '', [receipt]);
   const currency = receipt?.currency || 'USD';
@@ -49,10 +52,27 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     return null;
   }, [receipt?.notes]);
 
+  // Prefer server-provided totals first, then contract, then parsed notes
+  const serverTotal = typeof receipt?.totalSalePrice === 'number' ? receipt.totalSalePrice : null;
+  const serverPaidToDate = typeof receipt?.paidToDate === 'number' ? receipt.paidToDate : null;
+  const serverOutstanding = typeof receipt?.outstanding === 'number' ? receipt.outstanding : null;
+
+  const preferredTotalSale = useMemo(() => {
+    if (serverTotal != null) return serverTotal;
+    if (saleTotal != null) return saleTotal;
+    return parsedTotalSale;
+  }, [serverTotal, saleTotal, parsedTotalSale]);
+  const preferredCurrency = useMemo(() => (saleCurrency || currency), [saleCurrency, currency]);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!isSale || !groupRef) return;
+      // If server already provided paidToDate, trust it and skip client aggregation
+      if (serverPaidToDate != null) {
+        setPaidToDate(serverPaidToDate);
+        return;
+      }
       try {
         const payments: any[] = await paymentService.getSalesPayments();
         const related = (Array.isArray(payments) ? payments : [])
@@ -66,19 +86,41 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     };
     load();
     return () => { cancelled = true; };
-  }, [isSale, groupRef, receipt?.referenceNumber, receipt?.manualPropertyAddress]);
+  }, [isSale, groupRef, receipt?.referenceNumber, receipt?.manualPropertyAddress, serverPaidToDate]);
+
+  // Load linked sales contract for accurate totals/currency
+  useEffect(() => {
+    let cancelled = false;
+    const loadSale = async () => {
+      if (!isSale) return;
+      const id = receipt?.saleId;
+      if (!id) return;
+      try {
+        const sale = await salesContractService.get(String(id));
+        if (!cancelled && sale) {
+          if (typeof sale.totalSalePrice === 'number') setSaleTotal(sale.totalSalePrice);
+          if (sale.currency) setSaleCurrency(sale.currency);
+        }
+      } catch {
+        // ignore; fall back to parsed value from notes
+      }
+    };
+    loadSale();
+    return () => { cancelled = true; };
+  }, [isSale, receipt?.saleId]);
 
   const outstanding = useMemo(() => {
-    if (parsedTotalSale == null || paidToDate == null) return null;
-    return Math.max(0, parsedTotalSale - paidToDate);
-  }, [parsedTotalSale, paidToDate]);
+    if (serverOutstanding != null) return serverOutstanding;
+    if (preferredTotalSale == null || paidToDate == null) return null;
+    return Math.max(0, preferredTotalSale - paidToDate);
+  }, [serverOutstanding, preferredTotalSale, paidToDate]);
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
     if (printWindow) {
-      const saleTotalsHtml = (isSale && parsedTotalSale != null) ? `
-                <div class="detail-row"><span class="label">Total Sale Price:</span><span class="value">${currency} ${(parsedTotalSale || 0).toLocaleString()}</span></div>
-                <div class="detail-row"><span class="label">Paid To Date:</span><span class="value">${currency} ${(paidToDate || 0).toLocaleString()}</span></div>
-                <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${currency} ${((parsedTotalSale || 0) - (paidToDate || 0) > 0 ? ((parsedTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
+      const saleTotalsHtml = (isSale && preferredTotalSale != null) ? `
+                <div class="detail-row"><span class="label">Total Sale Price:</span><span class="value">${preferredCurrency} ${(preferredTotalSale || 0).toLocaleString()}</span></div>
+                <div class="detail-row"><span class="label">Paid To Date:</span><span class="value">${preferredCurrency} ${(paidToDate || 0).toLocaleString()}</span></div>
+                <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${preferredCurrency} ${((preferredTotalSale || 0) - (paidToDate || 0) > 0 ? ((preferredTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
               ` : '';
       printWindow.document.write(`
         <!DOCTYPE html>
@@ -145,6 +187,18 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
               .value {
                 color: #333;
               }
+              .two-col-row {
+                display: flex;
+                gap: 16px;
+              }
+              .detail-row-inline {
+                display: flex;
+                justify-content: space-between;
+                flex: 1;
+                margin: 8px 0;
+                border-bottom: 1px solid #eee;
+                padding-bottom: 5px;
+              }
               .footer {
                 margin-top: 30px;
                 text-align: center;
@@ -205,9 +259,16 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                   <span class="label">Agent:</span>
                   <span class="value">${(receipt.agent?.firstName || receipt.processedBy?.firstName || '')} ${(receipt.agent?.lastName || receipt.processedBy?.lastName || '') || 'N/A'}</span>
                 </div>
-                <div class="detail-row">
-                  <span class="label">Processed By:</span>
-                  <span class="value">${receipt.processedBy?.firstName} ${receipt.processedBy?.lastName || 'N/A'}</span>
+                <div class="two-col-row">
+                  <div class="detail-row-inline">
+                    <span class="label">Processed By:</span>
+                    <span class="value">${receipt.processedBy?.firstName} ${receipt.processedBy?.lastName || 'N/A'}</span>
+                  </div>
+                  ${isSale && (outstanding != null) ? `
+                  <div class="detail-row-inline">
+                    <span class="label">Balance:</span>
+                    <span class="value">${preferredCurrency} ${(outstanding || 0).toLocaleString()}</span>
+                  </div>` : ''}
                 </div>
                 ${saleTotalsHtml}
                 ${receipt.notes ? `
@@ -348,7 +409,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
         <Grid item xs={6}>
           <Typography variant="subtitle2" color="textSecondary">{(receipt.paymentType || receipt.type) === 'sale' ? 'Buyer' : 'Tenant'}</Typography>
           <Typography variant="body1">
-            {receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : (receipt.tenantName || 'N/A'))}
+            {receipt.buyerName || receipt.manualTenantName || (receipt.tenant ? `${receipt.tenant.firstName} ${receipt.tenant.lastName}` : (receipt.tenantName || 'N/A'))}
           </Typography>
         </Grid>
         <Grid item xs={6}>

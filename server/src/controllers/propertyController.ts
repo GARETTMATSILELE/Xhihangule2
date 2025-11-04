@@ -80,8 +80,8 @@ export const getPublicProperties = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(userContext.companyId)
     };
     
-    // If user is not an admin, only show their properties
-    if (userContext.userRole !== 'admin') {
+    // If user is neither admin nor accountant, only show their own properties
+    if (userContext.userRole !== 'admin' && userContext.userRole !== 'accountant') {
       query.ownerId = new mongoose.Types.ObjectId(userContext.userId);
     }
     
