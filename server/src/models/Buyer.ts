@@ -8,6 +8,7 @@ export interface IBuyer extends Document {
   budgetMin?: number;
   budgetMax?: number;
   prefs?: string;
+  propertyId?: mongoose.Types.ObjectId;
   developmentId?: mongoose.Types.ObjectId;
   developmentUnitId?: mongoose.Types.ObjectId;
   companyId: mongoose.Types.ObjectId;
@@ -24,6 +25,7 @@ const BuyerSchema: Schema = new Schema({
   budgetMin: { type: Number, default: 0, min: 0 },
   budgetMax: { type: Number, default: 0, min: 0 },
   prefs: { type: String, default: '' },
+  propertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property' },
   developmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Development' },
   developmentUnitId: { type: mongoose.Schema.Types.ObjectId, ref: 'DevelopmentUnit' },
   companyId: {
@@ -42,6 +44,7 @@ const BuyerSchema: Schema = new Schema({
 
 BuyerSchema.index({ companyId: 1 });
 BuyerSchema.index({ ownerId: 1 });
+BuyerSchema.index({ propertyId: 1 });
 BuyerSchema.index({ developmentId: 1 });
 BuyerSchema.index({ developmentUnitId: 1 });
 

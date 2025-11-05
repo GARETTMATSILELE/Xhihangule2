@@ -1454,6 +1454,17 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             levyPeriodMonth: payment.levyPeriodMonth,
             levyPeriodYear: payment.levyPeriodYear
         };
+        // Generate a deterministic unique receipt code for sale payments
+        if (payment.paymentType === 'sale') {
+            const dt = new Date(payment.paymentDate || payment.createdAt);
+            const y = dt.getFullYear();
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const d = String(dt.getDate()).padStart(2, '0');
+            const suffix = String(payment._id || '').slice(-6).toUpperCase();
+            const receiptCode = `SR-${y}${m}${d}-${suffix}`;
+            receipt.receiptCode = receiptCode;
+            receipt.receiptNumber = receiptCode;
+        }
         // For sale payments, compute totals for consistency with UI outstanding column
         try {
             const isSale = payment.paymentType === 'sale';

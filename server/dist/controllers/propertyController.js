@@ -393,7 +393,7 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
+        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, images, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
         if (!name || !address) {
             throw new errorHandler_1.AppError('Missing required fields: name and address', 400);
         }
@@ -415,6 +415,7 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
             builtArea: Number(builtArea || 0),
             landArea: Number(landArea || 0),
             description: description || '',
+            images: Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim() !== '') : [],
             ownerId: req.user.userId,
             companyId: req.user.companyId,
             agentId: agentId || req.user.userId,

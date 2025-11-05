@@ -8,6 +8,7 @@ export interface BuyerDTO {
   budgetMin?: number;
   budgetMax?: number;
   prefs?: string;
+  propertyId?: string;
 }
 
 export interface CreateBuyerInput {
@@ -20,6 +21,7 @@ export interface CreateBuyerInput {
   budgetMin?: number;
   budgetMax?: number;
   prefs?: string;
+  propertyId?: string;
 }
 
 export const buyerService = {

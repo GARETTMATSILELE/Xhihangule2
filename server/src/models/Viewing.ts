@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IViewing extends Document {
   propertyId: mongoose.Types.ObjectId;
   buyerId?: mongoose.Types.ObjectId; // optional link to buyers collection
+  leadId?: mongoose.Types.ObjectId; // optional link to leads collection
   when: Date;
   status: 'Scheduled' | 'Done' | 'No-show';
   notes?: string;
@@ -15,6 +16,7 @@ export interface IViewing extends Document {
 const ViewingSchema: Schema = new Schema({
   propertyId: { type: Schema.Types.ObjectId, ref: 'Property', required: true },
   buyerId: { type: Schema.Types.ObjectId, ref: 'Buyer' },
+  leadId: { type: Schema.Types.ObjectId, ref: 'Lead' },
   when: { type: Date, required: true },
   status: { type: String, enum: ['Scheduled','Done','No-show'], default: 'Scheduled' },
   notes: { type: String, default: '' },

@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteBuyer = exports.updateBuyer = exports.createBuyer = exports.listBuyers = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Buyer_1 = require("../models/Buyer");
+const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
@@ -54,11 +55,12 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { name, email, phone, idNumber, budgetMin, budgetMax, prefs, developmentId, developmentUnitId } = req.body;
+        const { name, email, phone, idNumber, budgetMin, budgetMax, prefs, developmentId, developmentUnitId, propertyId } = req.body;
         if (!name)
             throw new errorHandler_1.AppError('Name is required', 400);
         let devId = undefined;
         let unitId = undefined;
+        let propId = undefined;
         if (developmentId && mongoose_1.default.Types.ObjectId.isValid(String(developmentId))) {
             const dev = yield Development_1.Development.findOne({ _id: developmentId, companyId: req.user.companyId }).lean();
             if (!dev)
@@ -76,6 +78,15 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (!devId)
                 devId = new mongoose_1.default.Types.ObjectId(String(unit.developmentId));
         }
+        if (propertyId) {
+            if (!mongoose_1.default.Types.ObjectId.isValid(String(propertyId))) {
+                throw new errorHandler_1.AppError('Invalid propertyId', 400);
+            }
+            const prop = yield Property_1.Property.findOne({ _id: propertyId, companyId: req.user.companyId }).lean();
+            if (!prop)
+                throw new errorHandler_1.AppError('Invalid propertyId', 400);
+            propId = new mongoose_1.default.Types.ObjectId(String(propertyId));
+        }
         const buyer = yield Buyer_1.Buyer.create({
             name,
             email,
@@ -84,6 +95,7 @@ const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             budgetMax: Number(budgetMax || 0),
             idNumber: idNumber,
             prefs: prefs || '',
+            propertyId: propId,
             developmentId: devId,
             developmentUnitId: unitId,
             companyId: req.user.companyId,

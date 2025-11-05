@@ -28,12 +28,13 @@ export const createViewing = async (req: Request, res: Response) => {
     if (!req.user?.userId) throw new AppError('Authentication required', 401);
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
-    const { propertyId, buyerId, when, status, notes } = req.body;
+    const { propertyId, buyerId, leadId, when, status, notes } = req.body;
     if (!propertyId || !when) throw new AppError('propertyId and when are required', 400);
 
     const viewing = await Viewing.create({
       propertyId,
       buyerId: buyerId || undefined,
+      leadId: leadId || undefined,
       when: new Date(when),
       status: status || 'Scheduled',
       notes: notes || '',

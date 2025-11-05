@@ -26,6 +26,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
   const groupRef = useMemo(() => receipt?.saleId || receipt?.referenceNumber || receipt?.manualPropertyAddress || '', [receipt]);
   const currency = receipt?.currency || 'USD';
   const isLevy = useMemo(() => (receipt?.paymentType || receipt?.type) === 'levy', [receipt]);
+  const displayReceiptNumber = useMemo(() => receipt?.receiptCode || receipt?.receiptNumber, [receipt?.receiptCode, receipt?.receiptNumber]);
   // Ensure company details presence for print even if backend omitted optional fields
   const safeCompany = useMemo(() => {
     const c = receipt?.company || {};
@@ -126,7 +127,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
         <!DOCTYPE html>
         <html>
           <head>
-            <title>${isLevy ? 'Levy Payment Receipt' : 'Payment Receipt'} - ${receipt.receiptNumber}</title>
+            <title>${isLevy ? 'Levy Payment Receipt' : 'Payment Receipt'} - ${displayReceiptNumber}</title>
             <style>
               body {
                 font-family: Arial, sans-serif;
@@ -222,7 +223,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 ${safeCompany.registrationNumber ? `<p>Reg. No: ${safeCompany.registrationNumber}</p>` : ''}
                 ${safeCompany.tinNumber ? `<p>Tax No: ${safeCompany.tinNumber}</p>` : ''}
                 <div class="receipt-title">${isLevy ? 'Levy Payment Receipt' : 'Payment Receipt'}</div>
-                <div class="receipt-number">Receipt #${receipt.receiptNumber}</div>
+                <div class="receipt-number">Receipt #${displayReceiptNumber}</div>
               </div>
               
               <div class="amount">
@@ -377,7 +378,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
           ${receipt.amount?.toFixed(2) || '0.00'}
         </Typography>
         <Typography variant="h6" color="textSecondary">
-          Receipt #{receipt.receiptNumber}
+          Receipt #{displayReceiptNumber}
         </Typography>
       </Box>
 

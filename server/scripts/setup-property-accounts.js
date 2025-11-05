@@ -93,14 +93,15 @@ class SetupPropertyAccountService {
         return;
       }
 
-      // Create income transaction
+      // Create income transaction (rental vs sale)
+      const isSale = payment.paymentType === 'sale';
       const incomeTransaction = {
         type: 'income',
         amount: ownerAmount,
         date: payment.paymentDate || payment.createdAt,
         paymentId: new mongoose.Types.ObjectId(paymentId),
-        description: `Rental income - ${payment.referenceNumber}`,
-        category: 'rental_income',
+        description: isSale ? `Sale income - ${payment.referenceNumber}` : `Rental income - ${payment.referenceNumber}`,
+        category: isSale ? 'sale_income' : 'rental_income',
         status: 'completed',
         processedBy: payment.processedBy,
         referenceNumber: payment.referenceNumber,

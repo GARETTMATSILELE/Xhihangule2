@@ -584,9 +584,7 @@ export default function CRM() {
         name: buyer.name,
         phone: buyer.phone,
         email: buyer.email,
-        budgetMin: Number(buyer.budgetMin || 0),
-        budgetMax: Number(buyer.budgetMax || 0),
-        prefs: buyer.prefs
+        propertyId: buyer.propertyId
       });
       await refreshBuyers();
     } catch (e) {}
@@ -627,6 +625,7 @@ export default function CRM() {
         commissionPreaPercent: Number(property.commissionPreaPercent || 3),
         commissionAgencyPercentRemaining: Number(property.commissionAgencyPercentRemaining || 50),
         commissionAgentPercentRemaining: Number(property.commissionAgentPercentRemaining || 50),
+        images: Array.isArray((property as any).images) ? (property as any).images.filter((u: any)=> String(u||'').trim() !== '') : [],
       } as any;
       // Include property owner (from selection) and agent
       if (property.ownerId) {
@@ -678,7 +677,7 @@ export default function CRM() {
     try {
       await viewingService.create({
         propertyId: v.propertyId,
-        buyerId: v.buyerId,
+        leadId: v.leadId,
         when: new Date(v.when).toISOString(),
         status: v.status,
         notes: v.notes
@@ -883,7 +882,7 @@ export default function CRM() {
         {!location.pathname.includes('/sales-dashboard/files') && !location.pathname.includes('/sales-dashboard/valuations') && (
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap">
             {[
-              "Leads","Viewings","Buyers","Owners","Properties","Deals"
+              "Leads","Viewings","Owners","Properties","Buyers","Deals"
             ].map(t => (
               <Button key={t} onClick={()=>setTab(t)} className={cls("whitespace-nowrap", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
             ))}
@@ -1171,12 +1170,11 @@ export default function CRM() {
             <CardContent>
               {/* Saved segments */}
               <div className="mb-3 flex flex-wrap gap-2">
-                {['All','Hot','Budget ≥ 200k','North of CBD'].map(seg => (
+                {['All'].map(seg => (
                   <button key={seg} className={cls("text-xs px-2 py-1 rounded-lg border", (localStorage.getItem('buyers_segment')||'All')===seg?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={()=>{ localStorage.setItem('buyers_segment', seg); }}>
                     {seg}
                   </button>
                 ))}
-                <button className="text-xs underline" onClick={()=>{ const n = prompt('Save current filter as segment name'); if (!n) return; localStorage.setItem('buyers_segment', n); }}>Save current as segment</button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1185,8 +1183,6 @@ export default function CRM() {
                       <th className="py-2">Name</th>
                       <th className="py-2">Phone</th>
                       <th className="py-2">Email</th>
-                      <th className="py-2">Budget</th>
-                      <th className="py-2">Preferences</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1196,22 +1192,14 @@ export default function CRM() {
                         id: b._id,
                         name: b.name,
                         phone: b.phone,
-                        email: b.email,
-                        budgetMin: b.budgetMin || 0,
-                        budgetMax: b.budgetMax || 0,
-                        prefs: b.prefs || ''
+                        email: b.email
                       }));
-                      if (seg === 'Hot') rows = rows.filter(b => (b.budgetMax - b.budgetMin) >= 50000);
-                      if (seg === 'Budget ≥ 200k') rows = rows.filter(b => b.budgetMax >= 200000);
-                      if (seg === 'North of CBD') rows = rows.filter(b => /north|borrowdale|avondale/i.test(b.prefs));
-                      rows = filtered(rows,["name","email","phone","prefs"]);
+                      rows = filtered(rows,["name","email","phone"]);
                       return rows.map(b => (
                         <tr key={b.id} className="border-t">
                           <td className="py-2 font-medium">{b.name}</td>
                           <td className="py-2">{b.phone}</td>
                           <td className="py-2">{b.email}</td>
-                          <td className="py-2">{money(b.budgetMin)} - {money(b.budgetMax)}</td>
-                          <td className="py-2">{b.prefs}</td>
                         </tr>
                       ));
                     })()}
@@ -1295,7 +1283,11 @@ export default function CRM() {
                   const density = (localStorage.getItem('prop_density')||'comfortable');
                   return (
                     <div key={bp._id} className="rounded-2xl border overflow-hidden bg-white">
-                      <div className={cls("w-full bg-slate-100", density==='compact'?"h-28":"h-40")}></div>
+                      {Array.isArray((bp as any)?.images) && (bp as any).images.length > 0 ? (
+                        <img src={(bp as any).images[0]} alt={bp.name} className={cls("w-full object-cover", density==='compact'?"h-28":"h-40")} />
+                      ) : (
+                        <div className={cls("w-full bg-slate-100", density==='compact'?"h-28":"h-40")}></div>
+                      )}
                       <div className={cls("p-3", density==='compact'?"space-y-1":"space-y-2")}> 
                         <div className="flex items-center justify-between">
                           <div className="font-medium text-sm">{bp.address || bp.name}</div>
@@ -1487,6 +1479,7 @@ export default function CRM() {
                 commissionPreaPercent: Number(values.commissionPreaPercent || 3),
                 commissionAgencyPercentRemaining: Number(values.commissionAgencyPercentRemaining || 50),
                 commissionAgentPercentRemaining: Number(values.commissionAgentPercentRemaining || 50),
+                images: Array.isArray((values as any).images) ? (values as any).images.filter((u: any)=> String(u||'').trim() !== '') : [],
               };
               if (values.ownerId) payload.propertyOwnerId = values.ownerId;
               await propertyService.updateProperty(editPropertyId, payload);
@@ -1517,6 +1510,7 @@ export default function CRM() {
             commissionPreaPercent: (bp as any).commissionPreaPercent ?? 3,
             commissionAgencyPercentRemaining: (bp as any).commissionAgencyPercentRemaining ?? 50,
             commissionAgentPercentRemaining: (bp as any).commissionAgentPercentRemaining ?? 50,
+            images: Array.isArray((bp as any)?.images) ? (bp as any).images : [],
           };
         })()}
         owners={(owners || []).map((o: any) => ({
@@ -1525,7 +1519,7 @@ export default function CRM() {
         }))}
         companyId={user?.companyId}
       />
-      <ViewingModal open={showViewingModal} onClose={()=>setShowViewingModal(false)} onSubmit={addViewing} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
+      <ViewingModal open={showViewingModal} onClose={()=>setShowViewingModal(false)} onSubmit={addViewing} leads={(backendLeads || []).map((l: any) => ({ id: l._id, name: l.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
       <DealModal open={showDealModal} onClose={()=>setShowDealModal(false)} onSubmit={addDeal} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
 
       <CommissionDrilldown />
@@ -1666,18 +1660,29 @@ function LeadModal({ open, onClose, onSubmit }) {
 }
 
 function BuyerModal({ open, onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: "", phone: "", email: "", budgetMin: "", budgetMax: "", prefs: "" });
-  useEffect(()=>{ if(!open) setForm({ name: "", phone: "", email: "", budgetMin: "", budgetMax: "", prefs: "" }); }, [open]);
+  const { properties: backendProperties } = useProperties();
+  const [form, setForm] = useState({ name: "", phone: "", email: "" });
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | "">("");
+  useEffect(()=>{ 
+    if(!open) { 
+      setForm({ name: "", phone: "", email: "" }); 
+      setSelectedPropertyId(""); 
+    } 
+  }, [open]);
+  const saleProperties = (backendProperties || []).filter((p: any) => (p as any).rentalType === 'sale');
   return (
     <Modal open={open} onClose={onClose} title="Add Buyer">
-      <form onSubmit={async (e)=>{ e.preventDefault(); await onSubmit({
-        name: form.name,
-        phone: form.phone,
-        email: form.email,
-        budgetMin: form.budgetMin,
-        budgetMax: form.budgetMax,
-        prefs: form.prefs
-      }); onClose(); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <form onSubmit={async (e)=>{ 
+        e.preventDefault(); 
+        if (!selectedPropertyId) return; 
+        await onSubmit({
+          name: form.name,
+          phone: form.phone,
+          email: form.email,
+          propertyId: selectedPropertyId
+        }); 
+        onClose(); 
+      }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="text-sm">Name</label>
           <Input required value={form.name} onChange={e=>setForm({ ...form, name: e.target.value })} />
@@ -1690,21 +1695,16 @@ function BuyerModal({ open, onClose, onSubmit }) {
           <label className="text-sm">Email</label>
           <Input type="email" value={form.email} onChange={e=>setForm({ ...form, email: e.target.value })} />
         </div>
-        <div>
-          <label className="text-sm">Budget Min</label>
-          <Input type="number" value={form.budgetMin} onChange={e=>setForm({ ...form, budgetMin: e.target.value })} />
-        </div>
-        <div>
-          <label className="text-sm">Budget Max</label>
-          <Input type="number" value={form.budgetMax} onChange={e=>setForm({ ...form, budgetMax: e.target.value })} />
-        </div>
         <div className="md:col-span-2">
-          <label className="text-sm">Preferences</label>
-          <Textarea rows={3} value={form.prefs} onChange={e=>setForm({ ...form, prefs: e.target.value })} placeholder="e.g., 3+ bedrooms, north of CBD" />
+          <label className="text-sm">Property</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={selectedPropertyId} onChange={e=>setSelectedPropertyId(e.target.value)} required>
+            <option value="">-- Select sale property --</option>
+            {saleProperties.map((p: any) => (<option key={p._id} value={p._id}>{p.name}</option>))}
+          </select>
         </div>
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
-          <Button className="bg-slate-900 text-white border-slate-900" type="submit">Save Buyer</Button>
+          <Button className="bg-slate-900 text-white border-slate-900" type="submit" disabled={!selectedPropertyId}>Save Buyer</Button>
         </div>
       </form>
     </Modal>
@@ -1747,14 +1747,32 @@ function OwnerModal({ open, onClose, onSubmit }) {
 }
 
 function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial, companyId }) {
-  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
+  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50, images: (initial as any)?.images || [] });
   useEffect(()=>{
     if (open) {
-      setForm({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50 });
+      setForm({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50, images: (initial as any)?.images || [] });
     }
   }, [open, owners, initial]);
   const [valuations, setValuations] = useState<any[]>([]);
   const [pickedValuationId, setPickedValuationId] = useState<string>("");
+  const handleImageFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const fileArray = Array.from(files);
+    let remaining = fileArray.length;
+    const newImages: string[] = [];
+    fileArray.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        if (result) newImages.push(result);
+        remaining -= 1;
+        if (remaining === 0) {
+          setForm(prev => ({ ...prev, images: [ ...(Array.isArray(prev.images) ? prev.images : []), ...newImages ] }));
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1846,6 +1864,25 @@ function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial,
             {Object.keys(propertyColors).map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
+        <div className="md:col-span-2">
+          <label className="text-sm">Images</label>
+          <div className="space-y-2">
+            <input type="file" accept="image/*" multiple onChange={e=>handleImageFiles(e.target.files)} />
+            {Array.isArray(form.images) && form.images.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {(form.images as any[]).map((src: any, idx: number) => (
+                  <div key={idx} className="relative border rounded-lg overflow-hidden">
+                    <img src={src} alt={`Property ${idx+1}`} className="w-full h-28 object-cover" />
+                    <button type="button" className="absolute top-1 right-1 text-xs px-2 py-1 rounded bg-white/80 border" onClick={()=>{
+                      const next = (form.images as any[]).filter((_, i)=> i !== idx);
+                      setForm({ ...form, images: next });
+                    }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
         <div>
           <label className="text-sm">Sale Type</label>
           <select className="w-full px-3 py-2 rounded-xl border" value={form.saleType} onChange={e=>setForm({ ...form, saleType: e.target.value })}>
@@ -1884,9 +1921,9 @@ function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial,
   );
 }
 
-function ViewingModal({ open, onClose, onSubmit, buyers, properties }) {
-  const [form, setForm] = useState({ propertyId: properties[0]?.id, buyerId: buyers[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" });
-  useEffect(()=>{ if(!open) setForm({ propertyId: properties[0]?.id, buyerId: buyers[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" }); }, [open, buyers, properties]);
+function ViewingModal({ open, onClose, onSubmit, leads, properties }) {
+  const [form, setForm] = useState({ propertyId: properties[0]?.id, leadId: leads[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" });
+  useEffect(()=>{ if(!open) setForm({ propertyId: properties[0]?.id, leadId: leads[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" }); }, [open, leads, properties]);
   return (
     <Modal open={open} onClose={onClose} title="Schedule Viewing">
       <form onSubmit={(e)=>{ e.preventDefault(); onSubmit({ ...form, when: new Date(form.when).toISOString() }); onClose(); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1897,9 +1934,9 @@ function ViewingModal({ open, onClose, onSubmit, buyers, properties }) {
           </select>
         </div>
         <div>
-          <label className="text-sm">Buyer</label>
-          <select className="w-full px-3 py-2 rounded-xl border" value={form.buyerId} onChange={e=>setForm({ ...form, buyerId: e.target.value })}>
-            {buyers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          <label className="text-sm">Lead</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.leadId} onChange={e=>setForm({ ...form, leadId: e.target.value })}>
+            {leads.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </div>
         <div>

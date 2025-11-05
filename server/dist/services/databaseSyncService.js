@@ -473,14 +473,19 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     // Calculate owner amount (income after commission deduction)
                     const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || payment.amount;
                     logger_1.logger.info(`Payment ${payment._id}: Full amount: ${payment.amount}, Owner amount (after commission): ${ownerAmount}`);
-                    // Add income transaction
+                    // Add income transaction (rental vs sale)
+                    const isSale = payment.paymentType === 'sale';
+                    const incomeDescription = isSale
+                        ? `Sale income - ${payment.referenceNumber || ''}`
+                        : `Rent payment - ${payment.tenantName || 'Tenant'}`;
+                    const incomeCategory = isSale ? 'sale_income' : 'rental_income';
                     propertyAccount.transactions.push({
                         type: 'income',
                         amount: ownerAmount,
                         date: payment.paymentDate || new Date(),
                         paymentId: payment._id,
-                        description: `Rent payment - ${payment.tenantName || 'Tenant'}`,
-                        category: 'rental_income',
+                        description: incomeDescription,
+                        category: incomeCategory,
                         recipientType: 'tenant',
                         referenceNumber: payment.referenceNumber,
                         status: 'completed',

@@ -47,12 +47,13 @@ const createViewing = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { propertyId, buyerId, when, status, notes } = req.body;
+        const { propertyId, buyerId, leadId, when, status, notes } = req.body;
         if (!propertyId || !when)
             throw new errorHandler_1.AppError('propertyId and when are required', 400);
         const viewing = yield Viewing_1.Viewing.create({
             propertyId,
             buyerId: buyerId || undefined,
+            leadId: leadId || undefined,
             when: new Date(when),
             status: status || 'Scheduled',
             notes: notes || '',

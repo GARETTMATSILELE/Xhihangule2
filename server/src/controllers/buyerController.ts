@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Buyer } from '../models/Buyer';
+import { Property } from '../models/Property';
 import { AppError } from '../middleware/errorHandler';
 import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
@@ -35,11 +36,12 @@ export const createBuyer = async (req: Request, res: Response) => {
     if (!req.user?.userId) throw new AppError('Authentication required', 401);
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
-    const { name, email, phone, idNumber, budgetMin, budgetMax, prefs, developmentId, developmentUnitId } = req.body;
+    const { name, email, phone, idNumber, budgetMin, budgetMax, prefs, developmentId, developmentUnitId, propertyId } = req.body;
     if (!name) throw new AppError('Name is required', 400);
 
     let devId: mongoose.Types.ObjectId | undefined = undefined;
     let unitId: mongoose.Types.ObjectId | undefined = undefined;
+    let propId: mongoose.Types.ObjectId | undefined = undefined;
     if (developmentId && mongoose.Types.ObjectId.isValid(String(developmentId))) {
       const dev = await Development.findOne({ _id: developmentId, companyId: req.user.companyId }).lean();
       if (!dev) throw new AppError('Invalid developmentId', 400);
@@ -55,6 +57,15 @@ export const createBuyer = async (req: Request, res: Response) => {
       if (!devId) devId = new mongoose.Types.ObjectId(String(unit.developmentId));
     }
 
+    if (propertyId) {
+      if (!mongoose.Types.ObjectId.isValid(String(propertyId))) {
+        throw new AppError('Invalid propertyId', 400);
+      }
+      const prop = await Property.findOne({ _id: propertyId, companyId: req.user.companyId }).lean();
+      if (!prop) throw new AppError('Invalid propertyId', 400);
+      propId = new mongoose.Types.ObjectId(String(propertyId));
+    }
+
     const buyer = await Buyer.create({
       name,
       email,
@@ -63,6 +74,7 @@ export const createBuyer = async (req: Request, res: Response) => {
       budgetMax: Number(budgetMax || 0),
       idNumber: idNumber,
       prefs: prefs || '',
+      propertyId: propId,
       developmentId: devId,
       developmentUnitId: unitId,
       companyId: req.user.companyId,

@@ -26,8 +26,8 @@ export default function BuyersPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState<string>('');
   const [editing, setEditing] = React.useState<any | null>(null);
-  const [form, setForm] = React.useState<any>({ name: '', email: '', phone: '', budgetMin: '', budgetMax: '', prefs: '' });
-  const [createForm, setCreateForm] = React.useState<any>({ name: '', email: '', phone: '', budgetMin: '', budgetMax: '', prefs: '' });
+  const [form, setForm] = React.useState<any>({ name: '', email: '', phone: '' });
+  const [createForm, setCreateForm] = React.useState<any>({ name: '', email: '', phone: '' });
 
   const load = React.useCallback(async () => {
     try {
@@ -47,9 +47,9 @@ export default function BuyersPage() {
     return hay.includes(query.toLowerCase());
   });
 
-  const startEdit = (b: any) => { setEditing(b); setForm({ name: b.name||'', email: b.email||'', phone: b.phone||'', budgetMin: b.budgetMin||'', budgetMax: b.budgetMax||'', prefs: b.prefs||'' }); };
+  const startEdit = (b: any) => { setEditing(b); setForm({ name: b.name||'', email: b.email||'', phone: b.phone||'' }); };
   const saveEdit = async () => { if (!editing?._id) return; try { setLoading(true); await buyerService.update(editing._id, form); setEditing(null); await load(); } catch (e: any) { setError(e?.message||'Failed to update'); } finally { setLoading(false); } };
-  const createBuyer = async () => { if (!createForm.name?.trim()) { setError('Name is required'); return; } try { setLoading(true); setError(null); await buyerService.create({...createForm, budgetMin: Number(createForm.budgetMin||0), budgetMax: Number(createForm.budgetMax||0)}); setCreateForm({ name: '', email: '', phone: '', budgetMin: '', budgetMax: '', prefs: '' }); await load(); } catch (e:any) { setError(e?.message||'Failed to create'); } finally { setLoading(false); } };
+  const createBuyer = async () => { if (!createForm.name?.trim()) { setError('Name is required'); return; } try { setLoading(true); setError(null); await buyerService.create({ name: createForm.name, email: createForm.email, phone: createForm.phone }); setCreateForm({ name: '', email: '', phone: '' }); await load(); } catch (e:any) { setError(e?.message||'Failed to create'); } finally { setLoading(false); } };
   const deleteBuyer = async (id: string) => { if (!id) return; if (!window.confirm('Delete this buyer?')) return; try { setLoading(true); await buyerService.remove(id); await load(); } catch (e:any) { setError(e?.message||'Failed to delete'); } finally { setLoading(false); } };
 
   return (
@@ -70,9 +70,6 @@ export default function BuyersPage() {
                 <Input placeholder="Name" value={createForm.name} onChange={(e:any)=>setCreateForm((f:any)=>({...f, name: e.target.value}))} />
                 <Input placeholder="Email" value={createForm.email} onChange={(e:any)=>setCreateForm((f:any)=>({...f, email: e.target.value}))} />
                 <Input placeholder="Phone" value={createForm.phone} onChange={(e:any)=>setCreateForm((f:any)=>({...f, phone: e.target.value}))} />
-                <Input placeholder="Budget Min" value={createForm.budgetMin} onChange={(e:any)=>setCreateForm((f:any)=>({...f, budgetMin: e.target.value}))} />
-                <Input placeholder="Budget Max" value={createForm.budgetMax} onChange={(e:any)=>setCreateForm((f:any)=>({...f, budgetMax: e.target.value}))} />
-                <Input placeholder="Preferences" value={createForm.prefs} onChange={(e:any)=>setCreateForm((f:any)=>({...f, prefs: e.target.value}))} />
                 <div><button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={createBuyer} disabled={loading}>Create Buyer</button></div>
               </div>
 
@@ -86,19 +83,15 @@ export default function BuyersPage() {
                         <th className="py-2">Name</th>
                         <th className="py-2">Email</th>
                         <th className="py-2">Phone</th>
-                        <th className="py-2">Budget</th>
-                        <th className="py-2">Preferences</th>
                         <th className="py-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered(buyers, ['name','email','phone','prefs']).map(b => (
+                      {filtered(buyers, ['name','email','phone']).map(b => (
                         <tr key={b._id} className="border-t">
                           <td className="py-2 font-medium">{b.name}</td>
                           <td className="py-2">{b.email}</td>
                           <td className="py-2">{b.phone}</td>
-                          <td className="py-2">{b.budgetMin || 0} – {b.budgetMax || 0}</td>
-                          <td className="py-2">{b.prefs}</td>
                           <td className="py-2 flex gap-3">
                             <button className="text-xs underline" onClick={()=>startEdit(b)}>Edit</button>
                             <button className="text-xs underline text-rose-700" onClick={()=>deleteBuyer(b._id)}>Delete</button>
@@ -120,9 +113,6 @@ export default function BuyersPage() {
                   <Input placeholder="Name" value={form.name} onChange={(e:any)=>setForm((f:any)=>({...f, name: e.target.value}))} />
                   <Input placeholder="Email" value={form.email} onChange={(e:any)=>setForm((f:any)=>({...f, email: e.target.value}))} />
                   <Input placeholder="Phone" value={form.phone} onChange={(e:any)=>setForm((f:any)=>({...f, phone: e.target.value}))} />
-                  <Input placeholder="Budget Min" value={form.budgetMin} onChange={(e:any)=>setForm((f:any)=>({...f, budgetMin: e.target.value}))} />
-                  <Input placeholder="Budget Max" value={form.budgetMax} onChange={(e:any)=>setForm((f:any)=>({...f, budgetMax: e.target.value}))} />
-                  <Input placeholder="Preferences" value={form.prefs} onChange={(e:any)=>setForm((f:any)=>({...f, prefs: e.target.value}))} />
                 </div>
                 <div className="mt-3 flex gap-2">
                   <button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={saveEdit} disabled={loading}>Save</button>

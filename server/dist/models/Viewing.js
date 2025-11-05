@@ -38,6 +38,7 @@ const mongoose_1 = __importStar(require("mongoose"));
 const ViewingSchema = new mongoose_1.Schema({
     propertyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Property', required: true },
     buyerId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Buyer' },
+    leadId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Lead' },
     when: { type: Date, required: true },
     status: { type: String, enum: ['Scheduled', 'Done', 'No-show'], default: 'Scheduled' },
     notes: { type: String, default: '' },

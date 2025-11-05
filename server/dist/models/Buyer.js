@@ -43,6 +43,7 @@ const BuyerSchema = new mongoose_1.Schema({
     budgetMin: { type: Number, default: 0, min: 0 },
     budgetMax: { type: Number, default: 0, min: 0 },
     prefs: { type: String, default: '' },
+    propertyId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Property' },
     developmentId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Development' },
     developmentUnitId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'DevelopmentUnit' },
     companyId: {
@@ -60,6 +61,7 @@ const BuyerSchema = new mongoose_1.Schema({
 }, { timestamps: true });
 BuyerSchema.index({ companyId: 1 });
 BuyerSchema.index({ ownerId: 1 });
+BuyerSchema.index({ propertyId: 1 });
 BuyerSchema.index({ developmentId: 1 });
 BuyerSchema.index({ developmentUnitId: 1 });
 exports.Buyer = mongoose_1.default.model('Buyer', BuyerSchema, 'buyers');

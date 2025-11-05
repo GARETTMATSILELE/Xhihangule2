@@ -77,7 +77,9 @@ export const SalesSidebar: React.FC = () => {
           <span>Files</span>
         </button>
         {/* Section quick-links */}
-        {(["Leads","Viewings","Buyers","Owners","Properties","Deals","Valuations","Developments"] as const).map(section => {
+        {(["Leads","Viewings","Buyers","Owners","Properties","Deals","Valuations","Developments"] as const)
+          .filter(section => !(location.pathname.includes('/sales-dashboard/files') && section === 'Buyers'))
+          .map(section => {
           const key = section.toLowerCase() as 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals';
           const active = isActive(key as any);
           return (

@@ -12,6 +12,7 @@ export interface ViewingDTO {
 export interface CreateViewingInput {
   propertyId: string;
   buyerId?: string;
+  leadId?: string;
   when: string;
   status?: ViewingDTO['status'];
   notes?: string;

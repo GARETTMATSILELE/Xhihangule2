@@ -183,14 +183,19 @@ class PropertyAccountService {
                     logger_1.logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
                     return;
                 }
-                // Create income transaction
+                // Create income transaction (rental vs sale)
+                const isSale = payment.paymentType === 'sale';
+                const incomeDescription = isSale
+                    ? `Sale income - ${payment.referenceNumber}`
+                    : `Rental income - ${payment.referenceNumber}`;
+                const incomeCategory = isSale ? 'sale_income' : 'rental_income';
                 const incomeTransaction = {
                     type: 'income',
                     amount: incomeAmount,
                     date: payment.paymentDate || payment.createdAt,
                     paymentId: new mongoose_1.default.Types.ObjectId(paymentId),
-                    description: `Rental income - ${payment.referenceNumber}`,
-                    category: 'rental_income',
+                    description: incomeDescription,
+                    category: incomeCategory,
                     status: 'completed',
                     processedBy: payment.processedBy,
                     referenceNumber: payment.referenceNumber,
