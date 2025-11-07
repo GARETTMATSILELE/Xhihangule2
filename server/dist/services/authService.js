@@ -37,8 +37,17 @@ class AuthService {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.isInitialized)
                 return;
-            const isAvailable = yield (0, database_1.isDatabaseAvailable)();
-            if (!isAvailable) {
+            // Be resilient during startup/transient reconnects: attempt a quick lazy connect + short retries
+            if (!(0, database_1.isDatabaseAvailable)()) {
+                try {
+                    yield (0, database_1.connectDatabase)();
+                }
+                catch (_a) { }
+                for (let i = 0; i < 3 && !(0, database_1.isDatabaseAvailable)(); i++) {
+                    yield new Promise((r) => setTimeout(r, 1000));
+                }
+            }
+            if (!(0, database_1.isDatabaseAvailable)()) {
                 // Return an operational error so the API surfaces 503 instead of 500
                 throw new errorHandler_1.AppError('Service temporarily unavailable', 503, 'SERVICE_UNAVAILABLE');
             }

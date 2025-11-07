@@ -603,7 +603,9 @@ const SalesDevelopmentsPage: React.FC = () => {
                             label: String(unit.label),
                             status: unit.status as UnitStatus,
                             buyerName: buyersByUnit[String(unit.id)] || unit.buyerName,
-                            unitNumber: typeof unit.unitNumber === 'number' ? unit.unitNumber : undefined
+                            unitNumber: typeof unit.unitNumber === 'number' ? unit.unitNumber : undefined,
+                            collaborators: Array.isArray(unit.collaborators) ? unit.collaborators.map((x:any)=>String(x)) : [],
+                            price: typeof unit.price === 'number' ? Number(unit.price) : undefined
                           }));
                           updateDevelopment(dev.id, { units: nextUnits });
                         } catch {}

@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateVariation = exports.addVariations = exports.recomputeStats = exports.listPaymentsForDevelopment = exports.listUnitsForDevelopment = exports.deleteDevelopment = exports.updateDevelopment = exports.getDevelopment = exports.removeCollaborator = exports.addCollaborator = exports.listDevelopments = exports.createDevelopment = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
+const access_1 = require("../utils/access");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
 const Payment_1 = require("../models/Payment");
@@ -231,7 +232,7 @@ const listDevelopments = (req, res) => __awaiter(void 0, void 0, void 0, functio
         const companyId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
         // Sales users see developments they created OR those shared with them as collaborators.
         // Admin/accountant see all company developments.
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         let match;
         let unitDevIds = [];
         if (isPrivileged) {
@@ -263,7 +264,7 @@ const addCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!dev)
             throw new errorHandler_1.AppError('Development not found', 404);
         // Only development creator (owner) or admin/accountant can add collaborators
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         if (!isPrivileged && !isOwner) {
             throw new errorHandler_1.AppError('Only the development owner or admin can add collaborators', 403);
@@ -293,7 +294,7 @@ const removeCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const dev = yield Development_1.Development.findOne({ _id: req.params.id, companyId: req.user.companyId });
         if (!dev)
             throw new errorHandler_1.AppError('Development not found', 404);
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         if (!isPrivileged && !isOwner) {
             throw new errorHandler_1.AppError('Only the development owner or admin can remove collaborators', 403);
@@ -342,7 +343,7 @@ const updateDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             const existing = yield Development_1.Development.findOne({ _id: req.params.id, companyId: req.user.companyId }).lean();
             if (!existing)
                 throw new errorHandler_1.AppError('Development not found', 404);
-            const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+            const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
             const isOwner = String(existing.createdBy) === String(req.user.userId);
             if (!isPrivileged && !isOwner) {
                 throw new errorHandler_1.AppError('Only the development owner or admin can modify collaborator split settings', 403);

@@ -12197,3 +12197,121 @@
 {"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 54ms","timestamp":"2025-11-07T07:40:00.075Z"}
 {"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T07:45:00.044Z"}
 {"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 74ms","timestamp":"2025-11-07T07:45:00.120Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T07:50:00.042Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 38ms","timestamp":"2025-11-07T07:50:00.082Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T07:55:00.045Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 40ms","timestamp":"2025-11-07T07:55:00.083Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-11-07T08:00:00.012Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-11-07T08:00:00.017Z"}
+{"level":"info","message":"Syncing changes since 2025-11-07T07:00:00.019Z","timestamp":"2025-11-07T08:00:00.022Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:00:00.039Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 63ms","timestamp":"2025-11-07T08:00:00.104Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-07T08:00:00.866Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 856ms","timestamp":"2025-11-07T08:00:00.870Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:05:00.018Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 6ms","timestamp":"2025-11-07T08:05:00.025Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:10:00.013Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 21ms","timestamp":"2025-11-07T08:10:00.035Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:15:00.004Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 34ms","timestamp":"2025-11-07T08:15:00.040Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:20:00.018Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 18ms","timestamp":"2025-11-07T08:20:00.037Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:25:00.016Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 11ms","timestamp":"2025-11-07T08:25:00.028Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:30:00.010Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 20ms","timestamp":"2025-11-07T08:30:00.031Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:35:00.014Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 23ms","timestamp":"2025-11-07T08:35:00.040Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:40:00.018Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 13ms","timestamp":"2025-11-07T08:40:00.032Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:45:00.010Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 7ms","timestamp":"2025-11-07T08:45:00.017Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:50:00.009Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 24ms","timestamp":"2025-11-07T08:50:00.035Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T08:55:00.009Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 22ms","timestamp":"2025-11-07T08:55:00.032Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-11-07T09:00:00.010Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-11-07T09:00:00.025Z"}
+{"level":"info","message":"Syncing changes since 2025-11-07T08:00:00.031Z","timestamp":"2025-11-07T09:00:00.032Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:00:00.053Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 27ms","timestamp":"2025-11-07T09:00:00.081Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-07T09:00:00.817Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 807ms","timestamp":"2025-11-07T09:00:00.818Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:05:00.009Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 17ms","timestamp":"2025-11-07T09:05:00.031Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:10:00.015Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 11ms","timestamp":"2025-11-07T09:10:00.028Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:15:00.011Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 21ms","timestamp":"2025-11-07T09:15:00.033Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:20:00.013Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 152ms","timestamp":"2025-11-07T09:20:00.166Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-11-07T09:36:46.627Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Sat Nov 08 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:36:48.302Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-11-07T09:36:48.304Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Fri Nov 07 2025 12:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:36:48.308Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-11-07T09:36:48.309Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Nov 09 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:36:48.313Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-11-07T09:36:48.314Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Mon Dec 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:36:48.322Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-11-07T09:36:48.323Z"}
+{"level":"info","message":"Started sync job: sync_failure_reprocessor - Next run: Fri Nov 07 2025 11:40:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:36:48.327Z"}
+{"level":"info","message":"Added sync schedule: sync_failure_reprocessor - Reprocess pending sync failures with backoff","timestamp":"2025-11-07T09:36:48.328Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-11-07T09:36:48.329Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-11-07T09:36:48.330Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-11-07T09:36:48.331Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-11-07T09:36:48.331Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-11-07T09:36:48.332Z"}
+{"level":"info","message":"Sync job already started: sync_failure_reprocessor - skipping","timestamp":"2025-11-07T09:36:48.333Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-11-07T09:36:48.333Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-11-07T09:36:48.334Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-11-07T09:36:48.334Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:42:59.839Z"}
+{"code":"SERVICE_UNAVAILABLE","isOperational":true,"level":"error","message":"Error occurred: Service temporarily unavailable","method":"POST","name":"AppError","path":"/api/auth/login","stack":"AppError: Service temporarily unavailable\n    at AuthService.<anonymous> (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\authService.js:43:23)\n    at Generator.next (<anonymous>)\n    at fulfilled (C:\\Users\\garet\\OneDrive\\Documents\\GitHub\\Xhihangule2\\server\\dist\\services\\authService.js:5:58)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","statusCode":503,"timestamp":"2025-11-07T09:43:01.720Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 2068ms","timestamp":"2025-11-07T09:43:01.891Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:45:00.015Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 49ms","timestamp":"2025-11-07T09:45:00.068Z"}
+{"level":"info","message":"🚀 Initializing database synchronization services...","timestamp":"2025-11-07T09:47:10.603Z"}
+{"level":"info","message":"Started sync job: daily_sync - Next run: Sat Nov 08 2025 04:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:47:10.884Z"}
+{"level":"info","message":"Added sync schedule: daily_sync - Daily full synchronization at 2 AM","timestamp":"2025-11-07T09:47:10.885Z"}
+{"level":"info","message":"Started sync job: hourly_sync - Next run: Fri Nov 07 2025 12:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:47:10.889Z"}
+{"level":"info","message":"Added sync schedule: hourly_sync - Hourly synchronization of payments and properties","timestamp":"2025-11-07T09:47:10.889Z"}
+{"level":"info","message":"Started sync job: weekly_consistency_check - Next run: Sun Nov 09 2025 05:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:47:10.894Z"}
+{"level":"info","message":"Added sync schedule: weekly_consistency_check - Weekly data consistency validation","timestamp":"2025-11-07T09:47:10.895Z"}
+{"level":"info","message":"Started sync job: monthly_deep_sync - Next run: Mon Dec 01 2025 06:00:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:47:10.902Z"}
+{"level":"info","message":"Added sync schedule: monthly_deep_sync - Monthly deep synchronization and cleanup","timestamp":"2025-11-07T09:47:10.904Z"}
+{"level":"info","message":"Started sync job: sync_failure_reprocessor - Next run: Fri Nov 07 2025 11:50:00 GMT+0200 (Central Africa Time)","timestamp":"2025-11-07T09:47:10.907Z"}
+{"level":"info","message":"Added sync schedule: sync_failure_reprocessor - Reprocess pending sync failures with backoff","timestamp":"2025-11-07T09:47:10.908Z"}
+{"level":"info","message":"Starting all enabled sync schedules...","timestamp":"2025-11-07T09:47:10.909Z"}
+{"level":"info","message":"Sync job already started: daily_sync - skipping","timestamp":"2025-11-07T09:47:10.909Z"}
+{"level":"info","message":"Sync job already started: hourly_sync - skipping","timestamp":"2025-11-07T09:47:10.910Z"}
+{"level":"info","message":"Sync job already started: weekly_consistency_check - skipping","timestamp":"2025-11-07T09:47:10.911Z"}
+{"level":"info","message":"Sync job already started: monthly_deep_sync - skipping","timestamp":"2025-11-07T09:47:10.911Z"}
+{"level":"info","message":"Sync job already started: sync_failure_reprocessor - skipping","timestamp":"2025-11-07T09:47:10.915Z"}
+{"level":"info","message":"All enabled sync schedules started","timestamp":"2025-11-07T09:47:10.917Z"}
+{"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-11-07T09:47:10.923Z"}
+{"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-11-07T09:47:10.924Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:50:00.039Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 22ms","timestamp":"2025-11-07T09:50:00.063Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T09:55:00.367Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 841ms","timestamp":"2025-11-07T09:55:01.205Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-11-07T10:00:00.025Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-11-07T10:00:00.033Z"}
+{"level":"info","message":"Syncing changes since 2025-11-07T09:00:00.035Z","timestamp":"2025-11-07T10:00:00.037Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:00:00.054Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 82ms","timestamp":"2025-11-07T10:00:00.138Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-07T10:00:01.482Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 1458ms","timestamp":"2025-11-07T10:00:01.486Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:05:00.011Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 10ms","timestamp":"2025-11-07T10:05:00.024Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:10:00.012Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 20ms","timestamp":"2025-11-07T10:10:00.035Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:15:00.016Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 18ms","timestamp":"2025-11-07T10:15:00.036Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:20:00.015Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 21ms","timestamp":"2025-11-07T10:20:00.037Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:25:00.008Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 38ms","timestamp":"2025-11-07T10:25:00.047Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:30:00.010Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 11ms","timestamp":"2025-11-07T10:30:00.022Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-07T10:35:00.006Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 26ms","timestamp":"2025-11-07T10:35:00.035Z"}

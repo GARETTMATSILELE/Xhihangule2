@@ -19,6 +19,7 @@ const chartController_1 = require("./chartController");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
+const access_1 = require("../utils/access");
 // Helper function to extract user context from request
 const getUserContext = (req) => {
     // Try to get user context from query parameters first
@@ -190,7 +191,7 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             query.rentalType = 'sale';
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        else if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+        else if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             // Non-admin/accountant users only see their assigned properties
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
@@ -273,7 +274,7 @@ const getProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             companyId: req.user.companyId
         };
         // If user is not an admin or accountant, only allow access to their properties
-        if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             query.ownerId = req.user.userId;
         }
         const property = yield Property_1.Property.findOne(query)

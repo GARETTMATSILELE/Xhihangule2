@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Payment } from '../models/Payment';
 import { AppError } from '../middleware/errorHandler';
+import { hasAnyRole } from '../utils/access';
 
 export const getUserCommissionSummary = async (req: Request, res: Response) => {
   try {
@@ -13,7 +14,7 @@ export const getUserCommissionSummary = async (req: Request, res: Response) => {
     const { saleOnly, startDate, endDate, limit } = req.query as any;
 
     // Authorization: allow self, admin, or accountant within same company
-    if (String(req.user.userId) !== String(targetUserId) && !['admin','accountant'].includes(String(req.user.role || ''))) {
+    if (String(req.user.userId) !== String(targetUserId) && !hasAnyRole(req, ['admin','accountant'])) {
       throw new AppError('Forbidden', 403);
     }
 

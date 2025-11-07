@@ -4,7 +4,7 @@ import { User, IUser } from '../models/User';
 import { PropertyOwner, IPropertyOwner } from '../models/PropertyOwner';
 import { UserRole, JwtPayload } from '../types/auth';
 import { AppError } from '../middleware/errorHandler';
-import { isDatabaseAvailable } from '../config/database';
+import { isDatabaseAvailable, connectDatabase } from '../config/database';
 import { JWT_CONFIG } from '../config/jwt';
 
 // Token expiry times
@@ -30,13 +30,20 @@ export class AuthService {
 
   private async initialize(): Promise<void> {
     if (this.isInitialized) return;
-    
-    const isAvailable = await isDatabaseAvailable();
-    if (!isAvailable) {
+
+    // Be resilient during startup/transient reconnects: attempt a quick lazy connect + short retries
+    if (!isDatabaseAvailable()) {
+      try { await connectDatabase(); } catch {}
+      for (let i = 0; i < 3 && !isDatabaseAvailable(); i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+
+    if (!isDatabaseAvailable()) {
       // Return an operational error so the API surfaces 503 instead of 500
       throw new AppError('Service temporarily unavailable', 503, 'SERVICE_UNAVAILABLE');
     }
-    
+
     this.isInitialized = true;
   }
 

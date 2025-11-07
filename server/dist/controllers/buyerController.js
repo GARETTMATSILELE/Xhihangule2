@@ -19,6 +19,7 @@ const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
+const access_1 = require("../utils/access");
 const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -27,7 +28,7 @@ const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
         const query = { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) };
-        if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
         // Optional filters for developments

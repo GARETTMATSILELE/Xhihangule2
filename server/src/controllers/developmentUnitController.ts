@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { AppError } from '../middleware/errorHandler';
+import { hasAnyRole } from '../utils/access';
 import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
 import { Buyer } from '../models/Buyer';
@@ -126,7 +127,7 @@ export const listUnits = async (req: Request, res: Response) => {
     }
 
     // Restrict to unit collaborators when user is sales and not dev owner/collaborator
-    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isPrivileged = hasAnyRole(req, ['admin', 'accountant']);
     const isOwner = String(dev.createdBy) === String(req.user!.userId);
     const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id:any)=> String(id) === String(req.user!.userId));
     if (!isPrivileged && !isOwner && !isDevCollaborator) {
@@ -190,7 +191,7 @@ export const updateUnitDetails = async (req: Request, res: Response) => {
     if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
 
     // Only admin/accountant or development owner/collaborator can edit details
-    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isPrivileged = hasAnyRole(req, ['admin', 'accountant']);
     const isOwner = String(dev.createdBy) === String(req.user!.userId);
     const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id:any)=> String(id) === String(req.user!.userId));
     if (!isPrivileged && !isOwner && !isDevCollaborator) throw new AppError('Not allowed to modify this unit', 403);
@@ -230,7 +231,7 @@ export const addUnitCollaborator = async (req: Request, res: Response) => {
     const dev = await Development.findById(unit.developmentId).lean();
     if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
     // Only admin/accountant or development owner can add unit collaborators
-    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isPrivileged = hasAnyRole(req, ['admin', 'accountant']);
     const isOwner = String(dev.createdBy) === String(req.user!.userId);
     if (!isPrivileged && !isOwner) throw new AppError('Only development owner or admin can add unit collaborators', 403);
 
@@ -254,7 +255,7 @@ export const removeUnitCollaborator = async (req: Request, res: Response) => {
     if (!unit) throw new AppError('Unit not found', 404);
     const dev = await Development.findById(unit.developmentId).lean();
     if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
-    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isPrivileged = hasAnyRole(req, ['admin', 'accountant']);
     const isOwner = String(dev.createdBy) === String(req.user!.userId);
     if (!isPrivileged && !isOwner) throw new AppError('Only development owner or admin can remove unit collaborators', 403);
 

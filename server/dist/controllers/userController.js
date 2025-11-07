@@ -27,6 +27,7 @@ exports.updateUserById = exports.createUser = exports.getCurrentUser = exports.g
 const mongoose_1 = __importDefault(require("mongoose"));
 const Payment_1 = require("../models/Payment");
 const errorHandler_1 = require("../middleware/errorHandler");
+const access_1 = require("../utils/access");
 const getUserCommissionSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -36,7 +37,7 @@ const getUserCommissionSummary = (req, res) => __awaiter(void 0, void 0, void 0,
         const targetUserId = req.params.id;
         const { saleOnly, startDate, endDate, limit } = req.query;
         // Authorization: allow self, admin, or accountant within same company
-        if (String(req.user.userId) !== String(targetUserId) && !['admin', 'accountant'].includes(String(req.user.role || ''))) {
+        if (String(req.user.userId) !== String(targetUserId) && !(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             throw new errorHandler_1.AppError('Forbidden', 403);
         }
         const q = {

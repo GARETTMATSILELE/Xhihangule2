@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Deal } from '../models/Deal';
 import { AppError } from '../middleware/errorHandler';
+import { hasAnyRole } from '../utils/access';
 
 export const listDeals = async (req: Request, res: Response) => {
   try {
@@ -9,7 +10,7 @@ export const listDeals = async (req: Request, res: Response) => {
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
     const query: any = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
-    if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+    if (!hasAnyRole(req, ['admin', 'accountant'])) {
       query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
     }
     if (req.query.propertyId) {

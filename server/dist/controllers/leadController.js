@@ -16,6 +16,7 @@ exports.deleteLead = exports.updateLead = exports.createLead = exports.listLeads
 const mongoose_1 = __importDefault(require("mongoose"));
 const Lead_1 = require("../models/Lead");
 const errorHandler_1 = require("../middleware/errorHandler");
+const access_1 = require("../utils/access");
 const listLeads = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -24,7 +25,7 @@ const listLeads = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
         const query = { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) };
-        if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
         const leads = yield Lead_1.Lead.find(query).sort({ createdAt: -1 });

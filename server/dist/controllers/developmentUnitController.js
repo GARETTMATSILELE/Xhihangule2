@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.removeUnitCollaborator = exports.addUnitCollaborator = exports.updateUnitDetails = exports.setUnitBuyer = exports.listUnits = exports.updateUnitStatus = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
+const access_1 = require("../utils/access");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
 const Buyer_1 = require("../models/Buyer");
@@ -125,7 +126,7 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             ];
         }
         // Restrict to unit collaborators when user is sales and not dev owner/collaborator
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id) => String(id) === String(req.user.userId));
         if (!isPrivileged && !isOwner && !isDevCollaborator) {
@@ -186,7 +187,7 @@ const updateUnitDetails = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!dev || String(dev.companyId) !== String(req.user.companyId))
             throw new errorHandler_1.AppError('Forbidden', 403);
         // Only admin/accountant or development owner/collaborator can edit details
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id) => String(id) === String(req.user.userId));
         if (!isPrivileged && !isOwner && !isDevCollaborator)
@@ -237,7 +238,7 @@ const addUnitCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!dev || String(dev.companyId) !== String(req.user.companyId))
             throw new errorHandler_1.AppError('Forbidden', 403);
         // Only admin/accountant or development owner can add unit collaborators
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         if (!isPrivileged && !isOwner)
             throw new errorHandler_1.AppError('Only development owner or admin can add unit collaborators', 403);
@@ -265,7 +266,7 @@ const removeUnitCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, f
         const dev = yield Development_1.Development.findById(unit.developmentId).lean();
         if (!dev || String(dev.companyId) !== String(req.user.companyId))
             throw new errorHandler_1.AppError('Forbidden', 403);
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         if (!isPrivileged && !isOwner)
             throw new errorHandler_1.AppError('Only development owner or admin can remove unit collaborators', 403);
