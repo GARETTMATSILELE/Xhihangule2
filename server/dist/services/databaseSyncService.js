@@ -41,6 +41,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DatabaseSyncService = void 0;
 const database_1 = require("../config/database");
@@ -48,6 +51,8 @@ const Payment_1 = require("../models/Payment");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const logger_1 = require("../utils/logger");
+const databaseService_1 = require("./databaseService");
+const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const events_1 = require("events");
 class DatabaseSyncService extends events_1.EventEmitter {
     constructor() {
@@ -62,6 +67,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             syncDuration: 0,
             errors: []
         };
+        this.db = databaseService_1.DatabaseService.getInstance();
     }
     static getInstance() {
         if (!DatabaseSyncService.instance) {
@@ -345,10 +351,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 if (operationType === 'insert' || operationType === 'update') {
                     if (fullDocument && fullDocument.status === 'completed' && fullDocument.paymentType === 'rental') {
                         yield this.syncPaymentToAccounting(fullDocument);
+                        yield this.clearFailureRecord('payment', documentId);
                     }
                 }
                 else if (operationType === 'delete') {
                     yield this.removePaymentFromAccounting(documentId);
+                    yield this.clearFailureRecord('payment', documentId);
                 }
                 // Emit sync event
                 this.emit('paymentSynced', {
@@ -362,7 +370,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             }
             catch (error) {
                 logger_1.logger.error('Error handling payment change:', error);
-                this.recordSyncError('payment', documentId, error instanceof Error ? error.message : String(error));
+                this.recordSyncError('payment', documentId, error);
             }
         });
     }
@@ -376,9 +384,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 if (operationType === 'insert' || operationType === 'update') {
                     yield this.syncPropertyToAccounting(fullDocument);
+                    yield this.clearFailureRecord('property', documentId);
                 }
                 else if (operationType === 'delete') {
                     yield this.removePropertyFromAccounting(documentId);
+                    yield this.clearFailureRecord('property', documentId);
                 }
                 // Emit sync event
                 this.emit('propertySynced', {
@@ -392,7 +402,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             }
             catch (error) {
                 logger_1.logger.error('Error handling property change:', error);
-                this.recordSyncError('property', documentId, error instanceof Error ? error.message : String(error));
+                this.recordSyncError('property', documentId, error);
             }
         });
     }
@@ -406,9 +416,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 if (operationType === 'insert' || operationType === 'update') {
                     yield this.syncUserToAccounting(fullDocument);
+                    yield this.clearFailureRecord('user', documentId);
                 }
                 else if (operationType === 'delete') {
                     yield this.removeUserFromAccounting(documentId);
+                    yield this.clearFailureRecord('user', documentId);
                 }
                 // Emit sync event
                 this.emit('userSynced', {
@@ -422,7 +434,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             }
             catch (error) {
                 logger_1.logger.error('Error handling user change:', error);
-                this.recordSyncError('user', documentId, error instanceof Error ? error.message : String(error));
+                this.recordSyncError('user', documentId, error);
             }
         });
     }
@@ -497,7 +509,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     propertyAccount.runningBalance += ownerAmount;
                     propertyAccount.lastIncomeDate = new Date();
                     propertyAccount.lastUpdated = new Date();
-                    yield propertyAccount.save();
+                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                        yield propertyAccount.save();
+                    }));
                     logger_1.logger.info(`Synced payment ${payment._id} to property account ${payment.propertyId}`);
                     this.recordSyncSuccess();
                 }
@@ -528,7 +542,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         companyAccount.totalIncome += agencyShare;
                         companyAccount.runningBalance += agencyShare;
                         companyAccount.lastUpdated = new Date();
-                        yield companyAccount.save();
+                        yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                            yield companyAccount.save();
+                        }));
                         logger_1.logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
                     }
                 }
@@ -560,7 +576,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                             propertyAccount.ownerName = `${owner.firstName} ${owner.lastName}`;
                         }
                     }
-                    yield propertyAccount.save();
+                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                        yield propertyAccount.save();
+                    }));
                     logger_1.logger.info(`Updated property account for property ${property._id}`);
                 }
                 else {
@@ -586,7 +604,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         totalOwnerPayouts: 0,
                         isActive: property.isActive !== false
                     });
-                    yield newAccount.save();
+                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                        yield newAccount.save();
+                    }));
                     logger_1.logger.info(`Created property account for property ${property._id}`);
                 }
                 this.recordSyncSuccess();
@@ -605,14 +625,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 // Update owner names in property accounts if this user is a property owner
                 const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                const propertyAccounts = yield PropertyAccount.find({ ownerId: user._id });
-                for (const account of propertyAccounts) {
-                    account.ownerName = `${user.firstName} ${user.lastName}`;
-                    account.lastUpdated = new Date();
-                    yield account.save();
-                }
-                if (propertyAccounts.length > 0) {
-                    logger_1.logger.info(`Updated owner name in ${propertyAccounts.length} property accounts for user ${user._id}`);
+                const ownerName = `${user.firstName} ${user.lastName}`;
+                const res = yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                    return yield PropertyAccount.updateMany({ ownerId: user._id }, { $set: { ownerName, lastUpdated: new Date() } }, { maxTimeMS: 5000 });
+                }));
+                if ((res === null || res === void 0 ? void 0 : res.modifiedCount) > 0) {
+                    logger_1.logger.info(`Updated owner name in ${res.modifiedCount} property accounts for user ${user._id}`);
                 }
                 this.recordSyncSuccess();
             }
@@ -641,7 +659,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         propertyAccount.totalIncome -= transaction.amount;
                         propertyAccount.runningBalance -= transaction.amount;
                         propertyAccount.lastUpdated = new Date();
-                        yield propertyAccount.save();
+                        yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                            yield propertyAccount.save();
+                        }));
                         logger_1.logger.info(`Removed payment ${paymentId} from property account ${propertyAccount.propertyId}`);
                     }
                 }
@@ -660,7 +680,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                yield PropertyAccount.findOneAndDelete({ propertyId });
+                yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                    yield PropertyAccount.findOneAndDelete({ propertyId }, { maxTimeMS: 5000 });
+                }));
                 logger_1.logger.info(`Removed property account for property ${propertyId}`);
                 this.recordSyncSuccess();
             }
@@ -678,10 +700,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
                 // Update property accounts to remove owner reference
-                yield PropertyAccount.updateMany({ ownerId: userId }, {
-                    $unset: { ownerId: 1, ownerName: 1 },
-                    $set: { lastUpdated: new Date() }
-                });
+                yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                    yield PropertyAccount.updateMany({ ownerId: userId }, {
+                        $unset: { ownerId: 1, ownerName: 1 },
+                        $set: { lastUpdated: new Date() }
+                    }, { maxTimeMS: 5000 });
+                }));
                 logger_1.logger.info(`Removed user ${userId} from property accounts`);
                 this.recordSyncSuccess();
             }
@@ -742,7 +766,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         this.syncStats.totalSynced++;
                     }
                     catch (error) {
-                        this.recordSyncError('property', property._id.toString(), error instanceof Error ? error.message : String(error));
+                        this.recordSyncError('property', property._id.toString(), error);
                     }
                 }
             }
@@ -769,7 +793,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         this.syncStats.totalSynced++;
                     }
                     catch (error) {
-                        this.recordSyncError('payment', payment._id.toString(), error instanceof Error ? error.message : String(error));
+                        this.recordSyncError('payment', payment._id.toString(), error);
                     }
                 }
             }
@@ -793,7 +817,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         this.syncStats.totalSynced++;
                     }
                     catch (error) {
-                        this.recordSyncError('user', user._id.toString(), error instanceof Error ? error.message : String(error));
+                        this.recordSyncError('user', user._id.toString(), error);
                     }
                 }
             }
@@ -813,18 +837,118 @@ class DatabaseSyncService extends events_1.EventEmitter {
      * Record sync error
      */
     recordSyncError(type, documentId, error) {
+        const err = error;
+        const errorMessage = (err === null || err === void 0 ? void 0 : err.message) ? String(err.message) : String(error);
         this.syncStats.errorCount++;
         this.syncStats.errors.push({
             documentId,
-            error,
+            error: errorMessage,
             timestamp: new Date()
         });
+        // Persist failure for reprocessing
+        try {
+            const retriable = this.db.shouldRetry(err);
+            const labels = Array.isArray(err === null || err === void 0 ? void 0 : err.errorLabels) ? err.errorLabels : [];
+            const backoffMs = retriable ? 5 * 60 * 1000 : undefined; // 5 minutes initial backoff
+            SyncFailure_1.default.updateOne({ type, documentId }, Object.assign({ $set: {
+                    type,
+                    documentId,
+                    errorName: err === null || err === void 0 ? void 0 : err.name,
+                    errorCode: err === null || err === void 0 ? void 0 : err.code,
+                    errorMessage: errorMessage,
+                    errorLabels: labels,
+                    retriable,
+                    status: 'pending',
+                    lastErrorAt: new Date(),
+                    payload: undefined
+                }, $setOnInsert: {
+                    attemptCount: 0
+                } }, (retriable ? { $set: { nextAttemptAt: new Date(Date.now() + backoffMs) } } : {})), { upsert: true }).catch(() => { });
+        }
+        catch (persistErr) {
+            logger_1.logger.warn('Failed to persist sync failure record:', persistErr);
+        }
         // Emit error event
         this.emit('syncError', {
             type,
             documentId,
-            error,
+            error: errorMessage,
+            errorName: error === null || error === void 0 ? void 0 : error.name,
+            errorCode: error === null || error === void 0 ? void 0 : error.code,
+            retriable: this.db.shouldRetry(error),
             timestamp: new Date()
+        });
+    }
+    clearFailureRecord(type, documentId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                yield SyncFailure_1.default.deleteOne({ type, documentId });
+                this.emit('syncFailureCleared', { type, documentId, timestamp: new Date() });
+            }
+            catch (e) {
+                logger_1.logger.warn('Failed to clear failure record:', e);
+            }
+        });
+    }
+    /**
+     * Retry a failed sync for a specific document
+     */
+    retrySyncFor(type, documentId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                switch (type) {
+                    case 'payment': {
+                        const payment = yield Payment_1.Payment.findById(documentId);
+                        if (payment) {
+                            yield this.syncPaymentToAccounting(payment);
+                            yield this.clearFailureRecord('payment', documentId);
+                        }
+                        break;
+                    }
+                    case 'property': {
+                        const property = yield Property_1.Property.findById(documentId);
+                        if (property) {
+                            yield this.syncPropertyToAccounting(property);
+                            yield this.clearFailureRecord('property', documentId);
+                        }
+                        break;
+                    }
+                    case 'user': {
+                        const user = yield User_1.User.findById(documentId);
+                        if (user) {
+                            yield this.syncUserToAccounting(user);
+                            yield this.clearFailureRecord('user', documentId);
+                        }
+                        break;
+                    }
+                    default:
+                        logger_1.logger.warn(`No retry handler for type: ${type}`);
+                }
+            }
+            catch (error) {
+                throw error;
+            }
+        });
+    }
+    /**
+     * List stored sync failures (for dashboard)
+     */
+    listFailures(params) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { status, limit = 100 } = params || {};
+            const query = {};
+            if (status)
+                query.status = status;
+            return SyncFailure_1.default.find(query).sort({ lastErrorAt: -1 }).limit(limit).lean();
+        });
+    }
+    retryFailureById(id) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const fail = yield SyncFailure_1.default.findById(id);
+            if (!fail)
+                return;
+            yield this.retrySyncFor(fail.type, fail.documentId);
+            yield SyncFailure_1.default.updateOne({ _id: fail._id }, { $set: { status: 'resolved' } });
         });
     }
     /**

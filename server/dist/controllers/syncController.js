@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSyncHealth = exports.removeSyncSchedule = exports.addSyncSchedule = exports.stopAllSchedules = exports.startAllSchedules = exports.disableSyncSchedule = exports.enableSyncSchedule = exports.updateSyncSchedule = exports.getSyncSchedules = exports.validateDataConsistency = exports.getSyncStats = exports.getSyncStatus = exports.performFullSync = exports.stopRealTimeSync = exports.startRealTimeSync = void 0;
+exports.retrySyncFailure = exports.listSyncFailures = exports.getSyncHealth = exports.removeSyncSchedule = exports.addSyncSchedule = exports.stopAllSchedules = exports.startAllSchedules = exports.disableSyncSchedule = exports.enableSyncSchedule = exports.updateSyncSchedule = exports.getSyncSchedules = exports.validateDataConsistency = exports.getSyncStats = exports.getSyncStatus = exports.performFullSync = exports.stopRealTimeSync = exports.startRealTimeSync = void 0;
 const databaseSyncService_1 = __importDefault(require("../services/databaseSyncService"));
 const scheduledSyncService_1 = __importDefault(require("../services/scheduledSyncService"));
 const logger_1 = require("../utils/logger");
@@ -554,3 +554,46 @@ const getSyncHealth = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.getSyncHealth = getSyncHealth;
+/**
+ * List sync failures (for dashboard)
+ */
+const listSyncFailures = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const syncService = databaseSyncService_1.default.getInstance();
+        const { status, limit } = req.query;
+        const failures = yield syncService.listFailures({
+            status: status,
+            limit: limit ? Number(limit) : undefined
+        });
+        res.json({ success: true, data: failures });
+    }
+    catch (error) {
+        logger_1.logger.error('Error listing sync failures:', error);
+        res.status(500).json({ success: false, message: 'Failed to list sync failures' });
+    }
+});
+exports.listSyncFailures = listSyncFailures;
+/**
+ * Retry a sync failure
+ */
+const retrySyncFailure = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const syncService = databaseSyncService_1.default.getInstance();
+        const { id, type, documentId } = req.body || {};
+        if (id) {
+            yield syncService.retryFailureById(id);
+        }
+        else if (type && documentId) {
+            yield syncService.retrySyncFor(type, documentId);
+        }
+        else {
+            return res.status(400).json({ success: false, message: 'id or (type, documentId) required' });
+        }
+        res.json({ success: true, message: 'Retry triggered' });
+    }
+    catch (error) {
+        logger_1.logger.error('Error retrying sync failure:', error);
+        res.status(500).json({ success: false, message: 'Failed to retry sync failure' });
+    }
+});
+exports.retrySyncFailure = retrySyncFailure;

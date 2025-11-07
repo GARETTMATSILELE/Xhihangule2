@@ -147,6 +147,16 @@ export const connectDatabase = async (): Promise<void> => {
           { name: 'propertyId_1_ownerPayouts.referenceNumber_1', unique: true, sparse: true }
         );
       }
+
+      // Ensure unique index for transactions.paymentId to guarantee idempotency
+      const hasTxnPaymentIdx = idx.find((i: any) => i.name === 'transactions.paymentId_1');
+      if (!hasTxnPaymentIdx) {
+        console.log('Creating unique sparse index on propertyaccounts.transactions.paymentId');
+        await acct.createIndex(
+          { 'transactions.paymentId': 1 as any },
+          { name: 'transactions.paymentId_1', unique: true, sparse: true }
+        );
+      }
     } catch (acctIdxErr: any) {
       if (acctIdxErr && acctIdxErr.code === 26) {
         console.log('Accounting propertyaccounts collection not found; skipping compound index migration');

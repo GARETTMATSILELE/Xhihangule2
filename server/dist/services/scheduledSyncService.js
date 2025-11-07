@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ScheduledSyncService = void 0;
 const cron_1 = require("cron");
 const databaseSyncService_1 = __importDefault(require("./databaseSyncService"));
+const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const logger_1 = require("../utils/logger");
 class ScheduledSyncService {
     constructor() {
@@ -65,6 +66,15 @@ class ScheduledSyncService {
             name: 'monthly_deep_sync',
             cronExpression: '0 4 1 * *',
             description: 'Monthly deep synchronization and cleanup',
+            enabled: true,
+            runCount: 0,
+            averageDuration: 0
+        });
+        // Reprocess sync failures every 5 minutes
+        this.addSyncSchedule({
+            name: 'sync_failure_reprocessor',
+            cronExpression: '*/5 * * * *',
+            description: 'Reprocess pending sync failures with backoff',
             enabled: true,
             runCount: 0,
             averageDuration: 0
@@ -173,6 +183,9 @@ class ScheduledSyncService {
                     case 'monthly_deep_sync':
                         yield this.executeMonthlyDeepSync();
                         break;
+                    case 'sync_failure_reprocessor':
+                        yield this.executeFailureReprocessor();
+                        break;
                     default:
                         yield this.executeCustomSync(schedule);
                 }
@@ -194,6 +207,67 @@ class ScheduledSyncService {
                     error: error instanceof Error ? error.message : String(error),
                     timestamp: new Date()
                 });
+            }
+        });
+    }
+    /**
+     * Execute failure reprocessor
+     */
+    executeFailureReprocessor() {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b;
+            const MAX_ATTEMPTS = 10;
+            const BASE_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+            try {
+                const now = new Date();
+                const pending = yield SyncFailure_1.default.find({
+                    status: 'pending',
+                    $or: [
+                        { nextAttemptAt: { $exists: false } },
+                        { nextAttemptAt: { $lte: now } }
+                    ]
+                }).limit(100);
+                for (const fail of pending) {
+                    try {
+                        yield this.databaseSyncService.retrySyncFor(fail.type, fail.documentId);
+                        // On success, mark resolved
+                        yield SyncFailure_1.default.updateOne({ _id: fail._id }, { $set: { status: 'resolved' } });
+                        this.databaseSyncService.emit('syncFailureResolved', {
+                            type: fail.type,
+                            documentId: fail.documentId,
+                            resolvedAt: new Date()
+                        });
+                    }
+                    catch (err) {
+                        const attemptCount = ((_a = fail.attemptCount) !== null && _a !== void 0 ? _a : 0) + 1;
+                        const retriable = this.databaseSyncService['db'].shouldRetry(err);
+                        const backoff = Math.min(BASE_BACKOFF_MS * Math.pow(2, attemptCount - 1), 24 * 60 * 60 * 1000); // cap at 24h
+                        const update = {
+                            $set: {
+                                errorName: err === null || err === void 0 ? void 0 : err.name,
+                                errorCode: err === null || err === void 0 ? void 0 : err.code,
+                                errorMessage: (_b = err === null || err === void 0 ? void 0 : err.message) !== null && _b !== void 0 ? _b : String(err),
+                                errorLabels: Array.isArray(err === null || err === void 0 ? void 0 : err.errorLabels) ? err.errorLabels : [],
+                                retriable,
+                                lastErrorAt: new Date(),
+                                nextAttemptAt: retriable ? new Date(Date.now() + backoff) : undefined,
+                                status: attemptCount >= MAX_ATTEMPTS || !retriable ? 'discarded' : 'pending'
+                            },
+                            $inc: { attemptCount: 1 }
+                        };
+                        yield SyncFailure_1.default.updateOne({ _id: fail._id }, update);
+                        this.databaseSyncService.emit('syncFailureRetry', {
+                            type: fail.type,
+                            documentId: fail.documentId,
+                            attempt: attemptCount,
+                            retriable,
+                            nextAttemptAt: retriable ? new Date(Date.now() + backoff) : undefined
+                        });
+                    }
+                }
+            }
+            catch (error) {
+                logger_1.logger.error('Failure reprocessor run failed:', error);
             }
         });
     }

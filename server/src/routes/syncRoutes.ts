@@ -14,7 +14,9 @@ import {
   stopAllSchedules,
   addSyncSchedule,
   removeSyncSchedule,
-  getSyncHealth
+  getSyncHealth,
+  listSyncFailures,
+  retrySyncFailure
 } from '../controllers/syncController';
 import { isAdmin, isAccountant } from '../middleware/roles';
 import { auth } from '../middleware/auth';
@@ -146,6 +148,23 @@ router.post('/schedules/stop-all', auth, (req, res, next) => {
     res.status(403).json({ message: 'Access denied' });
   }
 }, stopAllSchedules);
+
+// Failure listing and retry (Admin and Accountant)
+router.get('/failures', auth, (req, res, next) => {
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
+    next();
+  } else {
+    res.status(403).json({ message: 'Access denied' });
+  }
+}, listSyncFailures);
+
+router.post('/failures/retry', auth, (req, res, next) => {
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
+    next();
+  } else {
+    res.status(403).json({ message: 'Access denied' });
+  }
+}, retrySyncFailure);
 
 export default router;
 

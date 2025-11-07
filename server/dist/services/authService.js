@@ -88,6 +88,7 @@ class AuthService {
                     userId: user._id.toString(),
                     email: user.email,
                     role: user.role,
+                    roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : undefined,
                     companyId: user.companyId ? user.companyId.toString() : undefined
                 },
                 token,
@@ -158,6 +159,7 @@ class AuthService {
                     userId: user._id.toString(),
                     email: user.email,
                     role: type === 'user' ? user.role : 'owner',
+                    roles: type === 'user' ? ((Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined) : undefined,
                     companyId: user.companyId ? user.companyId.toString() : undefined
                 };
                 console.log('AuthService: Returning user data:', result);
@@ -178,6 +180,7 @@ class AuthService {
         const payload = {
             userId: user._id.toString(),
             role: userType === 'user' ? user.role : 'owner',
+            roles: userType === 'user' ? ((Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined) : undefined,
             companyId: user.companyId ? user.companyId.toString() : undefined,
             type: 'access'
         };

@@ -148,4 +148,23 @@ router.post('/schedules/stop-all', auth_1.auth, (req, res, next) => {
         res.status(403).json({ message: 'Access denied' });
     }
 }, syncController_1.stopAllSchedules);
+// Failure listing and retry (Admin and Accountant)
+router.get('/failures', auth_1.auth, (req, res, next) => {
+    var _a, _b;
+    if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) === 'admin' || ((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) === 'accountant') {
+        next();
+    }
+    else {
+        res.status(403).json({ message: 'Access denied' });
+    }
+}, syncController_1.listSyncFailures);
+router.post('/failures/retry', auth_1.auth, (req, res, next) => {
+    var _a, _b;
+    if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) === 'admin' || ((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) === 'accountant') {
+        next();
+    }
+    else {
+        res.status(403).json({ message: 'Access denied' });
+    }
+}, syncController_1.retrySyncFailure);
 exports.default = router;

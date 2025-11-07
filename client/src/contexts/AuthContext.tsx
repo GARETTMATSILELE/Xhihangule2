@@ -36,6 +36,8 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   impersonate: (userId: string) => Promise<void>;
   stopImpersonation: () => Promise<void>;
+  activeRole?: User['role'];
+  setActiveRole: (role: User['role']) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -87,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [isImpersonating, setIsImpersonating] = useState(false);
+  const [activeRole, setActiveRoleState] = useState<User['role'] | undefined>(undefined);
 
   const clearError = () => setError(null);
 
@@ -125,6 +128,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             setUser(userData);
             setIsAuthenticated(true);
+            // Do not auto-restore active role for multi-role users; force explicit choice per session
+            try {
+              const roles: any[] = Array.isArray(userData.roles) && userData.roles.length > 0 ? userData.roles : [userData.role];
+              if (roles.length === 1) setActiveRoleState(roles[0]);
+            } catch {}
             if (storedImpersonating) {
               // When impersonating, do not auto-redirect away; keep current path
               console.log('Resuming impersonation session');
@@ -329,6 +337,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCompany(companyData);
       setIsAuthenticated(true);
       try { localStorage.setItem('auth:event', `login:${Date.now()}`); } catch {}
+      // Decide next route
+      try {
+        const roles: any[] = Array.isArray((userData as any).roles) && (userData as any).roles.length > 0 ? (userData as any).roles : [userData.role];
+        if (roles.length > 1) {
+          // Multi-role users must choose a dashboard every login
+          setActiveRoleState(undefined);
+          setLoading(false);
+          navigate('/choose-dashboard');
+          return userData;
+        }
+        // Single role
+        setActiveRoleState(roles[0]);
+        const dashboardPath = getDashboardPath(roles[0] as any);
+        console.log('Navigating to dashboard:', dashboardPath);
+        navigate(dashboardPath);
+      } catch {}
       
       console.log('User state updated:', { 
         isAuthenticated: true, 
@@ -338,10 +362,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       setLoading(false);
 
-      // Navigate to appropriate dashboard
-      const dashboardPath = getDashboardPath(userData.role);
-      console.log('Navigating to dashboard:', dashboardPath);
-      navigate(dashboardPath);
+      // Navigation handled above
 
       return userData;
     } catch (error) {
@@ -415,6 +436,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       localStorage.removeItem('impersonating');
+      try { localStorage.removeItem('activeRole'); } catch {}
       setIsImpersonating(false);
       setLoading(false);
       try { localStorage.setItem('auth:event', `logout:${Date.now()}`); } catch {}
@@ -560,7 +582,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearError,
       refreshUser,
       impersonate,
-      stopImpersonation
+      stopImpersonation,
+      activeRole,
+      setActiveRole: (role) => {
+        setActiveRoleState(role);
+        try { localStorage.setItem('activeRole', role as any); } catch {}
+        const path = getDashboardPath(role as any);
+        if (window.location.pathname !== path) {
+          try { (window as any).history.pushState({}, '', path); } catch {}
+        }
+      }
     }}>
       {children}
     </AuthContext.Provider>

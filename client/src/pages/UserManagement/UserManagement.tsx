@@ -42,6 +42,7 @@ interface User {
   lastName: string;
   email: string;
   role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
+  roles?: Array<'admin' | 'agent' | 'accountant' | 'owner' | 'sales'>;
   status: 'active' | 'inactive';
 }
 
@@ -56,6 +57,7 @@ interface UserFormData {
   lastName: string;
   email: string;
   role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
+  roles: Array<'admin' | 'agent' | 'accountant' | 'owner' | 'sales'>;
   password: string;
 }
 
@@ -101,6 +103,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
     lastName: '',
     email: '',
     role: 'agent',
+    roles: ['agent'],
     password: '',
   });
   const [message, setMessage] = useState<{
@@ -127,6 +130,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
         lastName: String(u.lastName || ''),
         email: String(u.email || ''),
         role: (u.role || 'agent') as User['role'],
+        roles: Array.isArray(u.roles) ? (u.roles as any) : undefined,
         status: (u.isActive ? 'active' : 'inactive') as User['status'],
       }));
       setUsers(mapped);
@@ -144,11 +148,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
   const handleOpenDialog = (user?: User) => {
     if (user) {
       setSelectedUser(user);
+      const rolesList = Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : [user.role];
       setFormData({
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
-        role: user.role,
+        role: rolesList[0],
+        roles: rolesList as any,
         password: '',
       });
     } else {
@@ -158,6 +164,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
         lastName: '',
         email: '',
         role: 'agent',
+        roles: ['agent'],
         password: '',
       });
     }
@@ -172,6 +179,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
       lastName: '',
       email: '',
       role: 'agent',
+      roles: ['agent'],
       password: '',
     });
   };
@@ -184,26 +192,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
     }));
   };
 
-  const handleRoleChange = (e: SelectChangeEvent) => {
+  const handleRolesChange = (e: SelectChangeEvent<string[]>) => {
+    const value = e.target.value as unknown as string[];
+    const list = Array.isArray(value) ? value : String(value || '').split(',').filter(Boolean);
     setFormData(prev => ({
       ...prev,
-      role: e.target.value as UserFormData['role'],
+      roles: list as any,
+      role: (list[0] as any) || prev.role,
     }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      console.log('Submitting form data:', formData);
-      
+      const payload: any = {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        roles: formData.roles,
+        role: formData.roles[0],
+      };
+      if (!selectedUser) {
+        payload.password = formData.password;
+      } else if (typeof formData.password === 'string' && formData.password.trim()) {
+        payload.password = formData.password;
+      }
+
       if (selectedUser) {
-        await api.put(`/users/${selectedUser.id}`, formData);
+        await api.put(`/users/${selectedUser.id}`, payload);
         setMessage({
           type: 'success',
           text: 'User updated successfully',
         });
       } else {
-        const response = await api.post('/users', formData);
+        const response = await api.post('/users', payload);
         const createdRaw = response.data?.data || response.data;
         const created: User = {
           id: createdRaw._id || createdRaw.id,
@@ -211,6 +233,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
           lastName: createdRaw.lastName,
           email: createdRaw.email,
           role: createdRaw.role,
+          roles: Array.isArray(createdRaw.roles) ? createdRaw.roles : undefined,
           status: createdRaw.isActive ? 'active' : 'inactive',
         };
         setUsers(prevUsers => [...prevUsers, created]);
@@ -376,38 +399,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
           <form onSubmit={handleSubmit}>
             <DialogContent>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TextField
-                  name="firstName"
-                  label="First Name"
-                  value={formData.firstName}
-                  onChange={handleInputChange}
-                  required
-                  fullWidth
-                />
-                <TextField
-                  name="lastName"
-                  label="Last Name"
-                  value={formData.lastName}
-                  onChange={handleInputChange}
-                  required
-                  fullWidth
-                />
-                <TextField
-                  name="email"
-                  label="Email"
-                  type="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  required
-                  fullWidth
-                />
+                <TextField name="firstName" label="First Name" value={formData.firstName} onChange={handleInputChange} required fullWidth />
+                <TextField name="lastName" label="Last Name" value={formData.lastName} onChange={handleInputChange} required fullWidth />
+                <TextField name="email" label="Email" type="email" value={formData.email} onChange={handleInputChange} required fullWidth />
                 <FormControl fullWidth required>
-                  <InputLabel>Role</InputLabel>
+                  <InputLabel>Roles</InputLabel>
                   <Select
-                    name="role"
-                    value={formData.role}
-                    onChange={handleRoleChange}
-                    label="Role"
+                    multiple
+                    name="roles"
+                    value={formData.roles as any}
+                    onChange={handleRolesChange as any}
+                    label="Roles"
+                    renderValue={(selected) => (selected as string[]).map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')}
                   >
                     {ROLES.map((role) => (
                       <MenuItem key={role.id} value={role.name}>
@@ -417,15 +420,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
                   </Select>
                 </FormControl>
                 {!selectedUser && (
-                  <TextField
-                    name="password"
-                    label="Password"
-                    type="password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    required
-                    fullWidth
-                  />
+                  <TextField name="password" label="Password" type="password" value={formData.password} onChange={handleInputChange} required fullWidth />
                 )}
               </Box>
             </DialogContent>
@@ -513,38 +508,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
             <form onSubmit={handleSubmit}>
               <DialogContent>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TextField
-                    name="firstName"
-                    label="First Name"
-                    value={formData.firstName}
-                    onChange={handleInputChange}
-                    required
-                    fullWidth
-                  />
-                  <TextField
-                    name="lastName"
-                    label="Last Name"
-                    value={formData.lastName}
-                    onChange={handleInputChange}
-                    required
-                    fullWidth
-                  />
-                  <TextField
-                    name="email"
-                    label="Email"
-                    type="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    required
-                    fullWidth
-                  />
+                  <TextField name="firstName" label="First Name" value={formData.firstName} onChange={handleInputChange} required fullWidth />
+                  <TextField name="lastName" label="Last Name" value={formData.lastName} onChange={handleInputChange} required fullWidth />
+                  <TextField name="email" label="Email" type="email" value={formData.email} onChange={handleInputChange} required fullWidth />
                   <FormControl fullWidth required>
-                    <InputLabel>Role</InputLabel>
+                    <InputLabel>Roles</InputLabel>
                     <Select
-                      name="role"
-                      value={formData.role}
-                      onChange={handleRoleChange}
-                      label="Role"
+                      multiple
+                      name="roles"
+                      value={formData.roles as any}
+                      onChange={handleRolesChange as any}
+                      label="Roles"
+                      renderValue={(selected) => (selected as string[]).map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')}
                     >
                       {ROLES.map((role) => (
                         <MenuItem key={role.id} value={role.name}>
@@ -554,15 +529,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
                     </Select>
                   </FormControl>
                   {!selectedUser && (
-                    <TextField
-                      name="password"
-                      label="Password"
-                      type="password"
-                      value={formData.password}
-                      onChange={handleInputChange}
-                      required
-                      fullWidth
-                    />
+                    <TextField name="password" label="Password" type="password" value={formData.password} onChange={handleInputChange} required fullWidth />
                   )}
                 </Box>
               </DialogContent>

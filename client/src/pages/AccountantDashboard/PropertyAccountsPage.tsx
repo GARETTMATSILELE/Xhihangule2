@@ -87,14 +87,18 @@ const PropertyAccountsPage: React.FC = () => {
         console.log('Final owner map:', ownerMap);
         setOwnerMap(ownerMap);
 
-        // Map propertyId to owner name for sales owners (salesowners collection)
+        // Map sale propertyId -> owner name using property's propertyOwnerId
+        const salesOwnerById: Record<string, PropertyOwner> = {};
+        salesOwners.forEach((o: PropertyOwner) => { salesOwnerById[String((o as any)._id)] = o; });
         const saleOwnerMapLocal: Record<string, string> = {};
-        salesOwners.forEach((owner: PropertyOwner) => {
-          if (owner.properties && Array.isArray(owner.properties)) {
-            owner.properties.forEach((propertyId: any) => {
-              const propId = typeof propertyId === 'object' && (propertyId as any).$oid ? (propertyId as any).$oid : propertyId;
-              saleOwnerMapLocal[propId] = `${owner.firstName} ${owner.lastName}`;
-            });
+        (props || []).forEach((p: any) => {
+          if ((p as any)?.rentalType === 'sale') {
+            const raw = (p as any).propertyOwnerId;
+            const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
+            if (ownerId && salesOwnerById[ownerId]) {
+              const o = salesOwnerById[ownerId];
+              saleOwnerMapLocal[String((p as any)._id)] = `${o.firstName} ${o.lastName}`;
+            }
           }
         });
         setSaleOwnerMap(saleOwnerMapLocal);

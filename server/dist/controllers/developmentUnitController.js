@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.setUnitBuyer = exports.listUnits = exports.updateUnitStatus = void 0;
+exports.removeUnitCollaborator = exports.addUnitCollaborator = exports.updateUnitDetails = exports.setUnitBuyer = exports.listUnits = exports.updateUnitStatus = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const Development_1 = require("../models/Development");
@@ -124,6 +124,13 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 { buyerId: { $exists: true } }
             ];
         }
+        // Restrict to unit collaborators when user is sales and not dev owner/collaborator
+        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isOwner = String(dev.createdBy) === String(req.user.userId);
+        const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id) => String(id) === String(req.user.userId));
+        if (!isPrivileged && !isOwner && !isDevCollaborator) {
+            query.collaborators = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        }
         const [items, total] = yield Promise.all([
             DevelopmentUnit_1.DevelopmentUnit.find(query)
                 .sort({ variationId: 1, unitNumber: 1 })
@@ -168,3 +175,108 @@ const setUnitBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.setUnitBuyer = setUnitBuyer;
+const updateUnitDetails = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const { unitId } = req.params;
+        const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean();
+        if (!unit)
+            throw new errorHandler_1.AppError('Unit not found', 404);
+        const dev = yield Development_1.Development.findById(unit.developmentId).lean();
+        if (!dev || String(dev.companyId) !== String(req.user.companyId))
+            throw new errorHandler_1.AppError('Forbidden', 403);
+        // Only admin/accountant or development owner/collaborator can edit details
+        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isOwner = String(dev.createdBy) === String(req.user.userId);
+        const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id) => String(id) === String(req.user.userId));
+        if (!isPrivileged && !isOwner && !isDevCollaborator)
+            throw new errorHandler_1.AppError('Not allowed to modify this unit', 403);
+        const body = req.body || {};
+        const setOps = {};
+        if (typeof body.unitCode === 'string')
+            setOps.unitCode = String(body.unitCode).trim();
+        if (typeof body.price === 'number')
+            setOps.price = Number(body.price);
+        if (body.meta && typeof body.meta === 'object') {
+            const meta = {};
+            if (typeof body.meta.block === 'string')
+                meta.block = String(body.meta.block).trim();
+            if (typeof body.meta.floor === 'string')
+                meta.floor = String(body.meta.floor).trim();
+            if (typeof body.meta.bedrooms === 'number')
+                meta.bedrooms = Number(body.meta.bedrooms);
+            if (typeof body.meta.bathrooms === 'number')
+                meta.bathrooms = Number(body.meta.bathrooms);
+            if (typeof body.meta.standSize === 'number')
+                meta.standSize = Number(body.meta.standSize);
+            setOps.meta = meta;
+        }
+        if (Object.keys(setOps).length === 0)
+            return res.json(yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean());
+        const updated = yield DevelopmentUnit_1.DevelopmentUnit.findByIdAndUpdate(unitId, { $set: setOps }, { new: true }).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error updating unit';
+        return res.status(status).json({ message });
+    }
+});
+exports.updateUnitDetails = updateUnitDetails;
+const addUnitCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const { unitId } = req.params;
+        const { userId } = req.body || {};
+        if (!userId || !mongoose_1.default.Types.ObjectId.isValid(String(userId)))
+            throw new errorHandler_1.AppError('Invalid userId', 400);
+        const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean();
+        if (!unit)
+            throw new errorHandler_1.AppError('Unit not found', 404);
+        const dev = yield Development_1.Development.findById(unit.developmentId).lean();
+        if (!dev || String(dev.companyId) !== String(req.user.companyId))
+            throw new errorHandler_1.AppError('Forbidden', 403);
+        // Only admin/accountant or development owner can add unit collaborators
+        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isOwner = String(dev.createdBy) === String(req.user.userId);
+        if (!isPrivileged && !isOwner)
+            throw new errorHandler_1.AppError('Only development owner or admin can add unit collaborators', 403);
+        yield DevelopmentUnit_1.DevelopmentUnit.updateOne({ _id: unitId }, { $addToSet: { collaborators: new mongoose_1.default.Types.ObjectId(String(userId)) } });
+        const updated = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error adding unit collaborator';
+        return res.status(status).json({ message });
+    }
+});
+exports.addUnitCollaborator = addUnitCollaborator;
+const removeUnitCollaborator = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        ensureAuthCompany(req);
+        const { unitId } = req.params;
+        const { userId } = req.body || {};
+        if (!userId || !mongoose_1.default.Types.ObjectId.isValid(String(userId)))
+            throw new errorHandler_1.AppError('Invalid userId', 400);
+        const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean();
+        if (!unit)
+            throw new errorHandler_1.AppError('Unit not found', 404);
+        const dev = yield Development_1.Development.findById(unit.developmentId).lean();
+        if (!dev || String(dev.companyId) !== String(req.user.companyId))
+            throw new errorHandler_1.AppError('Forbidden', 403);
+        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        const isOwner = String(dev.createdBy) === String(req.user.userId);
+        if (!isPrivileged && !isOwner)
+            throw new errorHandler_1.AppError('Only development owner or admin can remove unit collaborators', 403);
+        yield DevelopmentUnit_1.DevelopmentUnit.updateOne({ _id: unitId }, { $pull: { collaborators: new mongoose_1.default.Types.ObjectId(String(userId)) } });
+        const updated = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).lean();
+        return res.json(updated);
+    }
+    catch (error) {
+        const status = (error === null || error === void 0 ? void 0 : error.statusCode) || 500;
+        const message = (error === null || error === void 0 ? void 0 : error.message) || 'Error removing unit collaborator';
+        return res.status(status).json({ message });
+    }
+});
+exports.removeUnitCollaborator = removeUnitCollaborator;

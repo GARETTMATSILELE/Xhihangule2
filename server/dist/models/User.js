@@ -76,6 +76,12 @@ const userSchema = new mongoose_1.Schema({
         enum: ['admin', 'agent', 'accountant', 'owner', 'sales'],
         default: 'agent'
     },
+    roles: {
+        type: [String],
+        enum: ['admin', 'agent', 'accountant', 'owner', 'sales'],
+        required: false,
+        default: undefined
+    },
     companyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
@@ -129,7 +135,10 @@ userSchema.methods.comparePassword = function (candidatePassword) {
 };
 // Method to check if user can access a specific role's dashboard
 userSchema.methods.canAccessRole = function (role) {
-    return this.role === role;
+    const list = Array.isArray(this.roles) && this.roles.length > 0
+        ? this.roles
+        : [this.role];
+    return list.includes(role);
 };
 // Create and export the model
 exports.User = mongoose_1.default.model('User', userSchema, collections_1.COLLECTIONS.USERS);

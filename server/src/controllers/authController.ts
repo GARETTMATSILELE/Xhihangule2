@@ -245,6 +245,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
         email: savedUser!.email,
         name: `${savedUser!.firstName} ${savedUser!.lastName}`,
         role: savedUser!.role,
+        roles: (Array.isArray((savedUser as any).roles) && (savedUser as any).roles!.length > 0) ? (savedUser as any).roles : undefined,
         companyId: savedUser!.companyId
       },
       company: companyData,
@@ -336,6 +337,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         firstName: fullUser.firstName,
         lastName: fullUser.lastName,
         role: fullUser.role,
+        roles: (Array.isArray((fullUser as any).roles) && (fullUser as any).roles!.length > 0) ? (fullUser as any).roles : undefined,
         companyId: fullUser.companyId?.toString(),
         isActive: fullUser.isActive,
         lastLogin: fullUser.lastLogin,
@@ -498,6 +500,7 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        roles: (Array.isArray((user as any).roles) && (user as any).roles!.length > 0) ? (user as any).roles : undefined,
         companyId: user.companyId,
         isActive: user.isActive,
         lastLogin: user.lastLogin,

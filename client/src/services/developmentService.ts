@@ -13,7 +13,7 @@ export interface CreateDevelopmentInput {
     idNumber?: string;
     phone?: string;
   };
-  variations: Array<{ id: string; label: string; count: number; price?: number; size?: number }>;
+  variations: Array<{ id: string; label: string; count: number; price?: number; size?: number; unitCodes?: string[] }>;
   // Commission structure for development-wide payments
   commissionPercent?: number;
   commissionPreaPercent?: number;
@@ -33,6 +33,10 @@ export const developmentService = {
     const res = await api.get('/developments');
     return res.data?.data || res.data;
   },
+  async delete(devId: string) {
+    const res = await api.delete(`/developments/${devId}`);
+    return res.data?.data || res.data;
+  },
   async addCollaborator(devId: string, userId: string) {
     const res = await api.post(`/developments/${devId}/collaborators`, { userId });
     return res.data?.data || res.data;
@@ -41,7 +45,7 @@ export const developmentService = {
     const res = await api.delete(`/developments/${devId}/collaborators`, { data: { userId } as any });
     return res.data?.data || res.data;
   },
-  async addVariations(devId: string, variations: Array<{ id: string; label: string; count: number; price?: number; size?: number }>) {
+  async addVariations(devId: string, variations: Array<{ id: string; label: string; count: number; price?: number; size?: number; unitCodes?: string[] }>) {
     const res = await api.post(`/developments/${devId}/variations`, { variations });
     return res.data?.data || res.data;
   },

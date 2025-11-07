@@ -12,6 +12,7 @@ export interface IDevelopmentUnit extends Document {
   price?: number;
   buyerId?: mongoose.Types.ObjectId;
   buyerName?: string;
+  collaborators?: mongoose.Types.ObjectId[];
   meta?: {
     block?: string;
     floor?: string;
@@ -48,6 +49,7 @@ const DevelopmentUnitSchema: Schema = new Schema({
   price: { type: Number, min: [0, 'Price cannot be negative'] },
   buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Buyer' },
   buyerName: { type: String, trim: true },
+  collaborators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
   meta: {
     block: { type: String, trim: true },
     floor: { type: String, trim: true },
@@ -73,6 +75,7 @@ const DevelopmentUnitSchema: Schema = new Schema({
 DevelopmentUnitSchema.index({ developmentId: 1, status: 1 });
 DevelopmentUnitSchema.index({ developmentId: 1, variationId: 1 });
 DevelopmentUnitSchema.index({ developmentId: 1, variationId: 1, unitNumber: 1 }, { unique: true });
+DevelopmentUnitSchema.index({ collaborators: 1 });
 
 export const DevelopmentUnit = mongoose.model<IDevelopmentUnit>('DevelopmentUnit', DevelopmentUnitSchema, COLLECTIONS.DEVELOPMENT_UNITS);
 

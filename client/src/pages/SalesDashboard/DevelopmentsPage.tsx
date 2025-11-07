@@ -32,6 +32,7 @@ import api from '../../api/axios';
 import { developmentUnitService } from '../../services/developmentUnitService';
 import paymentService from '../../services/paymentService';
 import { Payment } from '../../types/payment';
+import { useAuth } from '../../contexts/AuthContext';
 
 type DevelopmentType = 'stands' | 'apartments' | 'houses' | 'semidetached' | 'townhouses';
 
@@ -56,6 +57,8 @@ interface UnitVariation {
   amenityBorehole?: boolean;
   amenityWaterTank?: boolean;
   amenityPool?: 'none' | 'individual' | 'communal';
+  // custom unit naming
+  customUnitNames?: string; // comma/newline separated input
 }
 
 interface DevelopmentUnit {
@@ -66,6 +69,8 @@ interface DevelopmentUnit {
   buyerName?: string;
   externalSale?: boolean; // sold outside system
   unitNumber?: number; // sequential number within its variation
+  collaborators?: string[];
+  price?: number;
 }
 
 interface Development {
@@ -74,6 +79,8 @@ interface Development {
   type: DevelopmentType;
   description?: string;
   collaborators?: string[];
+  createdBy?: string;
+  isUnitCollaborator?: boolean;
   // Owner details (optional)
   ownerFirstName?: string;
   ownerLastName?: string;
@@ -111,6 +118,9 @@ const exportUnitsCsv = (dev: Development) => {
 };
 
 const computeUnitPrice = (dev: Development, unit: DevelopmentUnit, variation?: UnitVariation): number => {
+  // If unit has its own price, prefer it
+  const own = (unit as any).price;
+  if (typeof own === 'number' && Number.isFinite(own)) return Math.max(0, Number(own));
   const v = variation || dev.variations.find(v => v.id === unit.variationId);
   if (!v) return 0;
   if (dev.type === 'stands') {
@@ -122,6 +132,7 @@ const computeUnitPrice = (dev: Development, unit: DevelopmentUnit, variation?: U
 };
 
 const SalesDevelopmentsPage: React.FC = () => {
+  const { user } = useAuth();
   const [developments, setDevelopments] = useState<Development[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
@@ -176,6 +187,7 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [newVarSizeSqm, setNewVarSizeSqm] = useState<number>(0);
   const [newVarPricePerSqm, setNewVarPricePerSqm] = useState<number>(0);
   const [newVarPrice, setNewVarPrice] = useState<number>(0);
+  const [newVarCustomNames, setNewVarCustomNames] = useState<string>('');
   const [savingVar, setSavingVar] = useState<boolean>(false);
 
   const [showEditVar, setShowEditVar] = useState<{ open: boolean; devId: string | null; variationId: string | null }>(
@@ -187,6 +199,16 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [editVarAddUnits, setEditVarAddUnits] = useState<number>(0);
   const [savingEditVar, setSavingEditVar] = useState<boolean>(false);
 
+  // Edit Unit dialog
+  const [showEditUnit, setShowEditUnit] = useState<{ open: boolean; devId: string | null; unitId: string | null }>({ open: false, devId: null, unitId: null });
+  const [editUnitCode, setEditUnitCode] = useState<string>('');
+  const [editUnitPrice, setEditUnitPrice] = useState<string>('');
+  const [editUnitBlock, setEditUnitBlock] = useState<string>('');
+  const [editUnitFloor, setEditUnitFloor] = useState<string>('');
+  const [editUnitStandSize, setEditUnitStandSize] = useState<string>('');
+  const [savingUnit, setSavingUnit] = useState<boolean>(false);
+  const [unitCollabUserId, setUnitCollabUserId] = useState<string>('');
+
   useEffect(() => {
     const loadDevs = async () => {
       try {
@@ -197,6 +219,8 @@ const SalesDevelopmentsPage: React.FC = () => {
           type: d.type,
           description: d.description,
           collaborators: Array.isArray(d.collaborators) ? d.collaborators.map((x: any)=> String(x)) : [],
+          createdBy: d.createdBy ? String(d.createdBy) : undefined,
+          isUnitCollaborator: !!d.isUnitCollaborator,
           ownerFirstName: d.owner?.firstName,
           ownerLastName: d.owner?.lastName,
           ownerCompanyName: d.owner?.companyName,
@@ -226,7 +250,7 @@ const SalesDevelopmentsPage: React.FC = () => {
     }
   }, [showCollab.open, salesUsers.length]);
 
-  const addVariation = () => setVariations(prev => [...prev, { id: uid(), label: '', count: 1 }]);
+  const addVariation = () => setVariations(prev => [...prev, { id: uid(), label: '', count: 1, customUnitNames: '' }]);
   const removeVariation = (id: string) => setVariations(prev => prev.filter(v => v.id !== id));
   const updateVariation = (id: string, patch: Partial<UnitVariation>) => setVariations(prev => prev.map(v => v.id === id ? { ...v, ...patch } : v));
 
@@ -251,13 +275,21 @@ const SalesDevelopmentsPage: React.FC = () => {
           idNumber: ownerIdNumber.trim() || undefined,
           phone: ownerPhone.trim() || undefined
         },
-        variations: validVariations.map(v => ({
-          id: v.id,
-          label: v.label,
-          count: v.count,
-          price: type === 'stands' ? Math.max(0, (v.sizeSqm || 0) * (v.pricePerSqm || 0)) : (v.price || 0),
-          size: type === 'stands' ? (v.sizeSqm || 0) : undefined
-        })),
+        variations: validVariations.map(v => {
+          const parsedNames = String(v.customUnitNames || '')
+            .split(/\n|,/)
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+          const hasCustom = type === 'stands' && parsedNames.length > 0;
+          return {
+            id: v.id,
+            label: v.label,
+            count: hasCustom ? parsedNames.length : v.count,
+            price: type === 'stands' ? Math.max(0, (v.sizeSqm || 0) * (v.pricePerSqm || 0)) : (v.price || 0),
+            size: type === 'stands' ? (v.sizeSqm || 0) : undefined,
+            unitCodes: hasCustom ? parsedNames : undefined
+          } as any;
+        }),
         commissionPercent,
         commissionPreaPercent: preaPercentOfCommission,
         commissionAgencyPercentRemaining: agencyPercent,
@@ -273,6 +305,7 @@ const SalesDevelopmentsPage: React.FC = () => {
         type: created.type,
         description: created.description,
         collaborators: Array.isArray(created.collaborators) ? created.collaborators.map((x: any)=> String(x)) : [],
+        createdBy: created.createdBy ? String(created.createdBy) : undefined,
         ownerFirstName: created.owner?.firstName,
         ownerLastName: created.owner?.lastName,
         ownerCompanyName: created.owner?.companyName,
@@ -323,8 +356,45 @@ const SalesDevelopmentsPage: React.FC = () => {
     setDevelopments(prev => prev.map(d => d.id === id ? { ...d, ...patch } : d));
   };
 
-  const removeDevelopment = (id: string) => {
+  const removeDevelopmentLocal = (id: string) => {
     setDevelopments(prev => prev.filter(d => d.id !== id));
+  };
+
+  const handleDeleteDevelopment = async (id: string) => {
+    // Allow admin or sales to delete
+    if (!user || !['admin', 'sales'].includes(user.role)) {
+      alert('Only admins or sales can delete developments.');
+      return;
+    }
+    const confirmed = window.confirm('Delete this development and all its units? This cannot be undone.');
+    if (!confirmed) return;
+    try {
+      await developmentService.delete(id);
+      removeDevelopmentLocal(id);
+    } catch (e: any) {
+      const msg = (e?.response?.data?.message) || 'Failed to delete development';
+      alert(msg);
+      try {
+        const items = await developmentService.list();
+        const mapped: Development[] = (items || []).map((d: any) => ({
+          id: d._id,
+          name: d.name,
+          type: d.type,
+          description: d.description,
+          collaborators: Array.isArray(d.collaborators) ? d.collaborators.map((x: any)=> String(x)) : [],
+          ownerFirstName: d.owner?.firstName,
+          ownerLastName: d.owner?.lastName,
+          ownerCompanyName: d.owner?.companyName,
+          ownerEmail: d.owner?.email,
+          ownerIdNumber: d.owner?.idNumber,
+          ownerPhone: d.owner?.phone,
+          variations: (d.variations || []).map((v: any) => ({ id: v.id, label: v.label, count: v.count, price: v.price, sizeSqm: d.type==='stands' ? v.size : undefined })),
+          units: [],
+          createdAt: d.createdAt,
+        }));
+        setDevelopments(mapped);
+      } catch {}
+    }
   };
 
   const updateUnit = (devId: string, unitId: string, patch: Partial<DevelopmentUnit>) => {
@@ -513,7 +583,9 @@ const SalesDevelopmentsPage: React.FC = () => {
                           label: String(u.unitCode || ''),
                           status: (u.status || 'available') as UnitStatus,
                           buyerName: u.buyerName,
-                          unitNumber: typeof u.unitNumber === 'number' ? u.unitNumber : undefined
+                          unitNumber: typeof u.unitNumber === 'number' ? u.unitNumber : undefined,
+                          collaborators: Array.isArray(u.collaborators) ? u.collaborators.map((x:any)=>String(x)) : [],
+                          price: typeof u.price === 'number' ? Number(u.price) : undefined
                         }));
                         updateDevelopment(dev.id, { units: mappedUnits });
                         // For each unit, load its buyers filtered by development and unit
@@ -545,7 +617,20 @@ const SalesDevelopmentsPage: React.FC = () => {
                   aria-expanded={isOpen}
                 >
                   <Box>
-                    <Typography variant="h6">{dev.name} • {dev.type.toUpperCase()}</Typography>
+                    <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
+                      <Typography variant="h6">{dev.name} • {dev.type.toUpperCase()}</Typography>
+                      {(() => {
+                        const uid = user?._id;
+                        const isOwner = uid && dev.createdBy && String(dev.createdBy) === String(uid);
+                        const isCollab = !isOwner && Array.isArray(dev.collaborators) && uid && dev.collaborators.some(c=> String(c)===String(uid));
+                        if (isOwner) return <Chip size="small" color="primary" label="Owner" />;
+                        if (isCollab) return <Chip size="small" label="Collaborator" />;
+                        // Show Unit collaborator if not owner/collab but server flagged or units indicate collaboration
+                        const isUnitCollab = !!(dev.isUnitCollaborator || (uid && (dev.units || []).some(u => Array.isArray(u.collaborators) && u.collaborators.some(id => String(id) === String(uid)))));
+                        if (isUnitCollab) return <Chip size="small" label="Unit collaborator" />;
+                        return null;
+                      })()}
+                    </Box>
                     {dev.description && <Typography variant="body2" color="text.secondary">{dev.description}</Typography>}
                     <Typography variant="caption" color="text.secondary">Collaborators: {dev.collaborators?.length || 0}</Typography>
                   </Box>
@@ -553,7 +638,9 @@ const SalesDevelopmentsPage: React.FC = () => {
                     <Box display="flex" gap={1}>
                       <Button size="small" startIcon={<FileDownloadIcon />} onClick={(e) => { e.stopPropagation(); exportUnitsCsv(dev); }}>Export CSV</Button>
                       <Button size="small" onClick={(e)=>{ e.stopPropagation(); setShowCollab({ open: true, devId: dev.id }); }}>Collaborators</Button>
-                      <Button size="small" startIcon={<DeleteIcon />} color="error" onClick={(e) => { e.stopPropagation(); removeDevelopment(dev.id); }}>Delete</Button>
+                      {(user?.role === 'admin' || user?.role === 'sales') && (
+                        <Button size="small" startIcon={<DeleteIcon />} color="error" onClick={(e) => { e.stopPropagation(); handleDeleteDevelopment(dev.id); }}>Delete</Button>
+                      )}
                     </Box>
                   )}
                 </Box>
@@ -565,18 +652,26 @@ const SalesDevelopmentsPage: React.FC = () => {
                     <Box sx={{ mb: 2 }}>
                       <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Variations</Typography>
                       <Box display="flex" flexWrap="wrap" gap={1} alignItems="center">
-                        {dev.variations.map(v => (
-                          <Box key={v.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Chip label={`${v.label} • ${v.count} units${typeof v.price === 'number' ? ` • ${v.price.toLocaleString()}` : ''}${dev.type==='stands' && typeof v.sizeSqm === 'number' ? ` • ${v.sizeSqm} sqm` : ''}`} />
-                            <Button size="small" variant="outlined" onClick={(e)=>{ e.stopPropagation();
-                              setShowEditVar({ open: true, devId: dev.id, variationId: v.id });
-                              setEditVarLabel(v.label || '');
-                              setEditVarSizeSqm(Number(v.sizeSqm || 0));
-                              setEditVarPrice(Number(v.price || 0));
-                              setEditVarAddUnits(0);
-                            }}>Edit</Button>
-                          </Box>
-                        ))}
+                        {dev.variations.map(v => {
+                          const uid = user?._id;
+                          const isOwner = uid && dev.createdBy && String(dev.createdBy) === String(uid);
+                          const isDevCollab = !isOwner && Array.isArray(dev.collaborators) && uid && dev.collaborators.some(c=> String(c)===String(uid));
+                          const limitedView = !(user?.role === 'admin' || user?.role === 'accountant') && !isOwner && !isDevCollab;
+                          const visibleCount = (dev.units || []).filter(u => String(u.variationId) === String(v.id)).length;
+                          const countToShow = limitedView ? visibleCount : (v.count || 0);
+                          return (
+                            <Box key={v.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Chip label={`${v.label} • ${countToShow} units${typeof v.price === 'number' ? ` • ${v.price.toLocaleString()}` : ''}${dev.type==='stands' && typeof v.sizeSqm === 'number' ? ` • ${v.sizeSqm} sqm` : ''}`} />
+                              <Button size="small" variant="outlined" onClick={(e)=>{ e.stopPropagation();
+                                setShowEditVar({ open: true, devId: dev.id, variationId: v.id });
+                                setEditVarLabel(v.label || '');
+                                setEditVarSizeSqm(Number(v.sizeSqm || 0));
+                                setEditVarPrice(Number(v.price || 0));
+                                setEditVarAddUnits(0);
+                              }}>Edit</Button>
+                            </Box>
+                          );
+                        })}
                         <Button size="small" startIcon={<AddIcon />} onClick={(e)=>{ e.stopPropagation(); setShowAddVar({ open: true, devId: dev.id }); setNewVarLabel(''); setNewVarCount(1); setNewVarSizeSqm(0); setNewVarPricePerSqm(0); setNewVarPrice(0); }}>Add Variation</Button>
                       </Box>
                     </Box>
@@ -655,9 +750,11 @@ const SalesDevelopmentsPage: React.FC = () => {
                               style={{ cursor: 'pointer' }}
                             >
                               <TableCell>{
-                                typeof u.unitNumber === 'number'
-                                  ? u.unitNumber
-                                  : (dev.units.filter(x => x.variationId === u.variationId).findIndex(x => x.id === u.id) + 1)
+                                (u.label && u.label.trim().length > 0)
+                                  ? u.label
+                                  : (typeof u.unitNumber === 'number'
+                                      ? u.unitNumber
+                                      : (dev.units.filter(x => x.variationId === u.variationId).findIndex(x => x.id === u.id) + 1))
                               }</TableCell>
                               <TableCell>{variation?.label}</TableCell>
                               <TableCell>
@@ -684,6 +781,26 @@ const SalesDevelopmentsPage: React.FC = () => {
                               
                               <TableCell>
                                 <Button size="small" startIcon={<AddIcon />} onClick={(e) => { e.stopPropagation(); openAddBuyer(dev.id, u.id); }}>Add Buyer</Button>
+                                <Button size="small" sx={{ ml: 1 }} onClick={(e)=>{ e.stopPropagation();
+                                  // Prefill edit dialog
+                                  setShowEditUnit({ open: true, devId: dev.id, unitId: u.id });
+                                  setEditUnitCode(u.label || '');
+                                  const found = dev.units.find(x=>x.id===u.id);
+                                  setEditUnitPrice('');
+                                  setEditUnitBlock('');
+                                  setEditUnitFloor('');
+                                  setEditUnitStandSize('');
+                                  // Lazy-load sales users if not loaded
+                                  if (salesUsers.length === 0) {
+                                    (async ()=>{
+                                      try {
+                                        const res = await api.get('/users/agents', { params: { role: 'sales' } });
+                                        const list = (res.data?.data || res.data || []) as any[];
+                                        setSalesUsers(Array.isArray(list) ? list : []);
+                                      } catch {}
+                                    })();
+                                  }
+                                }}>Edit</Button>
                                 <IconButton size="small" onClick={(e) => { e.stopPropagation(); printUnit(dev, u); }} title="Print">
                                   <PrintIcon fontSize="small" />
                                 </IconButton>
@@ -954,12 +1071,28 @@ const SalesDevelopmentsPage: React.FC = () => {
             <Paper key={v.id} variant="outlined" sx={{ p: 1, mb: 1 }}>
               <Grid container spacing={1} alignItems="center">
             <Grid item xs={12} sm={4}><TextField fullWidth size="small" label={(type==='stands')? 'Size label (e.g. 500 sqm)' : 'Variation label (e.g. 3 bed / 2 bath)'} value={v.label} onChange={(e)=>updateVariation(v.id, { label: e.target.value })} /></Grid>
-                <Grid item xs={6} sm={2}><TextField fullWidth size="small" type="number" label="Units" inputProps={{ min: 1 }} value={v.count} onChange={(e)=>updateVariation(v.id, { count: Math.max(1, Number(e.target.value)||1) })} /></Grid>
+                <Grid item xs={6} sm={2}><TextField fullWidth size="small" type="number" label="Units" inputProps={{ min: 1 }} value={v.count} onChange={(e)=>updateVariation(v.id, { count: Math.max(1, Number(e.target.value)||1) })} disabled={type==='stands' && !!(v.customUnitNames||'').trim()} /></Grid>
                 {type === 'stands' ? (
                   <>
                     <Grid item xs={6} sm={2}><TextField fullWidth size="small" type="number" label="Size (sqm)" value={v.sizeSqm || ''} onChange={(e)=>updateVariation(v.id, { sizeSqm: Number(e.target.value)||0 })} /></Grid>
                     <Grid item xs={6} sm={2}><TextField fullWidth size="small" type="number" label="Price / sqm" value={v.pricePerSqm || ''} onChange={(e)=>updateVariation(v.id, { pricePerSqm: Number(e.target.value)||0 })} /></Grid>
                     <Grid item xs={6} sm={2}><TextField fullWidth size="small" label="Example Total" value={((v.sizeSqm||0)*(v.pricePerSqm||0)).toLocaleString()} InputProps={{ readOnly: true }} /></Grid>
+                    <Grid item xs={12}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        multiline
+                        minRows={2}
+                        label="Custom unit names (comma or newline separated)"
+                        value={v.customUnitNames || ''}
+                        onChange={(e)=>{
+                          const text = e.target.value;
+                          const names = String(text||'').split(/\n|,/).map(s=>s.trim()).filter(Boolean);
+                          updateVariation(v.id, { customUnitNames: text, count: names.length>0 ? names.length : (v.count||1) });
+                        }}
+                        helperText={(() => { const n = String(v.customUnitNames||'').split(/\n|,/).map(s=>s.trim()).filter(Boolean).length; return n>0 ? `Detected ${n} names — Units will be set to ${n}` : 'Optional'; })()}
+                      />
+                    </Grid>
                   </>
                 ) : (
                   <>
@@ -1025,7 +1158,7 @@ const SalesDevelopmentsPage: React.FC = () => {
             <Grid item xs={6}>
               <TextField fullWidth type="number" label="Units" inputProps={{ min:1 }} value={newVarCount} onChange={(e)=>setNewVarCount(Math.max(1, Number(e.target.value)||1))} />
             </Grid>
-            {(() => {
+                        {(() => {
               const dev = developments.find(d => d.id === showAddVar.devId);
               if (dev?.type === 'stands') {
                 return (
@@ -1039,6 +1172,17 @@ const SalesDevelopmentsPage: React.FC = () => {
                     <Grid item xs={6}>
                       <TextField fullWidth label="Example Total" value={((newVarSizeSqm||0)*(newVarPricePerSqm||0)).toLocaleString()} InputProps={{ readOnly: true }} />
                     </Grid>
+                                <Grid item xs={12}>
+                                  <TextField
+                                    fullWidth
+                                    multiline
+                                    minRows={2}
+                                    label="Custom unit names (comma or newline separated)"
+                                    value={newVarCustomNames}
+                                    onChange={(e)=>setNewVarCustomNames(e.target.value)}
+                                    helperText={(() => { const n = (newVarCustomNames||'').split(/\n|,/).map(s=>s.trim()).filter(Boolean).length; return n>0 ? `Detected ${n} names — Units will be set to ${n}` : 'Optional'; })()}
+                                  />
+                                </Grid>
                   </>
                 );
               }
@@ -1051,18 +1195,24 @@ const SalesDevelopmentsPage: React.FC = () => {
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={()=>setShowAddVar({ open:false, devId:null })} disabled={savingVar}>Cancel</Button>
+          <Button onClick={()=>{ setShowAddVar({ open:false, devId:null }); setNewVarCustomNames(''); }} disabled={savingVar}>Cancel</Button>
           <Button variant="contained" disabled={savingVar || !newVarLabel.trim() || !showAddVar.devId} onClick={async ()=>{
             if (!showAddVar.devId) return;
             try {
               setSavingVar(true);
               const dev = developments.find(d => d.id === showAddVar.devId)!;
+              const parsedNames = String(newVarCustomNames || '')
+                .split(/\n|,/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+              const useCustom = dev.type === 'stands' && parsedNames.length > 0;
               const toSend = {
                 id: uid(),
                 label: newVarLabel.trim(),
-                count: newVarCount,
+                count: useCustom ? parsedNames.length : newVarCount,
                 price: dev.type === 'stands' ? Math.max(0, (newVarSizeSqm||0) * (newVarPricePerSqm||0)) : (newVarPrice || 0),
-                size: dev.type === 'stands' ? (newVarSizeSqm || 0) : undefined
+                size: dev.type === 'stands' ? (newVarSizeSqm || 0) : undefined,
+                unitCodes: useCustom ? parsedNames : undefined
               } as any;
               const updated = await developmentService.addVariations(showAddVar.devId, [toSend]);
               // Map updated development and replace in state
@@ -1072,6 +1222,8 @@ const SalesDevelopmentsPage: React.FC = () => {
                 type: updated.type,
                 description: updated.description,
                 collaborators: Array.isArray(updated.collaborators) ? updated.collaborators.map((x: any)=> String(x)) : [],
+                createdBy: updated.createdBy ? String(updated.createdBy) : undefined,
+                isUnitCollaborator: (developments.find(d=>d.id=== (updated._id||updated.id)) as any)?.isUnitCollaborator || false,
                 ownerFirstName: updated.owner?.firstName,
                 ownerLastName: updated.owner?.lastName,
                 ownerCompanyName: updated.owner?.companyName,
@@ -1084,6 +1236,7 @@ const SalesDevelopmentsPage: React.FC = () => {
               } as Development;
               setDevelopments(prev => prev.map(d => d.id === mapped.id ? mapped : d));
               setShowAddVar({ open:false, devId:null });
+              setNewVarCustomNames('');
             } catch (e) {
             } finally {
               setSavingVar(false);
@@ -1137,6 +1290,8 @@ const SalesDevelopmentsPage: React.FC = () => {
                 type: updated.type,
                 description: updated.description,
                 collaborators: Array.isArray(updated.collaborators) ? updated.collaborators.map((x: any)=> String(x)) : [],
+                createdBy: updated.createdBy ? String(updated.createdBy) : undefined,
+                isUnitCollaborator: (developments.find(d=>d.id=== (updated._id||updated.id)) as any)?.isUnitCollaborator || false,
                 ownerFirstName: updated.owner?.firstName,
                 ownerLastName: updated.owner?.lastName,
                 ownerCompanyName: updated.owner?.companyName,
@@ -1206,6 +1361,8 @@ const SalesDevelopmentsPage: React.FC = () => {
               setDevelopments((items || []).map((d:any)=>({
                 id: d._id, name: d.name, type: d.type, description: d.description,
                 collaborators: Array.isArray(d.collaborators)? d.collaborators.map((x:any)=>String(x)) : [],
+                createdBy: d.createdBy ? String(d.createdBy) : undefined,
+                isUnitCollaborator: !!d.isUnitCollaborator,
                 ownerFirstName: d.owner?.firstName, ownerLastName: d.owner?.lastName, ownerCompanyName: d.owner?.companyName,
                 ownerEmail: d.owner?.email, ownerIdNumber: d.owner?.idNumber, ownerPhone: d.owner?.phone,
                 variations: (d.variations||[]).map((v:any)=>({ id:v.id, label:v.label, count:v.count, price:v.price, sizeSqm:d.type==='stands'?v.size:undefined })),
@@ -1222,6 +1379,8 @@ const SalesDevelopmentsPage: React.FC = () => {
               setDevelopments((items || []).map((d:any)=>({
                 id: d._id, name: d.name, type: d.type, description: d.description,
                 collaborators: Array.isArray(d.collaborators)? d.collaborators.map((x:any)=>String(x)) : [],
+                createdBy: d.createdBy ? String(d.createdBy) : undefined,
+                isUnitCollaborator: !!d.isUnitCollaborator,
                 ownerFirstName: d.owner?.firstName, ownerLastName: d.owner?.lastName, ownerCompanyName: d.owner?.companyName,
                 ownerEmail: d.owner?.email, ownerIdNumber: d.owner?.idNumber, ownerPhone: d.owner?.phone,
                 variations: (d.variations||[]).map((v:any)=>({ id:v.id, label:v.label, count:v.count, price:v.price, sizeSqm:d.type==='stands'?v.size:undefined })),
@@ -1255,6 +1414,119 @@ const SalesDevelopmentsPage: React.FC = () => {
         <DialogActions>
           <Button onClick={()=>setShowAddBuyer(false)} disabled={buyerSaving}>Cancel</Button>
           <Button variant="contained" onClick={submitAddBuyer} disabled={!buyerName.trim() || buyerSaving}>Save Buyer</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Unit Dialog */}
+      <Dialog open={showEditUnit.open} onClose={()=> setShowEditUnit({ open:false, devId:null, unitId:null })} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Unit</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 0 }}>
+            <Grid item xs={12}>
+              <TextField fullWidth label="Unit name/code" value={editUnitCode} onChange={(e)=>setEditUnitCode(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField fullWidth type="number" label="Unit price (optional)" value={editUnitPrice} onChange={(e)=>setEditUnitPrice(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField fullWidth label="Block" value={editUnitBlock} onChange={(e)=>setEditUnitBlock(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField fullWidth label="Floor" value={editUnitFloor} onChange={(e)=>setEditUnitFloor(e.target.value)} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField fullWidth type="number" label="Stand size (sqm)" value={editUnitStandSize} onChange={(e)=>setEditUnitStandSize(e.target.value)} />
+            </Grid>
+          </Grid>
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Unit Collaborators</Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+            {(() => {
+              const dev = developments.find(d=>d.id===showEditUnit.devId);
+              const unit = dev?.units.find(u=>u.id===showEditUnit.unitId);
+              const ids = unit?.collaborators || [];
+              if (!ids.length) return <Typography variant="caption" color="text.secondary">None</Typography>;
+              return ids.map(cid => {
+                const u = salesUsers.find(s=> String(s._id||s.id) === String(cid));
+                const label = u ? `${u.firstName||''} ${u.lastName||''}`.trim() || u.email : cid;
+                return <Chip key={cid} label={label} size="small" />;
+              });
+            })()}
+          </Box>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField select fullWidth label="Select Sales User" value={unitCollabUserId} onChange={(e)=>setUnitCollabUserId(e.target.value)}>
+                <MenuItem value="">None</MenuItem>
+                {salesUsers
+                  .filter(u => {
+                    const q = salesSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    const name = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase();
+                    return name.includes(q) || String(u.email||'').toLowerCase().includes(q);
+                  })
+                  .map(u => (
+                    <MenuItem key={u._id || u.id} value={u._id || u.id}>
+                      {`${u.firstName || ''} ${u.lastName || ''}`.trim()} — {u.email}
+                    </MenuItem>
+                  ))}
+              </TextField>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={()=> setShowEditUnit({ open:false, devId:null, unitId:null })} disabled={savingUnit}>Close</Button>
+          {(user?.role === 'admin' || user?.role === 'accountant' || (showEditUnit.devId && developments.find(d=>d.id===showEditUnit.devId)?.createdBy === user?._id)) && (
+          <Button variant="outlined" disabled={savingUnit || !showEditUnit.unitId || !unitCollabUserId.trim()} onClick={async ()=>{
+            if (!showEditUnit.unitId) return;
+            try {
+              setSavingUnit(true);
+              const updated = await developmentUnitService.addCollaborator(showEditUnit.unitId, unitCollabUserId.trim());
+              // Update local state
+              setDevelopments(prev => prev.map(d => {
+                if (d.id !== showEditUnit.devId) return d;
+                return { ...d, units: d.units.map(u => u.id === showEditUnit.unitId ? { ...u, collaborators: Array.isArray(updated?.collaborators) ? updated.collaborators.map((x:any)=>String(x)) : u.collaborators } : u) };
+              }));
+              setUnitCollabUserId('');
+            } catch {}
+            finally { setSavingUnit(false); }
+          }}>Add Collaborator</Button>
+          )}
+          {(user?.role === 'admin' || user?.role === 'accountant' || (showEditUnit.devId && developments.find(d=>d.id===showEditUnit.devId)?.createdBy === user?._id)) && (
+          <Button variant="outlined" color="error" disabled={savingUnit || !showEditUnit.unitId || !unitCollabUserId.trim()} onClick={async ()=>{
+            if (!showEditUnit.unitId) return;
+            try {
+              setSavingUnit(true);
+              const updated = await developmentUnitService.removeCollaborator(showEditUnit.unitId, unitCollabUserId.trim());
+              setDevelopments(prev => prev.map(d => {
+                if (d.id !== showEditUnit.devId) return d;
+                return { ...d, units: d.units.map(u => u.id === showEditUnit.unitId ? { ...u, collaborators: Array.isArray(updated?.collaborators) ? updated.collaborators.map((x:any)=>String(x)) : u.collaborators } : u) };
+              }));
+              setUnitCollabUserId('');
+            } catch {}
+            finally { setSavingUnit(false); }
+          }}>Remove Collaborator</Button>
+          )}
+          <Button variant="contained" disabled={savingUnit || !showEditUnit.unitId} onClick={async ()=>{
+            if (!showEditUnit.unitId || !showEditUnit.devId) return;
+            try {
+              setSavingUnit(true);
+              const body: any = {};
+              body.unitCode = (editUnitCode || '').trim();
+              if (editUnitPrice.trim().length>0) body.price = Number(editUnitPrice);
+              body.meta = {} as any;
+              if (editUnitBlock.trim()) body.meta.block = editUnitBlock.trim();
+              if (editUnitFloor.trim()) body.meta.floor = editUnitFloor.trim();
+              if (editUnitStandSize.trim()) body.meta.standSize = Number(editUnitStandSize);
+              const updated = await developmentUnitService.updateDetails(showEditUnit.unitId, body);
+              // Update local state
+              setDevelopments(prev => prev.map(d => {
+                if (d.id !== showEditUnit.devId) return d;
+                return { ...d, units: d.units.map(u => u.id === showEditUnit.unitId ? { ...u, label: String(updated?.unitCode||''), price: typeof updated?.price==='number' ? Number(updated?.price) : u.price } : u) };
+              }));
+              setShowEditUnit({ open:false, devId:null, unitId:null });
+            } catch {}
+            finally { setSavingUnit(false); }
+          }}>{savingUnit ? 'Saving…' : 'Save'}</Button>
         </DialogActions>
       </Dialog>
     </Box>

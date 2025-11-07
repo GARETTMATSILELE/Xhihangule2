@@ -8,6 +8,7 @@ export interface IUser {
   email: string;
   password: string;
   role: UserRole;
+  roles?: UserRole[];
   firstName: string;
   lastName: string;
   companyId?: string;
@@ -51,6 +52,7 @@ export interface AuthError {
 export interface JwtPayload {
   userId: string;
   role: UserRole;
+  roles?: UserRole[];
   companyId?: string;
 }
 

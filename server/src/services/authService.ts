@@ -89,6 +89,7 @@ export class AuthService {
         userId: user._id.toString(),
         email: user.email,
         role: user.role as UserRole,
+        roles: Array.isArray((user as any).roles) && (user as any).roles!.length > 0 ? (user as any).roles : undefined,
         companyId: user.companyId ? user.companyId.toString() : undefined
       },
       token,
@@ -169,6 +170,7 @@ export class AuthService {
         userId: user._id.toString(),
         email: user.email,
         role: type === 'user' ? (user as IUser).role as UserRole : 'owner',
+        roles: type === 'user' ? ((Array.isArray((user as any).roles) && (user as any).roles!.length > 0) ? (user as any).roles : undefined) : undefined,
         companyId: (user as any).companyId ? (user as any).companyId.toString() : undefined
       };
 
@@ -189,6 +191,7 @@ export class AuthService {
     const payload = {
       userId: user._id.toString(),
       role: userType === 'user' ? user.role : 'owner',
+      roles: userType === 'user' ? ((Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined) : undefined,
       companyId: (user as any).companyId ? (user as any).companyId.toString() : undefined,
       type: 'access'
     };

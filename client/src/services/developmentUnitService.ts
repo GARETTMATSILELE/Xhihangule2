@@ -21,6 +21,18 @@ export const developmentUnitService = {
   async updateStatus(unitId: string, body: { to: 'available' | 'under_offer' | 'sold'; buyerId?: string; reservationMinutes?: number; dealId?: string; }) {
     const res = await api.patch(`/development-units/${unitId}/status`, body);
     return res.data?.data || res.data;
+  },
+  async updateDetails(unitId: string, body: { unitCode?: string; price?: number; meta?: { block?: string; floor?: string; bedrooms?: number; bathrooms?: number; standSize?: number } }) {
+    const res = await api.patch(`/development-units/${unitId}`, body);
+    return res.data?.data || res.data;
+  },
+  async addCollaborator(unitId: string, userId: string) {
+    const res = await api.post(`/development-units/${unitId}/collaborators`, { userId });
+    return res.data?.data || res.data;
+  },
+  async removeCollaborator(unitId: string, userId: string) {
+    const res = await api.delete(`/development-units/${unitId}/collaborators`, { data: { userId } as any });
+    return res.data?.data || res.data;
   }
 };
 

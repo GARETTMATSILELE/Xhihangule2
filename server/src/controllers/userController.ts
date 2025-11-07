@@ -102,8 +102,21 @@ export const createUser = async (userData: any) => {
     throw new AppError('User already exists', 400);
   }
 
+  // Normalize roles: if roles array provided, ensure unique/valid and set primary role
+  const VALID_ROLES = ['admin','agent','accountant','owner','sales'];
+  let payload: any = { ...userData };
+  if (Array.isArray(userData.roles) && userData.roles.length > 0) {
+    const roles = Array.from(new Set(userData.roles.map((r: any) => String(r)))).filter((r: any) => VALID_ROLES.includes(r));
+    if (roles.length === 0) throw new AppError('At least one valid role is required', 400);
+    payload.roles = roles;
+    // Set primary role if not provided or not valid
+    if (!VALID_ROLES.includes(String(userData.role))) {
+      payload.role = roles[0];
+    }
+  }
+
   // Create new user
-  const user = await User.create(userData);
+  const user = await User.create(payload);
   console.log('User created successfully:', user);
 
   // Return user without password
@@ -131,6 +144,19 @@ export const updateUserById = async (id: string, updates: any, currentCompanyId?
   if (typeof updates.lastName === 'string') user.lastName = updates.lastName;
   if (typeof updates.email === 'string') user.email = updates.email;
   if (typeof updates.role === 'string') user.role = updates.role;
+  // Update roles array if provided
+  const VALID_ROLES = ['admin','agent','accountant','owner','sales'];
+  if (Array.isArray(updates.roles)) {
+    const roles = Array.from(new Set(updates.roles.map((r: any) => String(r)))).filter((r: any) => VALID_ROLES.includes(r));
+    if (roles.length === 0) {
+      throw new AppError('At least one valid role is required', 400);
+    }
+    (user as any).roles = roles as any;
+    // Ensure primary role is aligned with roles array
+    if (!roles.includes(user.role)) {
+      user.role = roles[0] as any;
+    }
+  }
 
   // If password provided and non-empty, set it so pre-save hook re-hashes
   if (typeof updates.password === 'string' && updates.password.trim().length > 0) {

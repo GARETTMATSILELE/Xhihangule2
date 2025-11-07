@@ -258,6 +258,7 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                 email: savedUser.email,
                 name: `${savedUser.firstName} ${savedUser.lastName}`,
                 role: savedUser.role,
+                roles: (Array.isArray(savedUser.roles) && savedUser.roles.length > 0) ? savedUser.roles : undefined,
                 companyId: savedUser.companyId
             },
             company: companyData,
@@ -344,6 +345,7 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
                 firstName: fullUser.firstName,
                 lastName: fullUser.lastName,
                 role: fullUser.role,
+                roles: (Array.isArray(fullUser.roles) && fullUser.roles.length > 0) ? fullUser.roles : undefined,
                 companyId: (_a = fullUser.companyId) === null || _a === void 0 ? void 0 : _a.toString(),
                 isActive: fullUser.isActive,
                 lastLogin: fullUser.lastLogin,
@@ -497,6 +499,7 @@ const getCurrentUser = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
                 firstName: user.firstName,
                 lastName: user.lastName,
                 role: user.role,
+                roles: (Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined,
                 companyId: user.companyId,
                 isActive: user.isActive,
                 lastLogin: user.lastLogin,

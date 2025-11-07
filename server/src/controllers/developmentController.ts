@@ -55,10 +55,21 @@ export const createDevelopment = async (req: Request, res: Response) => {
     }
 
     // Basic validation of variations
-    for (const v of variations) {
-      if (!v?.id || !v?.label || !v?.count || v.count < 1) {
-        throw new AppError('Each variation must include id, label, and count >= 1', 400);
+    const normalizedVariations: any[] = [];
+    for (const v of variations as any[]) {
+      const unitCodes: string[] = Array.isArray(v?.unitCodes) ? (v.unitCodes as any[]).map((s:any)=>String(s).trim()).filter((s:string)=>s.length>0) : [];
+      const hasCount = typeof v?.count === 'number' && Number(v.count) >= 1;
+      if (!v?.id || !v?.label || (!hasCount && unitCodes.length === 0)) {
+        throw new AppError('Each variation must include id, label, and either count >= 1 or non-empty unitCodes[]', 400);
       }
+      normalizedVariations.push({
+        id: String(v.id),
+        label: String(v.label),
+        count: hasCount ? Number(v.count) : unitCodes.length,
+        price: typeof v.price === 'number' ? v.price : undefined,
+        size: typeof v.size === 'number' ? v.size : undefined,
+        unitCodes
+      });
     }
 
     // Helper: create without transaction (for standalone MongoDB)
@@ -70,7 +81,7 @@ export const createDevelopment = async (req: Request, res: Response) => {
         address: address || '',
         companyId: new mongoose.Types.ObjectId(req.user!.companyId),
         owner: owner || {},
-        variations,
+        variations: normalizedVariations.map(v=>({ id: v.id, label: v.label, count: v.count, price: v.price, size: v.size })),
         commissionPercent: typeof commissionPercent === 'number' ? commissionPercent : undefined,
         commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
         commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
@@ -82,15 +93,28 @@ export const createDevelopment = async (req: Request, res: Response) => {
       });
 
       const unitDocs: any[] = [];
-      for (const v of variations) {
-        for (let i = 1; i <= Number(v.count); i++) {
-          unitDocs.push({
-            developmentId: dev._id,
-            variationId: v.id,
-            unitNumber: i,
-            status: 'available',
-            price: typeof v.price === 'number' ? v.price : undefined
+      for (const v of normalizedVariations) {
+        if (Array.isArray(v.unitCodes) && v.unitCodes.length > 0) {
+          v.unitCodes.forEach((code: string, idx: number) => {
+            unitDocs.push({
+              developmentId: dev._id,
+              variationId: v.id,
+              unitNumber: idx + 1,
+              unitCode: code,
+              status: 'available',
+              price: typeof v.price === 'number' ? v.price : undefined
+            });
           });
+        } else {
+          for (let i = 1; i <= Number(v.count); i++) {
+            unitDocs.push({
+              developmentId: dev._id,
+              variationId: v.id,
+              unitNumber: i,
+              status: 'available',
+              price: typeof v.price === 'number' ? v.price : undefined
+            });
+          }
         }
       }
       if (unitDocs.length > 0) await DevelopmentUnit.insertMany(unitDocs);
@@ -122,7 +146,7 @@ export const createDevelopment = async (req: Request, res: Response) => {
             address: address || '',
             companyId: new mongoose.Types.ObjectId(req.user!.companyId),
             owner: owner || {},
-            variations,
+            variations: normalizedVariations.map(v=>({ id: v.id, label: v.label, count: v.count, price: v.price, size: v.size })),
             commissionPercent: typeof commissionPercent === 'number' ? commissionPercent : undefined,
             commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : undefined,
             commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : undefined,
@@ -137,15 +161,28 @@ export const createDevelopment = async (req: Request, res: Response) => {
         const dev = development[0];
 
         const unitDocs: any[] = [];
-        for (const v of variations) {
-          for (let i = 1; i <= Number(v.count); i++) {
-            unitDocs.push({
-              developmentId: dev._id,
-              variationId: v.id,
-              unitNumber: i,
-              status: 'available',
-              price: typeof v.price === 'number' ? v.price : undefined
+        for (const v of normalizedVariations) {
+          if (Array.isArray(v.unitCodes) && v.unitCodes.length > 0) {
+            v.unitCodes.forEach((code: string, idx: number) => {
+              unitDocs.push({
+                developmentId: dev._id,
+                variationId: v.id,
+                unitNumber: idx + 1,
+                unitCode: code,
+                status: 'available',
+                price: typeof v.price === 'number' ? v.price : undefined
+              });
             });
+          } else {
+            for (let i = 1; i <= Number(v.count); i++) {
+              unitDocs.push({
+                developmentId: dev._id,
+                variationId: v.id,
+                unitNumber: i,
+                status: 'available',
+                price: typeof v.price === 'number' ? v.price : undefined
+              });
+            }
           }
         }
         if (unitDocs.length > 0) await DevelopmentUnit.insertMany(unitDocs, { session });
@@ -195,13 +232,22 @@ export const listDevelopments = async (req: Request, res: Response) => {
     const companyId = new mongoose.Types.ObjectId(req.user!.companyId);
     // Sales users see developments they created OR those shared with them as collaborators.
     // Admin/accountant see all company developments.
-    const match = (req.user!.role === 'admin' || req.user!.role === 'accountant')
-      ? { companyId }
-      : { companyId, $or: [{ createdBy: userId }, { collaborators: userId }] } as any;
-    const developments = await Development.find(match)
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    let match: any;
+    let unitDevIds: any[] = [];
+    if (isPrivileged) {
+      match = { companyId };
+    } else {
+      // Include developments where user collaborates at unit-level
+      unitDevIds = await DevelopmentUnit.distinct('developmentId', { collaborators: userId }).catch(()=>[] as any[]);
+      match = { companyId, $or: [{ createdBy: userId }, { collaborators: userId }, { _id: { $in: unitDevIds } }] } as any;
+    }
+    const devs = await Development.find(match)
       .sort({ createdAt: -1 })
       .lean();
-    return res.json(developments);
+    const unitDevIdSet = new Set(String(unitDevIds?.length ? unitDevIds.map((x:any)=>String(x)) : []));
+    const withFlags = devs.map((d:any)=> ({ ...d, isUnitCollaborator: !isPrivileged && unitDevIdSet.has(String(d._id)) }));
+    return res.json(withFlags);
   } catch (error: any) {
     const status = (error as any)?.statusCode || 500;
     const message = (error as any)?.message || 'Error fetching developments';
@@ -328,22 +374,41 @@ export const updateDevelopment = async (req: Request, res: Response) => {
 export const deleteDevelopment = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    // Try transactional delete; fallback to non-transactional on standalone MongoDB
     try {
-      const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId }).session(session);
+      const session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId }).session(session);
+        if (!dev) throw new AppError('Development not found', 404);
+
+        const unitsDelete = await DevelopmentUnit.deleteMany({ developmentId: dev._id }).session(session);
+        await Development.deleteOne({ _id: dev._id }).session(session);
+
+        await session.commitTransaction();
+        session.endSession();
+        return res.json({ message: 'Development deleted', unitsDeleted: unitsDelete.deletedCount });
+      } catch (txErr: any) {
+        try { await session.abortTransaction(); } catch {}
+        session.endSession();
+        // If transactions are not supported, fallback to non-transactional delete
+        const msg = String(txErr?.message || '').toLowerCase();
+        if (msg.includes('transaction numbers are only allowed') || msg.includes('replica set')) {
+          const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId });
+          if (!dev) throw new AppError('Development not found', 404);
+          const unitsDelete = await DevelopmentUnit.deleteMany({ developmentId: dev._id });
+          await Development.deleteOne({ _id: dev._id });
+          return res.json({ message: 'Development deleted', unitsDeleted: unitsDelete.deletedCount });
+        }
+        throw txErr;
+      }
+    } catch (outerErr) {
+      // If session could not start, perform non-transactional delete
+      const dev = await Development.findOne({ _id: req.params.id, companyId: req.user!.companyId });
       if (!dev) throw new AppError('Development not found', 404);
-
-      const unitsDelete = await DevelopmentUnit.deleteMany({ developmentId: dev._id }).session(session);
-      await Development.deleteOne({ _id: dev._id }).session(session);
-
-      await session.commitTransaction();
-      session.endSession();
+      const unitsDelete = await DevelopmentUnit.deleteMany({ developmentId: dev._id });
+      await Development.deleteOne({ _id: dev._id });
       return res.json({ message: 'Development deleted', unitsDeleted: unitsDelete.deletedCount });
-    } catch (err) {
-      await session.abortTransaction();
-      session.endSession();
-      throw err;
     }
   } catch (error: any) {
     const status = (error as any)?.statusCode || 500;
@@ -365,6 +430,14 @@ export const listUnitsForDevelopment = async (req: Request, res: Response) => {
     const query: any = { developmentId: new mongoose.Types.ObjectId(req.params.id) };
     if (status) query.status = String(status);
     if (variationId) query.variationId = String(variationId);
+
+    // Restrict to unit collaborators when user is sales and not dev owner/collaborator
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id:any)=> String(id) === String(req.user!.userId));
+    if (!isPrivileged && !isOwner && !isDevCollaborator) {
+      query.collaborators = new mongoose.Types.ObjectId(req.user!.userId);
+    }
 
     const [items, total] = await Promise.all([
       DevelopmentUnit.find(query)
@@ -441,32 +514,50 @@ export const addVariations = async (req: Request, res: Response) => {
     if (!Array.isArray(variations) || variations.length === 0) {
       throw new AppError('variations array is required', 400);
     }
-    for (const v of variations) {
-      if (!v?.id || !v?.label || !v?.count || v.count < 1) {
-        throw new AppError('Each variation must include id, label, and count >= 1', 400);
+    const toAppendRaw = variations as any[];
+    const normalized: any[] = [];
+    for (const v of toAppendRaw) {
+      const unitCodes: string[] = Array.isArray(v?.unitCodes) ? (v.unitCodes as any[]).map((s:any)=>String(s).trim()).filter((s:string)=>s.length>0) : [];
+      const hasCount = typeof v?.count === 'number' && Number(v.count) >= 1;
+      if (!v?.id || !v?.label || (!hasCount && unitCodes.length === 0)) {
+        throw new AppError('Each variation must include id, label, and either count >= 1 or non-empty unitCodes[]', 400);
       }
       if (dev.variations.some((ex: any) => String(ex.id) === String(v.id))) {
         throw new AppError(`Variation id already exists: ${v.id}`, 400);
       }
+      normalized.push({ id: String(v.id), label: String(v.label), count: hasCount ? Number(v.count) : unitCodes.length, price: typeof v.price === 'number' ? v.price : undefined, size: typeof v.size === 'number' ? v.size : undefined, unitCodes });
     }
 
     // Append variations
-    const toAppend = variations.map((v: any) => ({ id: String(v.id), label: String(v.label), count: Number(v.count), price: typeof v.price === 'number' ? v.price : undefined, size: typeof v.size === 'number' ? v.size : undefined }));
+    const toAppend = normalized.map((v: any) => ({ id: v.id, label: v.label, count: v.count, price: v.price, size: v.size }));
     dev.variations = [...(dev.variations || []), ...toAppend] as any;
     dev.updatedBy = new mongoose.Types.ObjectId(req.user!.userId);
     await dev.save();
 
     // Create units for each new variation
     const unitDocs: any[] = [];
-    for (const v of toAppend) {
-      for (let i = 1; i <= Number(v.count); i++) {
-        unitDocs.push({
-          developmentId: dev._id,
-          variationId: v.id,
-          unitNumber: i,
-          status: 'available',
-          price: typeof v.price === 'number' ? v.price : undefined
+    for (const v of normalized) {
+      if (Array.isArray(v.unitCodes) && v.unitCodes.length > 0) {
+        v.unitCodes.forEach((code: string, idx: number) => {
+          unitDocs.push({
+            developmentId: dev._id,
+            variationId: v.id,
+            unitNumber: idx + 1,
+            unitCode: code,
+            status: 'available',
+            price: typeof v.price === 'number' ? v.price : undefined
+          });
         });
+      } else {
+        for (let i = 1; i <= Number(v.count); i++) {
+          unitDocs.push({
+            developmentId: dev._id,
+            variationId: v.id,
+            unitNumber: i,
+            status: 'available',
+            price: typeof v.price === 'number' ? v.price : undefined
+          });
+        }
       }
     }
     if (unitDocs.length > 0) await DevelopmentUnit.insertMany(unitDocs);

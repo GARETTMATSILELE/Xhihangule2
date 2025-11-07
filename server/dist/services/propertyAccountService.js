@@ -20,6 +20,7 @@ const Property_1 = require("../models/Property");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
+const Development_1 = require("../models/Development");
 class PropertyAccountService {
     static getInstance() {
         if (!PropertyAccountService.instance) {
@@ -32,43 +33,54 @@ class PropertyAccountService {
      */
     getOrCreatePropertyAccount(propertyId) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c;
             try {
                 console.log('getOrCreatePropertyAccount called with propertyId:', propertyId);
                 console.log('Converting to ObjectId:', new mongoose_1.default.Types.ObjectId(propertyId));
                 let account = yield PropertyAccount_1.default.findOne({ propertyId: new mongoose_1.default.Types.ObjectId(propertyId) });
                 console.log('Database query result:', account ? 'Found account' : 'No account found');
                 if (!account) {
-                    // Get property details
+                    // Try resolve as a Property; if not found, try as a Development
                     const property = yield Property_1.Property.findById(propertyId);
-                    if (!property) {
+                    const development = property ? null : yield Development_1.Development.findById(propertyId);
+                    if (!property && !development) {
                         throw new errorHandler_1.AppError('Property not found', 404);
                     }
-                    // Get owner details from PropertyOwner collection
+                    // Get owner details
                     let ownerName = 'Unknown Owner';
                     let ownerId = null;
-                    // First try to find owner by property.ownerId
-                    if (property.ownerId) {
-                        const owner = yield PropertyOwner_1.PropertyOwner.findById(property.ownerId);
-                        if (owner) {
-                            ownerName = `${owner.firstName} ${owner.lastName}`;
-                            ownerId = owner._id;
+                    if (property) {
+                        // Resolve owner via PropertyOwner linkage
+                        if (property.ownerId) {
+                            const owner = yield PropertyOwner_1.PropertyOwner.findById(property.ownerId);
+                            if (owner) {
+                                ownerName = `${owner.firstName} ${owner.lastName}`.trim();
+                                ownerId = owner._id;
+                            }
+                        }
+                        if (!ownerId) {
+                            const owner = yield PropertyOwner_1.PropertyOwner.findOne({
+                                properties: { $in: [new mongoose_1.default.Types.ObjectId(propertyId)] }
+                            });
+                            if (owner) {
+                                ownerName = `${owner.firstName} ${owner.lastName}`.trim();
+                                ownerId = owner._id;
+                            }
                         }
                     }
-                    // If not found by property.ownerId, try to find owner by searching properties array
-                    if (!ownerId) {
-                        const owner = yield PropertyOwner_1.PropertyOwner.findOne({
-                            properties: { $in: [new mongoose_1.default.Types.ObjectId(propertyId)] }
-                        });
-                        if (owner) {
-                            ownerName = `${owner.firstName} ${owner.lastName}`;
-                            ownerId = owner._id;
-                        }
+                    else if (development) {
+                        // Resolve owner from Development.owner first/last name
+                        const first = ((_a = development.owner) === null || _a === void 0 ? void 0 : _a.firstName) || '';
+                        const last = ((_b = development.owner) === null || _b === void 0 ? void 0 : _b.lastName) || '';
+                        const companyName = ((_c = development.owner) === null || _c === void 0 ? void 0 : _c.companyName) || '';
+                        const combined = `${first} ${last}`.trim();
+                        ownerName = combined || companyName || 'Unknown Owner';
                     }
                     // Create new account
                     account = new PropertyAccount_1.default({
                         propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
-                        propertyName: property.name,
-                        propertyAddress: property.address,
+                        propertyName: property ? property.name : development === null || development === void 0 ? void 0 : development.name,
+                        propertyAddress: property ? property.address : development === null || development === void 0 ? void 0 : development.address,
                         ownerId: ownerId,
                         ownerName,
                         transactions: [],
@@ -348,6 +360,7 @@ class PropertyAccountService {
      */
     getPropertyAccount(propertyId) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c;
             try {
                 const account = yield PropertyAccount_1.default.findOne({ propertyId: new mongoose_1.default.Types.ObjectId(propertyId) });
                 if (!account) {
@@ -359,27 +372,37 @@ class PropertyAccountService {
                     if (property) {
                         let ownerName = 'Unknown Owner';
                         let ownerId = null;
-                        // First try to find owner by property.ownerId
                         if (property.ownerId) {
                             const owner = yield PropertyOwner_1.PropertyOwner.findById(property.ownerId);
                             if (owner) {
-                                ownerName = `${owner.firstName} ${owner.lastName}`;
+                                ownerName = `${owner.firstName} ${owner.lastName}`.trim();
                                 ownerId = owner._id;
                             }
                         }
-                        // If not found by property.ownerId, try to find owner by searching properties array
                         if (!ownerId) {
                             const owner = yield PropertyOwner_1.PropertyOwner.findOne({
                                 properties: { $in: [new mongoose_1.default.Types.ObjectId(propertyId)] }
                             });
                             if (owner) {
-                                ownerName = `${owner.firstName} ${owner.lastName}`;
+                                ownerName = `${owner.firstName} ${owner.lastName}`.trim();
                                 ownerId = owner._id;
                             }
                         }
-                        // Update the account with owner information
                         if (ownerId) {
                             account.ownerId = ownerId;
+                            account.ownerName = ownerName;
+                            yield account.save();
+                        }
+                    }
+                    else {
+                        // Fallback: resolve via Development document
+                        const development = yield Development_1.Development.findById(propertyId);
+                        if (development) {
+                            const first = ((_a = development.owner) === null || _a === void 0 ? void 0 : _a.firstName) || '';
+                            const last = ((_b = development.owner) === null || _b === void 0 ? void 0 : _b.lastName) || '';
+                            const companyName = ((_c = development.owner) === null || _c === void 0 ? void 0 : _c.companyName) || '';
+                            const combined = `${first} ${last}`.trim();
+                            const ownerName = combined || companyName || 'Unknown Owner';
                             account.ownerName = ownerName;
                             yield account.save();
                         }

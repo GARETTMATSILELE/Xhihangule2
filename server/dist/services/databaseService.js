@@ -80,13 +80,39 @@ class DatabaseService {
         });
     }
     shouldRetry(error) {
-        if (error instanceof Error) {
-            // Retry on network errors or MongoDB specific errors
-            return (error.name === 'MongoNetworkError' ||
-                error.name === 'MongoServerSelectionError' ||
-                error.name === 'MongoTimeoutError' ||
-                error.message.includes('ECONNRESET') ||
-                error.message.includes('ETIMEDOUT'));
+        var _a;
+        const err = error;
+        const name = err === null || err === void 0 ? void 0 : err.name;
+        const code = err === null || err === void 0 ? void 0 : err.code;
+        const message = ((_a = err === null || err === void 0 ? void 0 : err.message) !== null && _a !== void 0 ? _a : '').toString();
+        const labels = Array.isArray(err === null || err === void 0 ? void 0 : err.errorLabels) ? err.errorLabels : [];
+        // Mongo retryable labels
+        if (labels.includes('TransientTransactionError') || labels.includes('RetryableWriteError')) {
+            return true;
+        }
+        // Common network and timeout conditions
+        if (name === 'MongoNetworkError' ||
+            name === 'MongoServerSelectionError' ||
+            name === 'MongoTopologyClosedError' ||
+            name === 'MongoTimeoutError' ||
+            message.includes('ECONNRESET') ||
+            message.includes('ETIMEDOUT') ||
+            message.includes('EHOSTUNREACH') ||
+            message.includes('ENETUNREACH')) {
+            return true;
+        }
+        // Selected server codes typically considered transient
+        const retryableCodes = [6, 7, 89, 91, 189, 11600, 13435, 13436];
+        if (retryableCodes.includes(code)) {
+            return true;
+        }
+        // Write concern timeouts are retriable
+        if (name === 'MongoWriteConcernError' || message.includes('WriteConcern')) {
+            return true;
+        }
+        // Duplicate key (11000) should NOT retry
+        if (code === 11000 || message.includes('E11000')) {
+            return false;
         }
         return false;
     }

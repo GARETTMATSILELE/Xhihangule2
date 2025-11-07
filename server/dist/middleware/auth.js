@@ -14,7 +14,7 @@ const authService_1 = require("../services/authService");
 const authService = authService_1.AuthService.getInstance();
 // Basic auth middleware that doesn't require companyId
 const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     try {
         // Get token from Authorization header or cookie
         const token = ((_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1]) || ((_b = req.cookies) === null || _b === void 0 ? void 0 : _b.token);
@@ -43,12 +43,13 @@ const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () 
         req.user = {
             userId: userData.userId,
             role: userData.role,
+            roles: userData.roles,
             companyId: userData.companyId
         };
         console.log('User object set in request:', {
-            userId: req.user.userId,
-            role: req.user.role,
-            companyId: req.user.companyId
+            userId: (_d = req.user) === null || _d === void 0 ? void 0 : _d.userId,
+            role: (_e = req.user) === null || _e === void 0 ? void 0 : _e.role,
+            companyId: (_f = req.user) === null || _f === void 0 ? void 0 : _f.companyId
         });
         next();
     }
@@ -112,6 +113,7 @@ const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, 
         req.user = {
             userId: userData.userId,
             role: userData.role,
+            roles: userData.roles,
             companyId: userData.companyId
         };
         next();
@@ -167,6 +169,7 @@ const authWithCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         req.user = {
             userId: userData.userId,
             role: userData.role,
+            roles: userData.roles,
             companyId: userData.companyId
         };
         next();
@@ -207,7 +210,8 @@ const authorize = (allowedRoles) => {
                 code: 'AUTH_REQUIRED'
             });
         }
-        if (!allowedRoles.includes(req.user.role)) {
+        const userRoles = req.user.roles || [req.user.role];
+        if (!allowedRoles.some(r => userRoles.includes(r))) {
             return res.status(403).json({
                 status: 'error',
                 message: 'Insufficient permissions',

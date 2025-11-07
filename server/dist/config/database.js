@@ -142,6 +142,12 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
                 console.log('Creating compound unique index on propertyaccounts: { propertyId: 1, ownerPayouts.referenceNumber: 1 }');
                 yield acct.createIndex({ propertyId: 1, 'ownerPayouts.referenceNumber': 1 }, { name: 'propertyId_1_ownerPayouts.referenceNumber_1', unique: true, sparse: true });
             }
+            // Ensure unique index for transactions.paymentId to guarantee idempotency
+            const hasTxnPaymentIdx = idx.find((i) => i.name === 'transactions.paymentId_1');
+            if (!hasTxnPaymentIdx) {
+                console.log('Creating unique sparse index on propertyaccounts.transactions.paymentId');
+                yield acct.createIndex({ 'transactions.paymentId': 1 }, { name: 'transactions.paymentId_1', unique: true, sparse: true });
+            }
         }
         catch (acctIdxErr) {
             if (acctIdxErr && acctIdxErr.code === 26) {

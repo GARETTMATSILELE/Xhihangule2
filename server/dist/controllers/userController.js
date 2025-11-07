@@ -118,8 +118,21 @@ const createUser = (userData) => __awaiter(void 0, void 0, void 0, function* () 
     if (existingUser) {
         throw new errorHandler_1.AppError('User already exists', 400);
     }
+    // Normalize roles: if roles array provided, ensure unique/valid and set primary role
+    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales'];
+    let payload = Object.assign({}, userData);
+    if (Array.isArray(userData.roles) && userData.roles.length > 0) {
+        const roles = Array.from(new Set(userData.roles.map((r) => String(r)))).filter((r) => VALID_ROLES.includes(r));
+        if (roles.length === 0)
+            throw new errorHandler_1.AppError('At least one valid role is required', 400);
+        payload.roles = roles;
+        // Set primary role if not provided or not valid
+        if (!VALID_ROLES.includes(String(userData.role))) {
+            payload.role = roles[0];
+        }
+    }
     // Create new user
-    const user = yield User_1.User.create(userData);
+    const user = yield User_1.User.create(payload);
     console.log('User created successfully:', user);
     // Return user without password
     const _a = user.toObject(), { password } = _a, userWithoutPassword = __rest(_a, ["password"]);
@@ -147,6 +160,19 @@ const updateUserById = (id, updates, currentCompanyId) => __awaiter(void 0, void
         user.email = updates.email;
     if (typeof updates.role === 'string')
         user.role = updates.role;
+    // Update roles array if provided
+    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales'];
+    if (Array.isArray(updates.roles)) {
+        const roles = Array.from(new Set(updates.roles.map((r) => String(r)))).filter((r) => VALID_ROLES.includes(r));
+        if (roles.length === 0) {
+            throw new errorHandler_1.AppError('At least one valid role is required', 400);
+        }
+        user.roles = roles;
+        // Ensure primary role is aligned with roles array
+        if (!roles.includes(user.role)) {
+            user.role = roles[0];
+        }
+    }
     // If password provided and non-empty, set it so pre-save hook re-hashes
     if (typeof updates.password === 'string' && updates.password.trim().length > 0) {
         user.password = updates.password;

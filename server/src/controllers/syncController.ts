@@ -598,3 +598,42 @@ export const getSyncHealth = async (req: Request, res: Response) => {
     });
   }
 };
+
+/**
+ * List sync failures (for dashboard)
+ */
+export const listSyncFailures = async (req: Request, res: Response) => {
+  try {
+    const syncService = DatabaseSyncService.getInstance();
+    const { status, limit } = req.query as any;
+    const failures = await syncService.listFailures({
+      status: status as any,
+      limit: limit ? Number(limit) : undefined
+    });
+    res.json({ success: true, data: failures });
+  } catch (error) {
+    logger.error('Error listing sync failures:', error);
+    res.status(500).json({ success: false, message: 'Failed to list sync failures' });
+  }
+};
+
+/**
+ * Retry a sync failure
+ */
+export const retrySyncFailure = async (req: Request, res: Response) => {
+  try {
+    const syncService = DatabaseSyncService.getInstance();
+    const { id, type, documentId } = req.body || {};
+    if (id) {
+      await syncService.retryFailureById(id);
+    } else if (type && documentId) {
+      await syncService.retrySyncFor(type, documentId);
+    } else {
+      return res.status(400).json({ success: false, message: 'id or (type, documentId) required' });
+    }
+    res.json({ success: true, message: 'Retry triggered' });
+  } catch (error) {
+    logger.error('Error retrying sync failure:', error);
+    res.status(500).json({ success: false, message: 'Failed to retry sync failure' });
+  }
+};

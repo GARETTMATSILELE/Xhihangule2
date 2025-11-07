@@ -19,6 +19,7 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
     isAuthenticated,
     hasUser: !!user,
     userRole: user?.role,
+    userRoles: (user as any)?.roles,
     requiredRoles,
     error
   });
@@ -51,16 +52,20 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
 
   // Check role-based access if required roles are specified
   if (requiredRoles && requiredRoles.length > 0) {
-    if (!requiredRoles.includes(user.role)) {
+    const roles: string[] = Array.isArray((user as any).roles) && (user as any).roles.length > 0 ? (user as any).roles : [user.role];
+    if (!requiredRoles.some(r => roles.includes(r))) {
       console.log('ProtectedRoute: User role not authorized', { userRole: user.role, requiredRoles });
-      // Redirect unauthorized users to their own dashboard instead of login
+      // Redirect unauthorized users to role chooser if they have other roles
+      const hasAnyRole = roles.length > 0;
+      if (hasAnyRole) return <Navigate to="/choose-dashboard" replace />;
       const fallback = getDashboardPath(user.role as any);
       return <Navigate to={fallback} replace />;
     }
   }
 
   // If admin is authenticated but has no companyId, route to company setup (except if already there)
-  if (user.role === 'admin' && isAuthenticated && !user.companyId && !location.pathname.startsWith('/admin/company-setup')) {
+  const roles = Array.isArray((user as any).roles) && (user as any).roles.length > 0 ? (user as any).roles : [user.role];
+  if (roles.includes('admin') && isAuthenticated && !user.companyId && !location.pathname.startsWith('/admin/company-setup')) {
     return <Navigate to="/admin/company-setup" replace />;
   }
 

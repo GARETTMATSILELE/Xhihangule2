@@ -76,7 +76,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
   const { user, company } = useAuth();
   const { getProperties } = usePropertyService();
-  const { getAllPublic: getAllPropertyOwners } = usePropertyOwnerService();
+  const { getAllPublic: getAllPropertyOwners, getAll: getAllSalesOwners } = usePropertyOwnerService();
   
   // State
   const [property, setProperty] = useState<any>(null);
@@ -130,13 +130,17 @@ const PropertyAccountDetailPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch property details, property account, and property owners in parallel
-        const [props, accountData, propertyOwners, depositSum] = await Promise.all([
+        // Fetch property details, property account, and owners (rental + sales) in parallel
+        const [props, accountData, propertyOwners, salesOwnersRaw, depositSum] = await Promise.all([
           getProperties(),
           propertyAccountService.getPropertyAccount(propertyId),
           getAllPropertyOwners().catch(err => {
             console.error('Error fetching property owners:', err);
             return [];
+          }),
+          getAllSalesOwners().catch(err => {
+            console.error('Error fetching sales owners:', err);
+            return { owners: [] } as any;
           }),
           paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
         ]);
@@ -146,7 +150,7 @@ const PropertyAccountDetailPage: React.FC = () => {
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
         
-        // Map propertyId to owner name using owner.properties array (same as PropertyAccountsPage)
+        // Map propertyId to owner name using rental owner.properties; override with sales owner via propertyOwnerId for sale properties
         const ownerMap: Record<string, string> = {};
         console.log('Property owners fetched:', propertyOwners.length);
         
@@ -166,6 +170,20 @@ const PropertyAccountDetailPage: React.FC = () => {
           }
         });
         console.log('Final owner map:', ownerMap);
+        // If this is a sale property, prefer mapping from property's propertyOwnerId using sales owners
+        const salesOwners: PropertyOwner[] = Array.isArray((salesOwnersRaw as any)?.owners)
+          ? (salesOwnersRaw as any).owners
+          : (Array.isArray(salesOwnersRaw as any) ? (salesOwnersRaw as any) : []);
+        const salesOwnerById: Record<string, PropertyOwner> = {};
+        salesOwners.forEach((o: PropertyOwner) => { salesOwnerById[String((o as any)._id)] = o; });
+        if (found && (found as any).rentalType === 'sale') {
+          const raw = (found as any).propertyOwnerId;
+          const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
+          if (ownerId && salesOwnerById[ownerId]) {
+            const o = salesOwnerById[ownerId];
+            ownerMap[String((found as any)._id)] = `${o.firstName} ${o.lastName}`;
+          }
+        }
         setOwnerMap(ownerMap);
         
       } catch (err: any) {

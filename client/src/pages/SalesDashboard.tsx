@@ -8,6 +8,7 @@ import { usePropertyOwnerService } from "../services/propertyOwnerService";
 import accountantService from "../services/accountantService";
 import api from "../api/axios";
 import { useNotification } from "../components/Layout/Header";
+import { getDashboardPath } from "../utils/registrationUtils";
 import SalesSidebar from "../components/Layout/SalesSidebar";
 import SalesLeadsPage from "./SalesDashboard/LeadsPage";
 import ValuationsPage from "./SalesDashboard/ValuationsPage";
@@ -326,7 +327,7 @@ const propertyColors = {
 
 // --- Main CRM component ---
 export default function CRM() {
-  const { user, logout } = useAuth();
+  const { user, logout, setActiveRole } = useAuth() as any;
   const { company } = useCompany();
   const navigate = useNavigate();
   const location = useLocation();
@@ -744,6 +745,7 @@ export default function CRM() {
     const hay = fields.map(f => String(it[f] ?? "")).join(" ").toLowerCase();
     return hay.includes(query.toLowerCase());
   });
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900">
@@ -785,13 +787,45 @@ export default function CRM() {
               })()}
             </div>
           </div>
-          <button
-            className="ml-3 px-3 py-2 rounded-xl border text-sm bg-slate-100 hover:bg-slate-200"
-            onClick={async ()=>{ try { await logout(); } catch {} finally { navigate('/login'); } }}
-            title="Logout"
-          >
-            Logout
-          </button>
+          <div className="ml-3 relative">
+            <button
+              className="h-9 w-9 rounded-full border bg-slate-100 hover:bg-slate-200 grid place-items-center font-semibold"
+              onClick={()=>setRoleMenuOpen(v=>!v)}
+              aria-label="Open user menu"
+              title="Switch dashboard"
+            >
+              {userInitials}
+            </button>
+            {roleMenuOpen && (
+              <div className="absolute right-0 mt-2 w-56 bg-white border rounded-xl shadow z-50">
+                {(() => {
+                  const roles = Array.isArray((user as any)?.roles) && (user as any)?.roles.length > 0 ? (user as any).roles : [user?.role].filter(Boolean);
+                  const labels: any = { admin: 'Admin Dashboard', agent: 'Agent Dashboard', owner: 'Owner Dashboard', accountant: 'Accountant Dashboard', sales: 'Sales Dashboard' };
+                  return (
+                    <div className="py-1">
+                      {roles.map((r: any) => (
+                        <button
+                          key={r}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+                          onClick={() => {
+                            try { setRoleMenuOpen(false); } catch {}
+                            try { setActiveRole && setActiveRole(r); } catch {}
+                            const path = getDashboardPath(r as any);
+                            navigate(path);
+                          }}
+                        >{labels[r] || r}</button>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div className="border-t my-1" />
+                <button
+                  className="w-full text-left px-3 py-2 text-sm text-rose-700 hover:bg-rose-50"
+                  onClick={async ()=>{ setRoleMenuOpen(false); try { await logout(); } catch {} finally { navigate('/login'); } }}
+                >Logout</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

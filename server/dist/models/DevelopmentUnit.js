@@ -50,6 +50,7 @@ const DevelopmentUnitSchema = new mongoose_1.Schema({
     price: { type: Number, min: [0, 'Price cannot be negative'] },
     buyerId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Buyer' },
     buyerName: { type: String, trim: true },
+    collaborators: [{ type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User', default: [] }],
     meta: {
         block: { type: String, trim: true },
         floor: { type: String, trim: true },
@@ -74,4 +75,5 @@ const DevelopmentUnitSchema = new mongoose_1.Schema({
 DevelopmentUnitSchema.index({ developmentId: 1, status: 1 });
 DevelopmentUnitSchema.index({ developmentId: 1, variationId: 1 });
 DevelopmentUnitSchema.index({ developmentId: 1, variationId: 1, unitNumber: 1 }, { unique: true });
+DevelopmentUnitSchema.index({ collaborators: 1 });
 exports.DevelopmentUnit = mongoose_1.default.model('DevelopmentUnit', DevelopmentUnitSchema, collections_1.COLLECTIONS.DEVELOPMENT_UNITS);

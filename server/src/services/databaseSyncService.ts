@@ -4,6 +4,8 @@ import { Property } from '../models/Property';
 import { User } from '../models/User';
 import { IPropertyAccount } from '../models/PropertyAccount';
 import { logger } from '../utils/logger';
+import { DatabaseService } from './databaseService';
+import SyncFailure from '../models/SyncFailure';
 import { EventEmitter } from 'events';
 
 export interface SyncEvent {
@@ -36,6 +38,7 @@ export class DatabaseSyncService extends EventEmitter {
     syncDuration: 0,
     errors: []
   };
+  private db: DatabaseService = DatabaseService.getInstance();
 
   private constructor() {
     super();
@@ -333,10 +336,12 @@ export class DatabaseSyncService extends EventEmitter {
     try {
       if (operationType === 'insert' || operationType === 'update') {
         if (fullDocument && fullDocument.status === 'completed' && fullDocument.paymentType === 'rental') {
-          await this.syncPaymentToAccounting(fullDocument);
+        await this.syncPaymentToAccounting(fullDocument);
+        await this.clearFailureRecord('payment', documentId);
         }
       } else if (operationType === 'delete') {
         await this.removePaymentFromAccounting(documentId);
+        await this.clearFailureRecord('payment', documentId);
       }
 
       // Emit sync event
@@ -351,7 +356,7 @@ export class DatabaseSyncService extends EventEmitter {
 
     } catch (error) {
       logger.error('Error handling payment change:', error);
-      this.recordSyncError('payment', documentId, error instanceof Error ? error.message : String(error));
+      this.recordSyncError('payment', documentId, error);
     }
   }
 
@@ -365,8 +370,10 @@ export class DatabaseSyncService extends EventEmitter {
     try {
       if (operationType === 'insert' || operationType === 'update') {
         await this.syncPropertyToAccounting(fullDocument);
+        await this.clearFailureRecord('property', documentId);
       } else if (operationType === 'delete') {
         await this.removePropertyFromAccounting(documentId);
+        await this.clearFailureRecord('property', documentId);
       }
 
       // Emit sync event
@@ -381,7 +388,7 @@ export class DatabaseSyncService extends EventEmitter {
 
     } catch (error) {
       logger.error('Error handling property change:', error);
-      this.recordSyncError('property', documentId, error instanceof Error ? error.message : String(error));
+      this.recordSyncError('property', documentId, error);
     }
   }
 
@@ -395,8 +402,10 @@ export class DatabaseSyncService extends EventEmitter {
     try {
       if (operationType === 'insert' || operationType === 'update') {
         await this.syncUserToAccounting(fullDocument);
+        await this.clearFailureRecord('user', documentId);
       } else if (operationType === 'delete') {
         await this.removeUserFromAccounting(documentId);
+        await this.clearFailureRecord('user', documentId);
       }
 
       // Emit sync event
@@ -411,7 +420,7 @@ export class DatabaseSyncService extends EventEmitter {
 
     } catch (error) {
       logger.error('Error handling user change:', error);
-      this.recordSyncError('user', documentId, error instanceof Error ? error.message : String(error));
+      this.recordSyncError('user', documentId, error);
     }
   }
 
@@ -497,7 +506,9 @@ export class DatabaseSyncService extends EventEmitter {
         propertyAccount.lastIncomeDate = new Date();
         propertyAccount.lastUpdated = new Date();
 
-        await propertyAccount.save();
+        await this.db.executeWithRetry(async () => {
+          await propertyAccount.save();
+        });
         logger.info(`Synced payment ${payment._id} to property account ${payment.propertyId}`);
         
         this.recordSyncSuccess();
@@ -531,7 +542,9 @@ export class DatabaseSyncService extends EventEmitter {
           companyAccount.totalIncome += agencyShare;
           companyAccount.runningBalance += agencyShare;
           companyAccount.lastUpdated = new Date();
-          await companyAccount.save();
+          await this.db.executeWithRetry(async () => {
+            await companyAccount.save();
+          });
           logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
         }
       }
@@ -566,7 +579,9 @@ export class DatabaseSyncService extends EventEmitter {
           }
         }
 
-        await propertyAccount.save();
+        await this.db.executeWithRetry(async () => {
+          await propertyAccount.save();
+        });
         logger.info(`Updated property account for property ${property._id}`);
       } else {
         // Create new account if it doesn't exist
@@ -593,7 +608,9 @@ export class DatabaseSyncService extends EventEmitter {
           isActive: property.isActive !== false
         });
 
-        await newAccount.save();
+        await this.db.executeWithRetry(async () => {
+          await newAccount.save();
+        });
         logger.info(`Created property account for property ${property._id}`);
       }
       
@@ -612,17 +629,17 @@ export class DatabaseSyncService extends EventEmitter {
     try {
       // Update owner names in property accounts if this user is a property owner
       const PropertyAccount = accountingConnection.model('PropertyAccount');
-      
-      const propertyAccounts = await PropertyAccount.find({ ownerId: user._id });
-      
-      for (const account of propertyAccounts) {
-        account.ownerName = `${user.firstName} ${user.lastName}`;
-        account.lastUpdated = new Date();
-        await account.save();
-      }
+      const ownerName = `${user.firstName} ${user.lastName}`;
+      const res = await this.db.executeWithRetry(async () => {
+        return await PropertyAccount.updateMany(
+          { ownerId: user._id },
+          { $set: { ownerName, lastUpdated: new Date() } },
+          { maxTimeMS: 5000 } as any
+        );
+      });
 
-      if (propertyAccounts.length > 0) {
-        logger.info(`Updated owner name in ${propertyAccounts.length} property accounts for user ${user._id}`);
+      if ((res as any)?.modifiedCount > 0) {
+        logger.info(`Updated owner name in ${(res as any).modifiedCount} property accounts for user ${user._id}`);
       }
       
       this.recordSyncSuccess();
@@ -660,7 +677,9 @@ export class DatabaseSyncService extends EventEmitter {
           propertyAccount.runningBalance -= transaction.amount;
           propertyAccount.lastUpdated = new Date();
 
-          await propertyAccount.save();
+          await this.db.executeWithRetry(async () => {
+            await propertyAccount.save();
+          });
           logger.info(`Removed payment ${paymentId} from property account ${propertyAccount.propertyId}`);
         }
       }
@@ -680,7 +699,9 @@ export class DatabaseSyncService extends EventEmitter {
     try {
       const PropertyAccount = accountingConnection.model('PropertyAccount');
       
-      await PropertyAccount.findOneAndDelete({ propertyId });
+      await this.db.executeWithRetry(async () => {
+        await PropertyAccount.findOneAndDelete({ propertyId }, { maxTimeMS: 5000 } as any);
+      });
       logger.info(`Removed property account for property ${propertyId}`);
       
       this.recordSyncSuccess();
@@ -699,13 +720,16 @@ export class DatabaseSyncService extends EventEmitter {
       const PropertyAccount = accountingConnection.model('PropertyAccount');
       
       // Update property accounts to remove owner reference
-      await PropertyAccount.updateMany(
-        { ownerId: userId },
-        { 
-          $unset: { ownerId: 1, ownerName: 1 },
-          $set: { lastUpdated: new Date() }
-        }
-      );
+      await this.db.executeWithRetry(async () => {
+        await PropertyAccount.updateMany(
+          { ownerId: userId },
+          { 
+            $unset: { ownerId: 1, ownerName: 1 },
+            $set: { lastUpdated: new Date() }
+          },
+          { maxTimeMS: 5000 } as any
+        );
+      });
 
       logger.info(`Removed user ${userId} from property accounts`);
       
@@ -774,7 +798,7 @@ export class DatabaseSyncService extends EventEmitter {
           await this.syncPropertyToAccounting(property);
           this.syncStats.totalSynced++;
         } catch (error) {
-          this.recordSyncError('property', property._id.toString(), error instanceof Error ? error.message : String(error));
+          this.recordSyncError('property', property._id.toString(), error);
         }
       }
 
@@ -801,7 +825,7 @@ export class DatabaseSyncService extends EventEmitter {
           await this.syncPaymentToAccounting(payment);
           this.syncStats.totalSynced++;
         } catch (error) {
-          this.recordSyncError('payment', payment._id.toString(), error instanceof Error ? error.message : String(error));
+          this.recordSyncError('payment', payment._id.toString(), error);
         }
       }
 
@@ -824,7 +848,7 @@ export class DatabaseSyncService extends EventEmitter {
           await this.syncUserToAccounting(user);
           this.syncStats.totalSynced++;
         } catch (error) {
-          this.recordSyncError('user', user._id.toString(), error instanceof Error ? error.message : String(error));
+          this.recordSyncError('user', user._id.toString(), error);
         }
       }
 
@@ -844,21 +868,121 @@ export class DatabaseSyncService extends EventEmitter {
   /**
    * Record sync error
    */
-  private recordSyncError(type: string, documentId: string, error: string): void {
+  private recordSyncError(type: string, documentId: string, error: unknown): void {
+    const err = error as any;
+    const errorMessage = err?.message ? String(err.message) : String(error);
     this.syncStats.errorCount++;
     this.syncStats.errors.push({
       documentId,
-      error,
+      error: errorMessage,
       timestamp: new Date()
     });
+
+    // Persist failure for reprocessing
+    try {
+      const retriable = this.db.shouldRetry(err);
+      const labels: string[] = Array.isArray(err?.errorLabels) ? err.errorLabels : [];
+      const backoffMs = retriable ? 5 * 60 * 1000 : undefined; // 5 minutes initial backoff
+      SyncFailure.updateOne(
+        { type, documentId },
+        {
+          $set: {
+            type,
+            documentId,
+            errorName: err?.name,
+            errorCode: err?.code,
+            errorMessage: errorMessage,
+            errorLabels: labels,
+            retriable,
+            status: 'pending',
+            lastErrorAt: new Date(),
+            payload: undefined
+          },
+          $setOnInsert: {
+            attemptCount: 0
+          },
+          ...(retriable ? { $set: { nextAttemptAt: new Date(Date.now() + (backoffMs as number)) } } : {})
+        },
+        { upsert: true }
+      ).catch(() => {});
+    } catch (persistErr) {
+      logger.warn('Failed to persist sync failure record:', persistErr);
+    }
 
     // Emit error event
     this.emit('syncError', {
       type,
       documentId,
-      error,
+      error: errorMessage,
+      errorName: (error as any)?.name,
+      errorCode: (error as any)?.code,
+      retriable: this.db.shouldRetry(error),
       timestamp: new Date()
     });
+  }
+
+  private async clearFailureRecord(type: string, documentId: string): Promise<void> {
+    try {
+      await SyncFailure.deleteOne({ type, documentId });
+      this.emit('syncFailureCleared', { type, documentId, timestamp: new Date() });
+    } catch (e) {
+      logger.warn('Failed to clear failure record:', e);
+    }
+  }
+
+  /**
+   * Retry a failed sync for a specific document
+   */
+  public async retrySyncFor(type: string, documentId: string): Promise<void> {
+    try {
+      switch (type) {
+        case 'payment': {
+          const payment = await Payment.findById(documentId);
+          if (payment) {
+            await this.syncPaymentToAccounting(payment);
+            await this.clearFailureRecord('payment', documentId);
+          }
+          break;
+        }
+        case 'property': {
+          const property = await Property.findById(documentId);
+          if (property) {
+            await this.syncPropertyToAccounting(property);
+            await this.clearFailureRecord('property', documentId);
+          }
+          break;
+        }
+        case 'user': {
+          const user = await User.findById(documentId);
+          if (user) {
+            await this.syncUserToAccounting(user);
+            await this.clearFailureRecord('user', documentId);
+          }
+          break;
+        }
+        default:
+          logger.warn(`No retry handler for type: ${type}`);
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * List stored sync failures (for dashboard)
+   */
+  public async listFailures(params?: { status?: 'pending' | 'resolved' | 'discarded'; limit?: number }): Promise<any[]> {
+    const { status, limit = 100 } = params || {};
+    const query: any = {};
+    if (status) query.status = status;
+    return SyncFailure.find(query).sort({ lastErrorAt: -1 }).limit(limit).lean();
+  }
+
+  public async retryFailureById(id: string): Promise<void> {
+    const fail = await SyncFailure.findById(id);
+    if (!fail) return;
+    await this.retrySyncFor(fail.type, fail.documentId);
+    await SyncFailure.updateOne({ _id: fail._id }, { $set: { status: 'resolved' } });
   }
 
   /**

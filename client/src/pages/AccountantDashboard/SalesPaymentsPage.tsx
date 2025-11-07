@@ -278,11 +278,18 @@ const SalesPaymentsPage: React.FC = () => {
                 }
               }} disabled={!selectedDevId} helperText={!selectedDevId ? 'Select a development first' : undefined}>
                 <MenuItem value="">None</MenuItem>
-                {(units || []).map((u: any) => (
-                  <MenuItem key={u._id || u.id} value={u._id || u.id}>
-                    {(u.unitCode || `Unit ${u.unitNumber || ''}`)}
-                  </MenuItem>
-                ))}
+                {(units || []).map((u: any) => {
+                  const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(selectedDevId));
+                  const variationLabel = (dev?.variations || []).find((v: any) => String(v.id || v._id) === String(u.variationId))?.label;
+                  const display = u.unitCode
+                    ? (variationLabel ? `${u.unitCode} • ${variationLabel}` : u.unitCode)
+                    : (variationLabel ? `${variationLabel}${u.unitNumber ? ` • Unit ${u.unitNumber}` : ''}` : `Unit ${u.unitNumber || ''}`);
+                  return (
+                    <MenuItem key={u._id || u.id} value={u._id || u.id}>
+                      {display}
+                    </MenuItem>
+                  );
+                })}
               </TextField>
             </Grid>
             <Grid item xs={12} md={4}>

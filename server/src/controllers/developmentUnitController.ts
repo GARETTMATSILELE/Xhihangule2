@@ -125,6 +125,14 @@ export const listUnits = async (req: Request, res: Response) => {
       ];
     }
 
+    // Restrict to unit collaborators when user is sales and not dev owner/collaborator
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id:any)=> String(id) === String(req.user!.userId));
+    if (!isPrivileged && !isOwner && !isDevCollaborator) {
+      query.collaborators = new mongoose.Types.ObjectId(req.user!.userId);
+    }
+
     const [items, total] = await Promise.all([
       DevelopmentUnit.find(query)
         .sort({ variationId: 1, unitNumber: 1 })
@@ -168,6 +176,94 @@ export const setUnitBuyer = async (req: Request, res: Response) => {
   } catch (error: any) {
     const status = (error as any)?.statusCode || 500;
     const message = (error as any)?.message || 'Error setting unit buyer';
+    return res.status(status).json({ message });
+  }
+};
+
+export const updateUnitDetails = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const { unitId } = req.params as any;
+    const unit = await DevelopmentUnit.findById(unitId).lean();
+    if (!unit) throw new AppError('Unit not found', 404);
+    const dev = await Development.findById(unit.developmentId).lean();
+    if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
+
+    // Only admin/accountant or development owner/collaborator can edit details
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id:any)=> String(id) === String(req.user!.userId));
+    if (!isPrivileged && !isOwner && !isDevCollaborator) throw new AppError('Not allowed to modify this unit', 403);
+
+    const body = req.body || {};
+    const setOps: any = {};
+    if (typeof body.unitCode === 'string') setOps.unitCode = String(body.unitCode).trim();
+    if (typeof body.price === 'number') setOps.price = Number(body.price);
+    if (body.meta && typeof body.meta === 'object') {
+      const meta: any = {};
+      if (typeof body.meta.block === 'string') meta.block = String(body.meta.block).trim();
+      if (typeof body.meta.floor === 'string') meta.floor = String(body.meta.floor).trim();
+      if (typeof body.meta.bedrooms === 'number') meta.bedrooms = Number(body.meta.bedrooms);
+      if (typeof body.meta.bathrooms === 'number') meta.bathrooms = Number(body.meta.bathrooms);
+      if (typeof body.meta.standSize === 'number') meta.standSize = Number(body.meta.standSize);
+      setOps.meta = meta;
+    }
+    if (Object.keys(setOps).length === 0) return res.json(await DevelopmentUnit.findById(unitId).lean());
+
+    const updated = await DevelopmentUnit.findByIdAndUpdate(unitId, { $set: setOps }, { new: true }).lean();
+    return res.json(updated);
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error updating unit';
+    return res.status(status).json({ message });
+  }
+};
+
+export const addUnitCollaborator = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const { unitId } = req.params as any;
+    const { userId } = req.body || {};
+    if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) throw new AppError('Invalid userId', 400);
+    const unit = await DevelopmentUnit.findById(unitId).lean();
+    if (!unit) throw new AppError('Unit not found', 404);
+    const dev = await Development.findById(unit.developmentId).lean();
+    if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
+    // Only admin/accountant or development owner can add unit collaborators
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    if (!isPrivileged && !isOwner) throw new AppError('Only development owner or admin can add unit collaborators', 403);
+
+    await DevelopmentUnit.updateOne({ _id: unitId }, { $addToSet: { collaborators: new mongoose.Types.ObjectId(String(userId)) } });
+    const updated = await DevelopmentUnit.findById(unitId).lean();
+    return res.json(updated);
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error adding unit collaborator';
+    return res.status(status).json({ message });
+  }
+};
+
+export const removeUnitCollaborator = async (req: Request, res: Response) => {
+  try {
+    ensureAuthCompany(req);
+    const { unitId } = req.params as any;
+    const { userId } = req.body || {};
+    if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) throw new AppError('Invalid userId', 400);
+    const unit = await DevelopmentUnit.findById(unitId).lean();
+    if (!unit) throw new AppError('Unit not found', 404);
+    const dev = await Development.findById(unit.developmentId).lean();
+    if (!dev || String(dev.companyId) !== String(req.user!.companyId)) throw new AppError('Forbidden', 403);
+    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    const isOwner = String(dev.createdBy) === String(req.user!.userId);
+    if (!isPrivileged && !isOwner) throw new AppError('Only development owner or admin can remove unit collaborators', 403);
+
+    await DevelopmentUnit.updateOne({ _id: unitId }, { $pull: { collaborators: new mongoose.Types.ObjectId(String(userId)) } });
+    const updated = await DevelopmentUnit.findById(unitId).lean();
+    return res.json(updated);
+  } catch (error: any) {
+    const status = (error as any)?.statusCode || 500;
+    const message = (error as any)?.message || 'Error removing unit collaborator';
     return res.status(status).json({ message });
   }
 };

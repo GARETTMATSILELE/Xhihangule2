@@ -1,5 +1,6 @@
 import { CronJob } from 'cron';
 import DatabaseSyncService from './databaseSyncService';
+import SyncFailure from '../models/SyncFailure';
 import { logger } from '../utils/logger';
 
 export interface SyncSchedule {
@@ -70,6 +71,16 @@ export class ScheduledSyncService {
       name: 'monthly_deep_sync',
       cronExpression: '0 4 1 * *',
       description: 'Monthly deep synchronization and cleanup',
+      enabled: true,
+      runCount: 0,
+      averageDuration: 0
+    });
+
+    // Reprocess sync failures every 5 minutes
+    this.addSyncSchedule({
+      name: 'sync_failure_reprocessor',
+      cronExpression: '*/5 * * * *',
+      description: 'Reprocess pending sync failures with backoff',
       enabled: true,
       runCount: 0,
       averageDuration: 0
@@ -199,6 +210,9 @@ export class ScheduledSyncService {
         case 'monthly_deep_sync':
           await this.executeMonthlyDeepSync();
           break;
+        case 'sync_failure_reprocessor':
+          await this.executeFailureReprocessor();
+          break;
         default:
           await this.executeCustomSync(schedule);
       }
@@ -224,6 +238,64 @@ export class ScheduledSyncService {
         error: error instanceof Error ? error.message : String(error),
         timestamp: new Date()
       });
+    }
+  }
+
+  /**
+   * Execute failure reprocessor
+   */
+  private async executeFailureReprocessor(): Promise<void> {
+    const MAX_ATTEMPTS = 10;
+    const BASE_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+    try {
+      const now = new Date();
+      const pending = await SyncFailure.find({
+        status: 'pending',
+        $or: [
+          { nextAttemptAt: { $exists: false } },
+          { nextAttemptAt: { $lte: now } }
+        ]
+      }).limit(100);
+
+      for (const fail of pending) {
+        try {
+          await this.databaseSyncService.retrySyncFor(fail.type, fail.documentId);
+          // On success, mark resolved
+          await SyncFailure.updateOne({ _id: fail._id }, { $set: { status: 'resolved' } });
+          this.databaseSyncService.emit('syncFailureResolved', {
+            type: fail.type,
+            documentId: fail.documentId,
+            resolvedAt: new Date()
+          });
+        } catch (err: any) {
+          const attemptCount = (fail.attemptCount ?? 0) + 1;
+          const retriable = this.databaseSyncService['db'].shouldRetry(err);
+          const backoff = Math.min(BASE_BACKOFF_MS * Math.pow(2, attemptCount - 1), 24 * 60 * 60 * 1000); // cap at 24h
+          const update: any = {
+            $set: {
+              errorName: err?.name,
+              errorCode: err?.code,
+              errorMessage: err?.message ?? String(err),
+              errorLabels: Array.isArray(err?.errorLabels) ? err.errorLabels : [],
+              retriable,
+              lastErrorAt: new Date(),
+              nextAttemptAt: retriable ? new Date(Date.now() + backoff) : undefined,
+              status: attemptCount >= MAX_ATTEMPTS || !retriable ? 'discarded' : 'pending'
+            },
+            $inc: { attemptCount: 1 }
+          };
+          await SyncFailure.updateOne({ _id: fail._id }, update);
+          this.databaseSyncService.emit('syncFailureRetry', {
+            type: fail.type,
+            documentId: fail.documentId,
+            attempt: attemptCount,
+            retriable,
+            nextAttemptAt: retriable ? new Date(Date.now() + backoff) : undefined
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('Failure reprocessor run failed:', error);
     }
   }
 

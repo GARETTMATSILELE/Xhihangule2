@@ -12,6 +12,7 @@ import { NotificationProvider } from './components/Layout/Header';
 // Eagerly load API module to avoid lazy chunk timeouts for shared api chunk
 import './api';
 import { lazyWithRetry } from './lib/lazyWithRetry';
+import ChooseDashboard from './pages/ChooseDashboard';
 
 const LandingPage = lazyWithRetry(() => import('./pages/LandingPage'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
@@ -220,6 +221,7 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
+              <Route path="/choose-dashboard" element={<ChooseDashboard />} />
               <Route path="/accountant-dashboard/*" element={
                 <ProtectedRoute requiredRoles={['accountant']}>
                   <PropertyProvider>

@@ -9,6 +9,7 @@ export interface IUser extends Document {
   firstName: string;
   lastName: string;
   role: UserRole;
+  roles?: UserRole[];
   companyId?: Types.ObjectId;
   isActive: boolean;
   lastLogin?: Date;
@@ -48,6 +49,12 @@ const userSchema = new Schema<IUser>({
     type: String,
     enum: ['admin', 'agent', 'accountant', 'owner', 'sales'] as UserRole[],
     default: 'agent'
+  },
+  roles: {
+    type: [String],
+    enum: ['admin', 'agent', 'accountant', 'owner', 'sales'] as UserRole[],
+    required: false,
+    default: undefined
   },
   companyId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -101,7 +108,10 @@ userSchema.methods.comparePassword = async function(candidatePassword: string): 
 
 // Method to check if user can access a specific role's dashboard
 userSchema.methods.canAccessRole = function(role: UserRole): boolean {
-  return this.role === role;
+  const list: UserRole[] = Array.isArray((this as any).roles) && (this as any).roles!.length > 0
+    ? (this as any).roles as UserRole[]
+    : [this.role];
+  return list.includes(role);
 };
 
 // Create and export the model

@@ -14,7 +14,7 @@ router.get('/:id/units', auth_1.authWithCompany, developmentController_1.listUni
 router.get('/:id/payments', auth_1.authWithCompany, developmentController_1.listPaymentsForDevelopment);
 router.post('/', auth_1.authWithCompany, developmentController_1.createDevelopment);
 router.patch('/:id', auth_1.authWithCompany, developmentController_1.updateDevelopment);
-router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, developmentController_1.deleteDevelopment);
+router.delete('/:id', auth_1.authWithCompany, roles_1.isAdminOrSales, developmentController_1.deleteDevelopment);
 router.post('/:id/recompute-stats', auth_1.authWithCompany, developmentController_1.recomputeStats);
 router.post('/:id/collaborators', auth_1.authWithCompany, developmentController_1.addCollaborator);
 router.delete('/:id/collaborators', auth_1.authWithCompany, developmentController_1.removeCollaborator);

@@ -248,6 +248,8 @@ PropertyAccountSchema.index({ 'ownerPayouts.date': -1 });
 PropertyAccountSchema.index({ runningBalance: 1 });
 // Ensure reference numbers are unique per property across owner payouts
 PropertyAccountSchema.index({ propertyId: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, sparse: true });
+// Ensure each paymentId is only recorded once across all property accounts
+PropertyAccountSchema.index({ 'transactions.paymentId': 1 }, { unique: true, sparse: true });
 
 // Pre-save middleware to update totals
 PropertyAccountSchema.pre('save', function(next) {

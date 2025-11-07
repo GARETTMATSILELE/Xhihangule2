@@ -54,13 +54,14 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
     req.user = {
       userId: userData.userId,
       role: userData.role,
+      roles: (userData as any).roles,
       companyId: userData.companyId
-    };
+    } as any;
 
     console.log('User object set in request:', {
-      userId: req.user.userId,
-      role: req.user.role,
-      companyId: req.user.companyId
+      userId: (req.user as any)?.userId,
+      role: (req.user as any)?.role,
+      companyId: (req.user as any)?.companyId
     });
 
     next();
@@ -129,8 +130,9 @@ export const propertyOwnerAuth = async (req: AuthRequest, res: Response, next: N
     req.user = {
       userId: userData.userId,
       role: userData.role,
+      roles: (userData as any).roles,
       companyId: userData.companyId
-    };
+    } as any;
 
     next();
   } catch (error) {
@@ -188,8 +190,9 @@ export const authWithCompany = async (req: AuthRequest, res: Response, next: Nex
     req.user = {
       userId: userData.userId,
       role: userData.role,
+      roles: (userData as any).roles,
       companyId: userData.companyId
-    };
+    } as any;
 
     next();
   } catch (error) {
@@ -230,7 +233,8 @@ export const authorize = (allowedRoles: UserRole[]) => {
       });
     }
 
-    if (!allowedRoles.includes(req.user.role as UserRole)) {
+    const userRoles = ((req.user as any).roles as UserRole[] | undefined) || [req.user.role as UserRole];
+    if (!allowedRoles.some(r => userRoles.includes(r as UserRole))) {
       return res.status(403).json({
         status: 'error',
         message: 'Insufficient permissions',

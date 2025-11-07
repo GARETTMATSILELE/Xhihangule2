@@ -7,6 +7,7 @@ import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { Development } from '../models/Development';
 
 export class PropertyAccountService {
   private static instance: PropertyAccountService;
@@ -30,41 +31,49 @@ export class PropertyAccountService {
       console.log('Database query result:', account ? 'Found account' : 'No account found');
       
     if (!account) {
-        // Get property details
+        // Try resolve as a Property; if not found, try as a Development
         const property = await Property.findById(propertyId);
-        if (!property) {
+        const development = property ? null : await Development.findById(propertyId);
+        if (!property && !development) {
           throw new AppError('Property not found', 404);
         }
 
-        // Get owner details from PropertyOwner collection
+        // Get owner details
         let ownerName = 'Unknown Owner';
-        let ownerId = null;
-        
-        // First try to find owner by property.ownerId
-        if (property.ownerId) {
-          const owner = await PropertyOwner.findById(property.ownerId);
-          if (owner) {
-            ownerName = `${owner.firstName} ${owner.lastName}`;
-            ownerId = owner._id;
+        let ownerId = null as any;
+
+        if (property) {
+          // Resolve owner via PropertyOwner linkage
+          if (property.ownerId) {
+            const owner = await PropertyOwner.findById(property.ownerId);
+            if (owner) {
+              ownerName = `${owner.firstName} ${owner.lastName}`.trim();
+              ownerId = owner._id;
+            }
           }
-        }
-        
-        // If not found by property.ownerId, try to find owner by searching properties array
-        if (!ownerId) {
-          const owner = await PropertyOwner.findOne({
-            properties: { $in: [new mongoose.Types.ObjectId(propertyId)] }
-          });
-          if (owner) {
-            ownerName = `${owner.firstName} ${owner.lastName}`;
-            ownerId = owner._id;
+          if (!ownerId) {
+            const owner = await PropertyOwner.findOne({
+              properties: { $in: [new mongoose.Types.ObjectId(propertyId)] }
+            });
+            if (owner) {
+              ownerName = `${owner.firstName} ${owner.lastName}`.trim();
+              ownerId = owner._id;
+            }
           }
+        } else if (development) {
+          // Resolve owner from Development.owner first/last name
+          const first = development.owner?.firstName || '';
+          const last = development.owner?.lastName || '';
+          const companyName = development.owner?.companyName || '';
+          const combined = `${first} ${last}`.trim();
+          ownerName = combined || companyName || 'Unknown Owner';
         }
 
         // Create new account
         account = new PropertyAccount({
           propertyId: new mongoose.Types.ObjectId(propertyId),
-          propertyName: property.name,
-          propertyAddress: property.address,
+          propertyName: property ? property.name : (development as any)?.name,
+          propertyAddress: property ? property.address : (development as any)?.address,
           ownerId: ownerId,
           ownerName,
           transactions: [],
@@ -417,31 +426,40 @@ export class PropertyAccountService {
         const property = await Property.findById(propertyId);
         if (property) {
           let ownerName = 'Unknown Owner';
-          let ownerId = null;
+          let ownerId = null as any;
           
-          // First try to find owner by property.ownerId
           if (property.ownerId) {
             const owner = await PropertyOwner.findById(property.ownerId);
             if (owner) {
-              ownerName = `${owner.firstName} ${owner.lastName}`;
+              ownerName = `${owner.firstName} ${owner.lastName}`.trim();
               ownerId = owner._id;
             }
           }
           
-          // If not found by property.ownerId, try to find owner by searching properties array
           if (!ownerId) {
             const owner = await PropertyOwner.findOne({
               properties: { $in: [new mongoose.Types.ObjectId(propertyId)] }
             });
             if (owner) {
-              ownerName = `${owner.firstName} ${owner.lastName}`;
+              ownerName = `${owner.firstName} ${owner.lastName}`.trim();
               ownerId = owner._id;
             }
           }
           
-          // Update the account with owner information
           if (ownerId) {
             account.ownerId = ownerId;
+            account.ownerName = ownerName;
+            await account.save();
+          }
+        } else {
+          // Fallback: resolve via Development document
+          const development = await Development.findById(propertyId);
+          if (development) {
+            const first = development.owner?.firstName || '';
+            const last = development.owner?.lastName || '';
+            const companyName = development.owner?.companyName || '';
+            const combined = `${first} ${last}`.trim();
+            const ownerName = combined || companyName || 'Unknown Owner';
             account.ownerName = ownerName;
             await account.save();
           }

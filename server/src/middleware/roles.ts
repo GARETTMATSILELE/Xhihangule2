@@ -6,7 +6,8 @@ export const isAgent = (req: Request, res: Response, next: NextFunction) => {
     throw new AppError('Authentication required', 401);
   }
 
-  if (!['agent', 'sales'].includes(req.user.role)) {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['agent', 'sales'].includes(r))) {
     throw new AppError('Access denied. Agent role required.', 403);
   }
 
@@ -18,7 +19,8 @@ export const isAdmin = (req: Request, res: Response, next: NextFunction) => {
     throw new AppError('Authentication required', 401);
   }
 
-  if (req.user.role !== 'admin') {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.includes('admin')) {
     throw new AppError('Access denied. Admin role required.', 403);
   }
 
@@ -30,7 +32,8 @@ export const isOwner = (req: Request, res: Response, next: NextFunction) => {
     throw new AppError('Authentication required', 401);
   }
 
-  if (req.user.role !== 'owner') {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.includes('owner')) {
     throw new AppError('Access denied. Owner role required.', 403);
   }
 
@@ -42,7 +45,8 @@ export const isAccountant = (req: Request, res: Response, next: NextFunction) =>
     throw new AppError('Authentication required', 401);
   }
 
-  if (req.user.role !== 'accountant') {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.includes('accountant')) {
     throw new AppError('Access denied. Accountant role required.', 403);
   }
 
@@ -54,7 +58,8 @@ export const canCreateProperty = (req: Request, res: Response, next: NextFunctio
     throw new AppError('Authentication required', 401);
   }
 
-  if (!['admin', 'owner', 'agent', 'sales'].includes(req.user.role)) {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['admin', 'owner', 'agent', 'sales'].includes(r))) {
     throw new AppError('Access denied. Admin, Owner, or Agent role required to create properties.', 403);
   }
 
@@ -66,7 +71,8 @@ export const canManagePayments = (req: Request, res: Response, next: NextFunctio
     throw new AppError('Authentication required', 401);
   }
 
-  if (!['admin', 'accountant', 'agent'].includes(req.user.role)) {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['admin', 'accountant', 'agent'].includes(r))) {
     throw new AppError('Access denied. Admin, Accountant, or Agent role required to manage payments.', 403);
   }
 
@@ -79,8 +85,22 @@ export const canViewCommissions = (req: Request, res: Response, next: NextFuncti
     throw new AppError('Authentication required', 401);
   }
 
-  if (!['admin', 'accountant'].includes(req.user.role)) {
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['admin', 'accountant'].includes(r))) {
     throw new AppError('Access denied. Admin or Accountant role required to view commissions.', 403);
+  }
+
+  next();
+};
+
+export const isAdminOrSales = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['admin', 'sales'].includes(r))) {
+    throw new AppError('Access denied. Admin or Sales role required.', 403);
   }
 
   next();
