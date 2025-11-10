@@ -322,8 +322,18 @@ class AgentAccountService {
                 // Get all agents for the company
                 const agents = yield User_1.User.find({ companyId: new mongoose_1.default.Types.ObjectId(companyId), role: { $in: ['agent', 'sales'] } });
                 const agentIds = agents.map(agent => agent._id);
-                // Get or create accounts for all agents
-                const accounts = yield Promise.all(agentIds.map(agentId => this.getOrCreateAgentAccount(agentId.toString())));
+                // For each agent, sync commission transactions (covers rentals and sales, including split roles),
+                // then fetch the updated account to ensure totals and balances are current for the list view.
+                const accounts = yield Promise.all(agentIds.map((agentObjectId) => __awaiter(this, void 0, void 0, function* () {
+                    const id = agentObjectId.toString();
+                    try {
+                        yield this.syncCommissionTransactions(id);
+                    }
+                    catch (e) {
+                        logger_1.logger.warn(`Failed to sync commissions for agent ${id} (non-fatal):`, e);
+                    }
+                    return yield this.getOrCreateAgentAccount(id);
+                })));
                 return accounts;
             }
             catch (error) {

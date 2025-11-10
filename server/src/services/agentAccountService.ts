@@ -375,12 +375,19 @@ export class AgentAccountService {
       // Get all agents for the company
       const agents = await User.find({ companyId: new mongoose.Types.ObjectId(companyId), role: { $in: ['agent', 'sales'] } });
       const agentIds = agents.map(agent => agent._id);
-      
-      // Get or create accounts for all agents
-      const accounts = await Promise.all(
-        agentIds.map(agentId => this.getOrCreateAgentAccount(agentId.toString()))
-      );
-      
+
+      // For each agent, sync commission transactions (covers rentals and sales, including split roles),
+      // then fetch the updated account to ensure totals and balances are current for the list view.
+      const accounts = await Promise.all(agentIds.map(async (agentObjectId) => {
+        const id = agentObjectId.toString();
+        try {
+          await this.syncCommissionTransactions(id);
+        } catch (e) {
+          logger.warn(`Failed to sync commissions for agent ${id} (non-fatal):`, e);
+        }
+        return await this.getOrCreateAgentAccount(id);
+      }));
+
       return accounts;
     } catch (error) {
       logger.error('Error getting company agent accounts:', error);
