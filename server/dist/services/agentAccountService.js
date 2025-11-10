@@ -255,30 +255,35 @@ class AgentAccountService {
                 const updatedAccount = yield this.getOrCreateAgentAccount(agentId);
                 // Get commission data from payments for display
                 console.log('Fetching commission data for agentId:', agentId);
-                // Determine agent role to filter payment types
-                const agentUser = yield User_1.User.findById(agentId).select('role');
-                const paymentTypeFilter = ((agentUser === null || agentUser === void 0 ? void 0 : agentUser.role) === 'sales') ? 'sale' : 'rental';
-                // First check if there are any payments for this agent
+                // Fetch both rentals and sales where this agent is involved either as the payment.agentId
+                // or through a sales split (owner/collaborator). This avoids role-based blind spots.
+                const agentObjId = new mongoose_1.default.Types.ObjectId(agentId);
+                const allowedTypes = ['rental', 'sale'];
+                // First check if there are any relevant payments
                 const totalPayments = yield Payment_1.Payment.countDocuments({
-                    agentId: new mongoose_1.default.Types.ObjectId(agentId),
-                    paymentType: paymentTypeFilter
-                });
-                console.log('Total payments for agent:', totalPayments);
-                const completedPayments = yield Payment_1.Payment.countDocuments({
-                    agentId: new mongoose_1.default.Types.ObjectId(agentId),
                     status: 'completed',
-                    paymentType: paymentTypeFilter
+                    paymentType: { $in: allowedTypes },
+                    $or: [
+                        { agentId: agentObjId },
+                        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                    ]
                 });
-                console.log('Completed payments for agent:', completedPayments);
+                console.log('Relevant completed payments for agent:', totalPayments);
                 const commissionData = yield Payment_1.Payment.find({
-                    agentId: new mongoose_1.default.Types.ObjectId(agentId),
                     status: 'completed',
-                    paymentType: paymentTypeFilter
-                }).populate('propertyId', 'address propertyName')
+                    paymentType: { $in: allowedTypes },
+                    $or: [
+                        { agentId: agentObjId },
+                        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                    ]
+                })
+                    .populate('propertyId', 'address propertyName')
                     .populate('tenantId', 'firstName lastName')
                     .select('paymentDate amount commissionDetails propertyId tenantId referenceNumber paymentType manualPropertyAddress manualTenantName')
                     .sort({ paymentDate: -1 })
-                    .lean(); // Use lean() for better performance since we don't need Mongoose documents
+                    .lean(); // Use lean() for better performance
                 console.log('Found commission data:', commissionData.length, 'records');
                 if (commissionData.length > 0) {
                     console.log('Sample commission record:', {
@@ -335,16 +340,13 @@ class AgentAccountService {
             var _a, _b;
             try {
                 console.log('Syncing commission transactions for agent:', agentId);
-                // Determine agent role to filter payment types
-                const agentUser = yield User_1.User.findById(agentId).select('role');
-                const paymentTypeFilter = ((agentUser === null || agentUser === void 0 ? void 0 : agentUser.role) === 'sales') ? 'sale' : 'rental';
                 // Get all completed payments where this agent is either:
                 // - the recorded agentId on the payment, or
                 // - the owner or collaborator in a sales split
                 const agentObjId = new mongoose_1.default.Types.ObjectId(agentId);
                 const payments = yield Payment_1.Payment.find({
                     status: 'completed',
-                    paymentType: paymentTypeFilter,
+                    paymentType: { $in: ['rental', 'sale'] },
                     $or: [
                         { agentId: agentObjId },
                         { 'commissionDetails.agentSplit.ownerUserId': agentObjId },

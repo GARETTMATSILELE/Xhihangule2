@@ -203,8 +203,41 @@ const DatabaseSyncDashboard: React.FC = () => {
   const handleFullSync = async () => {
     try {
       setActionLoading('fullSync');
-      await api.post('/sync/full');
+      const prevLastSync = syncStatus?.stats?.lastSyncTime ? new Date(syncStatus.stats.lastSyncTime).getTime() : 0;
+      const res = await api.post('/sync/full');
+      // Begin polling status until full sync finishes or timeout
+      const startedJobId = (res as any)?.data?.job?.id;
+      const start = Date.now();
+      const timeoutMs = 10 * 60 * 1000; // 10 minutes max
+      const pollIntervalMs = 3000;
+      const shouldStop = (statusData: any) => {
+        const full = statusData?.fullSync;
+        const stats = statusData?.stats;
+        const inProgress = !!full?.inProgress;
+        const completedAt = full?.completedAt ? new Date(full.completedAt).getTime() : 0;
+        const lastSyncTime = stats?.lastSyncTime ? new Date(stats.lastSyncTime).getTime() : 0;
+        const duration = Number(stats?.syncDuration || 0);
+        // Stop when no longer in progress and either lastSync advanced or completedAt is set or duration > 0
+        return (!inProgress) && ((lastSyncTime && lastSyncTime > prevLastSync) || !!completedAt || duration > 0);
+      };
+      // Immediate refresh
       await loadSyncData();
+      // Poll loop
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (Date.now() - start > timeoutMs) break;
+        await new Promise(r => setTimeout(r, pollIntervalMs));
+        try {
+          const statusRes = await api.get('/sync/status');
+          const data = (statusRes as any)?.data?.data;
+          if (data) {
+            setSyncStatus(data);
+            if (shouldStop(data)) break;
+          }
+        } catch {
+          // ignore transient polling errors
+        }
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to perform full sync');
     } finally {

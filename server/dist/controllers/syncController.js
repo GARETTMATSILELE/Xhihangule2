@@ -93,11 +93,11 @@ exports.stopRealTimeSync = stopRealTimeSync;
 const performFullSync = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const syncService = databaseSyncService_1.default.getInstance();
-        const stats = yield syncService.performFullSync();
-        res.json({
+        const { jobId, startedAt } = syncService.startFullSyncAsync();
+        res.status(202).json({
             success: true,
-            message: 'Full synchronization completed successfully',
-            stats,
+            message: 'Full synchronization started',
+            job: { id: jobId, startedAt },
             timestamp: new Date()
         });
     }
@@ -126,12 +126,14 @@ const getSyncStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const realTimeStatus = syncService.getSyncStatus();
         const scheduledStatus = scheduledService.getStatus();
         const syncStats = syncService.getSyncStats();
+        const fullSync = syncService.getFullSyncJobStatus();
         res.json({
             success: true,
             data: {
                 realTime: realTimeStatus,
                 scheduled: scheduledStatus,
                 stats: syncStats,
+                fullSync,
                 timestamp: new Date()
             }
         });

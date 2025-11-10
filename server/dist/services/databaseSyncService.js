@@ -59,6 +59,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
         super();
         this.isRunning = false;
         this.changeStreams = new Map();
+        // Track async full sync job state
+        this.fullSyncInProgress = false;
+        this.currentFullSyncJobId = null;
+        this.currentFullSyncStartedAt = null;
+        this.lastFullSyncCompletedAt = null;
+        this.lastFullSyncError = null;
         this.syncStats = {
             totalSynced: 0,
             successCount: 0,
@@ -751,6 +757,52 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 throw error;
             }
         });
+    }
+    /**
+     * Start full synchronization asynchronously and return a job id
+     */
+    startFullSyncAsync() {
+        // Lazy import to avoid top-level dependency cycle
+        const { v4: uuidv4 } = require('uuid');
+        if (this.fullSyncInProgress && this.currentFullSyncJobId) {
+            logger_1.logger.info(`Full sync already in progress (jobId=${this.currentFullSyncJobId})`);
+            return { jobId: this.currentFullSyncJobId, startedAt: this.currentFullSyncStartedAt || new Date() };
+        }
+        this.fullSyncInProgress = true;
+        this.lastFullSyncError = null;
+        this.currentFullSyncJobId = uuidv4();
+        this.currentFullSyncStartedAt = new Date();
+        const jobId = this.currentFullSyncJobId;
+        const startedAt = this.currentFullSyncStartedAt;
+        // Run on next tick without blocking the request cycle
+        setImmediate(() => __awaiter(this, void 0, void 0, function* () {
+            try {
+                yield this.performFullSync();
+            }
+            catch (e) {
+                const message = (e === null || e === void 0 ? void 0 : e.message) ? String(e.message) : String(e);
+                this.lastFullSyncError = message;
+                logger_1.logger.error(`Full sync job ${jobId} failed:`, e);
+            }
+            finally {
+                this.fullSyncInProgress = false;
+                this.lastFullSyncCompletedAt = new Date();
+                // keep currentFullSyncJobId until next start so status can show last run
+            }
+        }));
+        return { jobId, startedAt };
+    }
+    /**
+     * Get background full sync job status
+     */
+    getFullSyncJobStatus() {
+        return {
+            inProgress: this.fullSyncInProgress,
+            jobId: this.currentFullSyncJobId,
+            startedAt: this.currentFullSyncStartedAt,
+            completedAt: this.lastFullSyncCompletedAt,
+            lastError: this.lastFullSyncError
+        };
     }
     /**
      * Sync all properties
