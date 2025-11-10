@@ -308,7 +308,7 @@ export class AgentAccountService {
       // Fetch both rentals and sales where this agent is involved either as the payment.agentId
       // or through a sales split (owner/collaborator). This avoids role-based blind spots.
       const agentObjId = new mongoose.Types.ObjectId(agentId);
-      const allowedTypes = ['rental', 'sale'];
+      const allowedTypes = ['rental', 'sale', 'introduction'];
       // First check if there are any relevant payments
       const totalPayments = await Payment.countDocuments({
         status: 'completed',
@@ -408,7 +408,7 @@ export class AgentAccountService {
       const agentObjId = new mongoose.Types.ObjectId(agentId);
       const payments = await Payment.find({
         status: 'completed',
-        paymentType: { $in: ['rental', 'sale'] as any },
+        paymentType: { $in: ['rental', 'sale', 'introduction'] as any },
         $or: [
           { agentId: agentObjId },
           { 'commissionDetails.agentSplit.ownerUserId': agentObjId },

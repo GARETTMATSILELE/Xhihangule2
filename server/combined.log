@@ -12691,3 +12691,54 @@
 {"level":"info","message":"All enabled sync schedules started","timestamp":"2025-11-10T09:00:10.375Z"}
 {"level":"info","message":"✅ Scheduled synchronization services started","timestamp":"2025-11-10T09:00:10.375Z"}
 {"level":"info","message":"✅ Database synchronization services initialized successfully","timestamp":"2025-11-10T09:00:10.376Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:05:00.012Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 57ms","timestamp":"2025-11-10T09:05:00.074Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:10:00.007Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 17ms","timestamp":"2025-11-10T09:10:00.025Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:15:00.004Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 7ms","timestamp":"2025-11-10T09:15:00.012Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:20:00.003Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 16ms","timestamp":"2025-11-10T09:20:00.020Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:25:00.005Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 26ms","timestamp":"2025-11-10T09:25:00.032Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:30:00.016Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 11ms","timestamp":"2025-11-10T09:30:00.027Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:35:00.012Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 12ms","timestamp":"2025-11-10T09:35:00.027Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:40:00.006Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 9ms","timestamp":"2025-11-10T09:40:00.017Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:45:00.012Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 99ms","timestamp":"2025-11-10T09:45:00.113Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:50:00.010Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 9ms","timestamp":"2025-11-10T09:50:00.020Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T09:55:00.004Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 15ms","timestamp":"2025-11-10T09:55:00.020Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:00:00.007Z"}
+{"level":"info","message":"Executing scheduled sync: hourly_sync","timestamp":"2025-11-10T10:00:00.025Z"}
+{"level":"info","message":"Starting hourly synchronization...","timestamp":"2025-11-10T10:00:00.026Z"}
+{"level":"info","message":"Syncing changes since 2025-11-10T09:00:00.027Z","timestamp":"2025-11-10T10:00:00.027Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 58ms","timestamp":"2025-11-10T10:00:00.066Z"}
+{"level":"info","message":"Hourly synchronization completed","timestamp":"2025-11-10T10:00:01.041Z"}
+{"level":"info","message":"Completed scheduled sync: hourly_sync in 1017ms","timestamp":"2025-11-10T10:00:01.046Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:05:00.016Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 8ms","timestamp":"2025-11-10T10:05:00.025Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:10:00.015Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 16ms","timestamp":"2025-11-10T10:10:00.032Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:15:00.010Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 11ms","timestamp":"2025-11-10T10:15:00.022Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:20:00.006Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 18ms","timestamp":"2025-11-10T10:20:00.026Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:25:00.010Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 39ms","timestamp":"2025-11-10T10:25:00.050Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:30:00.007Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 6ms","timestamp":"2025-11-10T10:30:00.014Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:35:00.015Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 9ms","timestamp":"2025-11-10T10:35:00.025Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:40:00.014Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 9ms","timestamp":"2025-11-10T10:40:00.024Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:45:00.014Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 11ms","timestamp":"2025-11-10T10:45:00.026Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:50:00.020Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 17ms","timestamp":"2025-11-10T10:50:00.038Z"}
+{"level":"info","message":"Executing scheduled sync: sync_failure_reprocessor","timestamp":"2025-11-10T10:55:00.028Z"}
+{"level":"info","message":"Completed scheduled sync: sync_failure_reprocessor in 118ms","timestamp":"2025-11-10T10:55:00.147Z"}
