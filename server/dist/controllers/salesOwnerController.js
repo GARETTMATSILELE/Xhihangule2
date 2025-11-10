@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateSalesOwner = exports.getSalesOwnerById = exports.getSalesOwners = exports.createSalesOwner = void 0;
+exports.deleteSalesOwner = exports.updateSalesOwner = exports.getSalesOwnerById = exports.getSalesOwners = exports.createSalesOwner = void 0;
 const SalesOwner_1 = require("../models/SalesOwner");
 const createSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -70,7 +70,7 @@ const getSalesOwners = (req, res) => __awaiter(void 0, void 0, void 0, function*
 });
 exports.getSalesOwners = getSalesOwners;
 const getSalesOwnerById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             return res.status(401).json({ message: 'Company ID not found' });
@@ -79,7 +79,13 @@ const getSalesOwnerById = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!id) {
             return res.status(400).json({ message: 'Sales owner ID is required' });
         }
-        const owner = yield SalesOwner_1.SalesOwner.findOne({ _id: id, companyId: req.user.companyId }).select('-password');
+        const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
+        const filter = { _id: id, companyId: req.user.companyId };
+        // Sales agents can only view owners they created
+        if (!role || String(role).toLowerCase() === 'sales') {
+            filter.creatorId = req.user.userId;
+        }
+        const owner = yield SalesOwner_1.SalesOwner.findOne(filter).select('-password');
         if (!owner) {
             return res.status(404).json({ message: 'Sales owner not found' });
         }
@@ -92,7 +98,7 @@ const getSalesOwnerById = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.getSalesOwnerById = getSalesOwnerById;
 const updateSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             return res.status(401).json({ message: 'Company ID not found' });
@@ -114,7 +120,13 @@ const updateSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, functio
             update.phone = phone;
         if (Array.isArray(properties))
             update.properties = properties;
-        const owner = yield SalesOwner_1.SalesOwner.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, update, { new: true }).select('-password');
+        const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
+        const filter = { _id: id, companyId: req.user.companyId };
+        // Sales agents can only update owners they created
+        if (!role || String(role).toLowerCase() === 'sales') {
+            filter.creatorId = req.user.userId;
+        }
+        const owner = yield SalesOwner_1.SalesOwner.findOneAndUpdate(filter, update, { new: true }).select('-password');
         if (!owner) {
             return res.status(404).json({ message: 'Sales owner not found' });
         }
@@ -126,3 +138,31 @@ const updateSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.updateSalesOwner = updateSalesOwner;
+const deleteSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Company ID not found' });
+        }
+        const id = req.params.id;
+        if (!id) {
+            return res.status(400).json({ message: 'Sales owner ID is required' });
+        }
+        const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
+        const filter = { _id: id, companyId: req.user.companyId };
+        // Sales agents can only delete owners they created
+        if (!role || String(role).toLowerCase() === 'sales') {
+            filter.creatorId = req.user.userId;
+        }
+        const owner = yield SalesOwner_1.SalesOwner.findOneAndDelete(filter);
+        if (!owner) {
+            return res.status(404).json({ message: 'Sales owner not found' });
+        }
+        res.json({ message: 'Sales owner deleted successfully' });
+    }
+    catch (error) {
+        console.error('Error deleting sales owner:', error);
+        res.status(500).json({ message: 'Error deleting sales owner' });
+    }
+});
+exports.deleteSalesOwner = deleteSalesOwner;

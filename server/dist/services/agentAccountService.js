@@ -219,19 +219,34 @@ class AgentAccountService {
     recalculateBalance(account) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                let balance = 0;
+                // Use integer cents to prevent rounding drift
+                let balanceCents = 0;
+                let commissionCents = 0;
+                let payoutCents = 0;
+                let penaltyCents = 0;
                 // Sort transactions by date
                 const sortedTransactions = account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
                 for (const transaction of sortedTransactions) {
-                    if (transaction.type === 'commission') {
-                        balance += transaction.amount;
+                    const amountCents = Math.round((transaction.amount || 0) * 100);
+                    const isCompleted = transaction.status === 'completed';
+                    if (transaction.type === 'commission' && isCompleted) {
+                        commissionCents += amountCents;
+                        balanceCents += amountCents;
                     }
-                    else if (transaction.type === 'payout' || transaction.type === 'penalty') {
-                        balance -= transaction.amount;
+                    else if (transaction.type === 'payout' && isCompleted) {
+                        payoutCents += amountCents;
+                        balanceCents -= amountCents;
                     }
-                    transaction.runningBalance = balance;
+                    else if (transaction.type === 'penalty' && isCompleted) {
+                        penaltyCents += amountCents;
+                        balanceCents -= amountCents;
+                    }
+                    transaction.runningBalance = Number((balanceCents / 100).toFixed(2));
                 }
-                account.runningBalance = balance;
+                account.totalCommissions = Number((commissionCents / 100).toFixed(2));
+                account.totalPayouts = Number((payoutCents / 100).toFixed(2));
+                account.totalPenalties = Number((penaltyCents / 100).toFixed(2));
+                account.runningBalance = Number((balanceCents / 100).toFixed(2));
                 account.lastUpdated = new Date();
             }
             catch (error) {
@@ -258,7 +273,7 @@ class AgentAccountService {
                 // Fetch both rentals and sales where this agent is involved either as the payment.agentId
                 // or through a sales split (owner/collaborator). This avoids role-based blind spots.
                 const agentObjId = new mongoose_1.default.Types.ObjectId(agentId);
-                const allowedTypes = ['rental', 'sale'];
+                const allowedTypes = ['rental', 'sale', 'introduction'];
                 // First check if there are any relevant payments
                 const totalPayments = yield Payment_1.Payment.countDocuments({
                     status: 'completed',
@@ -356,7 +371,7 @@ class AgentAccountService {
                 const agentObjId = new mongoose_1.default.Types.ObjectId(agentId);
                 const payments = yield Payment_1.Payment.find({
                     status: 'completed',
-                    paymentType: { $in: ['rental', 'sale'] },
+                    paymentType: { $in: ['rental', 'sale', 'introduction'] },
                     $or: [
                         { agentId: agentObjId },
                         { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
@@ -401,15 +416,16 @@ class AgentAccountService {
                         const existingTransaction = account.transactions.find(t => {
                             if (t.type !== 'commission')
                                 return false;
-                            if (t.reference === uniqueRef)
-                                return true;
-                            if (!isSalesSplit) {
-                                if (t.reference === baseRef)
-                                    return true;
-                                if (typeof t.description === 'string' && baseRef && t.description.includes(baseRef))
-                                    return true;
+                            // Only dedupe on exact same paymentId. This allows multiple installments
+                            // that share the same textual reference to each create their own entry.
+                            const samePayment = String(t.paymentId || '') === String(payment._id || '');
+                            if (!samePayment)
+                                return false;
+                            // For split sales, also ensure we dedupe per role lane
+                            if (isSalesSplit) {
+                                return String(t.reference || '').endsWith(`-${roleLabel}`);
                             }
-                            return false;
+                            return true;
                         });
                         if (!existingTransaction) {
                             // Add commission transaction
@@ -421,6 +437,7 @@ class AgentAccountService {
                                 type: 'commission',
                                 amount: applicableAmount,
                                 date: payment.paymentDate,
+                                paymentId: payment._id,
                                 description,
                                 reference: uniqueRef,
                                 status: 'completed',
@@ -434,15 +451,10 @@ class AgentAccountService {
                         }
                     }
                 }
-                if (newTransactionsAdded > 0) {
-                    // Recalculate balance and save
-                    yield this.recalculateBalance(account);
-                    yield account.save();
-                    console.log(`Synced ${newTransactionsAdded} new commission transactions for agent ${agentId}`);
-                }
-                else {
-                    console.log('No new commission transactions to sync for agent:', agentId);
-                }
+                // Always recalc and save to ensure running balance and timestamps stay current
+                yield this.recalculateBalance(account);
+                yield account.save();
+                console.log(`Commission sync complete for agent ${agentId}; new transactions added: ${newTransactionsAdded}`);
             }
             catch (error) {
                 logger_1.logger.error('Error syncing commission transactions:', error);

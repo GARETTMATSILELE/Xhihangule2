@@ -621,11 +621,33 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
         const toObjectId = (v) => (v && mongoose_1.default.Types.ObjectId.isValid(v) ? new mongoose_1.default.Types.ObjectId(v) : undefined);
         const propId = toObjectId(propertyId);
         const tenId = toObjectId(tenantId);
-        const agId = toObjectId(agentId) || new mongoose_1.default.Types.ObjectId(user.userId);
+        // Prefer explicit agentId when provided. For non-development sales, fallback to property's assigned agent.
+        // Avoid blindly defaulting to the current user for sales to prevent mis-crediting commissions.
+        let agId = toObjectId(agentId);
         const procBy = toObjectId(processedBy) || new mongoose_1.default.Types.ObjectId(user.userId);
         const saleObjId = toObjectId(saleId);
         const devId = toObjectId(developmentId);
         const unitId = toObjectId(developmentUnitId);
+        // If no agent provided and this is a non-development sale, try to derive from property
+        if (!agId && !devId && propId) {
+            try {
+                const prop = yield Property_1.Property.findById(propId).select('agentId').lean();
+                if (prop && prop.agentId) {
+                    agId = new mongoose_1.default.Types.ObjectId(String(prop.agentId));
+                }
+            }
+            catch (_e) {
+                // ignore and enforce requirement below
+            }
+        }
+        // As a last resort for development-linked sales, allow the current user if they are the owner/collaborator (validated below).
+        if (!agId && devId) {
+            agId = new mongoose_1.default.Types.ObjectId(user.userId);
+        }
+        // Require an explicit/derived agent for non-development sales to ensure commission is credited correctly
+        if (!agId) {
+            return res.status(400).json({ message: 'Sales agent is required for this sale payment' });
+        }
         // Optional validation: if development/unit provided, ensure they belong to the same company and match
         let devAddressForManual;
         if (devId) {
@@ -674,7 +696,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 }
                 finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
             }
-            catch (_e) {
+            catch (_f) {
                 const base = (amount * 0.15);
                 const prea = base * 0.03;
                 const remaining = base - prea;

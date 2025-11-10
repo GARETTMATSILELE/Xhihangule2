@@ -31,13 +31,16 @@ const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        // Optional filters for developments
-        const { developmentId, developmentUnitId } = req.query;
+        // Optional filters for developments and property
+        const { developmentId, developmentUnitId, propertyId } = req.query;
         if (developmentId && mongoose_1.default.Types.ObjectId.isValid(String(developmentId))) {
             query.developmentId = new mongoose_1.default.Types.ObjectId(String(developmentId));
         }
         if (developmentUnitId && mongoose_1.default.Types.ObjectId.isValid(String(developmentUnitId))) {
             query.developmentUnitId = new mongoose_1.default.Types.ObjectId(String(developmentUnitId));
+        }
+        if (propertyId && mongoose_1.default.Types.ObjectId.isValid(String(propertyId))) {
+            query.propertyId = new mongoose_1.default.Types.ObjectId(String(propertyId));
         }
         const buyers = yield Buyer_1.Buyer.find(query).sort({ createdAt: -1 });
         res.json({ status: 'success', data: buyers });

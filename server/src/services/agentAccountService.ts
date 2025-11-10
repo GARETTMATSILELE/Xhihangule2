@@ -267,21 +267,35 @@ export class AgentAccountService {
    */
   async recalculateBalance(account: IAgentAccount): Promise<void> {
     try {
-      let balance = 0;
-      
+      // Use integer cents to prevent rounding drift
+      let balanceCents = 0;
+      let commissionCents = 0;
+      let payoutCents = 0;
+      let penaltyCents = 0;
+
       // Sort transactions by date
       const sortedTransactions = account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       
       for (const transaction of sortedTransactions) {
-        if (transaction.type === 'commission') {
-          balance += transaction.amount;
-        } else if (transaction.type === 'payout' || transaction.type === 'penalty') {
-          balance -= transaction.amount;
+        const amountCents = Math.round((transaction.amount || 0) * 100);
+        const isCompleted = transaction.status === 'completed';
+        if (transaction.type === 'commission' && isCompleted) {
+          commissionCents += amountCents;
+          balanceCents += amountCents;
+        } else if (transaction.type === 'payout' && isCompleted) {
+          payoutCents += amountCents;
+          balanceCents -= amountCents;
+        } else if (transaction.type === 'penalty' && isCompleted) {
+          penaltyCents += amountCents;
+          balanceCents -= amountCents;
         }
-        transaction.runningBalance = balance;
+        transaction.runningBalance = Number((balanceCents / 100).toFixed(2));
       }
       
-      account.runningBalance = balance;
+      account.totalCommissions = Number((commissionCents / 100).toFixed(2));
+      account.totalPayouts = Number((payoutCents / 100).toFixed(2));
+      account.totalPenalties = Number((penaltyCents / 100).toFixed(2));
+      account.runningBalance = Number((balanceCents / 100).toFixed(2));
       account.lastUpdated = new Date();
     } catch (error) {
       logger.error('Error recalculating balance:', error);
@@ -452,12 +466,15 @@ export class AgentAccountService {
           // so we perform a broader match for non-sales payments to avoid duplicates.
           const existingTransaction = account.transactions.find(t => {
             if (t.type !== 'commission') return false;
-            if (t.reference === uniqueRef) return true;
-            if (!isSalesSplit) {
-              if (t.reference === baseRef) return true;
-              if (typeof t.description === 'string' && baseRef && t.description.includes(baseRef)) return true;
+            // Only dedupe on exact same paymentId. This allows multiple installments
+            // that share the same textual reference to each create their own entry.
+            const samePayment = String((t as any).paymentId || '') === String((payment as any)._id || '');
+            if (!samePayment) return false;
+            // For split sales, also ensure we dedupe per role lane
+            if (isSalesSplit) {
+              return String(t.reference || '').endsWith(`-${roleLabel}`);
             }
-            return false;
+            return true;
           });
           
           if (!existingTransaction) {
@@ -470,6 +487,7 @@ export class AgentAccountService {
               type: 'commission',
               amount: applicableAmount,
               date: (payment as any).paymentDate,
+              paymentId: (payment as any)._id,
               description,
               reference: uniqueRef,
               status: 'completed',
@@ -486,14 +504,10 @@ export class AgentAccountService {
         }
       }
 
-      if (newTransactionsAdded > 0) {
-        // Recalculate balance and save
-        await this.recalculateBalance(account);
-        await account.save();
-        console.log(`Synced ${newTransactionsAdded} new commission transactions for agent ${agentId}`);
-      } else {
-        console.log('No new commission transactions to sync for agent:', agentId);
-      }
+      // Always recalc and save to ensure running balance and timestamps stay current
+      await this.recalculateBalance(account);
+      await account.save();
+      console.log(`Commission sync complete for agent ${agentId}; new transactions added: ${newTransactionsAdded}`);
     } catch (error) {
       logger.error('Error syncing commission transactions:', error);
       throw error;

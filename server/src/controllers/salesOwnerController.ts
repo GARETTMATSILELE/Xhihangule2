@@ -68,7 +68,13 @@ export const getSalesOwnerById = async (req: Request, res: Response) => {
     if (!id) {
       return res.status(400).json({ message: 'Sales owner ID is required' });
     }
-    const owner = await SalesOwner.findOne({ _id: id, companyId: req.user.companyId }).select('-password');
+    const role = (req.user as any)?.role;
+    const filter: any = { _id: id, companyId: req.user.companyId };
+    // Sales agents can only view owners they created
+    if (!role || String(role).toLowerCase() === 'sales') {
+      filter.creatorId = req.user.userId;
+    }
+    const owner = await SalesOwner.findOne(filter).select('-password');
     if (!owner) {
       return res.status(404).json({ message: 'Sales owner not found' });
     }
@@ -98,8 +104,15 @@ export const updateSalesOwner = async (req: Request, res: Response) => {
     if (typeof phone === 'string') update.phone = phone;
     if (Array.isArray(properties)) update.properties = properties;
 
+    const role = (req.user as any)?.role;
+    const filter: any = { _id: id, companyId: req.user.companyId };
+    // Sales agents can only update owners they created
+    if (!role || String(role).toLowerCase() === 'sales') {
+      filter.creatorId = req.user.userId;
+    }
+
     const owner = await SalesOwner.findOneAndUpdate(
-      { _id: id, companyId: req.user.companyId },
+      filter,
       update,
       { new: true }
     ).select('-password');
@@ -112,6 +125,32 @@ export const updateSalesOwner = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error updating sales owner:', error);
     res.status(500).json({ message: 'Error updating sales owner' });
+  }
+};
+
+export const deleteSalesOwner = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Company ID not found' });
+    }
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({ message: 'Sales owner ID is required' });
+    }
+    const role = (req.user as any)?.role;
+    const filter: any = { _id: id, companyId: req.user.companyId };
+    // Sales agents can only delete owners they created
+    if (!role || String(role).toLowerCase() === 'sales') {
+      filter.creatorId = req.user.userId;
+    }
+    const owner = await SalesOwner.findOneAndDelete(filter);
+    if (!owner) {
+      return res.status(404).json({ message: 'Sales owner not found' });
+    }
+    res.json({ message: 'Sales owner deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting sales owner:', error);
+    res.status(500).json({ message: 'Error deleting sales owner' });
   }
 };
 

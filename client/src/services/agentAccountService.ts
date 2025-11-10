@@ -51,6 +51,7 @@ export interface Transaction {
   type: 'commission' | 'payout' | 'penalty' | 'adjustment';
   amount: number;
   date: Date;
+  paymentId?: string;
   description: string;
   reference?: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled';
@@ -253,19 +254,23 @@ class AgentAccountService {
    * Calculate running balance from transactions
    */
   calculateRunningBalance(transactions: Transaction[]): { transactions: Transaction[]; finalBalance: number } {
-    let balance = 0;
+    let balanceCents = 0;
     const sortedTransactions = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     const updatedTransactions = sortedTransactions.map(transaction => {
-      if (transaction.type === 'commission') {
-        balance += transaction.amount;
-      } else if (transaction.type === 'payout' || transaction.type === 'penalty') {
-        balance -= transaction.amount;
+      const amtCents = Math.round((transaction.amount || 0) * 100);
+      const isCompleted = transaction.status === 'completed';
+      if (transaction.type === 'commission' && isCompleted) {
+        balanceCents += amtCents;
+      } else if (transaction.type === 'payout' && isCompleted) {
+        balanceCents -= amtCents;
+      } else if (transaction.type === 'penalty' && isCompleted) {
+        balanceCents -= amtCents;
       }
-      return { ...transaction, runningBalance: balance };
+      return { ...transaction, runningBalance: Number((balanceCents / 100).toFixed(2)) };
     });
     
-    return { transactions: updatedTransactions, finalBalance: balance };
+    return { transactions: updatedTransactions, finalBalance: Number((balanceCents / 100).toFixed(2)) };
   }
 }
 

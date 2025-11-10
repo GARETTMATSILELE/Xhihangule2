@@ -21,6 +21,7 @@ import { useCompany } from '../../contexts/CompanyContext';
 import { usePropertyService } from '../../services/propertyService';
 import { Property } from '../../types/property';
 import api from '../../api/axios';
+import { buyerService } from '../../services/buyerService';
 
 type Props = {
   onSubmit: (data: PaymentFormData) => Promise<void> | void;
@@ -128,6 +129,32 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     loadProps();
     return () => { cancelled = true; };
   }, [propertyService]);
+
+  // When a property is selected for a non-development sale, auto-fill the Buyer field
+  // from the buyers collection using the property's id. Do not override if buyerName
+  // was already set (e.g., by development workflow or manual input).
+  useEffect(() => {
+    let cancelled = false;
+    const maybePopulateBuyer = async () => {
+      if (!selectedPropertyId) return;
+      if ((buyerName || '').trim().length > 0) return;
+      try {
+        const buyers = await buyerService.list({ propertyId: selectedPropertyId });
+        const list = Array.isArray(buyers) ? buyers : [];
+        if (!cancelled && list.length > 0) {
+          const best = list[0];
+          const name = (best as any)?.name;
+          if (typeof name === 'string' && name.trim()) {
+            setBuyerName(name.trim());
+          }
+        }
+      } catch {
+        // ignore lookup errors; user can type manually
+      }
+    };
+    maybePopulateBuyer();
+    return () => { cancelled = true; };
+  }, [selectedPropertyId, buyerName]);
 
   // Load existing sales contracts filtered by reference when user types
   useEffect(() => {

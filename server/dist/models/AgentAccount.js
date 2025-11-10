@@ -51,6 +51,10 @@ const transactionSchema = new mongoose_1.Schema({
         required: true,
         default: Date.now
     },
+    paymentId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'Payment'
+    },
     description: {
         type: String,
         required: true
@@ -172,4 +176,5 @@ const agentAccountSchema = new mongoose_1.Schema({
 agentAccountSchema.index({ agentId: 1 });
 agentAccountSchema.index({ 'transactions.date': -1 });
 agentAccountSchema.index({ 'agentPayouts.date': -1 });
+agentAccountSchema.index({ 'transactions.paymentId': 1 });
 exports.AgentAccount = mongoose_1.default.model('AgentAccount', agentAccountSchema, collections_1.COLLECTIONS.AGENT_ACCOUNTS);

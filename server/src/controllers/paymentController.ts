@@ -686,11 +686,33 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
     const toObjectId = (v?: string) => (v && mongoose.Types.ObjectId.isValid(v) ? new mongoose.Types.ObjectId(v) : undefined);
     const propId = toObjectId(propertyId);
     const tenId = toObjectId(tenantId);
-    const agId = toObjectId(agentId) || new mongoose.Types.ObjectId(user.userId);
+    // Prefer explicit agentId when provided. For non-development sales, fallback to property's assigned agent.
+    // Avoid blindly defaulting to the current user for sales to prevent mis-crediting commissions.
+    let agId = toObjectId(agentId);
     const procBy = toObjectId(processedBy) || new mongoose.Types.ObjectId(user.userId);
     const saleObjId = toObjectId(saleId);
     const devId = toObjectId(developmentId);
     const unitId = toObjectId(developmentUnitId);
+
+    // If no agent provided and this is a non-development sale, try to derive from property
+    if (!agId && !devId && propId) {
+      try {
+        const prop = await Property.findById(propId).select('agentId').lean();
+        if (prop && (prop as any).agentId) {
+          agId = new mongoose.Types.ObjectId(String((prop as any).agentId));
+        }
+      } catch {
+        // ignore and enforce requirement below
+      }
+    }
+    // As a last resort for development-linked sales, allow the current user if they are the owner/collaborator (validated below).
+    if (!agId && devId) {
+      agId = new mongoose.Types.ObjectId(user.userId);
+    }
+    // Require an explicit/derived agent for non-development sales to ensure commission is credited correctly
+    if (!agId) {
+      return res.status(400).json({ message: 'Sales agent is required for this sale payment' });
+    }
 
     // Optional validation: if development/unit provided, ensure they belong to the same company and match
     let devAddressForManual: string | undefined;

@@ -16,13 +16,16 @@ export const listBuyers = async (req: Request, res: Response) => {
     if (!hasAnyRole(req, ['admin', 'accountant'])) {
       query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
     }
-    // Optional filters for developments
-    const { developmentId, developmentUnitId } = req.query as any;
+    // Optional filters for developments and property
+    const { developmentId, developmentUnitId, propertyId } = req.query as any;
     if (developmentId && mongoose.Types.ObjectId.isValid(String(developmentId))) {
       query.developmentId = new mongoose.Types.ObjectId(String(developmentId));
     }
     if (developmentUnitId && mongoose.Types.ObjectId.isValid(String(developmentUnitId))) {
       query.developmentUnitId = new mongoose.Types.ObjectId(String(developmentUnitId));
+    }
+    if (propertyId && mongoose.Types.ObjectId.isValid(String(propertyId))) {
+      query.propertyId = new mongoose.Types.ObjectId(String(propertyId));
     }
     const buyers = await Buyer.find(query).sort({ createdAt: -1 });
     res.json({ status: 'success', data: buyers });

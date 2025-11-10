@@ -25,7 +25,7 @@ export interface CreateBuyerInput {
 }
 
 export const buyerService = {
-  async list(filters?: { developmentId?: string; developmentUnitId?: string }) {
+  async list(filters?: { developmentId?: string; developmentUnitId?: string; propertyId?: string }) {
     const res = await api.get('/buyers', { params: filters });
     return Array.isArray(res.data) ? res.data : res.data.data;
   },

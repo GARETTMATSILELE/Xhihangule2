@@ -1,10 +1,10 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { PropertyOwner, IPropertyOwner } from '../models/PropertyOwner';
 import { AppError } from '../middleware/errorHandler';
 import { JwtPayload } from '../types/auth';
 import { Property } from '../models/Property';
 
-export const createPropertyOwner = async (req: Request, res: Response) => {
+export const createPropertyOwner = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -41,14 +41,14 @@ export const createPropertyOwner = async (req: Request, res: Response) => {
     res.status(201).json(owner);
   } catch (error) {
     console.error('Error creating property owner:', error);
-    res.status(500).json({ message: 'Error creating property owner' });
+    next(new AppError('Error creating property owner', 500));
   }
 };
 
-export const getPropertyOwners = async (req: Request, res: Response) => {
+export const getPropertyOwners = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
-      throw new AppError('Authentication required', 401);
+      return next(new AppError('Authentication required', 401));
     }
 
     console.log('getPropertyOwners - User data:', {
@@ -59,7 +59,7 @@ export const getPropertyOwners = async (req: Request, res: Response) => {
 
     if (!req.user.companyId) {
       console.log('getPropertyOwners - Company ID not found');
-      throw new AppError('Company ID not found', 401);
+      return next(new AppError('Company ID not found', 401));
     }
     const query: any = { companyId: req.user.companyId };
 
@@ -68,52 +68,46 @@ export const getPropertyOwners = async (req: Request, res: Response) => {
     const owners = await PropertyOwner.find(query);
     res.json(owners);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Error fetching property owners', 500);
+    next(error instanceof AppError ? error : new AppError('Error fetching property owners', 500));
   }
 };
 
-export const getPropertyOwnerById = async (req: Request, res: Response) => {
+export const getPropertyOwnerById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
-      throw new AppError('Authentication required', 401);
+      return next(new AppError('Authentication required', 401));
     }
 
     const { id } = req.params;
     
     if (!req.user.companyId) {
-      throw new AppError('Company ID not found', 401);
+      return next(new AppError('Company ID not found', 401));
     }
     const query: any = { _id: id, companyId: req.user.companyId };
     
     const owner = await PropertyOwner.findOne(query);
     
     if (!owner) {
-      throw new AppError('Property owner not found', 404);
+      return next(new AppError('Property owner not found', 404));
     }
     
     res.json(owner);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Error fetching property owner', 500);
+    next(error instanceof AppError ? error : new AppError('Error fetching property owner', 500));
   }
 };
 
-export const updatePropertyOwner = async (req: Request, res: Response) => {
+export const updatePropertyOwner = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
-      throw new AppError('Authentication required', 401);
+      return next(new AppError('Authentication required', 401));
     }
 
     const { id } = req.params;
     const { email, companyId: _ignoredCompanyId, ...updates } = req.body; // ignore companyId changes
 
     if (!req.user.companyId) {
-      throw new AppError('Company ID not found', 401);
+      return next(new AppError('Company ID not found', 401));
     }
     const query: any = { _id: id, companyId: req.user.companyId };
 
@@ -126,7 +120,7 @@ export const updatePropertyOwner = async (req: Request, res: Response) => {
       });
 
       if (existingOwner) {
-        throw new AppError('Email already in use by another property owner', 400);
+        return next(new AppError('Email already in use by another property owner', 400));
       }
     }
 
@@ -140,28 +134,25 @@ export const updatePropertyOwner = async (req: Request, res: Response) => {
     );
 
     if (!owner) {
-      throw new AppError('Property owner not found', 404);
+      return next(new AppError('Property owner not found', 404));
     }
 
     res.json(owner);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Error updating property owner', 500);
+    next(error instanceof AppError ? error : new AppError('Error updating property owner', 500));
   }
 };
 
-export const deletePropertyOwner = async (req: Request, res: Response) => {
+export const deletePropertyOwner = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
-      throw new AppError('Authentication required', 401);
+      return next(new AppError('Authentication required', 401));
     }
 
     const { id } = req.params;
     
     if (!req.user.companyId) {
-      throw new AppError('Company ID not found', 401);
+      return next(new AppError('Company ID not found', 401));
     }
     const query: any = { _id: id, companyId: req.user.companyId };
     
@@ -180,10 +171,7 @@ export const deletePropertyOwner = async (req: Request, res: Response) => {
     
     res.json({ message: 'Property owner deleted successfully' });
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Error deleting property owner', 500);
+    next(error instanceof AppError ? error : new AppError('Error deleting property owner', 500));
   }
 };
 

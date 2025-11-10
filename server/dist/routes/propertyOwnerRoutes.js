@@ -118,5 +118,7 @@ router.post('/', auth_1.authWithCompany, propertyOwnerController_1.createPropert
 router.get('/', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwners);
 router.get('/:id', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwnerById);
 router.patch('/:id', auth_1.authWithCompany, propertyOwnerController_1.updatePropertyOwner);
+// Accept PUT for clients that use PUT semantics for updates
+router.put('/:id', auth_1.authWithCompany, propertyOwnerController_1.updatePropertyOwner);
 router.delete('/:id', auth_1.authWithCompany, propertyOwnerController_1.deletePropertyOwner);
 exports.default = router;

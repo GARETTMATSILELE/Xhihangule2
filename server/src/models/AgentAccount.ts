@@ -6,6 +6,8 @@ export interface Transaction {
   type: 'commission' | 'payout' | 'penalty' | 'adjustment';
   amount: number;
   date: Date;
+  // Optional link to source payment for de-duplication
+  paymentId?: Types.ObjectId;
   description: string;
   reference?: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled';
@@ -61,6 +63,10 @@ const transactionSchema = new Schema<Transaction>({
     type: Date,
     required: true,
     default: Date.now
+  },
+  paymentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment'
   },
   description: {
     type: String,
@@ -186,6 +192,7 @@ const agentAccountSchema = new Schema<IAgentAccount>({
 agentAccountSchema.index({ agentId: 1 });
 agentAccountSchema.index({ 'transactions.date': -1 });
 agentAccountSchema.index({ 'agentPayouts.date': -1 });
+agentAccountSchema.index({ 'transactions.paymentId': 1 });
 
 export const AgentAccount = mongoose.model<IAgentAccount>('AgentAccount', agentAccountSchema, COLLECTIONS.AGENT_ACCOUNTS);
 

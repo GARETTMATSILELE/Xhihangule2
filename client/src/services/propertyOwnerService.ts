@@ -141,6 +141,16 @@ export const usePropertyOwnerService = () => {
     }
   };
 
+  // Delete sales owner (in salesowners collection)
+  const removeSales = async (id: string) => {
+    try {
+      await api.delete(`/sales-owners/${id}`);
+    } catch (error: any) {
+      console.error('Error deleting sales owner:', error);
+      throw new Error('Failed to delete sales owner');
+    }
+  };
+
   return {
     getAll,
     getAllPublic,
@@ -150,6 +160,7 @@ export const usePropertyOwnerService = () => {
     update,
     remove,
     updateSales,
+    removeSales,
     // Expose company ID getter for components that need it
     getCompanyId,
   };

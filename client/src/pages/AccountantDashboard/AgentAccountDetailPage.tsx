@@ -388,9 +388,7 @@ const AgentAccountDetailPage: React.FC = () => {
                 <Typography variant="h6">Total Commissions</Typography>
               </Box>
               <Typography variant="h4" color="success.main" sx={{ mt: 1 }}>
-                {agentAccountService.formatCurrency(
-                  account.commissionData?.reduce((sum, c) => sum + c.commissionDetails.agentShare, 0) || account.totalCommissions
-                )}
+                {agentAccountService.formatCurrency(account.totalCommissions)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 From {account.commissionData?.length || 0} property payments

@@ -65,7 +65,7 @@ export default function OwnersPage() {
 
   const saveEdit = async () => {
     if (!editing?._id) return;
-    try { setLoading(true); await ownerService.update(editing._id, form); setEditing(null); await load(); }
+    try { setLoading(true); await ownerService.updateSales(editing._id, form); setEditing(null); await load(); }
     catch (e: any) { setError(e?.message||'Failed to update owner'); }
     finally { setLoading(false); }
   };
@@ -87,7 +87,7 @@ export default function OwnersPage() {
 
   const deleteOwner = async (id: string) => {
     if (!id) return; if (!window.confirm('Delete this owner?')) return;
-    try { setLoading(true); await ownerService.remove(id); await load(); }
+    try { setLoading(true); await ownerService.removeSales(id); await load(); }
     catch (e: any) { setError(e?.message||'Failed to delete owner'); }
     finally { setLoading(false); }
   };

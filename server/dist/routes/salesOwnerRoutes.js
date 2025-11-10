@@ -11,4 +11,7 @@ router.post('/', auth_1.authWithCompany, salesOwnerController_1.createSalesOwner
 router.get('/', auth_1.authWithCompany, salesOwnerController_1.getSalesOwners);
 router.get('/:id', auth_1.authWithCompany, salesOwnerController_1.getSalesOwnerById);
 router.patch('/:id', auth_1.authWithCompany, salesOwnerController_1.updateSalesOwner);
+// Accept PUT for clients that use PUT semantics for updates
+router.put('/:id', auth_1.authWithCompany, salesOwnerController_1.updateSalesOwner);
+router.delete('/:id', auth_1.authWithCompany, salesOwnerController_1.deleteSalesOwner);
 exports.default = router;
