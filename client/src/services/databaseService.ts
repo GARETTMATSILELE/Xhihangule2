@@ -28,7 +28,7 @@ export class DatabaseService {
       console.log('Checking database connection...');
       
       // Check if the server is reachable first
-      const response = await api.get('health', {
+      const response = await api.get('/health', {
         timeout: this.HEALTH_CHECK_TIMEOUT,
         validateStatus: (status) => status < 500 // Accept any status less than 500
       });
@@ -132,11 +132,10 @@ export class DatabaseService {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        // Do not hard-block operations on transient health probe failures.
+        // If we think we're disconnected, kick off a background check but proceed.
         if (!this.isConnected) {
-          await this.checkConnection();
-          if (!this.isConnected) {
-            throw new Error('Database connection is not available');
-          }
+          try { this.checkConnection(); } catch {}
         }
 
         // If the operation itself sets a no-retry header, honor it
