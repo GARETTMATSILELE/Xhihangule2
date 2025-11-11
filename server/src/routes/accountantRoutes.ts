@@ -49,6 +49,7 @@ import {
   getAcknowledgementDocument as getAgentAcknowledgementDocument
 } from '../controllers/agentAccountController';
 import AgentAccountService from '../services/agentAccountService';
+import { compareAgentCommissionTotals } from '../controllers/agentAccountController';
 
 const router = express.Router();
 
@@ -178,6 +179,7 @@ router.get('/sales/:id', isAccountant, getSalesContract);
 
 // Agent Account routes - require accountant role
 router.get('/agent-accounts', isAccountant, getCompanyAgentAccounts);
+router.get('/agent-accounts/commission-compare', isAccountant, compareAgentCommissionTotals);
 router.get('/agent-accounts/:agentId', isAccountant, (req, res) => {
   console.log('Agent account detail route hit:', req.params.agentId);
   console.log('User role:', req.user?.role);

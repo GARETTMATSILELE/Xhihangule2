@@ -6,6 +6,98 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 
 /**
+ * Compare User.commission vs AgentAccount totals for the current company
+ */
+export const compareAgentCommissionTotals = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      throw new AppError('Company ID not found', 404);
+    }
+
+    // Fetch agents/sales users for this company
+    const agents = await User.find({
+      companyId: new mongoose.Types.ObjectId(companyId),
+      role: { $in: ['agent', 'sales'] }
+    }).select('_id firstName lastName email commission role').lean();
+
+    const rows: Array<{
+      agentId: string;
+      name: string;
+      email?: string;
+      role: string;
+      userCommission: number;
+      ledgerTotalCommissions: number;
+      ledgerRunningBalance: number;
+      totalPayouts: number;
+      totalPenalties: number;
+      deltaUserVsLedger: number;
+    }> = [];
+
+    for (const u of agents) {
+      try {
+        const account = await agentAccountService.getOrCreateAgentAccount(String(u._id));
+        const userCommission = Number((u as any).commission || 0);
+        const ledgerTotal = Number(account.totalCommissions || 0);
+        const delta = Number((ledgerTotal - userCommission).toFixed(2));
+        rows.push({
+          agentId: String(u._id),
+          name: `${(u as any).firstName || ''} ${(u as any).lastName || ''}`.trim(),
+          email: (u as any).email,
+          role: String((u as any).role || 'agent'),
+          userCommission,
+          ledgerTotalCommissions: ledgerTotal,
+          ledgerRunningBalance: Number(account.runningBalance || 0),
+          totalPayouts: Number(account.totalPayouts || 0),
+          totalPenalties: Number(account.totalPenalties || 0),
+          deltaUserVsLedger: delta
+        });
+      } catch (e) {
+        logger.warn('Failed to load agent account for comparison (non-fatal):', { userId: u._id, error: (e as any)?.message });
+      }
+    }
+
+    // Aggregate summary
+    const summary = rows.reduce((acc, r) => {
+      acc.userCommission += r.userCommission;
+      acc.ledgerTotalCommissions += r.ledgerTotalCommissions;
+      acc.ledgerRunningBalance += r.ledgerRunningBalance;
+      acc.totalPayouts += r.totalPayouts;
+      acc.totalPenalties += r.totalPenalties;
+      acc.deltaUserVsLedger += r.deltaUserVsLedger;
+      return acc;
+    }, {
+      userCommission: 0,
+      ledgerTotalCommissions: 0,
+      ledgerRunningBalance: 0,
+      totalPayouts: 0,
+      totalPenalties: 0,
+      deltaUserVsLedger: 0
+    });
+
+    res.json({
+      success: true,
+      data: {
+        comparisons: rows,
+        summary
+      }
+    });
+  } catch (error) {
+    logger.error('Error in compareAgentCommissionTotals:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
  * Get agent account with summary
  */
 export const getAgentAccount = async (req: Request, res: Response) => {

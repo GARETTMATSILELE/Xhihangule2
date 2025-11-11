@@ -44,6 +44,66 @@ export class AgentAccountService {
   }
 
   /**
+   * Sync commission transactions for a single payment (SSOT: Payment)
+   * Idempotent: uses paymentId + role-qualified reference for dedupe.
+   */
+  async syncCommissionForPayment(paymentId: string): Promise<void> {
+    try {
+      const payment = await Payment.findById(paymentId)
+        .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId')
+        .lean();
+      if (!payment) return;
+
+      // Handle non-split rentals/introduction as a single agent lane
+      const isSale = (payment as any).paymentType === 'sale' || (payment as any).paymentType === 'introduction';
+      const split = (payment as any)?.commissionDetails && (payment as any).commissionDetails.agentSplit;
+
+      // Helper to post to an agent lane idempotently
+      const postLane = async (agentUserId: string, amount: number, roleLabel: 'agent' | 'owner' | 'collaborator') => {
+        if (!agentUserId || !amount || amount <= 0) return;
+        const referenceBase = String((payment as any).referenceNumber || '');
+        const ref = isSale && roleLabel !== 'agent' ? `${String(paymentId)}-${roleLabel}` : String(paymentId);
+        const description = roleLabel === 'agent'
+          ? `Commission from payment ${referenceBase}`
+          : `Commission (${roleLabel}) from payment ${referenceBase}`;
+        await this.addCommission(String(agentUserId), {
+          amount: Number(amount),
+          date: new Date((payment as any).paymentDate || new Date()),
+          description,
+          reference: ref,
+          notes: `Property: ${(payment as any).propertyId || ''}, Tenant: ${(payment as any).tenantId || ''}`,
+          paymentId: String(paymentId)
+        });
+      };
+
+      if (isSale && split) {
+        const ownerId = split?.ownerUserId ? String(split.ownerUserId) : undefined;
+        const collabId = split?.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
+        const ownerAmt = Number(split?.ownerAgentShare || 0);
+        const collabAmt = Number(split?.collaboratorAgentShare || 0);
+        const hasValidOwner = Boolean(ownerId && ownerAmt > 0);
+        const hasValidCollab = Boolean(collabId && collabAmt > 0);
+        if (hasValidOwner) await postLane(ownerId!, ownerAmt, 'owner');
+        if (hasValidCollab) await postLane(collabId!, collabAmt, 'collaborator');
+        // Only return early if at least one valid split lane posted; otherwise fall through to single agent lane.
+        if (hasValidOwner || hasValidCollab) {
+          return;
+        }
+      }
+
+      // Rentals and non-split sales/introduction: single agent
+      const agentId = (payment as any).agentId ? String((payment as any).agentId) : undefined;
+      const amount = Number((payment as any)?.commissionDetails?.agentShare || 0);
+      if (agentId && amount && amount > 0) {
+        await postLane(agentId, amount, 'agent');
+      }
+    } catch (error) {
+      logger.error('Error syncing commission for payment:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get or create agent account
    */
   async getOrCreateAgentAccount(agentId: string): Promise<IAgentAccount> {
@@ -98,6 +158,7 @@ export class AgentAccountService {
     description: string;
     reference?: string;
     notes?: string;
+    paymentId?: string;
   }): Promise<IAgentAccount> {
     try {
       const account = await this.getOrCreateAgentAccount(agentId);
@@ -115,6 +176,16 @@ export class AgentAccountService {
           return account;
         }
       }
+      // Dedupe by paymentId when provided
+      if (commissionData.paymentId) {
+        const existsByPayment = account.transactions.some(t =>
+          t.type === 'commission' && String((t as any).paymentId || '') === String(commissionData.paymentId)
+        );
+        if (existsByPayment) {
+          logger.warn(`Duplicate commission by paymentId "${commissionData.paymentId}" for agent ${agentId} ignored.`);
+          return account;
+        }
+      }
 
       const transaction: Transaction = {
         type: 'commission',
@@ -125,6 +196,9 @@ export class AgentAccountService {
         status: 'completed',
         notes: commissionData.notes
       };
+      if (commissionData.paymentId) {
+        (transaction as any).paymentId = commissionData.paymentId;
+      }
 
       account.transactions.push(transaction);
       account.totalCommissions += commissionData.amount;
@@ -339,7 +413,7 @@ export class AgentAccountService {
       await this.syncCommissionTransactions(agentId);
       
       // Refresh the account after syncing
-      const updatedAccount = await this.getOrCreateAgentAccount(agentId);
+      let updatedAccount = await this.getOrCreateAgentAccount(agentId);
       
       // Get commission data from payments for display
       console.log('Fetching commission data for agentId:', agentId);
@@ -382,6 +456,54 @@ export class AgentAccountService {
           agentShare: commissionData[0].commissionDetails?.agentShare,
           propertyName: commissionData[0].propertyId?.propertyName
         });
+      }
+
+      // Defensive guarantee: for each payment visible in Commission Summary, ensure a matching
+      // commission transaction exists in the ledger for THIS agent. If missing, sync that payment.
+      try {
+        const needsSync: string[] = [];
+        const txByRef = new Set(
+          (updatedAccount.transactions || [])
+            .filter(t => t.type === 'commission')
+            .map(t => String(t.reference || ''))
+        );
+        for (const p of commissionData) {
+          const pid = String((p as any)?._id || '');
+          const split = (p as any)?.commissionDetails?.agentSplit;
+          if ((p as any).paymentType === 'sale' && split) {
+            const ownerId = split?.ownerUserId ? String(split.ownerUserId) : undefined;
+            const collabId = split?.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
+            const ownerAmt = Number(split?.ownerAgentShare || 0);
+            const collabAmt = Number(split?.collaboratorAgentShare || 0);
+            if (ownerId === agentId && ownerAmt > 0) {
+              const ref = `${pid}-owner`;
+              if (!txByRef.has(ref)) needsSync.push(pid);
+            } else if (collabId === agentId && collabAmt > 0) {
+              const ref = `${pid}-collaborator`;
+              if (!txByRef.has(ref)) needsSync.push(pid);
+            }
+          } else {
+            // Non-split (rentals and non-development sales)
+            const ref = pid;
+            if (!txByRef.has(ref)) needsSync.push(pid);
+          }
+        }
+        // Deduplicate and sync each missing payment lazily
+        if (needsSync.length > 0) {
+          const uniq = Array.from(new Set(needsSync));
+          console.log(`Backfilling ${uniq.length} missing commission transactions for agent ${agentId}`);
+          for (const pid of uniq) {
+            try {
+              await this.syncCommissionForPayment(pid);
+            } catch (e) {
+              console.warn(`Failed to backfill commission for payment ${pid}:`, (e as any)?.message || e);
+            }
+          }
+          // Refresh account after backfill
+          updatedAccount = await this.getOrCreateAgentAccount(agentId);
+        }
+      } catch (defErr) {
+        console.warn('Defensive commission backfill encountered an error (non-fatal):', defErr);
       }
       
       const accountData = updatedAccount.toObject();
@@ -633,7 +755,10 @@ export class AgentAccountService {
   async syncFromPayments(companyId: string): Promise<void> {
     try {
       // Get all agents for the company
-      const agents = await User.find({ companyId: new mongoose.Types.ObjectId(companyId), role: 'agent' });
+      const agents = await User.find({
+        companyId: new mongoose.Types.ObjectId(companyId),
+        role: { $in: ['agent', 'sales'] }
+      });
       
       for (const agent of agents) {
         await this.syncCommissionTransactions(agent._id.toString());

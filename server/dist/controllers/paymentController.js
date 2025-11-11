@@ -54,6 +54,7 @@ const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
 const SalesContract_1 = require("../models/SalesContract");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
+const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 // List sales-only payments for a company
 const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user) {
@@ -275,13 +276,8 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 revenue: paymentCommissionDetails.agencyShare,
             },
         });
-        // Update agent commission
-        yield User_1.User.findByIdAndUpdate(lease.tenantId, // Use tenant ID since no agent ID
-        {
-            $inc: {
-                commission: paymentCommissionDetails.agentShare,
-            },
-        });
+        // Sync commission from saved payment (SSOT)
+        yield agentAccountService_1.default.syncCommissionForPayment(payment._id.toString());
         // If it's a rental payment, update property owner's balance
         if (property.ownerId) {
             yield User_1.User.findByIdAndUpdate(property.ownerId, {
@@ -524,10 +520,10 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             });
             yield deposit.save(session ? { session } : undefined);
         }
-        // Post company revenue and agent commission only if not provisional
+        // Post company revenue and sync agent commission only if not provisional
         if (!payment.isProvisional) {
             yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare } }, session ? { session } : undefined);
-            yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(rawAgentId || user.userId), { $inc: { commission: finalCommissionDetails.agentShare } }, session ? { session } : undefined);
+            yield agentAccountService_1.default.syncCommissionForPayment(payment._id.toString());
         }
         if (!payment.isProvisional) {
             if (paymentType === 'rental' && rawOwnerId) {
@@ -652,10 +648,6 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 // ignore and enforce requirement below
             }
         }
-        // As a last resort for development-linked sales, allow the current user if they are the owner/collaborator (validated below).
-        if (!agId && devId) {
-            agId = new mongoose_1.default.Types.ObjectId(user.userId);
-        }
         // Require an explicit/derived agent for non-development sales to ensure commission is credited correctly
         if (!agId) {
             return res.status(400).json({ message: 'Sales agent is required for this sale payment' });
@@ -778,6 +770,21 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
         }
         const manualProperty = !propId && manualPropertyAddress;
         const manualTenant = !tenId && manualTenantName;
+        // Sanitize agentSplit: keep only for valid development splits; remove for non-development or empty splits
+        try {
+            if (!devId && (finalCommissionDetails === null || finalCommissionDetails === void 0 ? void 0 : finalCommissionDetails.agentSplit)) {
+                delete finalCommissionDetails.agentSplit;
+            }
+            else if (finalCommissionDetails === null || finalCommissionDetails === void 0 ? void 0 : finalCommissionDetails.agentSplit) {
+                const split = finalCommissionDetails.agentSplit;
+                const ownerAmtOk = Number((split === null || split === void 0 ? void 0 : split.ownerAgentShare) || 0) > 0 && !!(split === null || split === void 0 ? void 0 : split.ownerUserId);
+                const collabAmtOk = Number((split === null || split === void 0 ? void 0 : split.collaboratorAgentShare) || 0) > 0 && !!(split === null || split === void 0 ? void 0 : split.collaboratorUserId);
+                if (!ownerAmtOk && !collabAmtOk) {
+                    delete finalCommissionDetails.agentSplit;
+                }
+            }
+        }
+        catch ( /* no-op */_g) { /* no-op */ }
         const jsDate = new Date(paymentDate);
         const periodMonth = Number(rentalPeriodMonth !== null && rentalPeriodMonth !== void 0 ? rentalPeriodMonth : (jsDate.getMonth() + 1));
         const periodYear = Number(rentalPeriodYear !== null && rentalPeriodYear !== void 0 ? rentalPeriodYear : jsDate.getFullYear());
@@ -812,20 +819,10 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             developmentUnitId: unitId
         });
         yield payment.save();
-        // Post company and agent shares
+        // Post company revenue and sync agent commission(s)
         try {
             yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(user.companyId), { $inc: { revenue: finalCommissionDetails.agencyShare || 0 } });
-            // If split is present, credit both the development owner and the collaborator accordingly
-            if (finalCommissionDetails.agentSplit && ownerAgentIncrement > 0) {
-                const split = finalCommissionDetails.agentSplit;
-                if (split.ownerUserId) {
-                    yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(split.ownerUserId), { $inc: { commission: ownerAgentIncrement } });
-                }
-                yield User_1.User.findByIdAndUpdate(agId, { $inc: { commission: collaboratorAgentIncrement } });
-            }
-            else {
-                yield User_1.User.findByIdAndUpdate(agId, { $inc: { commission: finalCommissionDetails.agentShare || 0 } });
-            }
+            yield agentAccountService_1.default.syncCommissionForPayment(payment._id.toString());
         }
         catch (e) {
             console.warn('Non-fatal: commission posting failed', e);
@@ -1634,7 +1631,7 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
         payment.finalizedBy = new mongoose_1.default.Types.ObjectId(req.user.userId);
         yield payment.save();
         yield Company_1.Company.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.companyId), { $inc: { revenue: finalCommission.agencyShare } }, {});
-        yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(payment.agentId), { $inc: { commission: finalCommission.agentShare } }, {});
+        yield agentAccountService_1.default.syncCommissionForPayment(payment._id.toString());
         if (payment.paymentType === 'rental' && (ownerId || property.ownerId)) {
             yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(ownerId || (property.ownerId)), { $inc: { balance: finalCommission.ownerAmount } }, {});
         }

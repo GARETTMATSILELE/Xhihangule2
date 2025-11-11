@@ -10,6 +10,7 @@ import { User } from '../models/User';
 import { Company } from '../models/Company';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
+import agentAccountService from '../services/agentAccountService';
 
 // Get properties managed by the agent
 export const getAgentProperties = async (req: Request, res: Response) => {
@@ -767,15 +768,8 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       }
     );
 
-    // Update agent commission
-    await mongoose.model('User').findByIdAndUpdate(
-      new mongoose.Types.ObjectId(req.user.userId),
-      {
-        $inc: {
-          commission: commissionDetails.agentShare,
-        },
-      }
-    );
+    // Sync commission from saved payment (SSOT)
+    await agentAccountService.syncCommissionForPayment(payment._id.toString());
 
     // If it's a rental payment, update property owner's balance
     if ((paymentType || 'rental') === 'rental' && property.ownerId) {

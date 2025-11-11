@@ -24,6 +24,7 @@ const Payment_1 = require("../models/Payment");
 const mongoose_1 = __importDefault(require("mongoose"));
 const agentAccountController_1 = require("../controllers/agentAccountController");
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
+const agentAccountController_2 = require("../controllers/agentAccountController");
 const router = express_1.default.Router();
 // Debug middleware
 router.use((req, res, next) => {
@@ -143,6 +144,7 @@ router.get('/sales', roles_1.isAccountant, salesContractController_1.listSalesCo
 router.get('/sales/:id', roles_1.isAccountant, salesContractController_1.getSalesContract);
 // Agent Account routes - require accountant role
 router.get('/agent-accounts', roles_1.isAccountant, agentAccountController_1.getCompanyAgentAccounts);
+router.get('/agent-accounts/commission-compare', roles_1.isAccountant, agentAccountController_2.compareAgentCommissionTotals);
 router.get('/agent-accounts/:agentId', roles_1.isAccountant, (req, res) => {
     var _a;
     console.log('Agent account detail route hit:', req.params.agentId);

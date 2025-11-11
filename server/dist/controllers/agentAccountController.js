@@ -12,11 +12,91 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAcknowledgementDocument = exports.syncAgentCommissions = exports.syncAgentAccounts = exports.updatePayoutStatus = exports.createAgentPayout = exports.addPenalty = exports.getCompanyAgentAccounts = exports.getAgentAccount = void 0;
+exports.getAcknowledgementDocument = exports.syncAgentCommissions = exports.syncAgentAccounts = exports.updatePayoutStatus = exports.createAgentPayout = exports.addPenalty = exports.getCompanyAgentAccounts = exports.getAgentAccount = exports.compareAgentCommissionTotals = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
+const User_1 = require("../models/User");
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
+/**
+ * Compare User.commission vs AgentAccount totals for the current company
+ */
+const compareAgentCommissionTotals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company ID not found', 404);
+        }
+        // Fetch agents/sales users for this company
+        const agents = yield User_1.User.find({
+            companyId: new mongoose_1.default.Types.ObjectId(companyId),
+            role: { $in: ['agent', 'sales'] }
+        }).select('_id firstName lastName email commission role').lean();
+        const rows = [];
+        for (const u of agents) {
+            try {
+                const account = yield agentAccountService_1.default.getOrCreateAgentAccount(String(u._id));
+                const userCommission = Number(u.commission || 0);
+                const ledgerTotal = Number(account.totalCommissions || 0);
+                const delta = Number((ledgerTotal - userCommission).toFixed(2));
+                rows.push({
+                    agentId: String(u._id),
+                    name: `${u.firstName || ''} ${u.lastName || ''}`.trim(),
+                    email: u.email,
+                    role: String(u.role || 'agent'),
+                    userCommission,
+                    ledgerTotalCommissions: ledgerTotal,
+                    ledgerRunningBalance: Number(account.runningBalance || 0),
+                    totalPayouts: Number(account.totalPayouts || 0),
+                    totalPenalties: Number(account.totalPenalties || 0),
+                    deltaUserVsLedger: delta
+                });
+            }
+            catch (e) {
+                logger_1.logger.warn('Failed to load agent account for comparison (non-fatal):', { userId: u._id, error: e === null || e === void 0 ? void 0 : e.message });
+            }
+        }
+        // Aggregate summary
+        const summary = rows.reduce((acc, r) => {
+            acc.userCommission += r.userCommission;
+            acc.ledgerTotalCommissions += r.ledgerTotalCommissions;
+            acc.ledgerRunningBalance += r.ledgerRunningBalance;
+            acc.totalPayouts += r.totalPayouts;
+            acc.totalPenalties += r.totalPenalties;
+            acc.deltaUserVsLedger += r.deltaUserVsLedger;
+            return acc;
+        }, {
+            userCommission: 0,
+            ledgerTotalCommissions: 0,
+            ledgerRunningBalance: 0,
+            totalPayouts: 0,
+            totalPenalties: 0,
+            deltaUserVsLedger: 0
+        });
+        res.json({
+            success: true,
+            data: {
+                comparisons: rows,
+                summary
+            }
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in compareAgentCommissionTotals:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.compareAgentCommissionTotals = compareAgentCommissionTotals;
 /**
  * Get agent account with summary
  */

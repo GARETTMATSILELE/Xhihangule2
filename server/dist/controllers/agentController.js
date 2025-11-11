@@ -57,6 +57,7 @@ const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
+const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 // Get properties managed by the agent
 const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -725,12 +726,8 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 revenue: commissionDetails.agencyShare,
             },
         });
-        // Update agent commission
-        yield mongoose_1.default.model('User').findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(req.user.userId), {
-            $inc: {
-                commission: commissionDetails.agentShare,
-            },
-        });
+        // Sync commission from saved payment (SSOT)
+        yield agentAccountService_1.default.syncCommissionForPayment(payment._id.toString());
         // If it's a rental payment, update property owner's balance
         if ((paymentType || 'rental') === 'rental' && property.ownerId) {
             yield mongoose_1.default.model('User').findByIdAndUpdate(property.ownerId, {
