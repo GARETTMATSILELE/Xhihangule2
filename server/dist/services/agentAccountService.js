@@ -36,9 +36,19 @@ class AgentAccountService {
             var _a;
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId)
-                    .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId')
+                    .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status')
                     .lean();
                 if (!payment)
+                    return;
+                // Guard: never post commissions for provisional/suspense/unfinalized payments
+                if (payment.isProvisional === true)
+                    return;
+                if (payment.isInSuspense === true)
+                    return;
+                if (payment.commissionFinalized === false)
+                    return;
+                // Also require a completed status for rentals/sales that use status field
+                if (payment.status && String(payment.status) !== 'completed')
                     return;
                 // Handle non-split rentals/introduction as a single agent lane
                 const isSale = payment.paymentType === 'sale' || payment.paymentType === 'introduction';
@@ -147,10 +157,17 @@ class AgentAccountService {
             const commissionData = yield Payment_1.Payment.find({
                 status: 'completed',
                 paymentType: { $in: allowedTypes },
-                $or: [
-                    { agentId: agentObjId },
-                    { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-                    { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                isProvisional: { $ne: true },
+                isInSuspense: { $ne: true },
+                $and: [
+                    { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+                    {
+                        $or: [
+                            { agentId: agentObjId },
+                            { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                            { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                        ]
+                    }
                 ]
             }).select('_id paymentType commissionDetails').lean();
             const needsSync = [];
@@ -445,20 +462,34 @@ class AgentAccountService {
                 const totalPayments = yield Payment_1.Payment.countDocuments({
                     status: 'completed',
                     paymentType: { $in: allowedTypes },
-                    $or: [
-                        { agentId: agentObjId },
-                        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-                        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                    isProvisional: { $ne: true },
+                    isInSuspense: { $ne: true },
+                    $and: [
+                        { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+                        {
+                            $or: [
+                                { agentId: agentObjId },
+                                { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                                { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                            ]
+                        }
                     ]
                 });
                 console.log('Relevant completed payments for agent:', totalPayments);
                 const commissionData = yield Payment_1.Payment.find({
                     status: 'completed',
                     paymentType: { $in: allowedTypes },
-                    $or: [
-                        { agentId: agentObjId },
-                        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-                        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                    isProvisional: { $ne: true },
+                    isInSuspense: { $ne: true },
+                    $and: [
+                        { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+                        {
+                            $or: [
+                                { agentId: agentObjId },
+                                { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                                { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                            ]
+                        }
                     ]
                 })
                     .populate('propertyId', 'address propertyName')
@@ -591,10 +622,17 @@ class AgentAccountService {
                 const payments = yield Payment_1.Payment.find({
                     status: 'completed',
                     paymentType: { $in: ['rental', 'sale', 'introduction'] },
-                    $or: [
-                        { agentId: agentObjId },
-                        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-                        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                    isProvisional: { $ne: true },
+                    isInSuspense: { $ne: true },
+                    $and: [
+                        { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+                        {
+                            $or: [
+                                { agentId: agentObjId },
+                                { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+                                { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+                            ]
+                        }
                     ]
                 }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
                 const account = yield this.getOrCreateAgentAccount(agentId);

@@ -50,9 +50,16 @@ export class AgentAccountService {
   async syncCommissionForPayment(paymentId: string): Promise<void> {
     try {
       const payment = await Payment.findById(paymentId)
-        .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId')
+        .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status')
         .lean();
       if (!payment) return;
+
+      // Guard: never post commissions for provisional/suspense/unfinalized payments
+      if ((payment as any).isProvisional === true) return;
+      if ((payment as any).isInSuspense === true) return;
+      if ((payment as any).commissionFinalized === false) return;
+      // Also require a completed status for rentals/sales that use status field
+      if ((payment as any).status && String((payment as any).status) !== 'completed') return;
 
       // Handle non-split rentals/introduction as a single agent lane
       const isSale = (payment as any).paymentType === 'sale' || (payment as any).paymentType === 'introduction';
@@ -160,10 +167,17 @@ export class AgentAccountService {
     const commissionData = await Payment.find({
       status: 'completed',
       paymentType: { $in: allowedTypes as any },
-      $or: [
-        { agentId: agentObjId },
-        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+      isProvisional: { $ne: true },
+      isInSuspense: { $ne: true },
+      $and: [
+        { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+        {
+          $or: [
+            { agentId: agentObjId },
+            { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+            { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+          ]
+        }
       ]
     }).select('_id paymentType commissionDetails').lean();
 
@@ -489,10 +503,17 @@ export class AgentAccountService {
       const totalPayments = await Payment.countDocuments({
         status: 'completed',
         paymentType: { $in: allowedTypes as any },
-        $or: [
-          { agentId: agentObjId },
-          { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-          { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+        isProvisional: { $ne: true },
+        isInSuspense: { $ne: true },
+        $and: [
+          { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+          {
+            $or: [
+              { agentId: agentObjId },
+              { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+              { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+            ]
+          }
         ]
       });
       console.log('Relevant completed payments for agent:', totalPayments);
@@ -500,10 +521,17 @@ export class AgentAccountService {
       const commissionData = await Payment.find({
         status: 'completed',
         paymentType: { $in: allowedTypes as any },
-        $or: [
-          { agentId: agentObjId },
-          { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-          { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+        isProvisional: { $ne: true },
+        isInSuspense: { $ne: true },
+        $and: [
+          { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+          {
+            $or: [
+              { agentId: agentObjId },
+              { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+              { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+            ]
+          }
         ]
       })
         .populate('propertyId', 'address propertyName')
@@ -633,10 +661,17 @@ export class AgentAccountService {
       const payments = await Payment.find({
         status: 'completed',
         paymentType: { $in: ['rental', 'sale', 'introduction'] as any },
-        $or: [
-          { agentId: agentObjId },
-          { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
-          { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+        isProvisional: { $ne: true },
+        isInSuspense: { $ne: true },
+        $and: [
+          { $or: [{ commissionFinalized: true }, { commissionFinalized: { $exists: false } }] },
+          {
+            $or: [
+              { agentId: agentObjId },
+              { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+              { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+            ]
+          }
         ]
       }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
 
