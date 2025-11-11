@@ -387,25 +387,25 @@ class PaymentService {
 
   // Property Account: Get transactions (income/expenditure)
   async getPropertyTransactions(propertyId: string, type: 'income' | 'expenditure') {
-    const response = await api.get(`/api/property-accounts/${propertyId}/transactions`, { params: { type } });
+    const response = await api.get(`/accountants/property-accounts/${propertyId}/transactions`, { params: { type } });
     return response.data;
   }
 
   // Property Account: Create payment (expenditure)
   async createPropertyPayment(propertyId: string, paymentData: any) {
-    const response = await api.post(`/api/property-accounts/${propertyId}/pay`, paymentData);
+    const response = await api.post(`/accountants/property-accounts/${propertyId}/expense`, paymentData);
     return response.data;
   }
 
   // Property Account: Get payment request document
   async getPaymentRequestDocument(propertyId: string, paymentId: string) {
-    const response = await api.get(`/api/property-accounts/${propertyId}/payment-request/${paymentId}`);
+    const response = await api.get(`/accountants/property-accounts/${propertyId}/payout/${paymentId}/payment-request`);
     return response.data;
   }
 
   // Property Account: Get acknowledgement document
   async getAcknowledgementDocument(propertyId: string, paymentId: string) {
-    const response = await api.get(`/api/property-accounts/${propertyId}/acknowledgement/${paymentId}`);
+    const response = await api.get(`/accountants/property-accounts/${propertyId}/payout/${paymentId}/acknowledgement`);
     return response.data;
   }
 
