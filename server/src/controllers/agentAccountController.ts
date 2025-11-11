@@ -379,6 +379,12 @@ export const syncAgentCommissions = async (req: Request, res: Response) => {
     }
 
     await agentAccountService.syncCommissionTransactions(agentId);
+    // Ensure any payment visible in summary is projected to the ledger (idempotent)
+    try {
+      await agentAccountService.backfillMissingForAgent(agentId);
+    } catch (e) {
+      // swallow; core sync already done
+    }
     
     res.json({
       success: true,

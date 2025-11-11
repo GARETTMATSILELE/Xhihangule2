@@ -150,6 +150,70 @@ export class AgentAccountService {
   }
 
   /**
+   * Backfill any missing ledger commission transactions for an agent from Payments.
+   * Safe and idempotent: uses per-payment sync with paymentId/role references.
+   */
+  async backfillMissingForAgent(agentId: string): Promise<void> {
+    const updatedAccount = await this.getOrCreateAgentAccount(agentId);
+    const agentObjId = new mongoose.Types.ObjectId(agentId);
+    const allowedTypes = ['rental', 'sale', 'introduction'];
+    const commissionData = await Payment.find({
+      status: 'completed',
+      paymentType: { $in: allowedTypes as any },
+      $or: [
+        { agentId: agentObjId },
+        { 'commissionDetails.agentSplit.ownerUserId': agentObjId },
+        { 'commissionDetails.agentSplit.collaboratorUserId': agentObjId }
+      ]
+    }).select('_id paymentType commissionDetails').lean();
+
+    const needsSync: string[] = [];
+    const txByRef = new Set(
+      (updatedAccount.transactions || [])
+        .filter(t => t.type === 'commission')
+        .map(t => String(t.reference || ''))
+    );
+    for (const p of commissionData) {
+      const pid = String((p as any)?._id || '');
+      const split = (p as any)?.commissionDetails?.agentSplit;
+      if ((p as any).paymentType === 'sale' && split) {
+        const ownerId = split?.ownerUserId ? String(split.ownerUserId) : undefined;
+        const collabId = split?.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
+        const ownerAmt = Number(split?.ownerAgentShare || 0);
+        const collabAmt = Number(split?.collaboratorAgentShare || 0);
+        if (ownerId === agentId && ownerAmt > 0) {
+          const ref = `${pid}-owner`;
+          if (!txByRef.has(ref)) needsSync.push(pid);
+        } else if (collabId === agentId && collabAmt > 0) {
+          const ref = `${pid}-collaborator`;
+          if (!txByRef.has(ref)) needsSync.push(pid);
+        } else {
+          // Fall through to non-split lane if split not applicable to this agent
+          const ref = pid;
+          if (!txByRef.has(ref)) needsSync.push(pid);
+        }
+      } else {
+        const ref = pid;
+        if (!txByRef.has(ref)) needsSync.push(pid);
+      }
+    }
+    if (needsSync.length > 0) {
+      const uniq = Array.from(new Set(needsSync));
+      for (const pid of uniq) {
+        try {
+          await this.syncCommissionForPayment(pid);
+        } catch (e) {
+          logger.warn(`Backfill failed for payment ${pid}:`, (e as any)?.message || e);
+        }
+      }
+      // Recalculate to ensure balances updated
+      const account = await this.getOrCreateAgentAccount(agentId);
+      await this.recalculateBalance(account);
+      await account.save();
+    }
+  }
+
+  /**
    * Add commission transaction
    */
   async addCommission(agentId: string, commissionData: {

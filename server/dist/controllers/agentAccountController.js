@@ -348,6 +348,13 @@ const syncAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, fun
             return res.status(400).json({ message: 'Invalid agent ID format' });
         }
         yield agentAccountService_1.default.syncCommissionTransactions(agentId);
+        // Ensure any payment visible in summary is projected to the ledger (idempotent)
+        try {
+            yield agentAccountService_1.default.backfillMissingForAgent(agentId);
+        }
+        catch (e) {
+            // swallow; core sync already done
+        }
         res.json({
             success: true,
             message: 'Agent commission transactions synced successfully'

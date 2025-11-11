@@ -134,26 +134,24 @@ const PaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        
-        let propertiesData, tenantsData, paymentsData, levyPaymentsData: any[] = [];
-        
-        // Use agent service if user is an agent, otherwise use regular services
-        if (user?.role === 'agent') {
-          [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
-            agentService.getProperties(),
-            agentService.getTenants(),
-            api.get('/agents/payments').then((r: any) => r.data),
-            api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
-          ]);
-        } else {
-          const includeParams: any = user?.role === 'admin' ? { includeProvisional: 'true' } : {};
-          [propertiesData, tenantsData, paymentsData, levyPaymentsData] = await Promise.all([
-            propertyService.getPublicProperties(),
-            tenantService.getAllPublic(),
-            paymentService.getPayments(includeParams),
-            paymentService.getLevyPayments(user.companyId)
-          ]);
-        }
+
+        // Fetch all in parallel but tolerate partial failures
+        const isAgent = user?.role === 'agent';
+        const includeParams: any = user?.role === 'admin' ? { includeProvisional: 'true' } : {};
+        const tasks = isAgent
+          ? [
+              agentService.getProperties(),
+              agentService.getTenants(),
+              api.get('/agents/payments').then((r: any) => r.data),
+              api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
+            ]
+          : [
+              propertyService.getPublicProperties(),
+              tenantService.getAllPublic(),
+              paymentService.getPayments(includeParams),
+              paymentService.getLevyPayments(user.companyId)
+            ];
+        const [propRes, tenRes, payRes, levyRes] = await Promise.allSettled(tasks as any);
 
         // Load owners data
         let ownersData;
@@ -166,29 +164,30 @@ const PaymentsPage: React.FC = () => {
 
         if (!isMounted) return;
 
-        // Handle different response formats
-        const properties = Array.isArray(propertiesData) ? propertiesData : [];
-        const tenants = Array.isArray(tenantsData) ? tenantsData : (tenantsData.tenants || []);
-        const payments = Array.isArray(paymentsData) ? paymentsData : [];
-        const levyPayments = Array.isArray(levyPaymentsData) ? levyPaymentsData : [];
+        // Extract successful values, preserve previous state on failure
+        const nextProperties = propRes.status === 'fulfilled' ? (Array.isArray(propRes.value) ? propRes.value : []) : properties;
+        const tenantsRawResult = tenRes.status === 'fulfilled' ? tenRes.value : tenants;
+        const nextTenants = Array.isArray(tenantsRawResult) ? tenantsRawResult : (tenantsRawResult?.tenants || []);
+        const basePayments = payRes.status === 'fulfilled' ? (Array.isArray(payRes.value) ? payRes.value : []) : payments;
+        const levyPayments = levyRes.status === 'fulfilled' ? (Array.isArray(levyRes.value) ? levyRes.value : []) : [];
         const owners = Array.isArray(ownersData) ? ownersData : [];
 
-        if (!Array.isArray(properties) || !Array.isArray(tenants) || !Array.isArray(payments)) {
-          throw new Error('Invalid data format received from server');
-        }
+        // If all four failed, surface a single error but do not hard-clear UI
+        const allFailed = [propRes, tenRes, payRes, levyRes].every(r => r.status === 'rejected');
+        if (allFailed) setError('Some data failed to load. Please try again.');
 
-        setProperties(properties);
-        setTenants(tenants);
+        setProperties(nextProperties);
+        setTenants(nextTenants);
         // Merge levy payments into main list
-        setPayments([...(payments as any[]), ...(levyPayments as any[])]);
+        setPayments([...(basePayments as any[]), ...(levyPayments as any[])]);
         setOwners(owners);
         
         // Debug logging
-        console.log('Loaded properties:', properties);
-        console.log('Loaded payments:', payments);
-        if (payments && payments.length > 0) {
-          console.log('First payment propertyId:', payments[0].propertyId);
-          console.log('First payment propertyId type:', typeof payments[0].propertyId);
+        console.log('Loaded properties:', nextProperties);
+        console.log('Loaded payments:', basePayments);
+        if (basePayments && basePayments.length > 0) {
+          console.log('First payment propertyId:', basePayments[0].propertyId);
+          console.log('First payment propertyId type:', typeof basePayments[0].propertyId);
         }
       } catch (err: any) {
         if (!isMounted) return;
@@ -199,9 +198,7 @@ const PaymentsPage: React.FC = () => {
         } else {
           setError('Failed to load data. Please try again later.');
         }
-        setProperties([]);
-        setTenants([]);
-        setPayments([]);
+        // Do not clear existing UI state on transient errors
       } finally {
         if (isMounted) {
           setLoading(false);

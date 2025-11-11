@@ -26,22 +26,39 @@ export class DatabaseService {
   private async checkConnection(): Promise<void> {
     try {
       console.log('Checking database connection...');
-      
-      // Check if the server is reachable first
-      const response = await api.get('/health', {
-        timeout: this.HEALTH_CHECK_TIMEOUT,
-        validateStatus: (status) => status < 500 // Accept any status less than 500
+
+      // Prefer a fast readiness probe; on failure/timeout, fall back to liveness
+      const tryReady = () => api.get('/health/ready', {
+        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 4000),
+        validateStatus: (status) => status < 500
       });
-      
-      if (response.data?.database?.isHealthy) {
+      const tryLive = () => api.get('/health/live', {
+        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 2000),
+        validateStatus: (status) => status < 500
+      });
+
+      let response;
+      try {
+        response = await tryReady();
+      } catch (e) {
+        // Swallow and try liveness quickly to avoid blocking UX
+        try {
+          response = await tryLive();
+        } catch (liveErr) {
+          throw liveErr;
+        }
+      }
+
+      // If live responded, consider server reachable; only mark unhealthy if explicit unhealthy reported
+      const isHealthy = Boolean(response?.data?.database?.isHealthy) || response?.data?.status === 'ok';
+      if (isHealthy) {
         this.isConnected = true;
         this.failureCount = 0;
         console.log('Database connection is healthy:', response.data);
       } else {
         this.isConnected = false;
         this.failureCount++;
-        console.warn('Database reported unhealthy state:', response.data);
-        
+        console.warn('Database reported unhealthy state:', response?.data);
         if (this.failureCount >= this.MAX_FAILURES) {
           this.handleConnectionLoss();
         }
