@@ -18,6 +18,41 @@ class PaymentService {
     return PaymentService.instance;
   }
 
+  // Generate a stable idempotency key for payment submissions
+  // Uses a deterministic hash of salient fields so user retries/double-clicks are deduped server-side
+  private generateIdempotencyKey(data: any, prefix: string = 'pay'): string {
+    try {
+      const companyId = (typeof window !== 'undefined' ? (localStorage.getItem('companyId') || '') : '') || '';
+      const base = JSON.stringify({
+        companyId,
+        paymentType: data?.paymentType || 'rental',
+        propertyType: data?.propertyType || 'residential',
+        propertyId: String(data?.propertyId || ''),
+        tenantId: String(data?.tenantId || ''),
+        agentId: String(data?.agentId || ''),
+        rentalPeriodYear: Number(data?.rentalPeriodYear || 0),
+        rentalPeriodMonth: Number(data?.rentalPeriodMonth || 0),
+        amount: Number(data?.amount || 0),
+        currency: data?.currency || 'USD',
+        saleMode: data?.saleMode || undefined,
+        // For sales, include sale identifiers if present
+        saleId: data?.saleId || undefined,
+        developmentUnitId: data?.developmentUnitId || undefined
+      });
+      // djb2 hash for short deterministic key
+      let hash = 5381;
+      for (let i = 0; i < base.length; i++) {
+        hash = ((hash << 5) + hash) + base.charCodeAt(i);
+        hash = hash & hash;
+      }
+      const suffix = Math.abs(hash).toString(36);
+      return `${prefix}:${suffix}`;
+    } catch {
+      // Fallback: random-ish key per attempt
+      return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+    }
+  }
+
   private async handleAuthError(error: any): Promise<never> {
     console.error('Authentication error:', error);
     if (error.response?.status === 401) {
@@ -82,7 +117,8 @@ class PaymentService {
   async createPayment(paymentData: PaymentFormData): Promise<Payment> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.post('/payments', paymentData);
+        const body = { ...paymentData, idempotencyKey: (paymentData as any)?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'rental') };
+        const response = await api.post('/payments', body);
         return response.data;
       });
     } catch (error: any) {
@@ -94,7 +130,8 @@ class PaymentService {
   async createPaymentAccountant(paymentData: PaymentFormData): Promise<{ status: string; data: Payment; message: string }> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.post('/accountants/payments', paymentData);
+        const body = { ...paymentData, idempotencyKey: (paymentData as any)?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'acct') };
+        const response = await api.post('/accountants/payments', body);
         return response.data;
       });
     } catch (error: any) {
@@ -106,7 +143,8 @@ class PaymentService {
   async createSalesPaymentAccountant(paymentData: PaymentFormData): Promise<{ status?: string; payment?: Payment; data?: Payment; message?: string }> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const response = await api.post('/accountants/sales-payments', paymentData);
+        const body = { ...paymentData, idempotencyKey: (paymentData as any)?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'sale') };
+        const response = await api.post('/accountants/sales-payments', body);
         return response.data;
       });
     } catch (error: any) {
@@ -307,7 +345,8 @@ class PaymentService {
   // Public method for creating payments using public API
   async createPaymentPublic(paymentData: any): Promise<Payment> {
     try {
-      const response = await publicApi.post('/payments/public', paymentData);
+      const body = { ...paymentData, idempotencyKey: paymentData?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'pub') };
+      const response = await publicApi.post('/payments/public', body);
       return response.data.data;
     } catch (error: any) {
       console.error('Error creating payment (public):', error);

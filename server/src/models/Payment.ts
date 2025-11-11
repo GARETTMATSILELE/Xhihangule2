@@ -312,5 +312,15 @@ PaymentSchema.index({ developmentId: 1 });
 PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
 PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
+// Ensure a payment reference cannot repeat within a company (guards manual edits/imports)
+PaymentSchema.index(
+  { companyId: 1, referenceNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      referenceNumber: { $exists: true, $type: 'string', $ne: '' }
+    }
+  }
+);
 
 export const Payment = mongoose.model<IPayment>('Payment', PaymentSchema, COLLECTIONS.PAYMENTS); 

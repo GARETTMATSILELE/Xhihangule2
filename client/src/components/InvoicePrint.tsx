@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Typography, Button, Grid, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { Print as PrintIcon } from '@mui/icons-material';
 import { useCompany } from '../contexts/CompanyContext';
+import { formatCurrency as formatCurrencyUtil } from '../utils/money';
 import './InvoicePrint.css';
 
 interface InvoiceItem {
@@ -82,17 +83,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
   };
 
   const currencyCode = deriveCurrency();
-
-  const formatCurrency = (amount: number) => {
-    if (currencyCode === 'USD') {
-      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
-    }
-    if (currencyCode === 'ZAR') {
-      return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(amount);
-    }
-    // ZiG formatting (no official ISO code in Intl), prefix with label
-    return `ZiG ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
-  };
+  const formatAmount = (amount: number) => formatCurrencyUtil(amount, currencyCode as any);
 
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleDateString('en-US', {
@@ -306,9 +297,9 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
                     <TableCell className="code-value">{item.code}</TableCell>
                     <TableCell>{item.description}</TableCell>
                     <TableCell sx={{ textAlign: 'center' }}>{item.quantity ?? 1}</TableCell>
-                    <TableCell sx={{ textAlign: 'right' }}>{formatCurrency(item.unitPrice ?? item.netPrice)}</TableCell>
+                    <TableCell sx={{ textAlign: 'right' }}>{formatAmount(item.unitPrice ?? item.netPrice)}</TableCell>
                     <TableCell sx={{ textAlign: 'center' }}>{item.taxPercentage}%</TableCell>
-                    <TableCell sx={{ textAlign: 'right' }}>{formatCurrency((item.quantity ?? 1) * (item.unitPrice ?? item.netPrice))}</TableCell>
+                    <TableCell sx={{ textAlign: 'right' }}>{formatAmount((item.quantity ?? 1) * (item.unitPrice ?? item.netPrice))}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -322,33 +313,33 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="body2">Subtotal:</Typography>
               <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                {formatCurrency(invoice.subtotal)}
+                {formatAmount(invoice.subtotal)}
               </Typography>
             </Box>
             {invoice.discount > 0 && (
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                 <Typography variant="body2">Discount:</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'red' }}>
-                  -{formatCurrency(invoice.discount)}
+                  -{formatAmount(invoice.discount)}
                 </Typography>
               </Box>
             )}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="body2">Amount Excluding Tax:</Typography>
               <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                {formatCurrency(invoice.amountExcludingTax)}
+                {formatAmount(invoice.amountExcludingTax)}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
               <Typography variant="body2">VAT ({invoice.taxPercentage}%):</Typography>
               <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                {formatCurrency(invoice.taxAmount)}
+                {formatAmount(invoice.taxAmount)}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2, pt: 1, borderTop: '2px solid #1976d2' }}>
               <Typography variant="h6">Total Amount:</Typography>
               <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-                {formatCurrency(invoice.totalAmount)}
+                {formatAmount(invoice.totalAmount)}
               </Typography>
             </Box>
           </Box>

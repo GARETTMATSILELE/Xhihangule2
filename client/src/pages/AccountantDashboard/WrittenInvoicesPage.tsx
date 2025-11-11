@@ -6,6 +6,7 @@ import { Print as PrintIcon, Add as AddIcon, Delete as DeleteIcon } from '@mui/i
 import { apiService } from '../../api';
 import { useCompany } from '../../contexts/CompanyContext';
 import InvoicePrint from '../../components/InvoicePrint';
+import { calculateInvoiceTotals, formatCurrency } from '../../utils/money';
 
 interface InvoiceItem {
   code?: string;
@@ -128,17 +129,7 @@ const WrittenInvoicesPage: React.FC = () => {
   };
 
   const calculateTotals = () => {
-    const subtotal = items.reduce((sum, item) => {
-      const qty = item.quantity ?? 1;
-      const unit = item.unitPrice ?? item.netPrice ?? 0;
-      const line = qty * unit;
-      return sum + line;
-    }, 0);
-    const amountExcludingTax = subtotal - discount;
-    const taxAmount = (amountExcludingTax * taxPercentage) / 100;
-    const totalAmount = amountExcludingTax + taxAmount;
-
-    return { subtotal, amountExcludingTax, taxAmount, totalAmount };
+    return calculateInvoiceTotals(items, discount, taxPercentage);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -588,7 +579,7 @@ const WrittenInvoicesPage: React.FC = () => {
                           const qty = item.quantity ?? 1;
                           const unit = item.unitPrice ?? item.netPrice ?? 0;
                           const line = qty * unit;
-                          return `$${line.toFixed(2)}`;
+                          return formatCurrency(line, invoiceCurrency);
                         })()}
                       </TableCell>
                       <TableCell align="center">
@@ -632,7 +623,7 @@ const WrittenInvoicesPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    ${totals.subtotal.toFixed(2)}
+                    {formatCurrency(totals.subtotal, invoiceCurrency)}
                   </Typography>
                 </Grid>
                 {discount > 0 && (
@@ -642,7 +633,7 @@ const WrittenInvoicesPage: React.FC = () => {
                     </Grid>
                     <Grid item xs={6}>
                       <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'red' }}>
-                        -${discount.toFixed(2)}
+                        -{formatCurrency(discount, invoiceCurrency)}
                       </Typography>
                     </Grid>
                   </>
@@ -652,7 +643,7 @@ const WrittenInvoicesPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    ${totals.amountExcludingTax.toFixed(2)}
+                    {formatCurrency(totals.amountExcludingTax, invoiceCurrency)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -660,7 +651,7 @@ const WrittenInvoicesPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    ${totals.taxAmount.toFixed(2)}
+                    {formatCurrency(totals.taxAmount, invoiceCurrency)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -668,7 +659,7 @@ const WrittenInvoicesPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-                    ${totals.totalAmount.toFixed(2)}
+                    {formatCurrency(totals.totalAmount, invoiceCurrency)}
                   </Typography>
                 </Grid>
               </Grid>

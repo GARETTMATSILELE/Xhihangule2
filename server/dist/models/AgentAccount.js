@@ -177,4 +177,12 @@ agentAccountSchema.index({ agentId: 1 });
 agentAccountSchema.index({ 'transactions.date': -1 });
 agentAccountSchema.index({ 'agentPayouts.date': -1 });
 agentAccountSchema.index({ 'transactions.paymentId': 1 });
+// Enforce no duplicate commission reference per agent
+agentAccountSchema.index({ agentId: 1, 'transactions.type': 1, 'transactions.reference': 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        'transactions.type': 'commission',
+        'transactions.reference': { $exists: true, $type: 'string', $ne: '' }
+    }
+});
 exports.AgentAccount = mongoose_1.default.model('AgentAccount', agentAccountSchema, collections_1.COLLECTIONS.AGENT_ACCOUNTS);

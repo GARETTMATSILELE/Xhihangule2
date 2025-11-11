@@ -73,6 +73,14 @@ export const createPayment = async (req: Request, res: Response) => {
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
+  // Allow Idempotency-Key header as an alternative to body field
+  try {
+    const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']) as string | undefined;
+    if (headerKey && !req.body.idempotencyKey) {
+      (req.body as any).idempotencyKey = String(headerKey);
+    }
+  } catch (_) {}
+
   try {
     const {
       leaseId,
@@ -304,6 +312,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
 
   const currentUser = req.user as JwtPayload;
 
+  // Allow Idempotency-Key header as an alternative to body field
+  try {
+    const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']) as string | undefined;
+    if (headerKey && !(req.body as any).idempotencyKey) {
+      (req.body as any).idempotencyKey = String(headerKey);
+    }
+  } catch (_) {}
+
   type CreateResult = { payment: IPayment } | { error: { status: number; message: string } };
 
   // Helper to perform the actual create logic, with optional transaction session
@@ -419,17 +435,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       } catch (err) {
         // As a safety net, fall back to default split if anything goes wrong
         const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
-        const totalCommission = (amount * baseCommissionRate) / 100;
-        const preaFee = totalCommission * 0.03;
-        const remainingCommission = totalCommission - preaFee;
-        const agentShare = remainingCommission * 0.6;
-        const agencyShare = remainingCommission * 0.4;
+        const { totalCommission, preaFee, agentShare, agencyShare, ownerAmount } =
+          (await import('../utils/money')).computeCommissionFallback(amount, baseCommissionRate);
         finalCommissionDetails = {
           totalCommission,
           preaFee,
           agentShare,
           agencyShare,
-          ownerAmount: amount - totalCommission,
+          ownerAmount,
         } as any;
       }
     }
@@ -766,15 +779,13 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
           new mongoose.Types.ObjectId(user.companyId)
         ) as any;
       } catch {
-        const base = (amount * 0.15);
-        const prea = base * 0.03;
-        const remaining = base - prea;
+        const fallback = (await import('../utils/money')).computeCommissionFallback(amount, 15);
         finalCommissionDetails = {
-          totalCommission: base,
-          preaFee: prea,
-          agentShare: remaining * 0.6,
-          agencyShare: remaining * 0.4,
-          ownerAmount: amount - base,
+          totalCommission: fallback.totalCommission,
+          preaFee: fallback.preaFee,
+          agentShare: fallback.agentShare,
+          agencyShare: fallback.agencyShare,
+          ownerAmount: fallback.ownerAmount,
         } as any;
       }
     }
@@ -1248,6 +1259,14 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Unauthorized' });
   }
+
+  // Allow Idempotency-Key header as an alternative to body field
+  try {
+    const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']) as string | undefined;
+    if (headerKey && !req.body.idempotencyKey) {
+      (req.body as any).idempotencyKey = String(headerKey);
+    }
+  } catch (_) {}
 
   try {
     console.log('Public payment creation request:', {

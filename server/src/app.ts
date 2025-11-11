@@ -33,6 +33,7 @@ import viewingRoutes from './routes/viewingRoutes';
 import valuationRoutes from './routes/valuationRoutes';
 import developmentRoutes from './routes/developmentRoutes';
 import developmentUnitRoutes from './routes/developmentUnitRoutes';
+import maintenanceRoutes from './routes/maintenanceRoutes';
 
 import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
@@ -116,6 +117,7 @@ app.use('/api/charts', chartRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/properties', propertyRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/leases', leaseRoutes);

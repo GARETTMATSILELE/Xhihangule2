@@ -41,7 +41,7 @@ type Props = {
 };
 
 const PAYMENT_METHODS: PaymentMethod[] = ['bank_transfer', 'cash', 'credit_card', 'mobile_money'];
-const CURRENCIES: Currency[] = ['USD', 'ZWL'];
+const CURRENCIES: Currency[] = ['USD', 'ZiG', 'ZAR'];
 
 const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, prefill }) => {
   const { user } = useAuth();

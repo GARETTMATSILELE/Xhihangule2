@@ -1,4 +1,5 @@
 import api from '../api';
+import { formatCurrency as formatCurrencyUtil } from '../utils/money';
 
 export interface CommissionData {
   _id: string;
@@ -218,10 +219,7 @@ class AgentAccountService {
    * Format currency
    */
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
+    return formatCurrencyUtil(amount, 'USD');
   }
 
   /**
@@ -255,9 +253,24 @@ class AgentAccountService {
    */
   calculateRunningBalance(transactions: Transaction[]): { transactions: Transaction[]; finalBalance: number } {
     let balanceCents = 0;
+    // Sort by date ascending for deterministic running balance
     const sortedTransactions = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    const updatedTransactions = sortedTransactions.map(transaction => {
+
+    // Dedupe commission entries by exact same reference (keep earliest)
+    const seenCommissionRefs = new Set<string>();
+    const deduped: Transaction[] = [];
+    for (const t of sortedTransactions) {
+      if (t.type === 'commission' && typeof t.reference === 'string' && t.reference.trim().length > 0) {
+        const ref = t.reference.trim();
+        if (seenCommissionRefs.has(ref)) {
+          continue;
+        }
+        seenCommissionRefs.add(ref);
+      }
+      deduped.push(t);
+    }
+
+    const updatedTransactions = deduped.map(transaction => {
       const amtCents = Math.round((transaction.amount || 0) * 100);
       const isCompleted = transaction.status === 'completed';
       if (transaction.type === 'commission' && isCompleted) {
@@ -269,7 +282,7 @@ class AgentAccountService {
       }
       return { ...transaction, runningBalance: Number((balanceCents / 100).toFixed(2)) };
     });
-    
+
     return { transactions: updatedTransactions, finalBalance: Number((balanceCents / 100).toFixed(2)) };
   }
 }

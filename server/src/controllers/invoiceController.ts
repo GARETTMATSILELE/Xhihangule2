@@ -4,6 +4,7 @@ import { Invoice } from '../models/Invoice';
 import { AppError } from '../middleware/errorHandler';
 import { accountingConnection } from '../config/database';
 import { tryFiscalizeInvoice } from '../services/fiscalizationService';
+import { calculateTaxBreakdown } from '../utils/money';
 
 // Function to generate unique item code
 const generateItemCode = async (): Promise<string> => {
@@ -12,20 +13,7 @@ const generateItemCode = async (): Promise<string> => {
   return `ITEM-${timestamp}-${random}`.toUpperCase();
 };
 
-// Function to calculate tax breakdown
-const calculateTaxBreakdown = (items: any[], discount: number = 0, taxPercentage: number = 15) => {
-  const subtotal = items.reduce((sum, item) => sum + (item.netPrice || 0), 0);
-  const amountExcludingTax = subtotal - discount;
-  const taxAmount = (amountExcludingTax * taxPercentage) / 100;
-  const totalAmount = amountExcludingTax + taxAmount;
-
-  return {
-    subtotal,
-    amountExcludingTax,
-    taxAmount,
-    totalAmount
-  };
-};
+// Tax breakdown moved to utils/money to ensure single source of truth
 
 // Function to validate client details
 const validateClientDetails = (client: any) => {

@@ -44,7 +44,7 @@ export type PropertyType = 'residential' | 'commercial';
 export type SaleMode = 'quick' | 'installment';
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money';
 export type PaymentStatus = 'pending' | 'completed' | 'failed';
-export type Currency = 'USD' | 'ZWL';
+export type Currency = 'USD' | 'ZiG' | 'ZAR';
 
 // Runtime array of payment methods that matches the type
 export const PAYMENT_METHODS: PaymentMethod[] = [
@@ -54,7 +54,7 @@ export const PAYMENT_METHODS: PaymentMethod[] = [
   'mobile_money',
 ];
 
-export const SUPPORTED_CURRENCIES: Currency[] = ['USD', 'ZWL'];
+export const SUPPORTED_CURRENCIES: Currency[] = ['USD', 'ZiG', 'ZAR'];
 
 export interface PaymentFormData {
   paymentType: PaymentType;

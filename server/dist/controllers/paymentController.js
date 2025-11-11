@@ -113,6 +113,14 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    // Allow Idempotency-Key header as an alternative to body field
+    try {
+        const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']);
+        if (headerKey && !req.body.idempotencyKey) {
+            req.body.idempotencyKey = String(headerKey);
+        }
+    }
+    catch (_) { }
     try {
         const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Validate required fields
@@ -307,6 +315,14 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         return res.status(401).json({ message: 'Authentication required' });
     }
     const currentUser = req.user;
+    // Allow Idempotency-Key header as an alternative to body field
+    try {
+        const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']);
+        if (headerKey && !req.body.idempotencyKey) {
+            req.body.idempotencyKey = String(headerKey);
+        }
+    }
+    catch (_) { }
     // Helper to perform the actual create logic, with optional transaction session
     const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
         const { paymentType, propertyType, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, manualPropertyAddress, manualTenantName, } = req.body;
@@ -393,17 +409,13 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             catch (err) {
                 // As a safety net, fall back to default split if anything goes wrong
                 const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
-                const totalCommission = (amount * baseCommissionRate) / 100;
-                const preaFee = totalCommission * 0.03;
-                const remainingCommission = totalCommission - preaFee;
-                const agentShare = remainingCommission * 0.6;
-                const agencyShare = remainingCommission * 0.4;
+                const { totalCommission, preaFee, agentShare, agencyShare, ownerAmount } = (yield Promise.resolve().then(() => __importStar(require('../utils/money')))).computeCommissionFallback(amount, baseCommissionRate);
                 finalCommissionDetails = {
                     totalCommission,
                     preaFee,
                     agentShare,
                     agencyShare,
-                    ownerAmount: amount - totalCommission,
+                    ownerAmount,
                 };
             }
         }
@@ -697,15 +709,13 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
             }
             catch (_f) {
-                const base = (amount * 0.15);
-                const prea = base * 0.03;
-                const remaining = base - prea;
+                const fallback = (yield Promise.resolve().then(() => __importStar(require('../utils/money')))).computeCommissionFallback(amount, 15);
                 finalCommissionDetails = {
-                    totalCommission: base,
-                    preaFee: prea,
-                    agentShare: remaining * 0.6,
-                    agencyShare: remaining * 0.4,
-                    ownerAmount: amount - base,
+                    totalCommission: fallback.totalCommission,
+                    preaFee: fallback.preaFee,
+                    agentShare: fallback.agentShare,
+                    agencyShare: fallback.agencyShare,
+                    ownerAmount: fallback.ownerAmount,
                 };
             }
         }
@@ -1144,6 +1154,14 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    // Allow Idempotency-Key header as an alternative to body field
+    try {
+        const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']);
+        if (headerKey && !req.body.idempotencyKey) {
+            req.body.idempotencyKey = String(headerKey);
+        }
+    }
+    catch (_) { }
     try {
         console.log('Public payment creation request:', {
             body: req.body,

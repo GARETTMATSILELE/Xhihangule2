@@ -1,4 +1,5 @@
 import api from '../api';
+import { formatCurrency as formatCurrencyUtil } from '../utils/money';
 
 export interface PropertyAccount {
   _id: string;
@@ -265,10 +266,7 @@ class PropertyAccountService {
    * Format currency
    */
   formatCurrency(amount: number, currency: string = 'USD'): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency
-    }).format(amount);
+    return formatCurrencyUtil(amount, (currency as any) || 'USD');
   }
 
   /**

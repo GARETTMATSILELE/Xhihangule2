@@ -29,25 +29,14 @@ const Invoice_1 = require("../models/Invoice");
 const errorHandler_1 = require("../middleware/errorHandler");
 const database_1 = require("../config/database");
 const fiscalizationService_1 = require("../services/fiscalizationService");
+const money_1 = require("../utils/money");
 // Function to generate unique item code
 const generateItemCode = () => __awaiter(void 0, void 0, void 0, function* () {
     const timestamp = Date.now().toString(36);
     const random = Math.random().toString(36).substr(2, 5);
     return `ITEM-${timestamp}-${random}`.toUpperCase();
 });
-// Function to calculate tax breakdown
-const calculateTaxBreakdown = (items, discount = 0, taxPercentage = 15) => {
-    const subtotal = items.reduce((sum, item) => sum + (item.netPrice || 0), 0);
-    const amountExcludingTax = subtotal - discount;
-    const taxAmount = (amountExcludingTax * taxPercentage) / 100;
-    const totalAmount = amountExcludingTax + taxAmount;
-    return {
-        subtotal,
-        amountExcludingTax,
-        taxAmount,
-        totalAmount
-    };
-};
+// Tax breakdown moved to utils/money to ensure single source of truth
 // Function to validate client details
 const validateClientDetails = (client) => {
     var _a, _b, _c;
@@ -89,7 +78,7 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 netPrice, code: item.code || (yield generateItemCode()), taxPercentage: item.taxPercentage || taxPercentage }));
         })));
         // Calculate tax breakdown
-        const breakdown = calculateTaxBreakdown(processedItems, discount, taxPercentage);
+        const breakdown = (0, money_1.calculateTaxBreakdown)(processedItems, discount, taxPercentage);
         const invoiceData = Object.assign(Object.assign(Object.assign(Object.assign({}, otherData), { client: validatedClient, currency, items: processedItems, discount,
             taxPercentage }), breakdown), { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         const invoice = new Invoice_1.Invoice(invoiceData);

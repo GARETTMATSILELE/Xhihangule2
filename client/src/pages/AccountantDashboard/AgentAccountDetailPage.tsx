@@ -337,6 +337,10 @@ const AgentAccountDetailPage: React.FC = () => {
   }
 
   const { transactions, finalBalance } = agentAccountService.calculateRunningBalance(account.transactions);
+  const completedOnly = transactions.filter(t => t.status === 'completed');
+  const computedTotalCommissions = completedOnly.filter(t => t.type === 'commission').reduce((s, t) => s + (t.amount || 0), 0);
+  const computedTotalPayouts = completedOnly.filter(t => t.type === 'payout').reduce((s, t) => s + (t.amount || 0), 0);
+  const computedTotalPenalties = completedOnly.filter(t => t.type === 'penalty').reduce((s, t) => s + (t.amount || 0), 0);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -375,7 +379,7 @@ const AgentAccountDetailPage: React.FC = () => {
                 <Typography variant="h6">Current Balance</Typography>
               </Box>
               <Typography variant="h4" color="primary" sx={{ mt: 1 }}>
-                {agentAccountService.formatCurrency(account.runningBalance)}
+                {agentAccountService.formatCurrency(finalBalance)}
               </Typography>
             </CardContent>
           </Card>
@@ -388,7 +392,7 @@ const AgentAccountDetailPage: React.FC = () => {
                 <Typography variant="h6">Total Commissions</Typography>
               </Box>
               <Typography variant="h4" color="success.main" sx={{ mt: 1 }}>
-                {agentAccountService.formatCurrency(account.totalCommissions)}
+                {agentAccountService.formatCurrency(computedTotalCommissions)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 From {account.commissionData?.length || 0} property payments
@@ -404,7 +408,7 @@ const AgentAccountDetailPage: React.FC = () => {
                 <Typography variant="h6">Total Payouts</Typography>
               </Box>
               <Typography variant="h4" color="error.main" sx={{ mt: 1 }}>
-                {agentAccountService.formatCurrency(account.totalPayouts)}
+                {agentAccountService.formatCurrency(computedTotalPayouts)}
               </Typography>
             </CardContent>
           </Card>
@@ -417,7 +421,7 @@ const AgentAccountDetailPage: React.FC = () => {
                 <Typography variant="h6">Total Penalties</Typography>
               </Box>
               <Typography variant="h4" color="warning.main" sx={{ mt: 1 }}>
-                {agentAccountService.formatCurrency(account.totalPenalties)}
+                {agentAccountService.formatCurrency(computedTotalPenalties)}
               </Typography>
             </CardContent>
           </Card>
@@ -439,7 +443,7 @@ const AgentAccountDetailPage: React.FC = () => {
           color="secondary"
           startIcon={<PaymentIcon />}
           onClick={handleOpenPayoutDialog}
-          disabled={account.runningBalance <= 0}
+          disabled={finalBalance <= 0}
           sx={{ mr: 2 }}
         >
           Pay Agent
@@ -802,7 +806,7 @@ const AgentAccountDetailPage: React.FC = () => {
                 onChange={(e) => setPayoutData({ ...payoutData, amount: Number(e.target.value) })}
                 fullWidth
                 required
-                helperText={`Available balance: ${agentAccountService.formatCurrency(account.runningBalance)}`}
+                helperText={`Available balance: ${agentAccountService.formatCurrency(finalBalance)}`}
               />
             </Grid>
             <Grid item xs={12} sm={6}>

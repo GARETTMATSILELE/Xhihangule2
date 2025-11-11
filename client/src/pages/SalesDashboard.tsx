@@ -20,10 +20,11 @@ import { apiService } from "../api";
 import { usePropertyService } from "../services/propertyService";
 import paymentService from "../services/paymentService";
 import { agentAccountService } from "../services/agentAccountService";
+import { formatCurrency as formatCurrencyUtil } from "../utils/money";
 
 // --- Lightweight helpers ---
 const uid = () => Math.random().toString(36).slice(2, 9);
-const money = (n) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(n || 0));
+const money = (n) => formatCurrencyUtil(Number(n || 0), 'USD', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const cls = (...s) => s.filter(Boolean).join(" ");
 
 // --- Demo seed data ---

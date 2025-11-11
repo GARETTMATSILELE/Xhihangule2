@@ -10,37 +10,12 @@ import { isDatabaseAvailable } from '../config/database';
 // CommissionService is imported elsewhere in the codebase; this service does not need a singleton
 import { logger } from '../utils/logger';
 import { DatabaseService } from './databaseService';
+import { CommissionService } from './commissionService';
 
 const dbService = DatabaseService.getInstance();
 // Remove unused singleton reference; commission calculations are handled in controllers via CommissionService
 
-// Calculate commission based on property type and amount
-const calculateCommission = (amount: number, propertyType: string) => {
-  const rates = {
-    residential: {
-      totalCommission: 0.10, // 10%
-      preaFee: 0.02, // 2%
-      agentShare: 0.05, // 5%
-      agencyShare: 0.03, // 3%
-    },
-    commercial: {
-      totalCommission: 0.15, // 15%
-      preaFee: 0.03, // 3%
-      agentShare: 0.07, // 7%
-      agencyShare: 0.05, // 5%
-    }
-  };
-
-  const rate = rates[propertyType as keyof typeof rates] || rates.residential;
-  
-  return {
-    totalCommission: amount * rate.totalCommission,
-    preaFee: amount * rate.preaFee,
-    agentShare: amount * rate.agentShare,
-    agencyShare: amount * rate.agencyShare,
-    ownerAmount: amount * (1 - rate.totalCommission)
-  };
-};
+// Commission calculations are centralized in CommissionService
 
 // Get all payments for a company
 export const getCompanyPayments = async (req: Request, res: Response) => {
@@ -115,22 +90,15 @@ export const createPayment = async (req: Request, res: Response) => {
       throw new AppError('Agent not found', 404);
     }
 
-    // Calculate commission using property's current commission percent and company splits
-    const commissionPercent = typeof property.commission === 'number' ? property.commission : ((propertyType || 'residential') === 'residential' ? 15 : 10);
-    const totalCommission = (amount * commissionPercent) / 100;
-    const company = await Company.findById(req.user.companyId).session(session);
-    const preaPercentOfTotal = Math.max(0, Math.min(1, (company as any)?.commissionConfig?.preaPercentOfTotal ?? 0.03));
-    const agentPercentOfRemaining = Math.max(0, Math.min(1, (company as any)?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
-    const agencyPercentOfRemaining = Math.max(0, Math.min(1, (company as any)?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
-    const preaFee = totalCommission * preaPercentOfTotal;
-    const remainingCommission = totalCommission - preaFee;
-    const commissionDetails = {
-      totalCommission,
-      preaFee,
-      agentShare: remainingCommission * agentPercentOfRemaining,
-      agencyShare: remainingCommission * agencyPercentOfRemaining,
-      ownerAmount: amount - totalCommission
-    };
+    // Calculate commission using centralized service and company-configured splits
+    const commissionPercent = typeof property.commission === 'number'
+      ? property.commission
+      : ((propertyType || 'residential') === 'residential' ? 15 : 10);
+    const commissionDetails = await CommissionService.calculate(
+      amount,
+      commissionPercent,
+      new mongoose.Types.ObjectId(req.user.companyId)
+    );
 
     // Create payment record
     const payment = new Payment({

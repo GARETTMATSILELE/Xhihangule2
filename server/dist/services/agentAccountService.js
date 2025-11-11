@@ -19,6 +19,7 @@ const Payment_1 = require("../models/Payment");
 const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
+const money_1 = require("../utils/money");
 class AgentAccountService {
     static getInstance() {
         if (!AgentAccountService.instance) {
@@ -77,6 +78,17 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const account = yield this.getOrCreateAgentAccount(agentId);
+                // Dedupe by reference: if a commission with same reference already exists, no-op
+                if (commissionData.reference) {
+                    const exists = account.transactions.some(t => t.type === 'commission' &&
+                        typeof t.reference === 'string' &&
+                        t.reference.length > 0 &&
+                        t.reference === commissionData.reference);
+                    if (exists) {
+                        logger_1.logger.warn(`Duplicate commission reference "${commissionData.reference}" for agent ${agentId} ignored.`);
+                        return account;
+                    }
+                }
                 const transaction = {
                     type: 'commission',
                     amount: commissionData.amount,
@@ -91,7 +103,17 @@ class AgentAccountService {
                 account.lastCommissionDate = commissionData.date;
                 account.lastUpdated = new Date();
                 yield this.recalculateBalance(account);
-                yield account.save();
+                try {
+                    yield account.save();
+                }
+                catch (e) {
+                    // In case of a race, unique index on (agentId, transactions.type, transactions.reference) will throw here
+                    if (e && e.code === 11000) {
+                        logger_1.logger.warn(`Duplicate commission prevented by unique index for agent ${agentId}, ref "${commissionData.reference}".`);
+                        return yield AgentAccount_1.AgentAccount.findOne({ agentId }).lean();
+                    }
+                    throw e;
+                }
                 logger_1.logger.info(`Added commission of ${commissionData.amount} to agent ${agentId}`);
                 return account;
             }
@@ -428,6 +450,38 @@ class AgentAccountService {
                             return true;
                         });
                         if (!existingTransaction) {
+                            // Try to match a legacy entry without paymentId using reference/description/amount (backfill paymentId instead of adding)
+                            const amountsEqual = (a, b) => Math.abs(Number(a || 0) - Number(b || 0)) < 0.005;
+                            const legacyMatch = account.transactions.find(t => {
+                                if (t.type !== 'commission')
+                                    return false;
+                                if (t.paymentId)
+                                    return false;
+                                if (!amountsEqual(t.amount, applicableAmount))
+                                    return false;
+                                const ref = String(t.reference || '');
+                                const desc = String(t.description || '');
+                                if (isSalesSplit) {
+                                    // Must match role-qualified reference for split lanes
+                                    return ref === uniqueRef || desc.includes(uniqueRef);
+                                }
+                                // Non-split (rentals/introductions): allow base reference or description includes baseRef
+                                return ref === baseRef || desc.includes(baseRef);
+                            });
+                            if (legacyMatch) {
+                                // Backfill paymentId and normalize reference; do not create a new transaction
+                                legacyMatch.paymentId = payment._id;
+                                if (isSalesSplit) {
+                                    legacyMatch.reference = uniqueRef;
+                                    legacyMatch.description = `Commission (${roleLabel}) from payment ${baseRef}`;
+                                }
+                                else if (!legacyMatch.reference) {
+                                    legacyMatch.reference = baseRef;
+                                }
+                                account.lastCommissionDate = payment.paymentDate;
+                                // Continue to next payment without incrementing newTransactionsAdded
+                                continue;
+                            }
                             // Add commission transaction
                             // For rentals/introductions: keep legacy description to prevent duplicates.
                             const description = isSalesSplit
@@ -450,6 +504,72 @@ class AgentAccountService {
                             console.log(`Added commission transaction (${isSalesSplit ? roleLabel : 'agent'}): ${applicableAmount} for payment ${baseRef}`);
                         }
                     }
+                }
+                // Strong de-duplication pass:
+                // - For commission entries WITH paymentId: keep one per (paymentId, role), prefer latest date
+                // - For commission entries WITHOUT paymentId: keep at most one per (normalizedRef, role, amountCents),
+                //   and drop any that collide with an existing paymentId-backed (paymentId, role)
+                {
+                    const inferRole = (ref) => {
+                        const r = (ref || '').toLowerCase();
+                        if (r.endsWith('-owner'))
+                            return 'owner';
+                        if (r.endsWith('-collaborator'))
+                            return 'collaborator';
+                        return 'agent';
+                    };
+                    const normalizeRef = (ref) => (ref || '').trim().replace(/\s+/g, ' ').toLowerCase();
+                    const nonCommission = [];
+                    const commissions = [];
+                    for (const t of account.transactions) {
+                        if (t.type === 'commission')
+                            commissions.push(t);
+                        else
+                            nonCommission.push(t);
+                    }
+                    const keepByPidRole = Object.create(null);
+                    const legacyBuckets = Object.create(null);
+                    // Partition into paymentId-backed and legacy buckets
+                    for (const t of commissions) {
+                        const ref = String(t.reference || '');
+                        const role = inferRole(ref);
+                        if (t.paymentId) {
+                            const key = `${String(t.paymentId)}:${role}`;
+                            const existing = keepByPidRole[key];
+                            if (!existing || new Date(t.date).getTime() >= new Date(existing.date).getTime()) {
+                                keepByPidRole[key] = t;
+                            }
+                        }
+                        else {
+                            const amtCents = Math.round(Number(t.amount || 0) * 100);
+                            const bucketKey = `${normalizeRef(ref)}:${role}:${amtCents}`;
+                            if (!legacyBuckets[bucketKey])
+                                legacyBuckets[bucketKey] = [];
+                            legacyBuckets[bucketKey].push(t);
+                        }
+                    }
+                    // Build final list: start with paymentId-backed kept entries
+                    const finalCommissions = Object.values(keepByPidRole);
+                    // For each legacy bucket, keep only one if there is no payment-backed entry that would cover it
+                    for (const bucketKey of Object.keys(legacyBuckets)) {
+                        const list = legacyBuckets[bucketKey];
+                        if (list.length === 0)
+                            continue;
+                        // If any item in bucket has a paymentId already (shouldn't be here), skip bucket
+                        // Otherwise, retain the earliest by date
+                        const chosen = list.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+                        // Determine role from chosen reference and check if a paymentId-backed entry with same role exists
+                        const role = inferRole(String(chosen.reference || ''));
+                        // We cannot link to a specific paymentId here; if any payment-backed entry exists with same role and similar reference,
+                        // assume coverage and drop legacy. Otherwise keep single legacy.
+                        const anyPidSameRole = finalCommissions.some(t => inferRole(String(t.reference || '')) === role);
+                        if (!anyPidSameRole) {
+                            finalCommissions.push(chosen);
+                        }
+                    }
+                    // Reassemble final transactions list
+                    account.transactions = [...nonCommission, ...finalCommissions]
+                        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
                 }
                 // Always recalc and save to ensure running balance and timestamps stay current
                 yield this.recalculateBalance(account);
@@ -508,10 +628,7 @@ class AgentAccountService {
      * Format currency
      */
     formatCurrency(amount) {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD'
-        }).format(amount);
+        return (0, money_1.formatCurrency)(amount, 'USD');
     }
     /**
      * Get transaction type label
