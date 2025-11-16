@@ -57,6 +57,15 @@ const AccountantPaymentsPage: React.FC = () => {
   const [finalizeCommissionPercent, setFinalizeCommissionPercent] = useState<string>('');
   const [finalizing, setFinalizing] = useState(false);
 
+  // Consistent newest-first ordering (paymentDate -> createdAt -> updatedAt)
+  const sortPayments = useCallback((list: Payment[]) => {
+    const toTime = (p: any) => {
+      const d = p?.paymentDate || p?.createdAt || p?.updatedAt;
+      return d ? new Date(d).getTime() : 0;
+    };
+    return [...list].sort((a, b) => toTime(b) - toTime(a));
+  }, []);
+
   // Filter tenants to those linked to the selected property during finalize flow
   const tenantsForSelectedProperty = useMemo(() => {
     if (!finalizePropertyId) return tenants;
@@ -155,7 +164,7 @@ const AccountantPaymentsPage: React.FC = () => {
             tenants = Array.isArray(tpub?.tenants) ? tpub.tenants : [];
           } catch {}
         }
-        const paymentsList = Array.isArray((paymentsPage as any)?.items) ? (paymentsPage as any).items : [];
+        const paymentsList = Array.isArray((paymentsPage as any)?.items) ? sortPayments((paymentsPage as any).items) : [];
         const total = Number((paymentsPage as any)?.total) || paymentsList.length;
         setProperties(properties);
         setTenants(tenants);
@@ -193,7 +202,7 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
         // Include provisional payments on accountant view
         const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true' } as any);
-        setPayments(items as any[]);
+        setPayments(sortPayments(items as any[]));
         setTotalCount(total);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
@@ -202,7 +211,7 @@ const AccountantPaymentsPage: React.FC = () => {
       }
     };
     loadPayments();
-  }, [debouncedFilters, user?.companyId, page, limit]);
+  }, [debouncedFilters, user?.companyId, page, limit, sortPayments]);
 
   const handleCreatePayment = async (data: PaymentFormData) => {
     try {
@@ -222,7 +231,7 @@ const AccountantPaymentsPage: React.FC = () => {
         const resp = await paymentService.createPaymentAccountant(data);
         const created = (resp as any)?.data || resp;
         if (created) {
-          setPayments(prev => [...prev, created as Payment]);
+          setPayments(prev => sortPayments([created as Payment, ...(prev || [])]));
         }
         setSuccessMessage('Payment created successfully');
         try { window.dispatchEvent(new Event('payments:changed')); } catch {}

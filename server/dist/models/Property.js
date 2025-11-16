@@ -219,4 +219,7 @@ const PropertySchema = new mongoose_1.Schema({
 PropertySchema.index({ ownerId: 1 });
 PropertySchema.index({ companyId: 1 });
 PropertySchema.index({ status: 1 });
+// Speed up name/address searches within a company
+PropertySchema.index({ companyId: 1, name: 1 });
+PropertySchema.index({ companyId: 1, address: 1 });
 exports.Property = mongoose_1.default.model('Property', PropertySchema, collections_1.COLLECTIONS.PROPERTIES);

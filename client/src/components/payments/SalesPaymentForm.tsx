@@ -69,6 +69,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
   const [submitting, setSubmitting] = useState(false);
   const propertyService = usePropertyService();
   const [properties, setProperties] = useState<Property[]>([]);
+  const [seededProperties, setSeededProperties] = useState<Property[]>([]);
   const [loadingProperties, setLoadingProperties] = useState<boolean>(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
 
@@ -108,27 +109,70 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     return () => window.removeEventListener('sales-form-set-buyer', handler as any);
   }, []);
 
-  // Load properties for address/reference autocomplete
+  // Seed with latest sale properties for autocomplete
   useEffect(() => {
     let cancelled = false;
-    const loadProps = async () => {
+    const seed = async () => {
       try {
         setLoadingProperties(true);
-        const list = await propertyService.getPublicProperties().catch(async () => {
-          // Fallback to authenticated list if public fails
+        // Lightweight seed: latest sale properties, minimal fields
+        const list = await (propertyService as any).searchPublicProperties?.({
+          saleOnly: true,
+          limit: 20,
+          fields: 'id,_id,name,address,price,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+        }).catch(async () => {
           try { return await propertyService.getProperties(); } catch { return []; }
         });
         const arr = Array.isArray(list) ? list : [];
-        if (!cancelled) setProperties(arr.filter((p: any) => (p as any).rentalType === 'sale'));
+        if (!cancelled) {
+          setSeededProperties(arr as any[]);
+          setProperties(arr as any[]);
+        }
+      } catch {
+        if (!cancelled) {
+          setSeededProperties([]);
+          setProperties([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingProperties(false);
+      }
+    };
+    seed();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Debounced search as user types sale reference/address
+  useEffect(() => {
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const q = (saleReference || '').trim();
+        if (!q) {
+          // When clearing the search, restore the seeded default list
+          if (!cancelled) {
+            setProperties(seededProperties);
+            setLoadingProperties(false);
+          }
+          return;
+        }
+        setLoadingProperties(true);
+        const list = await (propertyService as any).searchPublicProperties?.({
+          q,
+          saleOnly: true,
+          limit: 20,
+          fields: 'id,_id,name,address,price,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+        });
+        if (!cancelled) {
+          setProperties(Array.isArray(list) ? (list as any[]) : []);
+        }
       } catch {
         if (!cancelled) setProperties([]);
       } finally {
         if (!cancelled) setLoadingProperties(false);
       }
-    };
-    loadProps();
-    return () => { cancelled = true; };
-  }, [propertyService]);
+    }, 250);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [saleReference, seededProperties]);
 
   // When a property is selected for a non-development sale, auto-fill the Buyer field
   // from the buyers collection using the property's id. Do not override if buyerName
@@ -289,15 +333,15 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
       )}
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
-          <TextField fullWidth label="Buyer" value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
+          <TextField id="buyerName" name="buyerName" fullWidth label="Buyer" value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
         </Grid>
         <Grid item xs={12} md={6}>
-          <TextField fullWidth label="Seller" value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
+          <TextField id="sellerName" name="sellerName" fullWidth label="Seller" value={sellerName} onChange={(e) => setSellerName(e.target.value)} />
         </Grid>
         <Grid item xs={12} md={6}>
           <FormControl fullWidth>
-            <InputLabel>Sales Agent</InputLabel>
-            <Select value={agentId} label="Sales Agent" onChange={(e) => setAgentId(e.target.value as string)}>
+            <InputLabel id="sales-agent-label">Sales Agent</InputLabel>
+            <Select labelId="sales-agent-label" id="sales-agent" name="agentId" value={agentId} label="Sales Agent" onChange={(e) => setAgentId(e.target.value as string)}>
               <MenuItem value="">None</MenuItem>
               {agents.map((a: any) => (
                 <MenuItem key={a._id || a.id} value={a._id || a.id}>
@@ -309,9 +353,13 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         </Grid>
         <Grid item xs={12} md={6}>
           <Autocomplete
+            id="sale-reference"
             freeSolo
+            openOnFocus
             options={properties}
             loading={loadingProperties}
+            loadingText="Searching properties…"
+            noOptionsText="No matching properties"
             getOptionLabel={(option: any) => {
               if (typeof option === 'string') return option;
               const name = option.name || option.propertyName || '';
@@ -319,18 +367,17 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
               const label = [name, address].filter(Boolean).join(' - ');
               return label || option._id || '';
             }}
+            // Options are pre-filtered server-side; just include raw input for manual entry
             filterOptions={(opts, state) => {
-              // Default filtering over combined label
-              const input = (state.inputValue || '').toLowerCase();
-              const filtered = (opts as any[]).filter(o => {
-                const label = (typeof o === 'string') ? o : `${o.name || o.propertyName || ''} ${o.address || ''}`;
-                return label.toLowerCase().includes(input);
-              });
-              // Also include raw input for manual entry
-              if (input && !filtered.some(o => (typeof o === 'string' ? o : `${o.name || ''} ${o.address || ''}`).toLowerCase() === input)) {
-                return [state.inputValue, ...filtered];
+              const input = (state.inputValue || '').trim();
+              const list = Array.isArray(opts) ? opts : [];
+              if (input && !list.some(o => {
+                const label = (typeof o === 'string') ? o : `${o.name || ''} ${o.address || ''}`.trim();
+                return label.toLowerCase() === input.toLowerCase();
+              })) {
+                return [state.inputValue, ...list];
               }
-              return filtered;
+              return list as any[];
             }}
             value={saleReference}
             onChange={(_, newValue) => {
@@ -365,14 +412,17 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
             inputValue={saleReference}
             onInputChange={(_, newInput) => setSaleReference(newInput)}
             renderInput={(params) => (
-              <TextField {...params} fullWidth label="Sale Reference / Address" placeholder="Start typing to search properties or enter manually" />
+              <TextField {...params} id="saleReference" name="saleReference" fullWidth label="Sale Reference / Address" placeholder="Start typing to search properties or enter manually" />
             )}
           />
         </Grid>
         <Grid item xs={12} md={6}>
           <FormControl fullWidth>
-            <InputLabel>Link to Sale</InputLabel>
+            <InputLabel id="link-to-sale-label">Link to Sale</InputLabel>
             <Select
+              labelId="link-to-sale-label"
+              id="saleId"
+              name="saleId"
               value={saleId}
               label="Link to Sale"
               onChange={(e) => setSaleId(e.target.value as string)}
@@ -388,15 +438,15 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         </Grid>
 
         <Grid item xs={12} md={4}>
-          <TextField fullWidth label="Total Sale Price" type="number" value={totalSalePrice} onChange={(e) => setTotalSalePrice(e.target.value)} inputProps={{ min: 0, step: '0.01' }} />
+          <TextField id="totalSalePrice" name="totalSalePrice" fullWidth label="Total Sale Price" type="number" value={totalSalePrice} onChange={(e) => setTotalSalePrice(e.target.value)} inputProps={{ min: 0, step: '0.01' }} />
         </Grid>
         <Grid item xs={12} md={4}>
-          <TextField fullWidth label="Amount Paid" type="number" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} inputProps={{ min: 0, step: '0.01' }} />
+          <TextField id="amountPaid" name="amountPaid" fullWidth label="Amount Paid" type="number" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} inputProps={{ min: 0, step: '0.01' }} />
         </Grid>
         <Grid item xs={12} md={4}>
           <FormControl fullWidth>
-            <InputLabel>Currency</InputLabel>
-            <Select value={currency} label="Currency" onChange={(e) => setCurrency(e.target.value as Currency)}>
+            <InputLabel id="currency-label">Currency</InputLabel>
+            <Select id="currency" name="currency" labelId="currency-label" value={currency} label="Currency" onChange={(e) => setCurrency(e.target.value as Currency)}>
               {CURRENCIES.map(c => (
                 <MenuItem key={c} value={c}>{c}</MenuItem>
               ))}
@@ -405,12 +455,12 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         </Grid>
 
         <Grid item xs={12} md={4}>
-          <TextField fullWidth label="Payment Date" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField id="paymentDate" name="paymentDate" fullWidth label="Payment Date" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} InputLabelProps={{ shrink: true }} />
         </Grid>
         <Grid item xs={12} md={4}>
           <FormControl fullWidth>
-            <InputLabel>Payment Method</InputLabel>
-            <Select value={paymentMethod} label="Payment Method" onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
+            <InputLabel id="payment-method-label">Payment Method</InputLabel>
+            <Select id="paymentMethod" name="paymentMethod" labelId="payment-method-label" value={paymentMethod} label="Payment Method" onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
               {PAYMENT_METHODS.map(m => (
                 <MenuItem key={m} value={m}>{m.replace('_', ' ')}</MenuItem>
               ))}
@@ -418,7 +468,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
           </FormControl>
         </Grid>
         <Grid item xs={12} md={4}>
-          <TextField fullWidth label="Commission %" type="number" value={commissionPercent} onChange={(e) => setCommissionPercent(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
+          <TextField id="commissionPercent" name="commissionPercent" fullWidth label="Commission %" type="number" value={commissionPercent} onChange={(e) => setCommissionPercent(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
         </Grid>
 
         <Grid item xs={12}>
@@ -426,28 +476,28 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
             <Typography variant="subtitle1" sx={{ mb: 1 }}>Commission Split</Typography>
             <Grid container spacing={2}>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="Total Commission" value={totalCommission.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="totalCommission" name="totalCommission" fullWidth label="Total Commission" value={totalCommission.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="PREA % of Commission" type="number" value={preaPercentOfCommission} onChange={(e) => setPreaPercentOfCommission(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
+                <TextField id="preaPercentOfCommission" name="preaPercentOfCommission" fullWidth label="PREA % of Commission" type="number" value={preaPercentOfCommission} onChange={(e) => setPreaPercentOfCommission(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="PREA Share" type="number" value={preaShare} onChange={(e) => setPreaShare(Number(e.target.value))} inputProps={{ min: 0, step: '0.01' }} />
+                <TextField id="preaShare" name="preaShare" fullWidth label="PREA Share" type="number" value={preaShare} onChange={(e) => setPreaShare(Number(e.target.value))} inputProps={{ min: 0, step: '0.01' }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label={`Seller Revenue (paid - commission - VAT ${Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.15) * 100).toFixed(2))}% on commission)`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="sellerRevenue" name="sellerRevenue" fullWidth label={`Seller Revenue (paid - commission - VAT ${Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.15) * 100).toFixed(2))}% on commission)`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="Agency % of Remaining" type="number" value={agencyPercent} onChange={(e) => handleAgencyPercentChange(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
+                <TextField id="agencyPercent" name="agencyPercent" fullWidth label="Agency % of Remaining" type="number" value={agencyPercent} onChange={(e) => handleAgencyPercentChange(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="Agent % of Remaining" type="number" value={agentPercent} InputProps={{ readOnly: true }} />
+                <TextField id="agentPercent" name="agentPercent" fullWidth label="Agent % of Remaining" type="number" value={agentPercent} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="Agency Share Amount" value={agencyShare.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="agencyShare" name="agencyShare" fullWidth label="Agency Share Amount" value={agencyShare.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField fullWidth label="Agent Share Amount" value={agentShare.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="agentShare" name="agentShare" fullWidth label="Agent Share Amount" value={agentShare.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
             </Grid>
             <Typography variant="caption" color="text.secondary">

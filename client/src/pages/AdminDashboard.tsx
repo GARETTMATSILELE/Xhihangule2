@@ -87,6 +87,7 @@ import PropertyLedgerPage from './admin/PropertyLedgerPage';
 // Removed MaintenancePageWrapper to avoid nested sidebars and doubled spacing
 import { AdminSettings } from './Settings/AdminSettings';
 import ReportsPage from './admin/ReportsPage';
+import ApprovalsPage from './admin/ApprovalsPage';
 import AdminLeasesPage from './AdminLeasesPage';
 import LevyPaymentsPage from './admin/LevyPaymentsPage';
 import DatabaseSyncDashboard from '../components/admin/DatabaseSyncDashboard';
@@ -1075,6 +1076,7 @@ const AdminDashboard: React.FC = () => {
             <Route path="/communications" element={<CommunicationsPage />} />
             <Route path="/files" element={<Files />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/approvals" element={<ApprovalsPage />} />
             <Route path="/sync" element={<DatabaseSyncDashboard />} />
             <Route path="/settings" element={<AdminSettings />} />
             {company?.plan === 'INDIVIDUAL' && (

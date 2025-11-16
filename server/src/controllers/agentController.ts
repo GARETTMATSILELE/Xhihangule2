@@ -783,6 +783,18 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       );
     }
 
+    // Ensure owner income is recorded in property ledger (enqueue retry on failure)
+    try {
+      const propertyAccountService = (await import('../services/propertyAccountService')).default;
+      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+    } catch (e) {
+      try {
+        const ledgerEventService = (await import('../services/ledgerEventService')).default;
+        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
+      } catch {}
+      console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e as any)?.message || e);
+    }
+
     res.status(201).json({
       status: 'success',
       data: payment,

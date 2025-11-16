@@ -89,10 +89,47 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
             query,
             queryString: JSON.stringify(query)
         });
-        // Get properties with populated owner information
+        // Optional lightweight search and projection for fast autocomplete
+        const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+        const saleOnly = String(req.query.saleOnly) === 'true';
+        const fields = typeof req.query.fields === 'string' ? req.query.fields : '';
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+        if (saleOnly) {
+            query.rentalType = 'sale';
+        }
+        if (q) {
+            const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            query.$or = [{ name: regex }, { address: regex }];
+        }
+        // Build projection from fields list; default to lightweight fields for autocomplete
+        let projection = undefined;
+        if (fields) {
+            projection = fields.split(',').reduce((acc, f) => {
+                const key = f.trim();
+                if (key)
+                    acc[key] = 1;
+                return acc;
+            }, {});
+        }
+        else {
+            projection = {
+                name: 1,
+                address: 1,
+                price: 1,
+                commission: 1,
+                commissionPreaPercent: 1,
+                commissionAgencyPercentRemaining: 1,
+                commissionAgentPercentRemaining: 1,
+                propertyOwnerId: 1,
+                rentalType: 1
+            };
+        }
+        // Get properties with optional projection; avoid heavy populate for autocomplete
         const properties = yield Property_1.Property.find(query)
-            .populate('ownerId', 'firstName lastName email')
-            .sort({ createdAt: -1 });
+            .select(projection)
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .lean();
         console.log('Found properties:', {
             count: properties.length,
             properties: properties.map(p => ({
@@ -191,8 +228,12 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             query.rentalType = 'sale';
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
+        else if (req.user.role === 'owner') {
+            // Property owners should see properties they own
+            query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        }
         else if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
-            // Non-admin/accountant users only see their assigned properties
+            // Other non-admin/accountant users only see properties assigned to them as agent
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
         console.log('Executing property query:', {

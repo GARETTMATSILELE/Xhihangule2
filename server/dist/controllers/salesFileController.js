@@ -15,15 +15,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteSalesFile = exports.downloadSalesFile = exports.uploadSalesFile = exports.listSalesFiles = void 0;
 const SalesFile_1 = __importDefault(require("../models/SalesFile"));
 const Property_1 = require("../models/Property");
+const Deal_1 = require("../models/Deal");
+const salesDocs_1 = require("../constants/salesDocs");
 const listSalesFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
             return res.status(401).json({ message: 'Authentication required' });
-        const { propertyId } = req.query;
+        const { propertyId, dealId, stage } = req.query;
         const query = { companyId: req.user.companyId };
         if (propertyId)
             query.propertyId = propertyId;
+        if (dealId)
+            query.dealId = dealId;
+        if (stage)
+            query.stage = stage;
         const files = yield SalesFile_1.default.find(query).sort({ uploadedAt: -1 });
         res.json({ files });
     }
@@ -39,20 +45,34 @@ const uploadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function
             return res.status(401).json({ message: 'Authentication required' });
         if (!req.file)
             return res.status(400).json({ message: 'No file uploaded' });
-        const { propertyId, docType } = req.body;
+        const { propertyId, dealId, stage, docType } = req.body;
         if (!propertyId || !docType)
             return res.status(400).json({ message: 'Missing propertyId or docType' });
         const companyId = req.user.companyId;
         const prop = yield Property_1.Property.findOne({ _id: propertyId, companyId });
         if (!prop)
             return res.status(404).json({ message: 'Property not found' });
+        // If uploading against a deal, validate ownership and stage/docType compatibility
+        if (dealId) {
+            const deal = yield Deal_1.Deal.findOne({ _id: dealId, companyId });
+            if (!deal)
+                return res.status(404).json({ message: 'Deal not found' });
+            if (stage) {
+                const allowed = salesDocs_1.ALLOWED_DOCS_BY_STAGE[stage] || [];
+                if (!allowed.includes(docType)) {
+                    return res.status(400).json({ message: `Doc type ${docType} not allowed for stage ${stage}` });
+                }
+            }
+        }
         const rec = yield SalesFile_1.default.create({
             propertyId,
+            dealId,
             companyId,
             fileName: req.file.originalname,
             docType,
             fileUrl: req.file.buffer.toString('base64'),
             uploadedBy: req.user.userId,
+            stage
         });
         res.status(201).json({ message: 'Uploaded', file: rec });
     }

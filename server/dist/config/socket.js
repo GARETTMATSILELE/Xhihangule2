@@ -3,12 +3,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.emitToAll = exports.emitToRoom = exports.initializeSocket = void 0;
+exports.getIo = exports.emitToAll = exports.emitToRoom = exports.initializeSocket = void 0;
 const socket_io_1 = require("socket.io");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const dotenv_1 = require("dotenv");
 const jwt_1 = require("./jwt");
 (0, dotenv_1.config)();
+let ioRef = null;
 const initializeSocket = (httpServer) => {
     const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
         .split(',')
@@ -61,6 +62,7 @@ const initializeSocket = (httpServer) => {
             console.log('Client disconnected:', socket.id, 'Reason:', reason);
         });
     });
+    ioRef = io;
     return { io };
 };
 exports.initializeSocket = initializeSocket;
@@ -74,3 +76,5 @@ const emitToAll = (io, event, data) => {
     io.emit(event, data);
 };
 exports.emitToAll = emitToAll;
+const getIo = () => ioRef;
+exports.getIo = getIo;

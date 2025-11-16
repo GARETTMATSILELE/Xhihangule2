@@ -11,6 +11,15 @@ router.post('/refresh-token', refreshToken);
 router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
 
+// Logout route (clear refresh token cookie)
+router.post('/logout', (_req, res) => {
+  res.clearCookie('refreshToken');
+  res.json({
+    status: 'success',
+    message: 'Logged out successfully'
+  });
+});
+
 // Test endpoint to verify authentication
 router.get('/test', (req, res) => {
   res.json({ 

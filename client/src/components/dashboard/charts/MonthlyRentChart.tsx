@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '@mui/material/styles';
 import {
   BarChart,
   Bar,
@@ -22,6 +23,7 @@ interface MonthlyRentChartProps {
 }
 
 export const MonthlyRentChart: React.FC<MonthlyRentChartProps> = ({ data }) => {
+  const theme = useTheme();
   const chartData = data.labels.map((label, index) => ({
     month: label,
     collected: data.collected[index],
@@ -39,8 +41,8 @@ export const MonthlyRentChart: React.FC<MonthlyRentChartProps> = ({ data }) => {
             formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
           />
           <Legend />
-          <Bar dataKey="collected" name="Collected" fill="#2ecc71" />
-          <Bar dataKey="expected" name="Expected" fill="#3498db" />
+          <Bar dataKey="collected" name="Collected" fill={theme.palette.success.main} />
+          <Bar dataKey="expected" name="Expected" fill={theme.palette.primary.main} />
         </BarChart>
       </ResponsiveContainer>
     </div>

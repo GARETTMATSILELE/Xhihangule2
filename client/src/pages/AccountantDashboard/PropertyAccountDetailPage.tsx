@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -74,6 +74,7 @@ function TabPanel(props: TabPanelProps) {
 
 const PropertyAccountDetailPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
+  const location = useLocation();
   const { user, company } = useAuth();
   const { getProperties } = usePropertyService();
   const { getAllPublic: getAllPropertyOwners, getAll: getAllSalesOwners } = usePropertyOwnerService();
@@ -131,9 +132,9 @@ const PropertyAccountDetailPage: React.FC = () => {
       setError(null);
       try {
         // Fetch property details, property account, and owners (rental + sales) in parallel
-        const [props, accountData, propertyOwners, salesOwnersRaw, depositSum] = await Promise.all([
+        const search = new URLSearchParams(location.search);
+        const [props, propertyOwners, salesOwnersRaw, depositSum] = await Promise.all([
           getProperties(),
-          propertyAccountService.getPropertyAccount(propertyId),
           getAllPropertyOwners().catch(err => {
             console.error('Error fetching property owners:', err);
             return [];
@@ -147,6 +148,11 @@ const PropertyAccountDetailPage: React.FC = () => {
         
         const found = props.find((p: any) => p._id === propertyId);
         setProperty(found || null);
+        // Determine ledger: URL param overrides; otherwise infer from property.rentalType
+        const ledger = (search.get('ledger') === 'sale' || (!search.get('ledger') && (found as any)?.rentalType === 'sale'))
+          ? 'sale'
+          : 'rental';
+        const accountData = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
         
@@ -710,6 +716,13 @@ const PropertyAccountDetailPage: React.FC = () => {
         <Typography variant="h4" fontWeight={600} gutterBottom>
           {property.name}
         </Typography>
+        {/* Ledger type label */}
+        <Chip
+          label={(account.ledgerType === 'sale' ? 'Sale Ledger' : 'Rental Ledger')}
+          color={account.ledgerType === 'sale' ? 'secondary' : 'primary'}
+          size="small"
+          sx={{ mb: 1 }}
+        />
         <Typography variant="body1" color="text.secondary" gutterBottom>
           {property.address}
         </Typography>

@@ -736,6 +736,19 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 },
             });
         }
+        // Ensure owner income is recorded in property ledger (enqueue retry on failure)
+        try {
+            const propertyAccountService = (yield Promise.resolve().then(() => __importStar(require('../services/propertyAccountService')))).default;
+            yield propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+        }
+        catch (e) {
+            try {
+                const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
+                yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
+            }
+            catch (_c) { }
+            console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e === null || e === void 0 ? void 0 : e.message) || e);
+        }
         res.status(201).json({
             status: 'success',
             data: payment,

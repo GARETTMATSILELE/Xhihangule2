@@ -166,6 +166,12 @@ export interface PaymentFilter {
   currency?: Currency;
   // Custom filter to show only payments with a deposit portion
   onlyDeposits?: string; // 'true' to enable
+  // Server-side pagination (optional)
+  page?: number;
+  limit?: number;
+  paginate?: boolean | string;
+  // Filter to exclude development-linked sales
+  noDevelopment?: boolean;
 }
 
 export interface PaymentSummary {

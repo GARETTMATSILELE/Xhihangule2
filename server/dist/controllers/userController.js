@@ -120,7 +120,7 @@ const createUser = (userData) => __awaiter(void 0, void 0, void 0, function* () 
         throw new errorHandler_1.AppError('User already exists', 400);
     }
     // Normalize roles: if roles array provided, ensure unique/valid and set primary role
-    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales'];
+    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'];
     let payload = Object.assign({}, userData);
     if (Array.isArray(userData.roles) && userData.roles.length > 0) {
         const roles = Array.from(new Set(userData.roles.map((r) => String(r)))).filter((r) => VALID_ROLES.includes(r));
@@ -162,7 +162,7 @@ const updateUserById = (id, updates, currentCompanyId) => __awaiter(void 0, void
     if (typeof updates.role === 'string')
         user.role = updates.role;
     // Update roles array if provided
-    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales'];
+    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'];
     if (Array.isArray(updates.roles)) {
         const roles = Array.from(new Set(updates.roles.map((r) => String(r)))).filter((r) => VALID_ROLES.includes(r));
         if (roles.length === 0) {

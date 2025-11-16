@@ -6,7 +6,7 @@ export interface DealDTO {
   buyerName: string;
   buyerEmail?: string;
   buyerPhone?: string;
-  stage: 'Offer' | 'Due Diligence' | 'Contract' | 'Closing';
+  stage: 'Offer' | 'Due Diligence' | 'Contract' | 'Closing' | 'Won';
   offerPrice: number;
   closeDate?: string | null;
   won: boolean;
@@ -22,14 +22,14 @@ export interface CreateDealInput {
   buyerName: string;
   buyerEmail?: string;
   buyerPhone?: string;
-  stage?: 'Offer' | 'Due Diligence' | 'Contract' | 'Closing';
+  stage?: 'Offer' | 'Due Diligence' | 'Contract' | 'Closing' | 'Won';
   offerPrice: number;
   closeDate?: string | null;
   notes?: string;
 }
 
 export const dealService = {
-  async list(params?: { propertyId?: string }) {
+  async list(params?: { propertyId?: string; stage?: string }) {
     const response = await api.get('/deals', { params });
     return Array.isArray(response.data) ? response.data : response.data.data;
   },
@@ -43,6 +43,10 @@ export const dealService = {
   },
   async remove(id: string) {
     await api.delete(`/deals/${id}`);
+  },
+  async createFromLead(payload: { leadId: string; propertyId: string; offerPrice: number; notes?: string }) {
+    const response = await api.post('/deals/from-lead', payload);
+    return response.data.data || response.data;
   }
 };
 

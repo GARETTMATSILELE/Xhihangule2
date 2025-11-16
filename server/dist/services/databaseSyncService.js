@@ -54,6 +54,8 @@ const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const events_1 = require("events");
+const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
+const ledgerEventService_1 = __importDefault(require("./ledgerEventService"));
 class DatabaseSyncService extends events_1.EventEmitter {
     constructor() {
         super();
@@ -128,6 +130,22 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 }
                 // Emit sync started event
                 this.emit('syncStarted', { timestamp: new Date() });
+                // Start background ledger event processing loop (common for both modes)
+                try {
+                    const processInterval = setInterval(() => __awaiter(this, void 0, void 0, function* () {
+                        try {
+                            yield ledgerEventService_1.default.processPending(50);
+                        }
+                        catch (procErr) {
+                            logger_1.logger.warn('Ledger events processing tick failed:', procErr);
+                        }
+                    }), 15000);
+                    this.changeStreams.set('ledger_events_processing', { close: () => clearInterval(processInterval) });
+                    logger_1.logger.info('Started ledger events processing loop');
+                }
+                catch (e) {
+                    logger_1.logger.warn('Failed to start ledger events processing loop:', e);
+                }
             }
             catch (error) {
                 logger_1.logger.error('Failed to start real-time sync:', error);
@@ -279,6 +297,16 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 this.changeStreams.set('payments_polling', { close: () => clearInterval(paymentPolling) });
                 this.changeStreams.set('properties_polling', { close: () => clearInterval(propertyPolling) });
                 this.changeStreams.set('users_polling', { close: () => clearInterval(userPolling) });
+                // Also start background ledger event processing in polling mode
+                const ledgerEventsPolling = setInterval(() => __awaiter(this, void 0, void 0, function* () {
+                    try {
+                        yield ledgerEventService_1.default.processPending(50);
+                    }
+                    catch (e) {
+                        logger_1.logger.warn('Error polling ledger events:', e);
+                    }
+                }), 15000);
+                this.changeStreams.set('ledger_events_polling', { close: () => clearInterval(ledgerEventsPolling) });
                 logger_1.logger.info('Polling-based synchronization started successfully');
             }
             catch (error) {
@@ -298,8 +326,13 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     updatedAt: { $gte: new Date(Date.now() - 60000) } // Last minute
                 }).limit(100);
                 for (const payment of recentPayments) {
-                    if (payment.status === 'completed' && payment.paymentType === 'rental') {
-                        yield this.syncPaymentToAccounting(payment);
+                    if (payment.status === 'completed' && (payment.paymentType === 'rental' || payment.paymentType === 'sale')) {
+                        try {
+                            yield this.syncPaymentToAccounting(payment);
+                        }
+                        catch (e) {
+                            // syncPaymentToAccounting already records failure; continue
+                        }
                     }
                 }
             }
@@ -355,9 +388,14 @@ class DatabaseSyncService extends events_1.EventEmitter {
             const documentId = documentKey._id.toString();
             try {
                 if (operationType === 'insert' || operationType === 'update') {
-                    if (fullDocument && fullDocument.status === 'completed' && fullDocument.paymentType === 'rental') {
-                        yield this.syncPaymentToAccounting(fullDocument);
-                        yield this.clearFailureRecord('payment', documentId);
+                    if (fullDocument && fullDocument.status === 'completed' && (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale')) {
+                        try {
+                            yield this.syncPaymentToAccounting(fullDocument);
+                            yield this.clearFailureRecord('payment', documentId);
+                        }
+                        catch (e) {
+                            // error recorded in syncPaymentToAccounting
+                        }
                     }
                 }
                 else if (operationType === 'delete') {
@@ -449,80 +487,24 @@ class DatabaseSyncService extends events_1.EventEmitter {
      */
     syncPaymentToAccounting(payment) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b;
+            var _a;
             try {
-                const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
-                // Find or create property account
-                let propertyAccount = yield PropertyAccount.findOne({ propertyId: payment.propertyId });
-                if (!propertyAccount) {
-                    // Get property details
-                    const property = yield Property_1.Property.findById(payment.propertyId);
-                    if (!property) {
-                        throw new Error(`Property not found: ${payment.propertyId}`);
-                    }
-                    // Get owner details
-                    let ownerName = 'Unknown Owner';
-                    if (property.ownerId) {
-                        const owner = yield User_1.User.findById(property.ownerId);
-                        if (owner) {
-                            ownerName = `${owner.firstName} ${owner.lastName}`;
-                        }
-                    }
-                    // Create new property account
-                    propertyAccount = new PropertyAccount({
-                        propertyId: payment.propertyId,
-                        propertyName: property.name,
-                        propertyAddress: property.address,
-                        ownerId: property.ownerId,
-                        ownerName,
-                        transactions: [],
-                        ownerPayouts: [],
-                        runningBalance: 0,
-                        totalIncome: 0,
-                        totalExpenses: 0,
-                        totalOwnerPayouts: 0,
-                        isActive: true
-                    });
+                // Post owner income to property ledger using unified service (handles rentals and sales)
+                try {
+                    yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
                 }
-                // Check if payment already exists in transactions
-                const existingTransaction = propertyAccount.transactions.find((t) => t.paymentId && t.paymentId.toString() === payment._id.toString());
-                if (!existingTransaction) {
-                    // Calculate owner amount (income after commission deduction)
-                    const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || payment.amount;
-                    logger_1.logger.info(`Payment ${payment._id}: Full amount: ${payment.amount}, Owner amount (after commission): ${ownerAmount}`);
-                    // Add income transaction (rental vs sale)
-                    const isSale = payment.paymentType === 'sale';
-                    const incomeDescription = isSale
-                        ? `Sale income - ${payment.referenceNumber || ''}`
-                        : `Rent payment - ${payment.tenantName || 'Tenant'}`;
-                    const incomeCategory = isSale ? 'sale_income' : 'rental_income';
-                    propertyAccount.transactions.push({
-                        type: 'income',
-                        amount: ownerAmount,
-                        date: payment.paymentDate || new Date(),
-                        paymentId: payment._id,
-                        description: incomeDescription,
-                        category: incomeCategory,
-                        recipientType: 'tenant',
-                        referenceNumber: payment.referenceNumber,
-                        status: 'completed',
-                        processedBy: payment.processedBy,
-                        notes: payment.notes
-                    });
-                    // Update totals with owner amount (after commission)
-                    propertyAccount.totalIncome += ownerAmount;
-                    propertyAccount.runningBalance += ownerAmount;
-                    propertyAccount.lastIncomeDate = new Date();
-                    propertyAccount.lastUpdated = new Date();
-                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                        yield propertyAccount.save();
-                    }));
-                    logger_1.logger.info(`Synced payment ${payment._id} to property account ${payment.propertyId}`);
-                    this.recordSyncSuccess();
+                catch (postErr) {
+                    // Enqueue event for retry and bubble up for failure recording
+                    try {
+                        yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(payment._id.toString());
+                    }
+                    catch (_b) { }
+                    throw postErr;
                 }
+                this.recordSyncSuccess();
                 // Record agency commission into company account as revenue
-                if (payment.companyId && ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare)) {
+                const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
+                if (payment.companyId && ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare)) {
                     const companyId = payment.companyId;
                     let companyAccount = yield CompanyAccount.findOne({ companyId });
                     if (!companyAccount) {
@@ -557,6 +539,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
             }
             catch (error) {
                 logger_1.logger.error(`Failed to sync payment ${payment._id}:`, error);
+                // Also ensure an event exists for retry
+                try {
+                    yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(payment._id.toString());
+                }
+                catch (_c) { }
                 throw error;
             }
         });
@@ -567,8 +554,10 @@ class DatabaseSyncService extends events_1.EventEmitter {
     syncPropertyToAccounting(property) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                let propertyAccount = yield PropertyAccount.findOne({ propertyId: property._id });
+                // Use application schema (with ledgerType)
+                const PropertyAccount = (yield Promise.resolve().then(() => __importStar(require('../models/PropertyAccount')))).default;
+                // Maintain the base rental ledger account as the canonical metadata carrier
+                let propertyAccount = yield PropertyAccount.findOne({ propertyId: property._id, ledgerType: 'rental' });
                 if (propertyAccount) {
                     // Update existing account
                     propertyAccount.propertyName = property.name;
@@ -598,6 +587,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     }
                     const newAccount = new PropertyAccount({
                         propertyId: property._id,
+                        ledgerType: 'rental',
                         propertyName: property.name,
                         propertyAddress: property.address,
                         ownerId: property.ownerId,
@@ -836,7 +826,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 const payments = yield Payment_1.Payment.find({
                     status: 'completed',
-                    paymentType: 'rental'
+                    paymentType: { $in: ['rental', 'sale'] }
                 });
                 logger_1.logger.info(`Syncing ${payments.length} completed payments...`);
                 for (const payment of payments) {

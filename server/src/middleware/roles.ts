@@ -72,12 +72,24 @@ export const canManagePayments = (req: Request, res: Response, next: NextFunctio
   }
 
   const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
-  if (!roles.some(r => ['admin', 'accountant', 'agent'].includes(r))) {
-    throw new AppError('Access denied. Admin, Accountant, or Agent role required to manage payments.', 403);
+  if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales', 'principal', 'prea'].includes(r))) {
+    throw new AppError('Access denied. Admin, Accountant, Agent, Sales, Principal or PREA role required to manage payments.', 403);
   }
 
   next();
 }; 
+
+// Allow viewing sales payments for Admin/Accountant/Agent/Sales
+export const canViewSalesPayments = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales'].includes(r))) {
+    throw new AppError('Access denied. Admin, Accountant, Agent, or Sales role required to view sales payments.', 403);
+  }
+  next();
+};
 
 // Allow viewing commission reports for Admins and Accountants
 export const canViewCommissions = (req: Request, res: Response, next: NextFunction) => {

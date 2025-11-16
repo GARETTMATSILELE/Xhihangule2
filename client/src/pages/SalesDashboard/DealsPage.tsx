@@ -2,6 +2,7 @@ import React from 'react';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { dealService } from '../../services/dealService';
 import { useProperties } from '../../contexts/PropertyContext';
+import { usePropertyService } from '../../services/propertyService';
 
 const cls = (...s: any[]) => s.filter(Boolean).join(' ');
 
@@ -22,7 +23,8 @@ const Input = (props: any) => (
 );
 
 export default function DealsPage() {
-  const { properties } = useProperties();
+  const { properties, refreshProperties } = useProperties();
+  const propertyService = usePropertyService();
   const propsById = React.useMemo(() => Object.fromEntries((properties||[]).map((p:any)=>[p._id, p])), [properties]);
   const [deals, setDeals] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -50,6 +52,26 @@ export default function DealsPage() {
   const saveEdit = async () => { if (!editing?._id) return; try { setLoading(true); await dealService.update(editing._id, { ...form, offerPrice: Number(form.offerPrice||0) }); setEditing(null); await load(); } catch(e:any){ setError(e?.message||'Failed to update'); } finally { setLoading(false);} };
   const createDeal = async () => { if (!createForm.propertyId || !createForm.buyerName?.trim()) { setError('Property and buyer name are required'); return; } try { setLoading(true); setError(null); await dealService.create({ ...createForm, offerPrice: Number(createForm.offerPrice||0) }); setCreateForm({ propertyId: '', buyerName: '', buyerEmail: '', buyerPhone: '', stage: 'Offer', offerPrice: '', closeDate: '', notes: '' }); await load(); } catch(e:any){ setError(e?.message||'Failed to create'); } finally { setLoading(false);} };
   const deleteDeal = async (id: string) => { if (!id) return; if (!window.confirm('Delete this deal?')) return; try { setLoading(true); await dealService.remove(id); await load(); } catch(e:any){ setError(e?.message||'Failed to delete'); } finally { setLoading(false);} };
+
+  const markWon = async (deal: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      // 1) Update deal as won
+      await dealService.update(deal._id, { won: true, stage: 'Won' });
+      // 2) Update linked property status to sold
+      if (deal.propertyId) {
+        await propertyService.updateProperty(deal.propertyId, { status: 'sold' });
+      }
+      // 3) Refresh lists
+      await load();
+      try { await refreshProperties(); } catch {}
+    } catch(e:any) {
+      setError(e?.message || 'Failed to mark deal as won');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900">
@@ -110,6 +132,9 @@ export default function DealsPage() {
                           <td className="py-2 flex gap-3">
                             <button className="text-xs underline" onClick={()=>startEdit(d)}>Edit</button>
                             <button className="text-xs underline text-rose-700" onClick={()=>deleteDeal(d._id)}>Delete</button>
+                            {!d.won && (
+                              <button className="text-xs underline text-emerald-700" onClick={()=>markWon(d)}>Mark Won</button>
+                            )}
                           </td>
                         </tr>
                       ))}

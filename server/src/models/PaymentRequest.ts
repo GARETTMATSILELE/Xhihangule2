@@ -5,6 +5,8 @@ export interface IPaymentRequest extends Document {
   propertyId: mongoose.Types.ObjectId;
   tenantId?: mongoose.Types.ObjectId;
   ownerId?: mongoose.Types.ObjectId;
+  developmentId?: mongoose.Types.ObjectId;
+  developmentUnitId?: mongoose.Types.ObjectId;
   amount: number;
   currency: 'USD' | 'ZWL';
   reason: string;
@@ -23,6 +25,19 @@ export interface IPaymentRequest extends Document {
     accountNumber?: string;
     address?: string;
   };
+  // Optional embedded HTML for the company disbursement report
+  reportHtml?: string;
+  // Approval workflow for Principal/PREA
+  approval?: {
+    status: 'pending' | 'approved' | 'rejected';
+    approvedBy?: mongoose.Types.ObjectId;
+    approvedByName?: string;
+    approvedByRole?: 'principal' | 'prea' | 'admin';
+    approvedAt?: Date;
+    notes?: string;
+  };
+  // When true, show in accountant tasks list
+  readyForAccounting?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,7 +50,7 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
   },
   propertyId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true,
+    required: false,
     ref: 'Property'
   },
   tenantId: {
@@ -104,7 +119,25 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
     bankDetails: String,
     accountNumber: String,
     address: String
-  }
+  },
+  developmentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Development'
+  },
+  developmentUnitId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DevelopmentUnit'
+  },
+  reportHtml: { type: String },
+  approval: {
+    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    approvedByName: { type: String },
+    approvedByRole: { type: String, enum: ['principal', 'prea', 'admin'] },
+    approvedAt: { type: Date },
+    notes: { type: String }
+  },
+  readyForAccounting: { type: Boolean, default: false }
 }, {
   timestamps: true
 });

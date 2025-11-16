@@ -243,9 +243,21 @@ export const listDevelopments = async (req: Request, res: Response) => {
       unitDevIds = await DevelopmentUnit.distinct('developmentId', { collaborators: userId }).catch(()=>[] as any[]);
       match = { companyId, $or: [{ createdBy: userId }, { collaborators: userId }, { _id: { $in: unitDevIds } }] } as any;
     }
-    const devs = await Development.find(match)
-      .sort({ createdAt: -1 })
-      .lean();
+    const { fields, limit } = req.query as any;
+    const selectFields = typeof fields === 'string'
+      ? String(fields).split(',').map(s => s.trim()).filter(Boolean).join(' ')
+      : undefined;
+    const limitParsed = Number(limit);
+    const limitNum = Number.isFinite(limitParsed) && limitParsed > 0 ? Math.min(1000, limitParsed) : undefined;
+
+    let query = Development.find(match).sort({ createdAt: -1 });
+    if (selectFields) {
+      query = query.select(selectFields);
+    }
+    if (typeof limitNum === 'number') {
+      query = query.limit(limitNum);
+    }
+    const devs = await query.lean();
     const unitDevIdSet = new Set(String(unitDevIds?.length ? unitDevIds.map((x:any)=>String(x)) : []));
     const withFlags = devs.map((d:any)=> ({ ...d, isUnitCollaborator: !isPrivileged && unitDevIdSet.has(String(d._id)) }));
     return res.json(withFlags);

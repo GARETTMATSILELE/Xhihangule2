@@ -23,13 +23,15 @@ const logger_1 = require("../utils/logger");
 const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { propertyId } = req.params;
+        const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
         console.log('getPropertyAccount controller called with propertyId:', propertyId);
         console.log('User:', req.user);
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
-        console.log('Calling propertyAccountService.getOrCreatePropertyAccount...');
-        const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(propertyId);
+        console.log('Calling propertyAccountService.getPropertyAccount...');
+        // Ensure an account exists (create if missing), respecting the requested ledger
+        const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(propertyId, ledger);
         res.json({
             success: true,
             data: account
@@ -87,6 +89,7 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
     try {
         const { propertyId } = req.params;
         const { type, startDate, endDate, category, status } = req.query;
+        const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
@@ -101,7 +104,7 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
             filters.category = category;
         if (status)
             filters.status = status;
-        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters);
+        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters, ledger);
         res.json({
             success: true,
             data: transactions
@@ -328,6 +331,14 @@ exports.getPayoutHistory = getPayoutHistory;
 const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         yield propertyAccountService_1.default.syncPropertyAccountsWithPayments();
+        // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
+        try {
+            const result = yield propertyAccountService_1.default.migrateSalesLedgerForCompany();
+            console.log('Sales ledger migration result:', result);
+        }
+        catch (e) {
+            console.warn('Sales ledger migration skipped/failed:', e);
+        }
         res.json({
             success: true,
             message: 'Property accounts synced successfully'

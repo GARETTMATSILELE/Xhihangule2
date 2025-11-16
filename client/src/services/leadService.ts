@@ -31,8 +31,8 @@ export const leadService = {
     const res = await api.post('/leads', input);
     return res.data.data || res.data;
   },
-  async update(id: string, updates: Partial<CreateLeadInput>) {
-    const res = await api.put(`/leads/${id}`, updates);
+  async update(id: string, updates: Partial<CreateLeadInput & { propertyId?: string }>) {
+    const res = await api.put(`/leads/${id}`, updates as any);
     return res.data.data || res.data;
   },
   async remove(id: string) {

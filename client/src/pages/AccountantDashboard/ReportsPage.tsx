@@ -342,6 +342,7 @@ const ReportsPage: React.FC = () => {
         return {
           id: p._id,
           date: effectiveDate.toISOString().slice(0,10),
+          ts: effectiveDate.getTime(),
           referenceNumber,
           paymentMethod,
           currencyCode,
@@ -367,10 +368,10 @@ const ReportsPage: React.FC = () => {
           collaboratorAgentName,
         };
       })
-      .sort((a: any,b: any)=> new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 25);
+      .sort((a: any,b: any)=> (b.ts || 0) - (a.ts || 0))
+      .slice(0, 5);
     return rows;
-  }, [payments, from, to, agentsById]);
+  }, [payments, from, to, agentsById, saleAgentId, buyerFilter, sellerFilter]);
 
   function printDisbursementReport(t: any) {
     try {
@@ -624,56 +625,47 @@ const ReportsPage: React.FC = () => {
             <div className="text-2xl font-bold">{currency(Math.round(netTotal / Math.max(filteredRevenue.length, 1)))}</div>
             <div className="text-sm text-slate-600 mt-2">Calculated over {filteredRevenue.length} months</div>
           </div>
-
-          <div className="bg-white p-4 rounded-2xl shadow w-full md:w-1/3">
-            <h3 className="text-sm text-slate-500">Top Agents</h3>
-            <div className="mt-1 grid grid-cols-1 gap-2">
-              <div className="flex items-baseline justify-between">
-                <div className="text-sm text-slate-600">Sales</div>
-                <div className="text-sm font-semibold">{(agentsAgg.topSales?.name || agentsAgg.topRental?.name) || '-'}</div>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Earnings</span>
-                <span>{agentsAgg.topSales ? currency(agentsAgg.topSales.total) : '-'}</span>
-              </div>
-              <div className="flex items-baseline justify-between mt-2">
-                <div className="text-sm text-slate-600">Rental</div>
-                <div className="text-sm font-semibold">{agentsAgg.topRental?.name || '-'}</div>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Earnings</span>
-                <span>{agentsAgg.topRental ? currency(agentsAgg.topRental.total) : '-'}</span>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* Top Agents moved here to replace the former Revenue over time chart */}
         <div className="col-span-2 bg-white p-4 rounded-2xl shadow">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold">Revenue over time</h2>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">From</label>
-              <input aria-label="from-date" className="border rounded px-2 py-1" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              <label className="text-xs text-slate-500">To</label>
-              <input aria-label="to-date" className="border rounded px-2 py-1" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <h2 className="text-lg font-semibold mb-2">Top Agents</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h3 className="text-sm font-medium mb-2">Sales Agents</h3>
+              <ul className="divide-y">
+                {(agentsAgg.salesArr?.length ? agentsAgg.salesArr : SAMPLE_DATA.agentsSales).slice(0,5).map((agent: any) => (
+                  <li key={agent.name} className="py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{agent.name}</div>
+                        <div className="text-xs text-slate-500">Sales performance</div>
+                      </div>
+                      <div className="text-sm font-semibold">{currency(agent.total)}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium mb-2">Rental Agents</h3>
+              <ul className="divide-y">
+                {(agentsAgg.rentalArr?.length ? agentsAgg.rentalArr : SAMPLE_DATA.agentsRental).slice(0,5).map((agent: any) => (
+                  <li key={agent.name} className="py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{agent.name}</div>
+                        <div className="text-xs text-slate-500">Management performance</div>
+                      </div>
+                      <div className="text-sm font-semibold">{currency(agent.total)}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
-
-          <div style={{ height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={filteredRevenue} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip formatter={(value: any) => currency(Number(value))} />
-                <Area type="monotone" dataKey="management" stackId="1" stroke="#4F46E5" fillOpacity={0.3} fill="#4F46E5" />
-                <Area type="monotone" dataKey="sales" stackId="1" stroke="#06B6D4" fillOpacity={0.3} fill="#06B6D4" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-3 text-sm text-slate-500">Tip: click the donut chart to drill into source-specific transactions.</div>
         </div>
 
         <div className="bg-white p-4 rounded-2xl shadow">
@@ -704,8 +696,9 @@ const ReportsPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="col-span-2 bg-white p-4 rounded-2xl shadow">
+      {/* Recent sale transactions now full width */}
+      <section className="mb-6">
+        <div className="bg-white p-4 rounded-2xl shadow">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Recent sale transactions</h2>
             <div className="flex items-center gap-2">
@@ -786,44 +779,6 @@ const ReportsPage: React.FC = () => {
                 )}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-2xl shadow">
-          <h2 className="text-lg font-semibold mb-2">Top Agents</h2>
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <h3 className="text-sm font-medium mb-2">Sales Agents</h3>
-              <ul className="divide-y">
-                {(agentsAgg.salesArr?.length ? agentsAgg.salesArr : SAMPLE_DATA.agentsSales).slice(0,5).map((agent: any) => (
-                  <li key={agent.name} className="py-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{agent.name}</div>
-                        <div className="text-xs text-slate-500">Sales performance</div>
-                      </div>
-                      <div className="text-sm font-semibold">{currency(agent.total)}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium mb-2">Rental Agents</h3>
-              <ul className="divide-y">
-                {(agentsAgg.rentalArr?.length ? agentsAgg.rentalArr : SAMPLE_DATA.agentsRental).slice(0,5).map((agent: any) => (
-                  <li key={agent.name} className="py-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{agent.name}</div>
-                        <div className="text-xs text-slate-500">Management performance</div>
-                      </div>
-                      <div className="text-sm font-semibold">{currency(agent.total)}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
           </div>
         </div>
       </section>

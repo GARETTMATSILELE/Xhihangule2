@@ -1,6 +1,6 @@
 import express from 'express';
 import { auth } from '../middleware/auth';
-import { isAccountant, canManagePayments, canViewCommissions } from '../middleware/roles';
+import { isAccountant, canManagePayments, canViewCommissions, canViewSalesPayments } from '../middleware/roles';
 import {
   getAgentCommissions,
   getAgencyCommission,
@@ -97,7 +97,7 @@ router.get('/trust-accounts/deposits', canViewCommissions, getCompanyDepositSumm
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', canManagePayments, getCompanyPayments);
 // Sales-specific payment endpoints
-router.get('/sales-payments', canManagePayments, getCompanySalesPayments);
+router.get('/sales-payments', canViewSalesPayments, getCompanySalesPayments);
 router.post('/sales-payments', canManagePayments, createSalesPaymentAccountant);
 router.put('/sales-payments/:id', canManagePayments, updatePayment);
 // Rental/general payments

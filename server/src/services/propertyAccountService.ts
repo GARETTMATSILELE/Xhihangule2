@@ -9,6 +9,9 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { Development } from '../models/Development';
 
+// Upgrade legacy indexes: allow separate ledgers per property
+let ledgerIndexUpgradePromise: Promise<void> | null = null;
+
 export class PropertyAccountService {
   private static instance: PropertyAccountService;
 
@@ -20,14 +23,44 @@ export class PropertyAccountService {
   }
 
   /**
+   * Infer ledger type for a property using the property's agent's role.
+   * - If agent roles include 'sales' → 'sale'
+   * - Else if roles include 'agent' → 'rental'
+   * - Fallback to property.rentalType ('sale' => 'sale') else 'rental'
+   */
+  private async inferLedgerTypeForProperty(propertyId: string): Promise<'rental' | 'sale'> {
+    try {
+      const property = await Property.findById(propertyId).lean();
+      const rawAgentId = (property as any)?.agentId;
+      if (rawAgentId) {
+        const agent = await User.findById(rawAgentId).lean();
+        const roles: string[] = Array.isArray((agent as any)?.roles)
+          ? ((agent as any).roles as string[])
+          : (((agent as any)?.role && typeof (agent as any).role === 'string') ? [String((agent as any).role)] : []);
+        if (roles.includes('sales')) return 'sale';
+        if (roles.includes('agent')) return 'rental';
+      }
+      if ((property as any)?.rentalType === 'sale') return 'sale';
+      return 'rental';
+    } catch {
+      return 'rental';
+    }
+  }
+
+  /**
    * Get or create property account
    */
-  async getOrCreatePropertyAccount(propertyId: string): Promise<IPropertyAccount> {
+  async getOrCreatePropertyAccount(propertyId: string, ledgerType: 'rental' | 'sale' = 'rental'): Promise<IPropertyAccount> {
     try {
+      // Ensure indexes support multi-ledger before any creates
+      await this.ensureLedgerIndexes();
       console.log('getOrCreatePropertyAccount called with propertyId:', propertyId);
       console.log('Converting to ObjectId:', new mongoose.Types.ObjectId(propertyId));
-      
-      let account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId) });
+
+      // If caller passed no explicit ledgerType, infer it
+      const effectiveLedger: 'rental' | 'sale' = ledgerType || await this.inferLedgerTypeForProperty(propertyId);
+
+      let account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
       console.log('Database query result:', account ? 'Found account' : 'No account found');
       
     if (!account) {
@@ -72,6 +105,7 @@ export class PropertyAccountService {
         // Create new account
         account = new PropertyAccount({
           propertyId: new mongoose.Types.ObjectId(propertyId),
+          ledgerType: effectiveLedger,
           propertyName: property ? property.name : (development as any)?.name,
           propertyAddress: property ? property.address : (development as any)?.address,
           ownerId: ownerId,
@@ -85,18 +119,109 @@ export class PropertyAccountService {
           isActive: true
         });
 
-        await account.save();
+        try {
+          await account.save();
+        } catch (saveErr: any) {
+          const isDup = (saveErr?.code === 11000) || /E11000 duplicate key error/.test(String(saveErr?.message || ''));
+          if (isDup) {
+            const reloaded = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
+            if (reloaded) {
+              account = reloaded as any;
+            } else {
+              throw saveErr;
+            }
+          } else {
+            throw saveErr;
+          }
+        }
         logger.info(`Created new property account for property: ${propertyId}`);
       } else {
         // Recalculate balance for existing account
         await this.recalculateBalance(account);
       }
 
-      return account;
+      return account as IPropertyAccount;
     } catch (error) {
       logger.error('Error in getOrCreatePropertyAccount:', error);
       throw error;
     }
+  }
+  
+  // One-time index upgrade to support { propertyId, ledgerType } uniqueness
+  private async ensureLedgerIndexes(): Promise<void> {
+    if (!ledgerIndexUpgradePromise) {
+      ledgerIndexUpgradePromise = (async () => {
+        try {
+          const indexes = await PropertyAccount.collection.indexes();
+          const legacyUniqueByProperty = indexes.find((idx: any) => idx.name === 'propertyId_1' && idx.unique === true);
+          if (legacyUniqueByProperty) {
+            try {
+              await PropertyAccount.collection.dropIndex('propertyId_1');
+              console.log('Dropped legacy unique index propertyId_1 on PropertyAccount.');
+            } catch (dropErr: any) {
+              console.warn('Could not drop legacy index propertyId_1:', dropErr?.message || dropErr);
+            }
+          }
+          // Drop legacy ownerPayout unique index that doesn't include ledgerType and may not be sparse
+          const legacyOwnerPayout = indexes.find((idx: any) => idx.name === 'propertyId_1_ownerPayouts.referenceNumber_1');
+          if (legacyOwnerPayout) {
+            try {
+              await PropertyAccount.collection.dropIndex('propertyId_1_ownerPayouts.referenceNumber_1');
+              console.log('Dropped legacy index propertyId_1_ownerPayouts.referenceNumber_1 on PropertyAccount.');
+            } catch (dropErr: any) {
+              console.warn('Could not drop legacy ownerPayout index:', dropErr?.message || dropErr);
+            }
+          }
+          const hasCompound = indexes.some((idx: any) => idx.name === 'propertyId_1_ledgerType_1' && idx.unique === true);
+          if (!hasCompound) {
+            try {
+              await PropertyAccount.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true });
+              console.log('Created compound unique index propertyId_1_ledgerType_1 on PropertyAccount.');
+            } catch (createErr: any) {
+              console.warn('Could not create compound index:', createErr?.message || createErr);
+            }
+          }
+          // Ensure owner payouts unique index includes ledgerType and is sparse
+          const hasOwnerPayoutCompound = indexes.some((idx: any) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1' && idx.unique === true);
+          if (!hasOwnerPayoutCompound) {
+            try {
+              await PropertyAccount.collection.createIndex(
+                { propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 },
+                { unique: true, sparse: true }
+              );
+              console.log('Created compound unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
+            } catch (createErr: any) {
+              console.warn('Could not create owner payout compound index:', createErr?.message || createErr);
+            }
+          }
+          // Ensure transactions.paymentId uniqueness is scoped per property ledger
+          const legacyTxIndex = indexes.find((idx: any) => idx.name === 'transactions.paymentId_1');
+          if (legacyTxIndex) {
+            try {
+              await PropertyAccount.collection.dropIndex('transactions.paymentId_1');
+              console.log('Dropped legacy index transactions.paymentId_1 on PropertyAccount.');
+            } catch (dropErr: any) {
+              console.warn('Could not drop legacy transactions.paymentId index:', dropErr?.message || dropErr);
+            }
+          }
+          const hasTxCompound = indexes.some((idx: any) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1' && idx.unique === true);
+          if (!hasTxCompound) {
+            try {
+              await PropertyAccount.collection.createIndex(
+                { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
+                { unique: true, sparse: true }
+              );
+              console.log('Created compound unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
+            } catch (createErr: any) {
+              console.warn('Could not create transactions compound index:', createErr?.message || createErr);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to verify/upgrade PropertyAccount indexes:', (e as any)?.message || e);
+        }
+      })();
+    }
+    return ledgerIndexUpgradePromise;
   }
 
   /**
@@ -140,7 +265,7 @@ export class PropertyAccountService {
           }
         }
       );
-      console.log(`Recalculated balance for property ${account.propertyId}: ${newRunningBalance}`);
+      console.log(`Recalculated balance for property ${account.propertyId} (${(account as any).ledgerType || 'rental'}): ${newRunningBalance}`);
     }
   }
 
@@ -148,20 +273,8 @@ export class PropertyAccountService {
    * Record income from rental payments
    */
   async recordIncomeFromPayment(paymentId: string): Promise<void> {
-    const session = await mongoose.startSession();
-    let useTransaction = false;
     try {
-      session.startTransaction();
-      useTransaction = true;
-    } catch (txnErr) {
-      console.warn('PropertyAccountService: transactions unsupported; proceeding without transaction:', txnErr);
-      useTransaction = false;
-    }
-
-    try {
-      const payment = useTransaction
-        ? await Payment.findById(paymentId).session(session)
-        : await Payment.findById(paymentId);
+      const payment = await Payment.findById(paymentId);
       if (!payment) {
         throw new AppError('Payment not found', 404);
       }
@@ -177,9 +290,17 @@ export class PropertyAccountService {
         logger.info(`Skipping income for deposit-only payment ${paymentId} (amount: ${payment.amount}, deposit: ${deposit})`);
         return;
       }
-
-      // Get or create property account
-      const account = await this.getOrCreatePropertyAccount(payment.propertyId.toString());
+            // Get or create property account.
+      // IMPORTANT: For sales, always use the 'sale' ledger regardless of agent roles.
+      // Rentals continue to use inference to support legacy setups.
+      const chosenLedger: 'rental' | 'sale' =
+        payment.paymentType === 'sale'
+          ? 'sale'
+          : 'rental';
+      // For sales tied to a development, post owner income to the development ledger
+      const devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
+      const targetEntityId = payment.paymentType === 'sale' && devId ? devId.toString() : payment.propertyId.toString();
+      const account = await this.getOrCreatePropertyAccount(targetEntityId, chosenLedger);
       
       // Check if income already recorded for this payment
       const existingTransaction = account.transactions.find(
@@ -191,12 +312,17 @@ export class PropertyAccountService {
         return;
       }
 
-      // Calculate owner amount (income after commission) and exclude deposits
+      // Calculate owner amount (income after commission)
       const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
       const totalPaid = payment.amount || 0;
       const depositPortion = payment.depositAmount || 0;
-      const ownerFraction = totalPaid > 0 ? ownerAmount / totalPaid : 0;
-      const incomeAmount = Math.max(0, (totalPaid - depositPortion) * ownerFraction);
+      // Use the payment intent to determine sale vs rental behavior
+      const isSale = payment.paymentType === 'sale';
+      // For sales, post the full ownerAmount (already net of commission) without deposit apportioning.
+      // For rentals, proportionally exclude the deposit portion from the owner's income.
+      const incomeAmount = isSale
+        ? Math.max(0, ownerAmount)
+        : Math.max(0, totalPaid > 0 ? (totalPaid - depositPortion) * (ownerAmount / totalPaid) : 0);
 
       if (incomeAmount <= 0) {
         logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
@@ -204,7 +330,6 @@ export class PropertyAccountService {
       }
 
       // Create income transaction (rental vs sale)
-      const isSale = payment.paymentType === 'sale';
       const incomeDescription = isSale
         ? `Sale income - ${payment.referenceNumber}`
         : `Rental income - ${payment.referenceNumber}`;
@@ -225,25 +350,12 @@ export class PropertyAccountService {
       };
 
       account.transactions.push(incomeTransaction);
-      if (useTransaction) {
-        await account.save({ session });
-      } else {
-        await account.save();
-      }
+      await account.save();
 
       logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
-      
-      if (useTransaction) {
-        await session.commitTransaction();
-      }
     } catch (error) {
-      if (useTransaction) {
-        await session.abortTransaction();
-      }
       logger.error('Error recording income from payment:', error);
       throw error;
-    } finally {
-      session.endSession();
     }
   }
 
@@ -414,12 +526,20 @@ export class PropertyAccountService {
   /**
    * Get property account with summary
    */
-  async getPropertyAccount(propertyId: string): Promise<IPropertyAccount> {
+  async getPropertyAccount(propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<IPropertyAccount> {
     try {
-      const account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId) });
+      const pid = new mongoose.Types.ObjectId(propertyId);
+      // Prefer exact ledgerType; fall back to legacy records without ledgerType
+      const effectiveLedger: 'rental' | 'sale' = ledgerType || await this.inferLedgerTypeForProperty(propertyId);
+      let account: IPropertyAccount | null = await PropertyAccount.findOne({ propertyId: pid, ledgerType: effectiveLedger }) as any;
       if (!account) {
-        throw new AppError('Property account not found', 404);
+        account = await PropertyAccount.findOne({ propertyId: pid, $or: [{ ledgerType: effectiveLedger }, { ledgerType: { $exists: false } }, { ledgerType: null as any }] }) as any;
       }
+      if (!account) {
+        // Create the account if missing, then proceed (enables seamless backfill below)
+        account = (await this.getOrCreatePropertyAccount(propertyId, effectiveLedger)) as IPropertyAccount;
+      }
+      if (!account) throw new AppError('Property account not found', 404);
       
       // Update owner information if missing or outdated
       if (!account.ownerName || account.ownerName === 'Unknown Owner') {
@@ -447,9 +567,9 @@ export class PropertyAccountService {
           }
           
           if (ownerId) {
-            account.ownerId = ownerId;
-            account.ownerName = ownerName;
-            await account.save();
+            (account as IPropertyAccount).ownerId = ownerId;
+            (account as IPropertyAccount).ownerName = ownerName;
+            await (account as IPropertyAccount).save();
           }
         } else {
           // Fallback: resolve via Development document
@@ -460,16 +580,63 @@ export class PropertyAccountService {
             const companyName = development.owner?.companyName || '';
             const combined = `${first} ${last}`.trim();
             const ownerName = combined || companyName || 'Unknown Owner';
-            account.ownerName = ownerName;
-            await account.save();
+            (account as IPropertyAccount).ownerName = ownerName;
+            await (account as IPropertyAccount).save();
           }
+        }
+      }
+
+      // Defensive backfill for sales ledger: ensure owner income for each completed sale payment exists
+      if (effectiveLedger === 'sale') {
+        try {
+          // Determine whether this account is for a Development or a Property
+          const devExists = await Development.exists({ _id: pid });
+          const present = new Set(
+            ((account as IPropertyAccount).transactions || [])
+              .filter(t => t.type === 'income' && (t.category === 'sale_income' || !t.category))
+              .map(t => String(t.paymentId || ''))
+              .filter(Boolean)
+          );
+
+          const baseFilter: any = {
+            paymentType: 'sale',
+            status: 'completed',
+            isProvisional: { $ne: true },
+            isInSuspense: { $ne: true },
+            $or: [
+              { commissionFinalized: true },
+              { commissionFinalized: { $exists: false } }
+            ]
+          };
+          if (devExists) {
+            baseFilter.developmentId = pid;
+          } else {
+            baseFilter.propertyId = pid;
+          }
+          const payments = await Payment.find(baseFilter).select('_id');
+
+          const missing = payments.map(p => String((p as any)._id)).filter(id => !present.has(id));
+          for (const mid of missing) {
+            try {
+              await this.recordIncomeFromPayment(mid);
+            } catch (e) {
+              console.warn(`Sales ledger backfill failed for payment ${mid}:`, (e as any)?.message || e);
+            }
+          }
+
+          if (missing.length > 0) {
+            account = (await this.getOrCreatePropertyAccount(propertyId, 'sale')) as IPropertyAccount;
+          }
+        } catch (defErr) {
+          console.warn('Sales ledger defensive backfill error (non-fatal):', defErr);
         }
       }
       
       // Recalculate balance for the account
-      await this.recalculateBalance(account);
+      const finalAccount = account as unknown as IPropertyAccount;
+      await this.recalculateBalance(finalAccount);
       
-      return account;
+      return finalAccount;
     } catch (error) {
       logger.error('Error getting property account:', error);
       throw error;
@@ -481,12 +648,17 @@ export class PropertyAccountService {
    */
   async getCompanyPropertyAccounts(companyId: string): Promise<IPropertyAccount[]> {
     try {
-      // Get all properties for the company
-      const properties = await Property.find({ companyId });
+      // Get all properties and developments for the company
+      const [properties, developments] = await Promise.all([
+        Property.find({ companyId }),
+        Development.find({ companyId })
+      ]);
       const propertyIds = properties.map(p => p._id);
+      const developmentIds = developments.map(d => d._id);
+      const allIds = [...propertyIds, ...developmentIds];
 
       const accounts = await PropertyAccount.find({
-        propertyId: { $in: propertyIds }
+        propertyId: { $in: allIds }
       }).sort({ lastUpdated: -1 });
 
       return accounts;
@@ -503,10 +675,9 @@ export class PropertyAccountService {
     try {
       logger.info('Starting property account sync with payments...');
       
-      // Get all completed rental payments that haven't been recorded as income
+      // Get all completed payments (rental and sale) to ensure owner income is posted
       const payments = await Payment.find({
-        status: 'completed',
-        paymentType: 'rental'
+        status: 'completed'
       });
 
       let syncedCount = 0;
@@ -537,10 +708,11 @@ export class PropertyAccountService {
       endDate?: Date;
       category?: string;
       status?: string;
-    }
+    },
+    ledgerType: 'rental' | 'sale' = 'rental'
   ): Promise<Transaction[]> {
     try {
-      const account = await this.getPropertyAccount(propertyId);
+      const account = await this.getPropertyAccount(propertyId, ledgerType);
       
       let transactions = account.transactions;
 
@@ -585,6 +757,52 @@ export class PropertyAccountService {
       throw error;
     }
   }
+
+  /**
+   * One-time migration: move sale income transactions from rental ledger to sale ledger per property.
+   * Safe to run multiple times (idempotent using transaction.paymentId uniqueness).
+   */
+  async migrateSalesLedgerForCompany(companyPropertyIds?: string[]): Promise<{ moved: number; propertiesAffected: number }> {
+    let moved = 0;
+    let propertiesAffected = 0;
+    const filter: any = {};
+    if (Array.isArray(companyPropertyIds) && companyPropertyIds.length > 0) {
+      filter.propertyId = { $in: companyPropertyIds.map(id => new mongoose.Types.ObjectId(id)) };
+    }
+    const rentalAccounts = await PropertyAccount.find({ ...filter, ledgerType: { $in: [null as any, 'rental'] } });
+    for (const rental of rentalAccounts) {
+      const saleTx = (rental.transactions || []).filter(t => t.type === 'income' && t.category === 'sale_income');
+      if (saleTx.length === 0) continue;
+      const saleAccount = await this.getOrCreatePropertyAccount(rental.propertyId.toString(), 'sale');
+      // Move each tx if not already present in sale ledger (by paymentId)
+      let movedHere = 0;
+      for (const tx of saleTx) {
+        const exists = saleAccount.transactions.some(st => st.type === 'income' && st.paymentId && tx.paymentId && st.paymentId.toString() === tx.paymentId.toString());
+        if (exists) continue;
+        saleAccount.transactions.push({ ...tx, _id: undefined as any });
+        movedHere++;
+        moved++;
+      }
+      if (movedHere > 0) {
+        // Remove from rental ledger
+        rental.transactions = rental.transactions.filter(t => !(t.type === 'income' && t.category === 'sale_income'));
+        await saleAccount.save();
+        await rental.save();
+        await this.recalculateBalance(saleAccount);
+        await this.recalculateBalance(rental);
+        propertiesAffected++;
+      }
+    }
+    return { moved, propertiesAffected };
+  }
 }
 
 export default PropertyAccountService.getInstance(); 
+
+// Convenience named export for scripts/tools that call this migration directly
+export async function migrateSalesLedgerForCompany(
+  companyPropertyIds?: string[]
+): Promise<{ moved: number; propertiesAffected: number }> {
+  const service = PropertyAccountService.getInstance();
+  return service.migrateSalesLedgerForCompany(companyPropertyIds);
+}

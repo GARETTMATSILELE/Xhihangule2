@@ -27,6 +27,7 @@ import {
   Folder as FolderIcon,
   Receipt as ReceiptIcon,
   Sync as SyncIcon,
+  Notifications as NotificationsIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
@@ -126,8 +127,17 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
         path: '/admin-dashboard/property-accounts'
       });
     }
+    // Add Notifications/Approvals for Principal/PREA
+    const roles: string[] = (Array.isArray((user as any)?.roles) && (user as any).roles.length > 0) ? (user as any).roles : [user?.role].filter(Boolean) as string[];
+    if (roles.some(r => ['principal', 'prea'].includes(r))) {
+      items.splice(items.length - 2, 0, {
+        text: 'Notifications',
+        icon: <NotificationsIcon />,
+        path: '/admin-dashboard/approvals'
+      });
+    }
     return items;
-  }, [company?.plan]);
+  }, [company?.plan, user?.role, (user as any)?.roles]);
 
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);

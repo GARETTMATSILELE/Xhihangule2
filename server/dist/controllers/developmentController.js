@@ -243,9 +243,20 @@ const listDevelopments = (req, res) => __awaiter(void 0, void 0, void 0, functio
             unitDevIds = yield DevelopmentUnit_1.DevelopmentUnit.distinct('developmentId', { collaborators: userId }).catch(() => []);
             match = { companyId, $or: [{ createdBy: userId }, { collaborators: userId }, { _id: { $in: unitDevIds } }] };
         }
-        const devs = yield Development_1.Development.find(match)
-            .sort({ createdAt: -1 })
-            .lean();
+        const { fields, limit } = req.query;
+        const selectFields = typeof fields === 'string'
+            ? String(fields).split(',').map(s => s.trim()).filter(Boolean).join(' ')
+            : undefined;
+        const limitParsed = Number(limit);
+        const limitNum = Number.isFinite(limitParsed) && limitParsed > 0 ? Math.min(1000, limitParsed) : undefined;
+        let query = Development_1.Development.find(match).sort({ createdAt: -1 });
+        if (selectFields) {
+            query = query.select(selectFields);
+        }
+        if (typeof limitNum === 'number') {
+            query = query.limit(limitNum);
+        }
+        const devs = yield query.lean();
         const unitDevIdSet = new Set(String((unitDevIds === null || unitDevIds === void 0 ? void 0 : unitDevIds.length) ? unitDevIds.map((x) => String(x)) : []));
         const withFlags = devs.map((d) => (Object.assign(Object.assign({}, d), { isUnitCollaborator: !isPrivileged && unitDevIdSet.has(String(d._id)) })));
         return res.json(withFlags);

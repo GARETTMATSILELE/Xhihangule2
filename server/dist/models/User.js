@@ -73,12 +73,12 @@ const userSchema = new mongoose_1.Schema({
     },
     role: {
         type: String,
-        enum: ['admin', 'agent', 'accountant', 'owner', 'sales'],
+        enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'],
         default: 'agent'
     },
     roles: {
         type: [String],
-        enum: ['admin', 'agent', 'accountant', 'owner', 'sales'],
+        enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'],
         required: false,
         default: undefined
     },

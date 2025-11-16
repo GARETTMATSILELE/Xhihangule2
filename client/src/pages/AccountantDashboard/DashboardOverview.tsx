@@ -854,16 +854,18 @@ const DashboardOverview: React.FC = () => {
                     </ListItemIcon>
                     <ListItemText
                       primary={`${request.payTo.name} ${request.payTo.surname}`}
+                      primaryTypographyProps={{ component: 'span' }}
                       secondary={
                         <Box>
-                          <Typography variant="body2">
+                          <Typography variant="body2" component="span">
                             {request.reason}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" component="span" color="text.secondary" sx={{ display: 'block' }}>
                             Due: {format(new Date(request.dueDate), 'MMM dd, yyyy')} • {request.currency} {request.amount.toLocaleString()}
                           </Typography>
                         </Box>
                       }
+                      secondaryTypographyProps={{ component: 'div' }}
                     />
                     <Chip
                       label={new Date(request.dueDate) <= new Date(Date.now() + 2 * 24 * 60 * 60 * 1000) ? 'Urgent' : 'Pending'}

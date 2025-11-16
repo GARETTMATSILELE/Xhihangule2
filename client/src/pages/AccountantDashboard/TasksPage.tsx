@@ -90,8 +90,10 @@ const TasksPage: React.FC<TasksPageProps> = () => {
     try {
       setLoading(true);
       setError(null);
+      // Fetch all; we'll filter so rentals can show regardless of approval,
+      // while sales-only show after approval.
       const response = await paymentRequestService.getPaymentRequests();
-      setPaymentRequests(response.data);
+      setPaymentRequests((response as any).data || []);
     } catch (err: any) {
       console.error('Error loading payment requests:', err);
       setError('Failed to load payment requests');
@@ -185,12 +187,22 @@ const TasksPage: React.FC<TasksPageProps> = () => {
     let filteredTasks: (Task | PaymentRequest)[] = [];
 
     // Add payment requests as tasks
-    const paymentRequestTasks = paymentRequests.map(req => ({
+    const paymentRequestTasks = paymentRequests
+      // Include rentals in any status; include sales when approved (via approval.status or readyForAccounting)
+      .filter((req: any) => {
+        const reason = String(req?.reason || '');
+        const isSales = Boolean((req as any).reportHtml) || /disbursement|sale|commission/i.test(reason);
+        const topLevelApproved = String(req?.status || '').toLowerCase() === 'approved';
+        const approvalApproved = String((req as any)?.approval?.status || '').toLowerCase() === 'approved';
+        const ready = Boolean((req as any)?.readyForAccounting);
+        return !isSales || topLevelApproved || approvalApproved || ready;
+      })
+      .map(req => ({
       ...req,
       type: 'payment_request' as const,
       title: `Payment Request - ${req.payTo.name} ${req.payTo.surname}`,
       description: req.reason,
-      priority: req.status === 'pending' ? 'high' as const : 'low' as const,
+      priority: (String((req as any)?.status).toLowerCase() === 'pending' ? 'high' : 'low'),
       dueDate: new Date(req.dueDate),
       createdAt: new Date(req.requestDate)
     }));
@@ -390,6 +402,39 @@ const TasksPage: React.FC<TasksPageProps> = () => {
                   }
                 />
               </ListItem>
+              {((request as any)?.approval?.status || '').toLowerCase() === 'approved' && (
+                <>
+                  <ListItem>
+                    <ListItemIcon>
+                      <ApproveIcon color="success" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Approval"
+                      secondary="APPROVED"
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemIcon>
+                      <PersonIcon />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Approved By"
+                      secondary={`${(request as any)?.approval?.approvedByName || 'Unknown'} (${(request as any)?.approval?.approvedBy || '-'})`}
+                    />
+                  </ListItem>
+                  {(request as any)?.approval?.approvedAt && (
+                    <ListItem>
+                      <ListItemIcon>
+                        <DateIcon />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Approved Date"
+                        secondary={format(new Date((request as any)?.approval?.approvedAt as any), 'MMM dd, yyyy HH:mm')}
+                      />
+                    </ListItem>
+                  )}
+                </>
+              )}
               {request.processedByUser && (
                 <ListItem>
                   <ListItemIcon>
@@ -426,6 +471,24 @@ const TasksPage: React.FC<TasksPageProps> = () => {
             </List>
           </Paper>
         </Grid>
+
+        {/* Disbursement Report Preview (stamped for approved requests) */}
+        {(request as any)?.reportHtml && (
+          <Grid item xs={12}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Company Disbursement Report
+              </Typography>
+              <Box sx={{ height: '70vh', border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+                <iframe
+                  title="Company Disbursement Report"
+                  srcDoc={(request as any).reportHtml as any}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                />
+              </Box>
+            </Paper>
+          </Grid>
+        )}
       </Grid>
     </Box>
   );

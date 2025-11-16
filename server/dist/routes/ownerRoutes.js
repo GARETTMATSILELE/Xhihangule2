@@ -344,6 +344,50 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
                 console.log(`[Owner Financial Data] Created temporary property accounts from payment data:`, propertyAccounts);
             }
         }
+        // Deduplicate accounts by propertyId to avoid duplicates in UI and summary
+        if (propertyAccounts && propertyAccounts.length > 0) {
+            const dedupedMap = new Map();
+            for (const acc of propertyAccounts) {
+                const key = (acc.propertyId || '').toString();
+                if (!key)
+                    continue;
+                const existing = dedupedMap.get(key);
+                if (!existing) {
+                    dedupedMap.set(key, {
+                        propertyId: acc.propertyId,
+                        propertyName: acc.propertyName,
+                        propertyAddress: acc.propertyAddress,
+                        totalIncome: Number(acc.totalIncome || 0),
+                        totalExpenses: Number(acc.totalExpenses || 0),
+                        totalOwnerPayouts: Number(acc.totalOwnerPayouts || 0),
+                        runningBalance: Number(acc.runningBalance || 0),
+                        lastIncomeDate: acc.lastIncomeDate,
+                        lastExpenseDate: acc.lastExpenseDate,
+                        lastPayoutDate: acc.lastPayoutDate,
+                        transactions: Array.isArray(acc.transactions) ? [...acc.transactions] : [],
+                        ownerPayouts: Array.isArray(acc.ownerPayouts) ? [...acc.ownerPayouts] : [],
+                    });
+                }
+                else {
+                    existing.totalIncome += Number(acc.totalIncome || 0);
+                    existing.totalExpenses += Number(acc.totalExpenses || 0);
+                    existing.totalOwnerPayouts += Number(acc.totalOwnerPayouts || 0);
+                    // Prefer the most recent balance/date values
+                    existing.runningBalance = Number(acc.runningBalance || existing.runningBalance || 0);
+                    existing.lastIncomeDate = new Date(Math.max(existing.lastIncomeDate ? new Date(existing.lastIncomeDate).getTime() : 0, acc.lastIncomeDate ? new Date(acc.lastIncomeDate).getTime() : 0));
+                    existing.lastExpenseDate = new Date(Math.max(existing.lastExpenseDate ? new Date(existing.lastExpenseDate).getTime() : 0, acc.lastExpenseDate ? new Date(acc.lastExpenseDate).getTime() : 0));
+                    existing.lastPayoutDate = new Date(Math.max(existing.lastPayoutDate ? new Date(existing.lastPayoutDate).getTime() : 0, acc.lastPayoutDate ? new Date(acc.lastPayoutDate).getTime() : 0));
+                    if (Array.isArray(acc.transactions)) {
+                        existing.transactions.push(...acc.transactions);
+                    }
+                    if (Array.isArray(acc.ownerPayouts)) {
+                        existing.ownerPayouts.push(...acc.ownerPayouts);
+                    }
+                }
+            }
+            propertyAccounts = Array.from(dedupedMap.values());
+            console.log(`[Owner Financial Data] Deduplicated property accounts count:`, propertyAccounts.length);
+        }
         if (!propertyAccounts || propertyAccounts.length === 0) {
             console.log(`[Owner Financial Data] No property accounts or payment data found for owner's properties`);
             return res.json({

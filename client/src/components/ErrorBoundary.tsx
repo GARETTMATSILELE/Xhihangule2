@@ -23,24 +23,9 @@ class ErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
 
-    // Auto-recover from chunk load errors by forcing a hard reload once
-    // Detect via both name and message, as environments differ in wording
-    const errorText = `${error?.name ?? ''} ${error?.message ?? ''}`;
-    const isChunkLoadError = /ChunkLoadError|Loading chunk|failed to fetch dynamically imported module|import\(\) failed/i.test(errorText);
-    if (isChunkLoadError) {
-      const alreadyReloaded = sessionStorage.getItem('reloadedAfterChunkError');
-      if (!alreadyReloaded) {
-        try {
-          sessionStorage.setItem('reloadedAfterChunkError', 'true');
-        } catch {}
-        window.location.reload();
-      } else {
-        // Give up after one reload attempt
-        try {
-          sessionStorage.removeItem('reloadedAfterChunkError');
-        } catch {}
-      }
-    }
+    // Previously we attempted to auto-recover from chunk load errors by forcing a hard reload.
+    // This caused UX issues by clearing user inputs after a successful initial load.
+    // We now avoid automatic reloads. Users can manually refresh if needed.
   }
 
   public render() {
@@ -63,13 +48,22 @@ class ErrorBoundary extends Component<Props, State> {
           <Typography variant="body1" color="text.secondary" paragraph>
             {this.state.error?.message || 'An unexpected error occurred'}
           </Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => window.location.reload()}
-          >
-            Refresh Page
-          </Button>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => this.setState({ hasError: false, error: null })}
+            >
+              Try Again
+            </Button>
+            <Button
+              variant="outlined"
+              color="inherit"
+              onClick={() => window.location.reload()}
+            >
+              Reload Page
+            </Button>
+          </Box>
         </Box>
       );
     }

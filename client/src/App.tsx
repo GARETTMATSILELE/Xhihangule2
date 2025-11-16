@@ -13,6 +13,7 @@ import { NotificationProvider } from './components/Layout/Header';
 import './api';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 import ChooseDashboard from './pages/ChooseDashboard';
+import { salesOwnerTheme } from './themes/salesOwnerTheme';
 
 const LandingPage = lazyWithRetry(() => import('./pages/LandingPage'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
@@ -39,6 +40,8 @@ const SalesOwnersPage = lazyWithRetry(() => import('./pages/SalesDashboard/Owner
 const SalesPropertiesPage = lazyWithRetry(() => import('./pages/SalesDashboard/PropertiesPage'));
 const SalesDealsPage = lazyWithRetry(() => import('./pages/SalesDashboard/DealsPage'));
 const SalesDevelopmentsPage = lazyWithRetry(() => import('./pages/SalesDashboard/DevelopmentsPage'));
+const SalesNotificationsPage = lazyWithRetry(() => import('./pages/SalesDashboard/NotificationsPage'));
+const SalesFilesPage = lazyWithRetry(() => import('./pages/SalesDashboard/FilesPage'));
 const Settings = lazyWithRetry(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })));
 const DashboardOverview = lazyWithRetry(() => import('./pages/AccountantDashboard/DashboardOverview'));
 const AccountantPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
@@ -91,10 +94,6 @@ const theme = createTheme({
   },
 });
 
-// Temporary stub to satisfy builds if any stale references exist.
-// Safe to remove once caches are fully cleared and no references remain.
-const SalesFilesPage: React.FC = () => null;
-
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
@@ -117,11 +116,47 @@ const App: React.FC = () => {
               <Route path="/admin-dashboard/*" element={
                 <PropertyProvider>
                   <CompanyProvider>
-                    <ProtectedRoute requiredRoles={['admin']}>
+                    <ProtectedRoute requiredRoles={['admin','principal','prea']}>
                       <AdminDashboard />
                     </ProtectedRoute>
                   </CompanyProvider>
                 </PropertyProvider>
+              } />
+              <Route path="/sales-dashboard/files" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesFilesPage />
+                      </ThemeProvider>
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/files/:propertyId" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesFilesPage />
+                      </ThemeProvider>
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-dashboard/notifications" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesNotificationsPage />
+                      </ThemeProvider>
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
               } />
               <Route path="/admin/company-setup" element={
                 <ProtectedRoute requiredRoles={['admin']}>
@@ -134,7 +169,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['owner']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <OwnerDashboard />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <OwnerDashboard />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -153,7 +191,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesDashboard />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesDashboard />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -162,7 +203,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesLeadsPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesLeadsPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -171,7 +215,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesViewingsPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesViewingsPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -180,7 +227,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesBuyersPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesBuyersPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -189,7 +239,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesOwnersPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesOwnersPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -198,7 +251,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesPropertiesPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesPropertiesPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -207,7 +263,10 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesDealsPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesDealsPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
@@ -216,14 +275,17 @@ const App: React.FC = () => {
                 <ProtectedRoute requiredRoles={['sales']}>
                   <PropertyProvider>
                     <CompanyProvider>
-                      <SalesDevelopmentsPage />
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesDevelopmentsPage />
+                      </ThemeProvider>
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
               <Route path="/choose-dashboard" element={<ChooseDashboard />} />
               <Route path="/accountant-dashboard/*" element={
-                <ProtectedRoute requiredRoles={['accountant']}>
+                <ProtectedRoute requiredRoles={['accountant','principal','prea']}>
                   <PropertyProvider>
                     <CompanyProvider>
                       <AccountantDashboard />

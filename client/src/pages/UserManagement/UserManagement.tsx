@@ -41,14 +41,14 @@ interface User {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
-  roles?: Array<'admin' | 'agent' | 'accountant' | 'owner' | 'sales'>;
+  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea';
+  roles?: Array<'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea'>;
   status: 'active' | 'inactive';
 }
 
 interface Role {
   id: string;
-  name: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
+  name: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea';
   description: string;
 }
 
@@ -56,8 +56,8 @@ interface UserFormData {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales';
-  roles: Array<'admin' | 'agent' | 'accountant' | 'owner' | 'sales'>;
+  role: 'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea';
+  roles: Array<'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea'>;
   password: string;
 }
 
@@ -86,6 +86,16 @@ const ROLES: Role[] = [
     id: 'sales',
     name: 'sales',
     description: 'Sales agent with CRM and sales property management access'
+  },
+  {
+    id: 'principal',
+    name: 'principal',
+    description: 'Principal – can approve requests and access admin/accountant dashboards'
+  },
+  {
+    id: 'prea',
+    name: 'prea',
+    description: 'PREA – receives approved requests; access admin/accountant dashboards'
   }
 ];
 

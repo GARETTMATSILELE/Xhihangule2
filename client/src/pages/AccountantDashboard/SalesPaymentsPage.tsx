@@ -38,7 +38,8 @@ const SalesPaymentsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<'quick' | 'installment'>('quick');
-  const [filters, setFilters] = useState<PaymentFilter>({ saleMode: 'quick' as any });
+  const [filters, setFilters] = useState<PaymentFilter>({ saleMode: 'quick' as any, page: 1 as any, limit: 25 as any });
+  const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
   // Development linkage state
   const [developments, setDevelopments] = useState<any[]>([]);
   const [selectedDevId, setSelectedDevId] = useState<string>('');
@@ -47,6 +48,18 @@ const SalesPaymentsPage: React.FC = () => {
   const [saleId, setSaleId] = useState<string>('');
   const [commissionDefaults, setCommissionDefaults] = useState<{ commissionPercent?: number; preaPercentOfCommission?: number; agencyPercentRemaining?: number; agentPercentRemaining?: number }>({});
   const [prefill, setPrefill] = useState<{ saleReference?: string; sellerName?: string; totalSalePrice?: number; commission?: { commissionPercent?: number; preaPercentOfCommission?: number; agencyPercentRemaining?: number; agentPercentRemaining?: number } } | undefined>(undefined);
+
+  // Cache units per development to avoid repeat network calls when toggling
+  const unitsCache = React.useRef<Record<string, any[]>>({});
+
+  // Consistent newest-first ordering (paymentDate -> createdAt fallback)
+  const sortSalesPayments = React.useCallback((list: Payment[]) => {
+    const toTime = (p: any) => {
+      const d = p?.paymentDate || p?.createdAt || p?.updatedAt;
+      return d ? new Date(d).getTime() : 0;
+    };
+    return [...list].sort((a, b) => toTime(b) - toTime(a));
+  }, []);
 
   const summary = useMemo(() => {
     const salesPayments = payments.filter(p => p.paymentType === 'sale');
@@ -70,22 +83,20 @@ const SalesPaymentsPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const [propertiesData, tenantsData, paymentsData, devs] = await Promise.all([
+        const [propertiesData, paymentsPage] = await Promise.all([
           propertyService.getProperties().catch(() => []),
-          tenantService.getAll().catch(() => ({ tenants: [] })),
-          paymentService.getSalesPayments().catch(() => []),
-          developmentService.list().catch(() => [])
+          paymentService.getSalesPaymentsPage({ saleMode: mode, page: 1, limit: (filters as any).limit || 25, noDevelopment: undefined }).catch(() => ({ items: [], total: 0, page: 1, pages: 1 }))
         ]);
         if (!isMounted) return;
         const properties = Array.isArray(propertiesData) ? propertiesData : [];
-        const tenants = Array.isArray((tenantsData as any).tenants) ? (tenantsData as any).tenants : (Array.isArray(tenantsData) ? tenantsData : []);
-        const payments = (Array.isArray(paymentsData) ? (paymentsData as Payment[]) : [])
+        const payments = sortSalesPayments(((paymentsPage as any)?.items || []) as Payment[])
           .filter(p => p.paymentType === 'sale')
           .filter(p => (p as any).saleMode === mode);
         setProperties(properties);
-        setTenants(tenants);
+        setTenants([]); // avoid heavy tenants load; rely on populated data for display
         setPayments(payments);
-        setDevelopments(Array.isArray(devs) ? devs : []);
+        setTotalCount(Number((paymentsPage as any)?.total) || payments.length);
+        // Defer development list fetch until form is opened
       } catch (err: any) {
         if (!isMounted) return;
         setError('Failed to load sales payments');
@@ -98,14 +109,37 @@ const SalesPaymentsPage: React.FC = () => {
     return () => { isMounted = false; };
   }, [authLoading]);
 
+  // Fetch developments only when needed (when form opens), and only once
+  useEffect(() => {
+    let isMounted = true;
+    const fetchDevsIfNeeded = async () => {
+      if (!showForm) return;
+      if ((developments || []).length > 0) return;
+      try {
+        const devs = await developmentService.list({
+          fields: '_id,name,address,commissionPercent,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,owner.firstName,owner.lastName,variations.id,variations.label'
+        }).catch(() => []);
+        if (!isMounted) return;
+        setDevelopments(Array.isArray(devs) ? devs : []);
+      } catch {}
+    };
+    fetchDevsIfNeeded();
+    return () => { isMounted = false; };
+  }, [showForm, developments]);
+
   useEffect(() => {
     const applyFilters = async () => {
       try {
         setLoading(true);
         setError(null);
-        const data = await paymentService.getSalesPayments({ ...filters, paymentType: 'sale', saleMode: mode });
-        const onlySales = (Array.isArray(data) ? data : []).filter((p: any) => p.paymentType === 'sale');
-        setPayments((onlySales as any[]).filter(p => (p as any).saleMode === mode) as Payment[]);
+        const page = Number((filters as any).page || 1);
+        const limit = Number((filters as any).limit || 25);
+        const resp = await paymentService.getSalesPaymentsPage({ ...(filters as any), paymentType: 'sale', saleMode: mode, page, limit });
+        const list = Array.isArray((resp as any).items) ? (resp as any).items : [];
+        const onlySales = list.filter((p: any) => p.paymentType === 'sale');
+        const next = (onlySales as any[]).filter(p => (p as any).saleMode === mode) as Payment[];
+        setPayments(sortSalesPayments(next));
+        setTotalCount(Number((resp as any).total) || next.length);
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {
@@ -113,7 +147,7 @@ const SalesPaymentsPage: React.FC = () => {
       }
     };
     applyFilters();
-  }, [filters, mode]);
+  }, [filters, mode, sortSalesPayments]);
 
   useEffect(() => {
     setFilters(prev => ({ ...prev, saleMode: mode }));
@@ -130,7 +164,11 @@ const SalesPaymentsPage: React.FC = () => {
       const created = await paymentService.createSalesPaymentAccountant(payload);
       const createdPayment = (created as any)?.payment || (created as any)?.data || created;
       if (createdPayment && (createdPayment as any).paymentType === 'sale') {
-        setPayments(prev => [...prev, createdPayment as Payment]);
+        setPayments(prev => {
+          const filtered = (prev || []).filter(p => (p as any).saleMode === mode);
+          const next = [createdPayment as Payment, ...filtered];
+          return sortSalesPayments(next);
+        });
       }
       setShowForm(false);
     } catch (err: any) {
@@ -189,10 +227,17 @@ const SalesPaymentsPage: React.FC = () => {
                 setPrefill(undefined);
                 if (id) {
                   try {
-                    // Load only sold units and include only those with a buyer set
-                    const data = await developmentUnitService.list({ developmentId: id, requireBuyer: true, limit: 500 });
-                    const list = Array.isArray(data) ? data : (data?.items || []);
-                    setUnits(list as any[]);
+                    // Use cache if available for instant UI; fallback to network and update cache
+                    const cached = unitsCache.current[id];
+                    if (cached) {
+                      setUnits(cached as any[]);
+                    } else {
+                      // Load only sold units and include only those with a buyer set; request a lightweight payload
+                      const data = await developmentUnitService.list({ developmentId: id, requireBuyer: true, limit: 500, fields: 'id,_id,unitCode,unitNumber,variationId,price,buyerName' } as any);
+                      const list = Array.isArray(data) ? data : (data?.items || []);
+                      unitsCache.current[id] = list as any[];
+                      setUnits(list as any[]);
+                    }
                     // Apply commission defaults
                     const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(id));
                     if (dev) {
@@ -239,17 +284,9 @@ const SalesPaymentsPage: React.FC = () => {
                 setSaleId('');
                 if (uid) {
                   try {
-                    // Try to resolve an existing sale by buyerName + development name
+                    // Avoid full contracts fetch; prefer fast local prefill and defer linking
                     const unit = (units || []).find((u: any) => String(u._id || u.id) === String(uid));
-                    const buyerName = unit?.buyerName || '';
                     const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(selectedDevId));
-                    const devName = dev?.name || '';
-                    const list = await salesContractService.list({ reference: '' });
-                    const found = (Array.isArray(list) ? list : []).find((s: any) => {
-                      const ref = String(s.reference || s.manualPropertyAddress || '').toLowerCase();
-                      return (buyerName && String(s.buyerName||'').toLowerCase() === String(buyerName).toLowerCase()) || (ref && (ref.includes(devName.toLowerCase())));
-                    });
-                    if (found) setSaleId(found._id);
                     // Auto-fill buyer by querying buyers collection with development/unit filters
                     try {
                       const buyers = await buyerService.list({ developmentId: selectedDevId, developmentUnitId: uid });
@@ -265,7 +302,7 @@ const SalesPaymentsPage: React.FC = () => {
                         window.dispatchEvent(new CustomEvent('sales-form-set-buyer', { detail: { name: b.name } }));
                       }
                     } catch {}
-                    // Prefill reference with development address + unit code/number, and price from unit
+                    // Prefill reference with development address + unit code/number, and price from unit (fast, local)
                     const unitLabel = unit?.unitCode || (unit?.unitNumber ? `Unit ${unit.unitNumber}` : '');
                     const baseRef = [dev?.name, dev?.address, unitLabel].filter(Boolean).join(' - ');
                     const unitPrice = typeof unit?.price === 'number' ? unit.price : undefined;
@@ -319,6 +356,8 @@ const SalesPaymentsPage: React.FC = () => {
           error={error}
           properties={properties}
           tenants={tenants}
+          totalCount={totalCount}
+          disableOutstandingFetch={mode === 'quick'}
           getReceiptForPrint={async (payment) => {
             // Always use the dedicated sales receipt for sales payments
             return await salesReceiptService.getSalesPaymentReceipt(payment._id, user?.companyId);

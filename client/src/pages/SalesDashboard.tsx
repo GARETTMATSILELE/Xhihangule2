@@ -21,6 +21,7 @@ import { usePropertyService } from "../services/propertyService";
 import paymentService from "../services/paymentService";
 import { agentAccountService } from "../services/agentAccountService";
 import { formatCurrency as formatCurrencyUtil } from "../utils/money";
+import { salesFileService } from "../services/salesFileService";
 
 // --- Lightweight helpers ---
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -436,6 +437,12 @@ export default function CRM() {
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [showViewingModal, setShowViewingModal] = useState(false);
   const [showDealModal, setShowDealModal] = useState(false);
+  const [showConvertLeadModal, setShowConvertLeadModal] = useState(false);
+  const [convertLeadId, setConvertLeadId] = useState<string | null>(null);
+  const [convertForm, setConvertForm] = useState<{ propertyId?: string; offerPrice?: string; notes?: string; file?: File | null }>({});
+  const [stageDocsOpen, setStageDocsOpen] = useState(false);
+  const [stageDocsTarget, setStageDocsTarget] = useState<{ dealId?: string; propertyId?: string; stage?: string } | null>(null);
+  const [stageDocsForm, setStageDocsForm] = useState<{ kyc?: File | null; title?: File | null; aosDrafts?: File[]; aosSigned?: File | null }>({ aosDrafts: [] });
 
   // Backend leads state
   const [backendLeads, setBackendLeads] = useState<any[]>([]);
@@ -730,15 +737,44 @@ export default function CRM() {
 
   const updateLeadStatus = async (_id, _status) => {
     try {
-      await leadService.update(_id, { status: _status });
-      // Optimistic update
-      setBackendLeads(prev => prev.map((l: any) => l._id === _id ? { ...l, status: _status } : l));
+      if (_status === 'Won') {
+        // Prompt to select property to attach buyer to
+        setWonLeadId(_id);
+        const firstPropId = (backendProperties && backendProperties[0]?._id) ? String(backendProperties[0]._id) : undefined;
+        setWonForm({ propertyId: firstPropId });
+        setShowLeadWonModal(true);
+        return;
+      } else {
+        await leadService.update(_id, { status: _status } as any);
+        // Optimistic update
+        setBackendLeads(prev => prev.map((l: any) => l._id === _id ? { ...l, status: _status } : l));
+      }
+      // If moved to Offer, prompt to create a Deal from this Lead
+      if (_status === 'Offer') {
+        setConvertLeadId(_id);
+        // Prefill property if there is exactly one property, else leave blank for selection
+        const firstPropId = (backendProperties && backendProperties[0]?._id) ? String(backendProperties[0]._id) : undefined;
+        setConvertForm({ propertyId: firstPropId, offerPrice: '', notes: '' });
+        setShowConvertLeadModal(true);
+      }
     } catch (e) {
       // Fallback to refresh on error
       await refreshLeads();
     }
   };
-  const markPropertyStatus = async (_id, _status) => {};
+  const markPropertyStatus = async (_id, _status) => {
+    try {
+      // Map human label to API enum
+      const toApi = (s) => s === 'Sold' ? 'sold' : (s === 'Under Offer' ? 'under_offer' : 'available');
+      const statusPayload = toApi(String(_status || 'Available'));
+      if (!_id) return;
+      await propertyService.updateProperty(String(_id), { status: statusPayload });
+      // Refresh shared properties so cards and lists update
+      try { await refreshProperties(); } catch {}
+    } catch (e) {
+      console.error('Failed to update property status', e);
+    }
+  };
   const progressDeal = async (_id, _updates) => {};
 
   const filtered = (items, fields) => items.filter(it => {
@@ -765,7 +801,10 @@ export default function CRM() {
           </div>
           <div className="flex-1" />
           <div className="w-full max-w-md relative">
-            <Input placeholder="Search (Press Ctrl/Cmd K for Command Palette)…" value={query} onChange={e=>setQuery(e.target.value)} />
+            <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.473 9.8l3.614 3.613a.75.75 0 1 0 1.06-1.06l-3.613-3.614A5.5 5.5 0 0 0 9 3.5ZM5 9a4 4 0 1 1 8 0A4 4 0 0 1 5 9Z" clipRule="evenodd" />
+            </svg>
+            <Input placeholder="Search" value={query} onChange={e=>setQuery(e.target.value)} className="pl-10" />
             {query && (
               <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 bg-slate-100 px-2 py-1 rounded hover:bg-slate-200" onClick={()=>setQuery("")}>Clear</button>
             )}
@@ -864,25 +903,25 @@ export default function CRM() {
             </>
           ) : (
             <>
-              <Card>
+              <Card className="border-blue-100 bg-blue-50/70">
                 <CardHeader>
                   <CardTitle>Leads</CardTitle>
                 </CardHeader>
                 <CardContent className="text-3xl font-bold">{backendLeads.length}</CardContent>
               </Card>
-              <Card>
+              <Card className="border-teal-100 bg-teal-50/70">
                 <CardHeader>
                   <CardTitle>Upcoming Viewings</CardTitle>
                 </CardHeader>
                 <CardContent className="text-3xl font-bold">{(backendViewings || []).filter(v => new Date(v.when) > new Date()).length}</CardContent>
               </Card>
-              <Card>
+              <Card className="border-emerald-100 bg-emerald-50/70">
                 <CardHeader>
                   <CardTitle>Active Properties</CardTitle>
                 </CardHeader>
                 <CardContent className="text-3xl font-bold">{(backendProperties || []).filter((p: any) => p.status !== 'rented').length}</CardContent>
               </Card>
-              <Card>
+              <Card className="border-amber-100 bg-amber-50/70">
                 <CardHeader>
                   <CardTitle>Won Deals</CardTitle>
                 </CardHeader>
@@ -919,14 +958,25 @@ export default function CRM() {
             {[
               "Leads","Viewings","Owners","Properties","Buyers","Deals"
             ].map(t => (
-              <Button key={t} onClick={()=>setTab(t)} className={cls("whitespace-nowrap", tab===t?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")}>{t}</Button>
+              <Button
+                key={t}
+                onClick={()=>setTab(t)}
+                className={cls(
+                  "whitespace-nowrap rounded-full px-4 py-2",
+                  tab===t
+                    ? "bg-blue-50 text-blue-900 border border-blue-500 hover:bg-blue-100"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-transparent"
+                )}
+              >
+                {t}
+              </Button>
             ))}
             <div className="flex-1" />
             {/* Quick add menu */}
             <div className="flex gap-2">
-              <Button className="bg-emerald-600 text-blue-600 border-emerald-600" onClick={()=>setShowLeadModal(true)}>+ Lead</Button>
-              <Button className="bg-amber-600 text-blue-600 border-amber-600" onClick={()=>setShowViewingModal(true)}>+ Viewing</Button>
-              <Button className="bg-sky-600 text-blue-600 border-sky-600" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
+              <Button className="bg-slate-900 text-white border-slate-900 hover:bg-slate-800" onClick={()=>setShowLeadModal(true)}>+ Lead</Button>
+              <Button className="bg-slate-900 text-white border-slate-900 hover:bg-slate-800" onClick={()=>setShowViewingModal(true)}>+ Viewing</Button>
+              <Button className="bg-slate-900 text-white border-slate-900 hover:bg-slate-800" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
             </div>
           </nav>
         )}
@@ -1082,32 +1132,7 @@ export default function CRM() {
             </Card>
           );
         })()}
-        {location.pathname.endsWith('/sales-dashboard/notifications') && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Notifications</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {(notifications || []).length === 0 && (
-                  <div className="text-sm text-slate-500">No notifications</div>
-                )}
-                {(notifications || []).map(n => (
-                  <div key={n.id} className="flex items-start justify-between p-3 rounded-xl border">
-                    <div>
-                      <div className={cls("text-sm font-medium", !n.read && "text-slate-900")}>{n.title}</div>
-                      <div className="text-xs text-slate-600">{n.message}</div>
-                      {n.createdAt && (<div className="text-[11px] text-slate-400 mt-1">{new Date(n.createdAt).toLocaleString()}</div>)}
-                    </div>
-                    {n.link && (
-                      <button className="text-xs underline" onClick={()=>navigate(n.link!)}>View</button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        
 
         {!location.pathname.includes('/sales-dashboard/files') && !location.pathname.includes('/sales-dashboard/valuations') && tab === "Leads" && (
           <Card>
@@ -1200,7 +1225,7 @@ export default function CRM() {
           <Card>
             <CardHeader className="flex items-center justify-between">
               <CardTitle>Buyers</CardTitle>
-              <Button className="bg-slate-900 text-white border-slate-900" onClick={()=>setShowBuyerModal(true)}>+ Buyer</Button>
+              <Button className="bg-slate-900 text-white border-slate-900 hover:bg-slate-800" onClick={()=>setShowBuyerModal(true)}>+ Buyer</Button>
             </CardHeader>
             <CardContent>
               {/* Saved segments */}
@@ -1306,7 +1331,7 @@ export default function CRM() {
                   <option value="comfortable">Comfortable</option>
                   <option value="compact">Compact</option>
                 </select>
-                <Button className="bg-slate-900 text-white border-slate-900" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
+                <Button className="bg-slate-900 text-white border-slate-900 hover:bg-slate-800" onClick={()=>setShowPropertyModal(true)}>+ Property</Button>
               </div>
             </CardHeader>
             <CardContent>
@@ -1363,7 +1388,17 @@ export default function CRM() {
                       onDragOver={(e)=>e.preventDefault()}
                       onDrop={async (e)=>{
                         const id = e.dataTransfer.getData('text/plain');
-                        if (id) { await dealService.update(id, { stage: col }); await refreshDeals(); }
+                        if (id) {
+                          const deal = (backendDeals || []).find((x:any) => String(x._id) === String(id));
+                          const needDocs = ['Due Diligence','Contract','Closing'].includes(col);
+                          if (deal && needDocs) {
+                            setStageDocsTarget({ dealId: String(deal._id), propertyId: String(deal.propertyId), stage: col });
+                            setStageDocsOpen(true);
+                          } else {
+                            await dealService.update(id, { stage: col });
+                            await refreshDeals();
+                          }
+                        }
                       }}
                     >
                       {(backendDeals||[]).filter(d=>d.stage===col && !d.won).map(d => (
@@ -1380,7 +1415,16 @@ export default function CRM() {
                           <div className="text-xs text-slate-600 mt-1">Buyer: {d.buyerName || '—'} · Offer: {money(d.offerPrice)}</div>
                           <div className="mt-2 flex flex-wrap gap-1">
                             {["Offer","Due Diligence","Contract","Closing"].map(s=> (
-                              <button key={s} className={cls("text-[10px] px-2 py-1 rounded-lg border", d.stage===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={async ()=>{ await dealService.update(d._id, { stage: s }); await refreshDeals(); }}>{s}</button>
+                              <button key={s} className={cls("text-[10px] px-2 py-1 rounded-lg border", d.stage===s?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={async ()=>{
+                                const needDocs = ['Due Diligence','Contract','Closing'].includes(s);
+                                if (needDocs) {
+                                  setStageDocsTarget({ dealId: String(d._id), propertyId: String(d.propertyId), stage: s });
+                                  setStageDocsOpen(true);
+                                } else {
+                                  await dealService.update(d._id, { stage: s });
+                                  await refreshDeals();
+                                }
+                              }}>{s}</button>
                             ))}
                             <button className="text-[10px] px-2 py-1 rounded-lg border bg-emerald-600 text-white border-emerald-600" onClick={async ()=>{ await dealService.update(d._id, { won: true, closeDate: new Date().toISOString() }); await refreshDeals(); }}>Mark Won</button>
                           </div>
@@ -1556,6 +1600,73 @@ export default function CRM() {
       />
       <ViewingModal open={showViewingModal} onClose={()=>setShowViewingModal(false)} onSubmit={addViewing} leads={(backendLeads || []).map((l: any) => ({ id: l._id, name: l.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
       <DealModal open={showDealModal} onClose={()=>setShowDealModal(false)} onSubmit={addDeal} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
+      <ConvertLeadToDealModal
+        open={showConvertLeadModal}
+        onClose={()=>{ setShowConvertLeadModal(false); setConvertLeadId(null); }}
+        form={convertForm}
+        onChange={setConvertForm}
+        onSubmit={async (payload) => {
+          if (!convertLeadId) return;
+          try {
+            const created = await dealService.createFromLead({ leadId: convertLeadId, propertyId: String(payload.propertyId), offerPrice: Number(payload.offerPrice||0), notes: payload.notes || '' });
+            const dealId = String((created && (created._id || created.id)) || '');
+            if (payload.file && payload.propertyId && dealId) {
+              try {
+                await salesFileService.upload({
+                  file: payload.file,
+                  propertyId: String(payload.propertyId),
+                  dealId,
+                  stage: 'Offer',
+                  docType: 'OFFER_FORM'
+                });
+              } catch {}
+            }
+            await refreshDeals();
+            setShowConvertLeadModal(false);
+            setConvertLeadId(null);
+          } catch {}
+        }}
+        properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))}
+      />
+      <StageDocsModal
+        open={stageDocsOpen}
+        onClose={()=>{ setStageDocsOpen(false); setStageDocsTarget(null); setStageDocsForm({ aosDrafts: [] }); }}
+        stage={stageDocsTarget?.stage}
+        form={stageDocsForm}
+        onChange={setStageDocsForm}
+        onSubmit={async () => {
+          try {
+            const target = stageDocsTarget || {};
+            const dealId = String(target.dealId || '');
+            const propertyId = String(target.propertyId || '');
+            if (!dealId || !propertyId || !target.stage) return;
+            // Upload stage-specific docs if provided
+            if (target.stage === 'Due Diligence') {
+              if (stageDocsForm.kyc) {
+                await salesFileService.upload({ file: stageDocsForm.kyc, propertyId, dealId, stage: 'Due Diligence', docType: 'KYC_FORM' });
+              }
+              if (stageDocsForm.title) {
+                await salesFileService.upload({ file: stageDocsForm.title, propertyId, dealId, stage: 'Due Diligence', docType: 'TITLE_DOCUMENT' });
+              }
+            } else if (target.stage === 'Contract') {
+              const drafts = Array.isArray(stageDocsForm.aosDrafts) ? stageDocsForm.aosDrafts : [];
+              for (const f of drafts) {
+                await salesFileService.upload({ file: f, propertyId, dealId, stage: 'Contract', docType: 'AOS_DRAFT' });
+              }
+            } else if (target.stage === 'Closing') {
+              if (stageDocsForm.aosSigned) {
+                await salesFileService.upload({ file: stageDocsForm.aosSigned, propertyId, dealId, stage: 'Closing', docType: 'AOS_SIGNED' });
+              }
+            }
+            // Progress stage
+            await dealService.update(dealId, { stage: String(target.stage) as any });
+            await refreshDeals();
+          } catch {}
+          setStageDocsOpen(false);
+          setStageDocsTarget(null);
+          setStageDocsForm({ aosDrafts: [] });
+        }}
+      />
 
       <CommissionDrilldown />
 
@@ -2028,6 +2139,100 @@ function DealModal({ open, onClose, onSubmit, buyers, properties }) {
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button className="bg-slate-900 text-white border-slate-900" type="submit">Save Deal</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ConvertLeadToDealModal({ open, onClose, form, onChange, onSubmit, properties }) {
+  const safeForm = form || {};
+  return (
+    <Modal open={open} onClose={onClose} title="Convert Lead to Deal (Offer)">
+      <form onSubmit={(e)=>{ e.preventDefault(); onSubmit(safeForm); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="md:col-span-2">
+          <label className="text-sm">Property</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={safeForm.propertyId || ''} onChange={e=>onChange({ ...safeForm, propertyId: e.target.value })}>
+            <option value="">Select property…</option>
+            {properties.map((p:any) => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-sm">Offer Price</label>
+          <Input type="number" value={safeForm.offerPrice || ''} onChange={e=>onChange({ ...safeForm, offerPrice: e.target.value })} />
+        </div>
+        <div>
+          <label className="text-sm">Notes</label>
+          <Input value={safeForm.notes || ''} onChange={e=>onChange({ ...safeForm, notes: e.target.value })} />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-sm">Offer Form (optional)</label>
+          <input type="file" onChange={e=>onChange({ ...safeForm, file: (e.target.files||[])[0] || null })} className="w-full px-3 py-2 rounded-xl border" />
+          <div className="text-xs text-slate-500 mt-1">If provided, this will save as an Offer Form under this property’s files.</div>
+        </div>
+        <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button disabled={!safeForm.propertyId} className="bg-slate-900 text-white border-slate-900 disabled:opacity-50" type="submit">Create Deal</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function LeadWonModal({ open, onClose, form, onChange, onSubmit, properties }) {
+  const f = form || {};
+  return (
+    <Modal open={open} onClose={onClose} title="Mark Lead as Won">
+      <form onSubmit={(e)=>{ e.preventDefault(); onSubmit(f); }} className="grid grid-cols-1 gap-3">
+        <div>
+          <label className="text-sm">Property to attach buyer to</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={f.propertyId || ''} onChange={e=>onChange({ ...f, propertyId: e.target.value })}>
+            <option value="">Select property…</option>
+            {properties.map((p:any) => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button disabled={!f.propertyId} className="bg-slate-900 text-white border-slate-900 disabled:opacity-50" type="submit">Confirm Won</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function StageDocsModal({ open, onClose, stage, form, onChange, onSubmit }) {
+  const f = form || {};
+  return (
+    <Modal open={open} onClose={onClose} title={`Upload ${stage} documents`}>
+      <form onSubmit={(e)=>{ e.preventDefault(); onSubmit(); }} className="grid grid-cols-1 gap-3">
+        {stage === 'Due Diligence' && (
+          <>
+            <div>
+              <label className="text-sm">KYC Form (optional)</label>
+              <input type="file" className="w-full px-3 py-2 rounded-xl border" onChange={e=>onChange({ ...f, kyc: (e.target.files||[])[0] || null })} />
+            </div>
+            <div>
+              <label className="text-sm">Title Document (optional)</label>
+              <input type="file" className="w-full px-3 py-2 rounded-xl border" onChange={e=>onChange({ ...f, title: (e.target.files||[])[0] || null })} />
+            </div>
+          </>
+        )}
+        {stage === 'Contract' && (
+          <div>
+            <label className="text-sm">AOS Draft(s) (optional, you can upload multiple)</label>
+            <input type="file" multiple className="w-full px-3 py-2 rounded-xl border" onChange={e=>onChange({ ...f, aosDrafts: Array.from(e.target.files || []) })} />
+            <div className="text-xs text-slate-500 mt-1">You can upload different versions later; all will be kept.</div>
+          </div>
+        )}
+        {stage === 'Closing' && (
+          <div>
+            <label className="text-sm">Signed Agreement (optional)</label>
+            <input type="file" className="w-full px-3 py-2 rounded-xl border" onChange={e=>onChange({ ...f, aosSigned: (e.target.files||[])[0] || null })} />
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button className="bg-slate-900 text-white border-slate-900" type="submit">Continue</Button>
         </div>
       </form>
     </Modal>

@@ -63,7 +63,7 @@ router.get('/trust-accounts/deposits', roles_1.canViewCommissions, accountantCon
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', roles_1.canManagePayments, paymentController_1.getCompanyPayments);
 // Sales-specific payment endpoints
-router.get('/sales-payments', roles_1.canManagePayments, paymentController_1.getCompanySalesPayments);
+router.get('/sales-payments', roles_1.canViewSalesPayments, paymentController_1.getCompanySalesPayments);
 router.post('/sales-payments', roles_1.canManagePayments, paymentController_1.createSalesPaymentAccountant);
 router.put('/sales-payments/:id', roles_1.canManagePayments, paymentController_1.updatePayment);
 // Rental/general payments

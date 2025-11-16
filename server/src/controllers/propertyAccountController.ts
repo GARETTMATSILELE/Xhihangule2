@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 export const getPropertyAccount = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
+    const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
     
     console.log('getPropertyAccount controller called with propertyId:', propertyId);
     console.log('User:', req.user);
@@ -20,8 +21,9 @@ export const getPropertyAccount = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Property ID is required' });
     }
 
-    console.log('Calling propertyAccountService.getOrCreatePropertyAccount...');
-    const account = await propertyAccountService.getOrCreatePropertyAccount(propertyId);
+    console.log('Calling propertyAccountService.getPropertyAccount...');
+    // Ensure an account exists (create if missing), respecting the requested ledger
+    const account = await propertyAccountService.getOrCreatePropertyAccount(propertyId, ledger as any);
     
     res.json({
       success: true,
@@ -83,6 +85,7 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
     const { type, startDate, endDate, category, status } = req.query;
+    const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
     
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
@@ -95,7 +98,7 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
     if (category) filters.category = category;
     if (status) filters.status = status;
 
-    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters);
+    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters, ledger as any);
     
     res.json({
       success: true,
@@ -372,6 +375,13 @@ export const getPayoutHistory = async (req: Request, res: Response) => {
 export const syncPropertyAccounts = async (req: Request, res: Response) => {
   try {
     await propertyAccountService.syncPropertyAccountsWithPayments();
+    // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
+    try {
+      const result = await propertyAccountService.migrateSalesLedgerForCompany();
+      console.log('Sales ledger migration result:', result);
+    } catch (e) {
+      console.warn('Sales ledger migration skipped/failed:', e);
+    }
     
     res.json({
       success: true,

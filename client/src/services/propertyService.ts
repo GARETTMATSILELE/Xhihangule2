@@ -99,6 +99,28 @@ export const usePropertyService = () => {
     }
   };
 
+  // Public, lightweight search for properties (optimized for autocomplete)
+  const searchPublicProperties = async (params?: { q?: string; saleOnly?: boolean; limit?: number; fields?: string }): Promise<Property[]> => {
+    try {
+      const query: any = {};
+      if (user?._id) query.userId = user._id;
+      if (user?.companyId) query.companyId = user.companyId;
+      if (user?.role) query.userRole = user.role as any;
+      if (params?.q) query.q = params.q;
+      if (typeof params?.saleOnly !== 'undefined') query.saleOnly = params.saleOnly ? 'true' : 'false';
+      if (params?.limit) query.limit = params.limit;
+      if (params?.fields) query.fields = params.fields;
+      const response = await publicApi.get('/properties/public-filtered', { params: query });
+      return Array.isArray(response.data?.data) ? response.data.data : (Array.isArray(response.data) ? response.data : []);
+    } catch (error: any) {
+      console.error('Error searching properties (public):', error);
+      if (error.response?.status === 401) {
+        return [];
+      }
+      throw error;
+    }
+  };
+
   const getProperties = async (): Promise<Property[]> => {
     try {
       console.log('propertyService: getProperties called');
@@ -352,6 +374,7 @@ export const usePropertyService = () => {
     getProperties,
     getVacantProperties,
     getPublicProperties,
+    searchPublicProperties,
     getPropertiesForUser,
     getProperty,
     createProperty,

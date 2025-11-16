@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button, TextField } from '@mui/material';
+import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button, TextField, Chip } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { Property } from '../../types/property';
 import { usePropertyService } from '../../services/propertyService';
@@ -114,7 +114,9 @@ const PropertyAccountsPage: React.FC = () => {
   }, []);
 
   const handlePropertyClick = (propertyId: string) => {
-    navigate(`/accountant-dashboard/property-accounts/${propertyId}`);
+    const prop = properties.find(p => p._id === propertyId) as any;
+    const isSale = prop && (prop.rentalType === 'sale');
+    navigate(`/accountant-dashboard/property-accounts/${propertyId}${isSale ? '?ledger=sale' : ''}`);
   };
 
   if (loading) {
@@ -164,7 +166,14 @@ const PropertyAccountsPage: React.FC = () => {
           <Grid item xs={12} md={6} lg={4} key={property._id}>
             <Card sx={{ cursor: 'pointer' }} onClick={() => handlePropertyClick(property._id)}>
               <CardContent>
-                <Typography variant="h6">{property.name}</Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center">
+                  <Typography variant="h6">{property.name}</Typography>
+                  <Chip
+                    label={property.rentalType === 'sale' ? 'Sale Ledger' : 'Rental Ledger'}
+                    color={property.rentalType === 'sale' ? 'secondary' : 'primary'}
+                    size="small"
+                  />
+                </Box>
                 <Typography variant="body2" color="text.secondary">{property.address}</Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>
                   Owner: {(property.rentalType === 'sale' ? saleOwnerMap[property._id] : ownerMap[property._id]) || 'N/A'}

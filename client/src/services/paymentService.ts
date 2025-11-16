@@ -56,6 +56,11 @@ class PaymentService {
   private async handleAuthError(error: any): Promise<never> {
     console.error('Authentication error:', error);
     if (error.response?.status === 401) {
+      try {
+        window.dispatchEvent(new CustomEvent('authError', {
+          detail: 'Authentication required. Please log in to continue.'
+        }));
+      } catch {}
       throw new Error('Authentication required. Please log in to continue.');
     }
     throw new Error('An unexpected error occurred. Please try again later.');
@@ -177,6 +182,31 @@ class PaymentService {
         return p;
       });
       return normalized as Payment[];
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
+  // Paginated sales payments
+  async getSalesPaymentsPage(filters?: PaymentFilter & { page?: number; limit?: number; paginate?: boolean; noDevelopment?: boolean }): Promise<{ items: Payment[]; total: number; page: number; pages: number }> {
+    try {
+      const response = await this.db.executeWithRetry(async () => {
+        const params: any = { ...(filters || {}), paginate: 'true' };
+        return await api.get('/accountants/sales-payments', { params, validateStatus: (s) => s < 500 });
+      }, { maxRetries: 0 });
+      if (response.status === 401) {
+        return this.handleAuthError(response);
+      }
+      const data = response.data;
+      if (!data || typeof data !== 'object' || !Array.isArray(data.items)) {
+        throw new Error('Invalid paginated response format');
+      }
+      return {
+        items: data.items as Payment[],
+        total: Number(data.total) || 0,
+        page: Number(data.page) || 1,
+        pages: Number(data.pages) || 1,
+      };
     } catch (error: any) {
       return this.handleAuthError(error);
     }

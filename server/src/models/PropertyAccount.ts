@@ -42,6 +42,7 @@ export interface OwnerPayout {
 
 export interface IPropertyAccount extends Document {
   propertyId: Types.ObjectId;
+  ledgerType?: 'rental' | 'sale';
   propertyName?: string;
   propertyAddress?: string;
   ownerId?: Types.ObjectId;
@@ -185,8 +186,12 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
   propertyId: { 
     type: Schema.Types.ObjectId, 
     ref: 'Property', 
-    required: true, 
-    unique: true 
+    required: true
+  },
+  ledgerType: {
+    type: String,
+    enum: ['rental', 'sale'],
+    default: 'rental'
   },
   propertyName: { 
     type: String 
@@ -241,15 +246,21 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
 });
 
 // Indexes for better query performance
-PropertyAccountSchema.index({ propertyId: 1 });
+PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1 }, { unique: true });
 PropertyAccountSchema.index({ ownerId: 1 });
 PropertyAccountSchema.index({ 'transactions.date': -1 });
 PropertyAccountSchema.index({ 'ownerPayouts.date': -1 });
 PropertyAccountSchema.index({ runningBalance: 1 });
-// Ensure reference numbers are unique per property across owner payouts
-PropertyAccountSchema.index({ propertyId: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, sparse: true });
-// Ensure each paymentId is only recorded once across all property accounts
-PropertyAccountSchema.index({ 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+// Ensure reference numbers are unique per property and ledger across owner payouts (sparse to ignore nulls)
+PropertyAccountSchema.index(
+  { propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 },
+  { unique: true, sparse: true }
+);
+// Ensure each paymentId is only recorded once per property ledger
+PropertyAccountSchema.index(
+  { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
+  { unique: true, sparse: true }
+);
 
 // Pre-save middleware to update totals
 PropertyAccountSchema.pre('save', function(next) {

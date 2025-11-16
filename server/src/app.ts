@@ -38,6 +38,7 @@ import maintenanceRoutes from './routes/maintenanceRoutes';
 import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
 import paymentRequestRoutes from './routes/paymentRequestRoutes';
+import notificationRoutes from './routes/notificationRoutes';
 
 // Load environment variables
 config();
@@ -142,6 +143,7 @@ app.use('/api/development-units', developmentUnitRoutes);
 app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Error handling
 app.use(errorHandler);

@@ -103,7 +103,7 @@ export const updateUnitStatus = async (req: Request, res: Response) => {
 export const listUnits = async (req: Request, res: Response) => {
   try {
     ensureAuthCompany(req);
-    const { developmentId, status, variationId, page = '1', limit = '50', requireBuyer } = req.query as any;
+    const { developmentId, status, variationId, page = '1', limit = '50', requireBuyer, fields } = req.query as any;
     if (!developmentId) throw new AppError('developmentId is required', 400);
 
     // Ensure development belongs to company
@@ -134,12 +134,19 @@ export const listUnits = async (req: Request, res: Response) => {
       query.collaborators = new mongoose.Types.ObjectId(req.user!.userId);
     }
 
+    const selectFields = typeof fields === 'string'
+      ? String(fields).split(',').map((s: string) => s.trim()).filter(Boolean).join(' ')
+      : undefined;
+
     const [items, total] = await Promise.all([
-      DevelopmentUnit.find(query)
-        .sort({ variationId: 1, unitNumber: 1 })
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum)
-        .lean(),
+      (() => {
+        let q = DevelopmentUnit.find(query)
+          .sort({ variationId: 1, unitNumber: 1 })
+          .skip((pageNum - 1) * limitNum)
+          .limit(limitNum);
+        if (selectFields) q = q.select(selectFields);
+        return q.lean();
+      })(),
       DevelopmentUnit.countDocuments(query)
     ]);
 

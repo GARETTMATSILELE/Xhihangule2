@@ -1,5 +1,6 @@
 import express from 'express';
 import { getDatabaseHealth, getAccountingDatabaseHealth } from '../config/database';
+import LedgerEvent from '../models/LedgerEvent';
 
 const router = express.Router();
 
@@ -80,6 +81,40 @@ router.get('/', (req, res) => {
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
+  }
+});
+
+// Ledger events health: shows backlog and last failure info
+router.get('/ledger-events', async (req, res) => {
+  try {
+    const [pending, processing, failed, completed, latestFailed, nextDue] = await Promise.all([
+      LedgerEvent.countDocuments({ status: 'pending' }),
+      LedgerEvent.countDocuments({ status: 'processing' }),
+      LedgerEvent.countDocuments({ status: 'failed' }),
+      LedgerEvent.countDocuments({ status: 'completed', updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } }),
+      LedgerEvent.findOne({ status: 'failed' }).sort({ updatedAt: -1 }).lean(),
+      LedgerEvent.findOne({ status: { $in: ['pending', 'failed'] } }).sort({ nextAttemptAt: 1 }).lean()
+    ]);
+
+    const payload = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      counts: { pending, processing, failed, completedLast24h: completed },
+      nextAttemptAt: nextDue?.nextAttemptAt || null,
+      latestFailure: latestFailed
+        ? {
+            id: String(latestFailed._id),
+            paymentId: String(latestFailed.paymentId),
+            attemptCount: latestFailed.attemptCount,
+            lastError: latestFailed.lastError || null,
+            updatedAt: latestFailed.updatedAt
+          }
+        : null
+    };
+    res.json(payload);
+  } catch (error: any) {
+    console.error('Ledger events health error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch ledger events health' });
   }
 });
 

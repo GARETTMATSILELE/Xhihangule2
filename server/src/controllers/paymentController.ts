@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Payment, IPayment } from '../models/Payment';
+import { Notification } from '../models/Notification';
 import { IUser } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import { JwtPayload } from '../types/auth';
@@ -21,11 +22,85 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
 
   try {
     const query: any = { companyId: req.user.companyId, paymentType: 'sale' };
+
+    // Filters
     if (req.query.saleMode === 'quick' || req.query.saleMode === 'installment') {
       query.saleMode = req.query.saleMode;
     }
-    const payments = await Payment.find(query).sort({ paymentDate: -1 });
-    return res.json(payments);
+    if (req.query.status && typeof req.query.status === 'string') {
+      query.status = req.query.status;
+    }
+    if (req.query.paymentMethod && typeof req.query.paymentMethod === 'string') {
+      query.paymentMethod = req.query.paymentMethod;
+    }
+    if (req.query.propertyId && typeof req.query.propertyId === 'string') {
+      try {
+        query.propertyId = new mongoose.Types.ObjectId(req.query.propertyId);
+      } catch {
+        // ignore invalid id
+      }
+    }
+    // Non-development filter: returns only payments not linked to a development
+    if (String(req.query.noDevelopment) === 'true') {
+      query.$or = [
+        { developmentId: { $exists: false } },
+        { developmentId: null }
+      ];
+    }
+    // Date filtering
+    if (req.query.startDate || req.query.endDate) {
+      query.paymentDate = {};
+      if (req.query.startDate) {
+        query.paymentDate.$gte = new Date(String(req.query.startDate));
+      }
+      if (req.query.endDate) {
+        query.paymentDate.$lte = new Date(String(req.query.endDate));
+      }
+    }
+
+    const paginate = String(req.query.paginate) === 'true';
+    const page = Math.max(1, Number(req.query.page || 1));
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit || 25)));
+    const skip = (page - 1) * limit;
+
+    // Base query with lean and minimal fields
+    const base = Payment.find(query)
+      .select({
+        paymentType: 1,
+        amount: 1,
+        currency: 1,
+        paymentDate: 1,
+        paymentMethod: 1,
+        status: 1,
+        referenceNumber: 1,
+        saleMode: 1,
+        developmentId: 1,
+        propertyId: 1,
+        tenantId: 1,
+        manualPropertyAddress: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .populate('propertyId', 'name address')
+      .populate('tenantId', 'firstName lastName')
+      .sort({ paymentDate: -1 })
+      .lean();
+
+    if (!paginate) {
+      const payments = await base.exec();
+      return res.json(payments);
+    }
+
+    const [items, total] = await Promise.all([
+      base.skip(skip).limit(limit).exec(),
+      Payment.countDocuments(query)
+    ]);
+    return res.json({
+      items,
+      total,
+      page,
+      pages: Math.ceil(total / limit)
+    });
   } catch (error) {
     console.error('Error fetching sales payments:', error);
     return res.status(500).json({ message: 'Failed to fetch sales payments' });
@@ -277,6 +352,17 @@ export const createPayment = async (req: Request, res: Response) => {
           },
         }
       );
+    }
+
+    // Ensure owner income is recorded in property ledger (enqueue retry on failure)
+    try {
+      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
+    } catch (e) {
+      try {
+        const ledgerEventService = (await import('../services/ledgerEventService')).default;
+        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
+      } catch {}
+      console.warn('Non-fatal: property account record failed (lease-based create), enqueued for retry', (e as any)?.message || e);
     }
 
     // Update property arrears after payment
@@ -577,7 +663,44 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
       }
     } catch (error) {
-      console.error('Failed to record income in property account:', error);
+      try {
+        const ledgerEventService = (await import('../services/ledgerEventService')).default;
+        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
+      } catch {}
+      console.error('Failed to record income in property account, enqueued for retry:', error);
+    }
+
+    // Notify the primary agent (and split participants) when a completed sale payment is created
+    try {
+      if (!payment.isProvisional && (payment as any).paymentType === 'sale') {
+        const recipientIds = new Set<string>();
+        if (payment.agentId) recipientIds.add(String(payment.agentId));
+        const split = ((payment as any).commissionDetails || (req.body as any).commissionDetails || {})?.agentSplit || {};
+        if (split.ownerUserId) recipientIds.add(String(split.ownerUserId));
+        if (split.collaboratorUserId) recipientIds.add(String(split.collaboratorUserId));
+        const docs = Array.from(recipientIds).map((uid) => ({
+          companyId: String((req.user as any).companyId),
+          userId: new mongoose.Types.ObjectId(uid),
+          title: 'Sale payment recorded',
+          message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+          link: '/sales-dashboard/notifications',
+          payload: { paymentId: payment._id, paymentType: payment.paymentType }
+        }));
+        if (docs.length) {
+          const saved = await Notification.insertMany(docs);
+          try {
+            const { getIo } = await import('../config/socket');
+            const io = getIo();
+            if (io) {
+              for (const n of saved) {
+                io.to(`user-${String((n as any).userId)}`).emit('newNotification', n);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Non-fatal: failed to create agent notification for payment', e);
     }
 
     return { payment };
@@ -897,7 +1020,38 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
     }
 
     // Record income in property accounts
-    try { await propertyAccountService.recordIncomeFromPayment(payment._id.toString()); } catch (e) { console.warn('Non-fatal: property account record failed', e); }
+    try { await propertyAccountService.recordIncomeFromPayment(payment._id.toString()); } catch (e) { try { const ledgerEventService = (await import('../services/ledgerEventService')).default; await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString()); } catch {} console.warn('Non-fatal: property account record failed (sales), enqueued for retry', e); }
+
+    // Notify the primary agent and split participants for completed sale payment
+    try {
+      const recipientIds = new Set<string>();
+      if (payment.agentId) recipientIds.add(String(payment.agentId));
+      const split = ((finalCommissionDetails as any)?.agentSplit) || {};
+      if (split.ownerUserId) recipientIds.add(String(split.ownerUserId));
+      if (split.collaboratorUserId) recipientIds.add(String(split.collaboratorUserId));
+      const docs = Array.from(recipientIds).map((uid) => ({
+        companyId: String((user as any).companyId),
+        userId: new mongoose.Types.ObjectId(uid),
+        title: 'Sale payment recorded',
+        message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+        link: '/sales-dashboard/notifications',
+        payload: { paymentId: payment._id, paymentType: payment.paymentType }
+      }));
+      if (docs.length) {
+        const saved = await Notification.insertMany(docs);
+        try {
+          const { getIo } = await import('../config/socket');
+          const io = getIo();
+          if (io) {
+            for (const n of saved) {
+              io.to(`user-${String((n as any).userId)}`).emit('newNotification', n);
+            }
+          }
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('Non-fatal: failed to create agent notification for sale payment', e);
+    }
 
     return res.status(201).json({ message: 'Sales payment processed successfully', payment });
   } catch (error: any) {
@@ -1822,7 +1976,11 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     try {
       await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
     } catch (err) {
-      console.error('Failed to record income in property account during finalize:', err);
+      try {
+        const ledgerEventService = (await import('../services/ledgerEventService')).default;
+        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
+      } catch {}
+      console.error('Failed to record income in property account during finalize; enqueued for retry:', err);
     }
 
     // Return populated payment so the UI can immediately show property/tenant details

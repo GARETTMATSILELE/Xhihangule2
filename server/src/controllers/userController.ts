@@ -104,7 +104,7 @@ export const createUser = async (userData: any) => {
   }
 
   // Normalize roles: if roles array provided, ensure unique/valid and set primary role
-  const VALID_ROLES = ['admin','agent','accountant','owner','sales'];
+  const VALID_ROLES = ['admin','agent','accountant','owner','sales','principal','prea'];
   let payload: any = { ...userData };
   if (Array.isArray(userData.roles) && userData.roles.length > 0) {
     const roles = Array.from(new Set(userData.roles.map((r: any) => String(r)))).filter((r: any) => VALID_ROLES.includes(r));
@@ -146,7 +146,7 @@ export const updateUserById = async (id: string, updates: any, currentCompanyId?
   if (typeof updates.email === 'string') user.email = updates.email;
   if (typeof updates.role === 'string') user.role = updates.role;
   // Update roles array if provided
-  const VALID_ROLES = ['admin','agent','accountant','owner','sales'];
+  const VALID_ROLES = ['admin','agent','accountant','owner','sales','principal','prea'];
   if (Array.isArray(updates.roles)) {
     const roles = Array.from(new Set(updates.roles.map((r: any) => String(r)))).filter((r: any) => VALID_ROLES.includes(r));
     if (roles.length === 0) {

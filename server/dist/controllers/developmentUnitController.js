@@ -102,7 +102,7 @@ exports.updateUnitStatus = updateUnitStatus;
 const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         ensureAuthCompany(req);
-        const { developmentId, status, variationId, page = '1', limit = '50', requireBuyer } = req.query;
+        const { developmentId, status, variationId, page = '1', limit = '50', requireBuyer, fields } = req.query;
         if (!developmentId)
             throw new errorHandler_1.AppError('developmentId is required', 400);
         // Ensure development belongs to company
@@ -132,12 +132,19 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (!isPrivileged && !isOwner && !isDevCollaborator) {
             query.collaborators = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
+        const selectFields = typeof fields === 'string'
+            ? String(fields).split(',').map((s) => s.trim()).filter(Boolean).join(' ')
+            : undefined;
         const [items, total] = yield Promise.all([
-            DevelopmentUnit_1.DevelopmentUnit.find(query)
-                .sort({ variationId: 1, unitNumber: 1 })
-                .skip((pageNum - 1) * limitNum)
-                .limit(limitNum)
-                .lean(),
+            (() => {
+                let q = DevelopmentUnit_1.DevelopmentUnit.find(query)
+                    .sort({ variationId: 1, unitNumber: 1 })
+                    .skip((pageNum - 1) * limitNum)
+                    .limit(limitNum);
+                if (selectFields)
+                    q = q.select(selectFields);
+                return q.lean();
+            })(),
             DevelopmentUnit_1.DevelopmentUnit.countDocuments(query)
         ]);
         return res.json({ items, total, page: pageNum, limit: limitNum });

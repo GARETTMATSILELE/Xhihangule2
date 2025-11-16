@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import { useNotification } from './Header';
+import paymentService from '../../services/paymentService';
 
 const cls = (...s: any[]) => s.filter(Boolean).join(' ');
 
@@ -25,6 +26,36 @@ export const SalesSidebar: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
   const { company } = useCompany();
   const { notifications } = useNotification();
+  const [pendingSendCount, setPendingSendCount] = React.useState<number>(0);
+
+  // Compute number of sales payments that still show "Send payment request"
+  React.useEffect(() => {
+    let cancelled = false;
+    const compute = async () => {
+      try {
+        const agentId = (user as any)?._id;
+        if (!agentId) {
+          if (!cancelled) setPendingSendCount(0);
+          return;
+        }
+        const pays = await paymentService.getSalesPayments({ paymentType: 'sale', agentId });
+        const count = (Array.isArray(pays) ? pays : []).reduce((sum, p: any) => {
+          const pid = String(p?._id || '');
+          if (!pid) return sum;
+          const sent = (typeof window !== 'undefined') && localStorage.getItem(`sent_payment_request_${pid}`) === '1';
+          return sent ? sum : sum + 1;
+        }, 0);
+        if (!cancelled) setPendingSendCount(count);
+      } catch {
+        if (!cancelled) setPendingSendCount(0);
+      }
+    };
+    compute();
+    // Recompute when Notifications page marks something as sent
+    const onChanged = () => { compute(); };
+    window.addEventListener('paymentRequest:sentChanged', onChanged as any);
+    return () => { cancelled = true; window.removeEventListener('paymentRequest:sentChanged', onChanged as any); };
+  }, [(user as any)?._id]);
 
   const isActive = (
   key: 'dashboard' | 'files' | 'settings' | 'leads' | 'viewings' | 'buyers' | 'owners' | 'properties' | 'deals' | 'valuations' | 'developments'
@@ -99,7 +130,7 @@ export const SalesSidebar: React.FC = () => {
           <div className="px-3 py-2 text-xs uppercase tracking-wider text-slate-400">Help & Support</div>
           <button title="Notifications" className="flex items-center justify-between px-3 py-2 rounded-xl border text-sm bg-slate-100 hover:bg-slate-200" onClick={()=>navigate('/sales-dashboard/notifications')}>
             <span className="flex items-center gap-3"><IconBell /> Notifications</span>
-            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-xs bg-rose-100 text-rose-700 border border-rose-200">{notifications.filter(n=>!n.read).length}</span>
+            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-xs bg-rose-100 text-rose-700 border border-rose-200">{pendingSendCount}</span>
           </button>
           <button title="Settings" className={cls("mt-2 flex items-center gap-3 px-3 py-2 rounded-xl border text-sm", isActive('settings')?"bg-transparent text-slate-900 border-slate-900":"bg-slate-100 hover:bg-slate-200")} onClick={()=>navigate('/sales-dashboard/settings')}>
             <IconCog />

@@ -6,7 +6,9 @@ import {
   getPaymentRequest,
   updatePaymentRequestStatus,
   deletePaymentRequest,
-  getPaymentRequestStats
+  getPaymentRequestStats,
+  approvePaymentRequest,
+  rejectPaymentRequest
 } from '../controllers/paymentRequestController';
 
 const router = express.Router();
@@ -25,6 +27,10 @@ router.get('/:id', auth, getPaymentRequest);
 
 // Update payment request status (requires auth)
 router.patch('/:id/status', auth, updatePaymentRequestStatus);
+
+// Approvals (Principal/PREA/Admin)
+router.post('/:id/approve', auth, approvePaymentRequest);
+router.post('/:id/reject', auth, rejectPaymentRequest);
 
 // Delete a payment request (requires auth)
 router.delete('/:id', auth, deletePaymentRequest);

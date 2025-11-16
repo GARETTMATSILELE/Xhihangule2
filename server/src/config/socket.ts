@@ -22,6 +22,8 @@ type CustomSocket = Socket & {
   data: SocketData;
 };
 
+let ioRef: Server | null = null;
+
 export const initializeSocket = (httpServer: HttpServer) => {
   const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -80,6 +82,7 @@ export const initializeSocket = (httpServer: HttpServer) => {
     });
   });
 
+  ioRef = io;
   return { io };
 };
 
@@ -92,3 +95,5 @@ export const emitToRoom = <T>(io: Server, room: string, event: string, data: T):
 export const emitToAll = <T>(io: Server, event: string, data: T): void => {
   io.emit(event, data);
 }; 
+
+export const getIo = (): Server | null => ioRef;

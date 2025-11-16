@@ -1,9 +1,20 @@
 import api from '../api';
 import { formatCurrency as formatCurrencyUtil } from '../utils/money';
 
+function humanizeAccountError(error: any): string {
+  const status = error?.response?.status;
+  const backendMsg = error?.response?.data?.message || '';
+  const generic = error?.message || 'Request failed';
+  if (status === 400 && /insufficient balance/i.test(backendMsg)) {
+    return 'Insufficient funds';
+  }
+  return backendMsg || generic;
+}
+
 export interface PropertyAccount {
   _id: string;
   propertyId: string;
+  ledgerType?: 'rental' | 'sale';
   propertyName?: string;
   propertyAddress?: string;
   ownerId?: string;
@@ -111,9 +122,11 @@ class PropertyAccountService {
   /**
    * Get property account by ID
    */
-  async getPropertyAccount(propertyId: string): Promise<PropertyAccount> {
+  async getPropertyAccount(propertyId: string, ledger?: 'rental' | 'sale'): Promise<PropertyAccount> {
     try {
-      const response = await api.get(`/accountants/property-accounts/${propertyId}`);
+      const response = await api.get(`/accountants/property-accounts/${propertyId}`, {
+        params: ledger ? { ledger } : {}
+      });
       return response.data.data;
     } catch (error) {
       console.error('Error fetching property account:', error);
@@ -156,7 +169,7 @@ class PropertyAccountService {
       return response.data.data;
     } catch (error) {
       console.error('Error adding expense:', error);
-      throw error;
+      throw new Error(humanizeAccountError(error));
     }
   }
 
@@ -169,7 +182,7 @@ class PropertyAccountService {
       return response.data.data;
     } catch (error) {
       console.error('Error creating owner payout:', error);
-      throw error;
+      throw new Error(humanizeAccountError(error));
     }
   }
 
@@ -182,7 +195,7 @@ class PropertyAccountService {
       return response.data.data;
     } catch (error) {
       console.error('Error updating payout status:', error);
-      throw error;
+      throw new Error(humanizeAccountError(error));
     }
   }
 

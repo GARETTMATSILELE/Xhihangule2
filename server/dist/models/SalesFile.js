@@ -40,6 +40,10 @@ const SalesFileSchema = new mongoose_1.Schema({
         ref: 'Property',
         required: true
     },
+    dealId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Deal'
+    },
     companyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
@@ -63,6 +67,9 @@ const SalesFileSchema = new mongoose_1.Schema({
         ref: 'User',
         required: true
     },
+    stage: {
+        type: String,
+    },
     uploadedAt: {
         type: Date,
         default: Date.now
@@ -76,5 +83,7 @@ SalesFileSchema.index({ propertyId: 1 });
 SalesFileSchema.index({ companyId: 1 });
 SalesFileSchema.index({ uploadedBy: 1 });
 SalesFileSchema.index({ docType: 1 });
+SalesFileSchema.index({ dealId: 1 });
+SalesFileSchema.index({ dealId: 1, stage: 1, docType: 1 });
 SalesFileSchema.index({ uploadedAt: -1 });
 exports.default = mongoose_1.default.model('SalesFile', SalesFileSchema);

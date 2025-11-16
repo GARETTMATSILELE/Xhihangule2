@@ -1,10 +1,11 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
-export type DealStage = 'Offer' | 'Due Diligence' | 'Contract' | 'Closing';
+export type DealStage = 'Offer' | 'Due Diligence' | 'Contract' | 'Closing' | 'Won';
 
 export interface IDeal extends Document {
   propertyId: mongoose.Types.ObjectId;
+  leadId?: mongoose.Types.ObjectId;
   buyerName: string;
   buyerEmail?: string;
   buyerPhone?: string;
@@ -21,10 +22,11 @@ export interface IDeal extends Document {
 
 const DealSchema: Schema = new Schema({
   propertyId: { type: Schema.Types.ObjectId, ref: 'Property', required: true },
+  leadId: { type: Schema.Types.ObjectId, ref: 'Lead' },
   buyerName: { type: String, required: true, trim: true },
   buyerEmail: { type: String, trim: true },
   buyerPhone: { type: String, trim: true },
-  stage: { type: String, enum: ['Offer','Due Diligence','Contract','Closing'], default: 'Offer' },
+  stage: { type: String, enum: ['Offer','Due Diligence','Contract','Closing','Won'], default: 'Offer' },
   offerPrice: { type: Number, required: true, min: 0 },
   closeDate: { type: Date, default: null },
   won: { type: Boolean, default: false },
@@ -46,6 +48,8 @@ const DealSchema: Schema = new Schema({
 DealSchema.index({ companyId: 1 });
 DealSchema.index({ ownerId: 1 });
 DealSchema.index({ propertyId: 1 });
+DealSchema.index({ companyId: 1, stage: 1 });
+DealSchema.index({ companyId: 1, ownerId: 1, stage: 1 });
 
 export const Deal = mongoose.model<IDeal>('Deal', DealSchema, 'deals');
 

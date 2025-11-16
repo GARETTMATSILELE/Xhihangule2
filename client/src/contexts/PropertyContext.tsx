@@ -23,6 +23,9 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const propertyService = usePropertyService();
   const location = useLocation();
+  const userId = user?._id;
+  const companyId = user?.companyId;
+  const userRole = user?.role;
 
   // Check if we're on an admin route
   const isAdminRoute = location.pathname.includes('/admin-dashboard') || 
@@ -48,10 +51,10 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     console.log('PropertyContext: Auth state:', { 
       authLoading, 
       isAuthenticated, 
-      hasUser: !!user,
-      userId: user?._id, 
-      companyId: user?.companyId,
-      role: user?.role 
+      hasUser: !!userId,
+      userId, 
+      companyId,
+      role: userRole 
     });
 
     // Don't fetch if auth is still loading
@@ -62,7 +65,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // Try to fetch properties even if user is not fully authenticated
     // The public API will handle the filtering based on available user context
-    if (!user) {
+    if (!userId) {
       console.log('PropertyContext: No user data available, skipping fetch');
       setError('User data not available');
       setProperties([]);
@@ -71,7 +74,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     // Don't fetch if user has no companyId
-    if (!user.companyId) {
+    if (!companyId) {
       console.log('PropertyContext: User has no company ID, skipping fetch');
       setError('User is not associated with any company');
       setProperties([]);
@@ -105,7 +108,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } finally {
       setLoading(false);
     }
-  }, [shouldSkipPropertyContext, authLoading, user, propertyService]);
+  }, [shouldSkipPropertyContext, authLoading, userId, companyId]);
 
   const addProperty = async (property: Property) => {
     // Skip if we're on admin routes or user is admin
@@ -231,7 +234,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setError('User is not associated with any company');
       setLoading(false);
     }
-  }, [authLoading, user, user?.companyId, shouldSkipPropertyContext, location.pathname]);
+  }, [authLoading, userId, companyId, shouldSkipPropertyContext, location.pathname]);
 
   const contextValue = useMemo(() => ({
     properties,

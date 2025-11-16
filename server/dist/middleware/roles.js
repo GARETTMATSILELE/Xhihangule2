@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAdminOrSales = exports.canViewCommissions = exports.canManagePayments = exports.canCreateProperty = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
+exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
 const errorHandler_1 = require("./errorHandler");
 const isAgent = (req, res, next) => {
     if (!req.user) {
@@ -62,12 +62,24 @@ const canManagePayments = (req, res, next) => {
         throw new errorHandler_1.AppError('Authentication required', 401);
     }
     const roles = req.user.roles || [req.user.role];
-    if (!roles.some(r => ['admin', 'accountant', 'agent'].includes(r))) {
-        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, or Agent role required to manage payments.', 403);
+    if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales', 'principal', 'prea'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, Agent, Sales, Principal or PREA role required to manage payments.', 403);
     }
     next();
 };
 exports.canManagePayments = canManagePayments;
+// Allow viewing sales payments for Admin/Accountant/Agent/Sales
+const canViewSalesPayments = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    const roles = req.user.roles || [req.user.role];
+    if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, Agent, or Sales role required to view sales payments.', 403);
+    }
+    next();
+};
+exports.canViewSalesPayments = canViewSalesPayments;
 // Allow viewing commission reports for Admins and Accountants
 const canViewCommissions = (req, res, next) => {
     if (!req.user) {

@@ -37,10 +37,11 @@ exports.Deal = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const DealSchema = new mongoose_1.Schema({
     propertyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Property', required: true },
+    leadId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Lead' },
     buyerName: { type: String, required: true, trim: true },
     buyerEmail: { type: String, trim: true },
     buyerPhone: { type: String, trim: true },
-    stage: { type: String, enum: ['Offer', 'Due Diligence', 'Contract', 'Closing'], default: 'Offer' },
+    stage: { type: String, enum: ['Offer', 'Due Diligence', 'Contract', 'Closing', 'Won'], default: 'Offer' },
     offerPrice: { type: Number, required: true, min: 0 },
     closeDate: { type: Date, default: null },
     won: { type: Boolean, default: false },
@@ -61,4 +62,6 @@ const DealSchema = new mongoose_1.Schema({
 DealSchema.index({ companyId: 1 });
 DealSchema.index({ ownerId: 1 });
 DealSchema.index({ propertyId: 1 });
+DealSchema.index({ companyId: 1, stage: 1 });
+DealSchema.index({ companyId: 1, ownerId: 1, stage: 1 });
 exports.Deal = mongoose_1.default.model('Deal', DealSchema, 'deals');

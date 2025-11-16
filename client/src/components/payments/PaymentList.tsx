@@ -53,6 +53,8 @@ export interface PaymentListProps {
   totalCount?: number;
   // Optional override for printing receipt; if provided, used instead of default
   getReceiptForPrint?: (payment: Payment) => Promise<any>;
+  // When true, skip loading all sales payments to compute outstanding (improves performance)
+  disableOutstandingFetch?: boolean;
 }
 
 const PaymentList: React.FC<PaymentListProps> = (props) => {
@@ -70,6 +72,7 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     tenants = [],
     totalCount,
     getReceiptForPrint,
+    disableOutstandingFetch = false,
   } = props;
   // removed unused theme
   const { user } = useAuth();
@@ -86,16 +89,20 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
   // Load all sales payments once to compute outstanding balances for installments
   React.useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const list = await paymentService.getSalesPayments();
-        if (!cancelled) setAllSalesPayments(Array.isArray(list) ? list : []);
-      } catch {
-        if (!cancelled) setAllSalesPayments([]);
-      }
-    })();
+    if (!disableOutstandingFetch) {
+      (async () => {
+        try {
+          const list = await paymentService.getSalesPayments();
+          if (!cancelled) setAllSalesPayments(Array.isArray(list) ? list : []);
+        } catch {
+          if (!cancelled) setAllSalesPayments([]);
+        }
+      })();
+    } else {
+      setAllSalesPayments(null);
+    }
     return () => { cancelled = true; };
-  }, []);
+  }, [disableOutstandingFetch]);
 
   const handleFilterChange = useCallback((key: keyof PaymentFilter, value: any) => {
     if (filters[key] !== value) {

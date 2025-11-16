@@ -1,10 +1,20 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const database_1 = require("../config/database");
+const LedgerEvent_1 = __importDefault(require("../models/LedgerEvent"));
 const router = express_1.default.Router();
 // Debug middleware to log health check requests
 router.use((req, res, next) => {
@@ -80,4 +90,37 @@ router.get('/', (req, res) => {
         });
     }
 });
+// Ledger events health: shows backlog and last failure info
+router.get('/ledger-events', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const [pending, processing, failed, completed, latestFailed, nextDue] = yield Promise.all([
+            LedgerEvent_1.default.countDocuments({ status: 'pending' }),
+            LedgerEvent_1.default.countDocuments({ status: 'processing' }),
+            LedgerEvent_1.default.countDocuments({ status: 'failed' }),
+            LedgerEvent_1.default.countDocuments({ status: 'completed', updatedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } }),
+            LedgerEvent_1.default.findOne({ status: 'failed' }).sort({ updatedAt: -1 }).lean(),
+            LedgerEvent_1.default.findOne({ status: { $in: ['pending', 'failed'] } }).sort({ nextAttemptAt: 1 }).lean()
+        ]);
+        const payload = {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            counts: { pending, processing, failed, completedLast24h: completed },
+            nextAttemptAt: (nextDue === null || nextDue === void 0 ? void 0 : nextDue.nextAttemptAt) || null,
+            latestFailure: latestFailed
+                ? {
+                    id: String(latestFailed._id),
+                    paymentId: String(latestFailed.paymentId),
+                    attemptCount: latestFailed.attemptCount,
+                    lastError: latestFailed.lastError || null,
+                    updatedAt: latestFailed.updatedAt
+                }
+                : null
+        };
+        res.json(payload);
+    }
+    catch (error) {
+        console.error('Ledger events health error:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to fetch ledger events health' });
+    }
+}));
 exports.default = router;

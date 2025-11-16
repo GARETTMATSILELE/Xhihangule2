@@ -43,7 +43,7 @@ const PaymentRequestSchema = new mongoose_1.Schema({
     },
     propertyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
-        required: true,
+        required: false,
         ref: 'Property'
     },
     tenantId: {
@@ -112,7 +112,25 @@ const PaymentRequestSchema = new mongoose_1.Schema({
         bankDetails: String,
         accountNumber: String,
         address: String
-    }
+    },
+    developmentId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'Development'
+    },
+    developmentUnitId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'DevelopmentUnit'
+    },
+    reportHtml: { type: String },
+    approval: {
+        status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+        approvedBy: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User' },
+        approvedByName: { type: String },
+        approvedByRole: { type: String, enum: ['principal', 'prea', 'admin'] },
+        approvedAt: { type: Date },
+        notes: { type: String }
+    },
+    readyForAccounting: { type: Boolean, default: false }
 }, {
     timestamps: true
 });
