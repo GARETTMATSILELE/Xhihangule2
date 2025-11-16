@@ -42,6 +42,7 @@ const SalesDealsPage = lazyWithRetry(() => import('./pages/SalesDashboard/DealsP
 const SalesDevelopmentsPage = lazyWithRetry(() => import('./pages/SalesDashboard/DevelopmentsPage'));
 const SalesNotificationsPage = lazyWithRetry(() => import('./pages/SalesDashboard/NotificationsPage'));
 const SalesFilesPage = lazyWithRetry(() => import('./pages/SalesDashboard/FilesPage'));
+const SalesSettingsPage = lazyWithRetry(() => import('./pages/SalesDashboard/SettingsPage'));
 const Settings = lazyWithRetry(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })));
 const DashboardOverview = lazyWithRetry(() => import('./pages/AccountantDashboard/DashboardOverview'));
 const AccountantPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
@@ -121,6 +122,18 @@ const App: React.FC = () => {
                     </ProtectedRoute>
                   </CompanyProvider>
                 </PropertyProvider>
+              } />
+              <Route path="/sales-dashboard/settings" element={
+                <ProtectedRoute requiredRoles={['sales']}>
+                  <PropertyProvider>
+                    <CompanyProvider>
+                      <ThemeProvider theme={salesOwnerTheme}>
+                        <CssBaseline />
+                        <SalesSettingsPage />
+                      </ThemeProvider>
+                    </CompanyProvider>
+                  </PropertyProvider>
+                </ProtectedRoute>
               } />
               <Route path="/sales-dashboard/files" element={
                 <ProtectedRoute requiredRoles={['sales']}>

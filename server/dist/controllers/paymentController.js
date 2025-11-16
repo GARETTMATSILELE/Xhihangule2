@@ -58,11 +58,41 @@ const propertyAccountService_1 = __importDefault(require("../services/propertyAc
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 // List sales-only payments for a company
 const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
         const query = { companyId: req.user.companyId, paymentType: 'sale' };
+        // Role-based access narrowing: agents/sales users can only see their own payments
+        try {
+            const roles = (req.user.roles || [req.user.role]).map(r => String(r));
+            const isAgentUser = roles.some(r => r === 'agent' || r === 'sales');
+            if (isAgentUser) {
+                const uid = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+                if (uid) {
+                    try {
+                        query.agentId = new mongoose_1.default.Types.ObjectId(String(uid));
+                    }
+                    catch (_b) {
+                        // if user id is not a valid object id, fall back to string equality
+                        query.agentId = String(uid);
+                    }
+                }
+            }
+            else if (req.query.agentId && typeof req.query.agentId === 'string') {
+                // Admin/Accountant may optionally filter by specific agentId
+                try {
+                    query.agentId = new mongoose_1.default.Types.ObjectId(req.query.agentId);
+                }
+                catch (_c) {
+                    query.agentId = String(req.query.agentId);
+                }
+            }
+        }
+        catch (_d) {
+            // Non-fatal: if role parsing fails, no additional restriction beyond company is applied
+        }
         // Filters
         if (req.query.saleMode === 'quick' || req.query.saleMode === 'installment') {
             query.saleMode = req.query.saleMode;
@@ -77,7 +107,7 @@ const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, 
             try {
                 query.propertyId = new mongoose_1.default.Types.ObjectId(req.query.propertyId);
             }
-            catch (_a) {
+            catch (_e) {
                 // ignore invalid id
             }
         }
@@ -116,6 +146,9 @@ const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, 
             developmentId: 1,
             propertyId: 1,
             tenantId: 1,
+            buyerName: 1,
+            sellerName: 1,
+            commissionDetails: 1,
             manualPropertyAddress: 1,
             createdAt: 1,
             updatedAt: 1,

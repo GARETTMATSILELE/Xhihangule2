@@ -23,6 +23,32 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
   try {
     const query: any = { companyId: req.user.companyId, paymentType: 'sale' };
 
+    // Role-based access narrowing: agents/sales users can only see their own payments
+    try {
+      const roles = (((req.user as any).roles as string[] | undefined) || [req.user.role]).map(r => String(r));
+      const isAgentUser = roles.some(r => r === 'agent' || r === 'sales');
+      if (isAgentUser) {
+        const uid = (req.user as any)?.userId;
+        if (uid) {
+          try {
+            query.agentId = new mongoose.Types.ObjectId(String(uid));
+          } catch {
+            // if user id is not a valid object id, fall back to string equality
+            query.agentId = String(uid);
+          }
+        }
+      } else if (req.query.agentId && typeof req.query.agentId === 'string') {
+        // Admin/Accountant may optionally filter by specific agentId
+        try {
+          query.agentId = new mongoose.Types.ObjectId(req.query.agentId);
+        } catch {
+          query.agentId = String(req.query.agentId);
+        }
+      }
+    } catch {
+      // Non-fatal: if role parsing fails, no additional restriction beyond company is applied
+    }
+
     // Filters
     if (req.query.saleMode === 'quick' || req.query.saleMode === 'installment') {
       query.saleMode = req.query.saleMode;
@@ -77,6 +103,9 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
         developmentId: 1,
         propertyId: 1,
         tenantId: 1,
+        buyerName: 1,
+        sellerName: 1,
+        commissionDetails: 1,
         manualPropertyAddress: 1,
         createdAt: 1,
         updatedAt: 1,
