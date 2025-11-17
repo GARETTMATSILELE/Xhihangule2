@@ -325,4 +325,41 @@ PaymentSchema.index(
   }
 );
 
+// Prevent history-changing bulk updates on core fields; use document.save() with workflows instead
+function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
+  const setOps = ['$set', '$unset'];
+  const protectedKeys = new Set([
+    'amount','paymentDate','paymentMethod','propertyId','tenantId','agentId','companyId',
+    'referenceNumber','currency','rentalPeriodMonth','rentalPeriodYear','advanceMonthsPaid',
+    'advancePeriodStart','advancePeriodEnd','processedBy','recipientId','recipientType','reason'
+  ]);
+  for (const op of setOps) {
+    const payload = (update as any)[op];
+    if (!payload || typeof payload !== 'object') continue;
+    for (const key of Object.keys(payload)) {
+      // Allow operational flags and enrichment fields
+      if (key.startsWith('commissionDetails')) continue;
+      if ([
+        'status','isProvisional','isInSuspense','commissionFinalized','provisionalRelationshipType',
+        'finalizedAt','finalizedBy','idempotencyKey','manualPropertyAddress','manualTenantName',
+        'buyerName','sellerName','saleId','developmentId','developmentUnitId','notes'
+      ].includes(key)) continue;
+      if (protectedKeys.has(key)) return true;
+    }
+  }
+  return false;
+}
+
+PaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
+  try {
+    const update = (this as any).getUpdate?.() || {};
+    if (isIllegalPaymentUpdate(update)) {
+      return next(new Error('Payment records are immutable. Create a correcting payment instead of editing core fields.'));
+    }
+    return next();
+  } catch (e) {
+    return next(e as any);
+  }
+});
+
 export const Payment = mongoose.model<IPayment>('Payment', PaymentSchema, COLLECTIONS.PAYMENTS); 

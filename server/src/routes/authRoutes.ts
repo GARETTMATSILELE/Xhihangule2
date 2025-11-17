@@ -35,7 +35,12 @@ router.get('/me', auth, async (req, res) => {
 
     const { user, type } = userResult;
 
-    // Return the structure the client expects
+    // Build avatar URL if present (only for app users, not property owners)
+    const avatarUrl = (type === 'user' && (user as any)?.avatar)
+      ? `data:${(user as any).avatarMimeType || 'image/png'};base64,${(user as any).avatar}`
+      : undefined;
+
+    // Return the structure the client expects (include avatarUrl when present)
     res.json({
       user: {
         _id: user._id,
@@ -47,7 +52,8 @@ router.get('/me', auth, async (req, res) => {
         isActive: type === 'user' ? (user as IUser).isActive : true,
         lastLogin: type === 'user' ? (user as IUser).lastLogin : undefined,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt
+        updatedAt: user.updatedAt,
+        ...(avatarUrl ? { avatarUrl } : {})
       }
     });
   } catch (error) {
@@ -99,7 +105,12 @@ router.post('/login', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     
-    // Return the structure the client expects: { user, company, token, refreshToken }
+    // Build avatar URL if present
+    const avatarUrl = (fullUser as any)?.avatar
+      ? `data:${(fullUser as any).avatarMimeType || 'image/png'};base64,${(fullUser as any).avatar}`
+      : undefined;
+
+    // Return the structure the client expects: { user, company, token, refreshToken } (include avatarUrl)
     res.json({
       user: {
         _id: fullUser._id,
@@ -111,7 +122,8 @@ router.post('/login', async (req, res) => {
         isActive: type === 'user' ? (fullUser as IUser).isActive : true,
         lastLogin: type === 'user' ? (fullUser as IUser).lastLogin : undefined,
         createdAt: fullUser.createdAt,
-        updatedAt: fullUser.updatedAt
+        updatedAt: fullUser.updatedAt,
+        ...(avatarUrl ? { avatarUrl } : {})
       },
       company: company,
       token: result.token,

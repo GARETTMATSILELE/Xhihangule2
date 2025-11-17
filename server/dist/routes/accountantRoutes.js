@@ -132,6 +132,8 @@ router.post('/property-accounts/:propertyId/payout', roles_1.canViewCommissions,
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.canViewCommissions, propertyAccountController_1.updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', roles_1.canViewCommissions, propertyAccountController_1.getPayoutHistory);
 router.post('/property-accounts/sync', roles_1.canViewCommissions, propertyAccountController_1.syncPropertyAccounts);
+// Maintenance: remove duplicate income transactions for a property ledger (idempotent)
+router.post('/property-accounts/:propertyId/reconcile-duplicates', roles_1.canViewCommissions, propertyAccountController_1.reconcilePropertyDuplicates);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.canViewCommissions, propertyAccountController_1.getAcknowledgementDocument);
 // Company account routes
@@ -145,6 +147,7 @@ router.get('/sales/:id', roles_1.isAccountant, salesContractController_1.getSale
 // Agent Account routes - require accountant role
 router.get('/agent-accounts', roles_1.isAccountant, agentAccountController_1.getCompanyAgentAccounts);
 router.get('/agent-accounts/commission-compare', roles_1.isAccountant, agentAccountController_2.compareAgentCommissionTotals);
+router.get('/agent-accounts/top-agents', roles_1.isAccountant, agentAccountController_1.getTopAgentsForMonth);
 router.get('/agent-accounts/:agentId', roles_1.isAccountant, (req, res) => {
     var _a;
     console.log('Agent account detail route hit:', req.params.agentId);

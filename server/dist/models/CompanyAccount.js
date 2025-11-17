@@ -25,4 +25,55 @@ const CompanyAccountSchema = new mongoose_1.Schema({
     lastUpdated: { type: Date },
 }, { timestamps: true });
 CompanyAccountSchema.index({ companyId: 1, 'transactions.date': -1 });
+// Prevent double-posting the same payment into company ledger
+CompanyAccountSchema.index({ companyId: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+// Immutability guard for update operations
+function isIllegalCompanyLedgerMutation(update) {
+    const illegalSetters = ['$set', '$unset', '$inc'];
+    const illegalRemovers = ['$pull', '$pullAll', '$pop'];
+    const allowedAppends = ['$push', '$addToSet'];
+    const root = 'transactions';
+    const startsWithRoot = (k) => k === root || k.startsWith(`${root}.`) || k.startsWith(`${root}.$`);
+    for (const op of illegalSetters) {
+        const payload = update[op];
+        if (!payload)
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (startsWithRoot(path))
+                return true;
+        }
+    }
+    for (const op of illegalRemovers) {
+        const payload = update[op];
+        if (!payload)
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (startsWithRoot(path))
+                return true;
+        }
+    }
+    for (const op of allowedAppends) {
+        const payload = update[op];
+        if (!payload)
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (path !== root)
+                return true; // only allow appending at root transactions
+        }
+    }
+    return false;
+}
+CompanyAccountSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
+    var _a, _b;
+    try {
+        const update = ((_b = (_a = this).getUpdate) === null || _b === void 0 ? void 0 : _b.call(_a)) || {};
+        if (isIllegalCompanyLedgerMutation(update)) {
+            return next(new Error('CompanyAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
+        }
+        return next();
+    }
+    catch (e) {
+        return next(e);
+    }
+});
 exports.CompanyAccount = database_1.accountingConnection.model('CompanyAccount', CompanyAccountSchema, 'companyaccounts');

@@ -493,19 +493,9 @@ const getCurrentUser = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
             hasCompany: !!company
         });
         res.json({
-            user: {
-                _id: user._id,
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                role: user.role,
-                roles: (Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined,
-                companyId: user.companyId,
-                isActive: user.isActive,
-                lastLogin: user.lastLogin,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt
-            },
+            user: Object.assign({ _id: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName, role: user.role, roles: (Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined, companyId: user.companyId, isActive: user.isActive, lastLogin: user.lastLogin, createdAt: user.createdAt, updatedAt: user.updatedAt }, user.avatar ? {
+                avatarUrl: `data:${user.avatarMimeType || 'image/png'};base64,${user.avatar}`
+            } : {}),
             company
         });
     }

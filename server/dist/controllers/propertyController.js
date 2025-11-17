@@ -94,6 +94,7 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         const saleOnly = String(req.query.saleOnly) === 'true';
         const fields = typeof req.query.fields === 'string' ? req.query.fields : '';
         const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+        const page = Math.max(1, Number(req.query.page || 1));
         if (saleOnly) {
             query.rentalType = 'sale';
         }
@@ -128,6 +129,7 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         const properties = yield Property_1.Property.find(query)
             .select(projection)
             .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
             .limit(limit)
             .lean();
         console.log('Found properties:', {

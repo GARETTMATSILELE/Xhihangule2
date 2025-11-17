@@ -107,6 +107,24 @@ class AgentAccountService {
   }
 
   /**
+   * Get top agents by month/year (from agentaccounts commissions)
+   */
+  async getTopAgents(year: number, month: number): Promise<{
+    year: number;
+    month: number;
+    sales: Array<{ agentId: string; name: string; email?: string; role: string; total: number }>;
+    rental: Array<{ agentId: string; name: string; email?: string; role: string; total: number }>;
+    topSales: { agentId: string; name: string; email?: string; role: string; total: number } | null;
+    topRental: { agentId: string; name: string; email?: string; role: string; total: number } | null;
+  }> {
+    const params = new URLSearchParams();
+    params.append('year', String(year));
+    params.append('month', String(month));
+    const resp = await api.get(`/accountants/agent-accounts/top-agents?${params.toString()}`);
+    return resp.data.data;
+  }
+
+  /**
    * Get agent account by ID
    */
   async getAgentAccount(agentId: string): Promise<AgentAccount> {

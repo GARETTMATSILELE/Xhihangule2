@@ -5,6 +5,7 @@ import { User } from '../models/User';
 import { Request, Response, NextFunction } from 'express';
 import { auth, authWithCompany, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
+import multer from 'multer';
 
 const router = express.Router();
 
@@ -63,6 +64,19 @@ router.get('/public/agents', async (req: Request, res: Response) => {
   }
 });
 
+// Multer for avatar uploads (images only, memory storage)
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype && file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed for avatar'));
+    }
+  }
+});
+
 // Update current user's own profile (no company required)
 router.put('/me', auth, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -102,6 +116,39 @@ router.put('/me', auth, async (req: Request, res: Response, next: NextFunction) 
 
     res.json({ status: 'success', data: updated });
   } catch (error) {
+    next(error);
+  }
+});
+
+// Upload/update current user's avatar
+router.post('/me/avatar', auth, avatarUpload.single('avatar'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('User not authenticated', 401);
+    }
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) {
+      throw new AppError('No avatar file uploaded', 400);
+    }
+    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+      throw new AppError('Invalid file type. Only images are allowed.', 400);
+    }
+    const base64 = file.buffer.toString('base64');
+    const updated = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: { avatar: base64, avatarMimeType: file.mimetype } },
+      { new: true }
+    ).select('_id avatar avatarMimeType');
+    if (!updated) {
+      throw new AppError('User not found', 404);
+    }
+    const avatarUrl = `data:${updated.avatarMimeType || 'image/png'};base64,${updated.avatar}`;
+    res.json({ status: 'success', data: { avatarUrl } });
+  } catch (error) {
+    // Handle Multer file size errors gracefully
+    if ((error as any)?.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ status: 'error', message: 'Avatar exceeds maximum size of 10MB. Please upload a smaller image.' });
+    }
     next(error);
   }
 });

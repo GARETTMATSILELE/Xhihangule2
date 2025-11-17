@@ -12,11 +12,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.getPropertyAccount = void 0;
+exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.getPropertyAccount = void 0;
 const Property_1 = require("../models/Property");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
+const propertyAccountService_2 = require("../services/propertyAccountService");
 /**
  * Get property account with summary
  */
@@ -325,6 +326,28 @@ const getPayoutHistory = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.getPayoutHistory = getPayoutHistory;
+/**
+ * Reconcile and remove duplicate income transactions for a property ledger
+ */
+const reconcilePropertyDuplicates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { propertyId } = req.params;
+        const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        const result = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId, ledger);
+        return res.json({ success: true, message: 'Reconciliation completed', data: result });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in reconcilePropertyDuplicates:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+exports.reconcilePropertyDuplicates = reconcilePropertyDuplicates;
 /**
  * Sync property accounts with payments
  */

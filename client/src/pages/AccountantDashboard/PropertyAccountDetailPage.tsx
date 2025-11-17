@@ -76,8 +76,8 @@ const PropertyAccountDetailPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
   const location = useLocation();
   const { user, company } = useAuth();
-  const { getProperties } = usePropertyService();
-  const { getAllPublic: getAllPropertyOwners, getAll: getAllSalesOwners } = usePropertyOwnerService();
+  const { getProperty } = usePropertyService();
+  const { getSalesById } = usePropertyOwnerService();
   
   // State
   const [property, setProperty] = useState<any>(null);
@@ -120,6 +120,7 @@ const PropertyAccountDetailPage: React.FC = () => {
 
   // Levies state and payout controls (moved before any early returns to satisfy Hooks rules)
   const [levyRows, setLevyRows] = useState<any[]>([]);
+  const [leviesLoaded, setLeviesLoaded] = useState(false);
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [payoutRow, setPayoutRow] = useState<any>(null);
   const [payoutForm, setPayoutForm] = useState({ paidToName: '', paidToAccount: '', paidToContact: '', payoutDate: '', payoutMethod: 'bank_transfer', payoutReference: '', notes: '' });
@@ -131,66 +132,40 @@ const PropertyAccountDetailPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch property details, property account, and owners (rental + sales) in parallel
+        // Fetch property first to determine ledger type
         const search = new URLSearchParams(location.search);
-        const [props, propertyOwners, salesOwnersRaw, depositSum] = await Promise.all([
-          getProperties(),
-          getAllPropertyOwners().catch(err => {
-            console.error('Error fetching property owners:', err);
-            return [];
-          }),
-          getAllSalesOwners().catch(err => {
-            console.error('Error fetching sales owners:', err);
-            return { owners: [] } as any;
-          }),
-          paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
-        ]);
-        
-        const found = props.find((p: any) => p._id === propertyId);
+        const found = await getProperty(propertyId);
         setProperty(found || null);
-        // Determine ledger: URL param overrides; otherwise infer from property.rentalType
-        const ledger = (search.get('ledger') === 'sale' || (!search.get('ledger') && (found as any)?.rentalType === 'sale'))
+
+        const inferredLedger = (search.get('ledger') === 'sale' || (!search.get('ledger') && (found as any)?.rentalType === 'sale'))
           ? 'sale'
           : 'rental';
-        const accountData = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
+
+        // Fetch account and deposit summary in parallel
+        const [accountData, depositSum] = await Promise.all([
+          propertyAccountService.getPropertyAccount(propertyId, inferredLedger as any),
+          paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
+        ]);
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
-        
-        // Map propertyId to owner name using rental owner.properties; override with sales owner via propertyOwnerId for sale properties
-        const ownerMap: Record<string, string> = {};
-        console.log('Property owners fetched:', propertyOwners.length);
-        
-        propertyOwners.forEach((owner: PropertyOwner) => {
-          console.log(`Owner ${owner._id}: ${owner.firstName} ${owner.lastName}`);
-          console.log('Owner properties:', owner.properties);
-          
-          // Check if owner has properties array
-          if (owner.properties && Array.isArray(owner.properties)) {
-            owner.properties.forEach((propertyId: any) => {
-              // Handle both string and ObjectId formats
-              const propId = typeof propertyId === 'object' && propertyId.$oid ? propertyId.$oid : propertyId;
-              console.log(`Checking property ${propId} for owner ${owner.firstName} ${owner.lastName}`);
-              ownerMap[propId] = `${owner.firstName} ${owner.lastName}`;
-              console.log(`Mapped property ${propId} to owner ${owner.firstName} ${owner.lastName}`);
-            });
-          }
-        });
-        console.log('Final owner map:', ownerMap);
-        // If this is a sale property, prefer mapping from property's propertyOwnerId using sales owners
-        const salesOwners: PropertyOwner[] = Array.isArray((salesOwnersRaw as any)?.owners)
-          ? (salesOwnersRaw as any).owners
-          : (Array.isArray(salesOwnersRaw as any) ? (salesOwnersRaw as any) : []);
-        const salesOwnerById: Record<string, PropertyOwner> = {};
-        salesOwners.forEach((o: PropertyOwner) => { salesOwnerById[String((o as any)._id)] = o; });
-        if (found && (found as any).rentalType === 'sale') {
-          const raw = (found as any).propertyOwnerId;
-          const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
-          if (ownerId && salesOwnerById[ownerId]) {
-            const o = salesOwnerById[ownerId];
-            ownerMap[String((found as any)._id)] = `${o.firstName} ${o.lastName}`;
+
+        // Resolve owner name efficiently
+        const map: Record<string, string> = {};
+        if (inferredLedger === 'sale') {
+          try {
+            const raw = (found as any).propertyOwnerId;
+            const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
+            if (ownerId) {
+              const salesOwner = await getSalesById(ownerId);
+              if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
+                map[String((found as any)._id)] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+              }
+            }
+          } catch (e) {
+            // ignore owner fetch failure; we'll fall back to account.ownerName
           }
         }
-        setOwnerMap(ownerMap);
+        setOwnerMap(map);
         
       } catch (err: any) {
         setError(err.message || 'Failed to fetch property account data');
@@ -202,7 +177,7 @@ const PropertyAccountDetailPage: React.FC = () => {
     fetchData();
   }, [propertyId]);
 
-  // Load levy payments for this property (must be declared before any early return)
+  // Lazy-load levy payments when Levies tab is opened
   useEffect(() => {
     const loadLevies = async () => {
       try {
@@ -210,12 +185,15 @@ const PropertyAccountDetailPage: React.FC = () => {
         const all = await paymentService.getLevyPayments(user.companyId);
         const filtered = (Array.isArray(all) ? all : []).filter((p: any) => String(p?.propertyId?._id || p?.propertyId) === String(propertyId));
         setLevyRows(filtered);
+        setLeviesLoaded(true);
       } catch {
         // ignore
       }
     };
-    loadLevies();
-  }, [propertyId, user?.companyId]);
+    if (tabValue === 2 && !leviesLoaded) {
+      loadLevies();
+    }
+  }, [tabValue, leviesLoaded, propertyId, user?.companyId]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -425,10 +403,24 @@ const PropertyAccountDetailPage: React.FC = () => {
       const propertyAddress = property?.address || 'Property Address Not Available';
       const ownerName = ownerMap[propertyId!] || account?.ownerName || 'Unknown Owner';
       
-      // Filter transactions based on date range or include all
-      let filteredTransactions = transactions;
+      // Deduplicate base transactions (by type + paymentId) then filter by date range
+      const baseDeduped = (() => {
+        const seen = new Set<string>();
+        const result: typeof transactions = [];
+        for (const t of transactions) {
+          const paymentId = (t as any)?.paymentId ? String((t as any).paymentId) : '';
+          const key = paymentId
+            ? `${t.type}:${paymentId}`
+            : `${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          result.push(t);
+        }
+        return result;
+      })();
+      let filteredTransactions = baseDeduped;
       if (!statementData.includeAllTransactions) {
-        filteredTransactions = transactions.filter(transaction => {
+        filteredTransactions = baseDeduped.filter(transaction => {
           const transactionDate = new Date(transaction.date);
           return transactionDate >= statementData.startDate && transactionDate <= statementData.endDate;
         });
@@ -681,6 +673,24 @@ const PropertyAccountDetailPage: React.FC = () => {
     }
   };
 
+  // Prepare transactions and stable, deduplicated view BEFORE any early returns
+  const baseTransactions = Array.isArray(account?.transactions) ? account!.transactions : [];
+  const { transactions, finalBalance } = propertyAccountService.calculateRunningBalance(baseTransactions);
+  const uniqueTransactions: Transaction[] = React.useMemo(() => {
+    const seen = new Set<string>();
+    const result: Transaction[] = [];
+    for (const t of transactions) {
+      const paymentId = (t as any)?.paymentId ? String((t as any).paymentId) : '';
+      const key = paymentId
+        ? `${t.type}:${paymentId}`
+        : `${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(t);
+    }
+    return result;
+  }, [transactions]);
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -706,8 +716,6 @@ const PropertyAccountDetailPage: React.FC = () => {
       </Box>
     );
   }
-
-  const { transactions, finalBalance } = propertyAccountService.calculateRunningBalance(account.transactions);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -896,8 +904,8 @@ const PropertyAccountDetailPage: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {transactions.map((transaction, index) => (
-                <TableRow key={index}>
+              {uniqueTransactions.map((transaction, index) => (
+                <TableRow key={String((transaction as any)?._id || (transaction as any)?.paymentId || index)}>
                   <TableCell>{new Date(transaction.date).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <Chip

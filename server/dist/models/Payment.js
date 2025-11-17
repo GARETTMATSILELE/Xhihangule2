@@ -287,4 +287,45 @@ PaymentSchema.index({ companyId: 1, referenceNumber: 1 }, {
         referenceNumber: { $exists: true, $type: 'string', $ne: '' }
     }
 });
+// Prevent history-changing bulk updates on core fields; use document.save() with workflows instead
+function isIllegalPaymentUpdate(update) {
+    const setOps = ['$set', '$unset'];
+    const protectedKeys = new Set([
+        'amount', 'paymentDate', 'paymentMethod', 'propertyId', 'tenantId', 'agentId', 'companyId',
+        'referenceNumber', 'currency', 'rentalPeriodMonth', 'rentalPeriodYear', 'advanceMonthsPaid',
+        'advancePeriodStart', 'advancePeriodEnd', 'processedBy', 'recipientId', 'recipientType', 'reason'
+    ]);
+    for (const op of setOps) {
+        const payload = update[op];
+        if (!payload || typeof payload !== 'object')
+            continue;
+        for (const key of Object.keys(payload)) {
+            // Allow operational flags and enrichment fields
+            if (key.startsWith('commissionDetails'))
+                continue;
+            if ([
+                'status', 'isProvisional', 'isInSuspense', 'commissionFinalized', 'provisionalRelationshipType',
+                'finalizedAt', 'finalizedBy', 'idempotencyKey', 'manualPropertyAddress', 'manualTenantName',
+                'buyerName', 'sellerName', 'saleId', 'developmentId', 'developmentUnitId', 'notes'
+            ].includes(key))
+                continue;
+            if (protectedKeys.has(key))
+                return true;
+        }
+    }
+    return false;
+}
+PaymentSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
+    var _a, _b;
+    try {
+        const update = ((_b = (_a = this).getUpdate) === null || _b === void 0 ? void 0 : _b.call(_a)) || {};
+        if (isIllegalPaymentUpdate(update)) {
+            return next(new Error('Payment records are immutable. Create a correcting payment instead of editing core fields.'));
+        }
+        return next();
+    }
+    catch (e) {
+        return next(e);
+    }
+});
 exports.Payment = mongoose_1.default.model('Payment', PaymentSchema, collections_1.COLLECTIONS.PAYMENTS);

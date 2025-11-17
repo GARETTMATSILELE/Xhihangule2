@@ -32,6 +32,15 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AgentAccount = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
@@ -185,4 +194,73 @@ agentAccountSchema.index({ agentId: 1, 'transactions.type': 1, 'transactions.ref
         'transactions.reference': { $exists: true, $type: 'string', $ne: '' }
     }
 });
+// Prevent duplicate paymentId-backed entries per agent (commission lane)
+agentAccountSchema.index({ agentId: 1, 'transactions.paymentId': 1, 'transactions.type': 1 }, {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+        'transactions.type': 'commission',
+        'transactions.paymentId': { $exists: true }
+    }
+});
+// Immutability guard for update operations
+function isIllegalAgentLedgerMutation(update) {
+    const illegalSetters = ['$set', '$unset', '$inc'];
+    const illegalRemovers = ['$pull', '$pullAll', '$pop'];
+    const allowedAppends = ['$push', '$addToSet'];
+    const rootArrays = ['transactions', 'agentPayouts'];
+    const startsWithAny = (k) => rootArrays.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
+    for (const op of illegalSetters) {
+        const payload = update[op];
+        if (!payload)
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (startsWithAny(path))
+                return true;
+        }
+    }
+    for (const op of illegalRemovers) {
+        const payload = update[op];
+        if (!payload)
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (startsWithAny(path))
+                return true;
+        }
+    }
+    for (const op of allowedAppends) {
+        const payload = update[op];
+        if (!payload)
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (!rootArrays.includes(path))
+                return true;
+        }
+    }
+    return false;
+}
+agentAccountSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
+    var _a, _b;
+    try {
+        const update = ((_b = (_a = this).getUpdate) === null || _b === void 0 ? void 0 : _b.call(_a)) || {};
+        if (isIllegalAgentLedgerMutation(update)) {
+            return next(new Error('AgentAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
+        }
+        return next();
+    }
+    catch (e) {
+        return next(e);
+    }
+});
+// Prevent deletion of agent ledgers that contain any history
+function guardAgentAccountDeletion(next) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Tight policy: agent account ledgers are never deletable
+        return next(new Error('Deletion of AgentAccount ledgers is disabled. Ledgers are permanent.'));
+    });
+}
+agentAccountSchema.pre('deleteOne', { document: true, query: false }, guardAgentAccountDeletion);
+agentAccountSchema.pre('deleteOne', guardAgentAccountDeletion);
+agentAccountSchema.pre('deleteMany', guardAgentAccountDeletion);
+agentAccountSchema.pre('findOneAndDelete', guardAgentAccountDeletion);
 exports.AgentAccount = mongoose_1.default.model('AgentAccount', agentAccountSchema, collections_1.COLLECTIONS.AGENT_ACCOUNTS);

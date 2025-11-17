@@ -470,56 +470,50 @@ export class DatabaseSyncService extends EventEmitter {
    */
   private async syncPaymentToAccounting(payment: any): Promise<void> {
     try {
-      // Post owner income to property ledger using unified service (handles rentals and sales)
-      try {
-        await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
-      } catch (postErr) {
-        // Enqueue event for retry and bubble up for failure recording
-        try { await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString()); } catch {}
-        throw postErr;
-      }
-      this.recordSyncSuccess();
-
-      // Record agency commission into company account as revenue
+      // Record agency commission into company account as revenue (idempotent, race-safe)
       const { CompanyAccount } = await import('../models/CompanyAccount');
       if (payment.companyId && payment.commissionDetails?.agencyShare) {
         const companyId = payment.companyId;
-        let companyAccount = await CompanyAccount.findOne({ companyId });
-        if (!companyAccount) {
-          companyAccount = new CompanyAccount({ companyId, transactions: [], runningBalance: 0, totalIncome: 0, totalExpenses: 0 });
-        }
-
-        const alreadyLogged = companyAccount.transactions.some((t: any) => t.paymentId?.toString() === payment._id.toString() && t.type === 'income');
-        if (!alreadyLogged) {
+        // Determine correct source label based on payment type
+        const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
           const agencyShare = payment.commissionDetails.agencyShare;
-          const source = payment.paymentType === 'introduction' ? 'sales_commission' : 'rental_commission';
-          companyAccount.transactions.push({
+        const txDoc = {
             type: 'income',
-            source,
+            source: desiredSource,
             amount: agencyShare,
             date: payment.paymentDate || new Date(),
             currency: payment.currency || 'USD',
             paymentMethod: payment.paymentMethod,
             paymentId: payment._id,
             referenceNumber: payment.referenceNumber,
-            description: source === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+            description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
             processedBy: payment.processedBy,
             notes: payment.notes
-          });
-          companyAccount.totalIncome += agencyShare;
-          companyAccount.runningBalance += agencyShare;
-          companyAccount.lastUpdated = new Date();
+        };
           await this.db.executeWithRetry(async () => {
-            await companyAccount.save();
+          // 1) Ensure base account exists (idempotent)
+          await CompanyAccount.updateOne(
+            { companyId },
+            { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } },
+            { upsert: true }
+          );
+          // 2) Append commission transaction only if not already present; do NOT upsert here to avoid duplicate docs
+          const res = await CompanyAccount.updateOne(
+            { companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id } } } },
+            {
+              $push: { transactions: txDoc },
+              $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
+              $set: { lastUpdated: new Date() }
+            }
+          );
+          // If already present (matchedCount === 0), treat as success (idempotent)
           });
           logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
-        }
       }
+      this.recordSyncSuccess();
 
     } catch (error) {
       logger.error(`Failed to sync payment ${payment._id}:`, error);
-      // Also ensure an event exists for retry
-      try { await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString()); } catch {}
       throw error;
     }
   }

@@ -12,9 +12,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAcknowledgementDocument = exports.syncAgentCommissions = exports.syncAgentAccounts = exports.updatePayoutStatus = exports.createAgentPayout = exports.addPenalty = exports.getCompanyAgentAccounts = exports.getAgentAccount = exports.compareAgentCommissionTotals = void 0;
+exports.getAcknowledgementDocument = exports.syncAgentCommissions = exports.syncAgentAccounts = exports.updatePayoutStatus = exports.createAgentPayout = exports.addPenalty = exports.getCompanyAgentAccounts = exports.getAgentAccount = exports.getTopAgentsForMonth = exports.compareAgentCommissionTotals = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = require("../models/User");
+const AgentAccount_1 = require("../models/AgentAccount");
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
@@ -97,6 +98,110 @@ const compareAgentCommissionTotals = (req, res) => __awaiter(void 0, void 0, voi
     }
 });
 exports.compareAgentCommissionTotals = compareAgentCommissionTotals;
+/**
+ * Get top agents by income (commission) for a given month/year
+ * Source of truth: agentaccounts.transactions (type: 'commission', status: 'completed')
+ * Classification: user role -> 'sales' vs 'agent' (treated as 'rental')
+ */
+const getTopAgentsForMonth = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company ID not found', 404);
+        }
+        const year = Number(req.query.year) || new Date().getFullYear();
+        const month = Number(req.query.month) || (new Date().getMonth() + 1); // 1-12
+        if (month < 1 || month > 12) {
+            return res.status(400).json({ success: false, message: 'Invalid month. Use 1-12.' });
+        }
+        const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+        const end = new Date(year, month, 0, 23, 59, 59, 999);
+        // Fetch agents in company (role or roles include agent/sales)
+        const users = yield User_1.User.find({
+            companyId: new mongoose_1.default.Types.ObjectId(companyId),
+            $or: [
+                { role: { $in: ['agent', 'sales'] } },
+                { roles: { $in: ['agent', 'sales'] } }
+            ]
+        }).select('_id firstName lastName email role roles').lean();
+        const userById = Object.create(null);
+        const agentIds = users.map(u => {
+            const id = String(u._id);
+            userById[id] = u;
+            return new mongoose_1.default.Types.ObjectId(id);
+        });
+        if (agentIds.length === 0) {
+            return res.json({
+                success: true,
+                data: { year, month, sales: [], rental: [], topSales: null, topRental: null }
+            });
+        }
+        // Aggregate commissions per agent for month range
+        const agg = yield AgentAccount_1.AgentAccount.aggregate([
+            { $match: { agentId: { $in: agentIds } } },
+            { $unwind: '$transactions' },
+            {
+                $match: {
+                    'transactions.type': 'commission',
+                    'transactions.status': 'completed',
+                    'transactions.date': { $gte: start, $lte: end }
+                }
+            },
+            {
+                $group: {
+                    _id: '$agentId',
+                    total: { $sum: '$transactions.amount' }
+                }
+            },
+            { $sort: { total: -1 } }
+        ]);
+        // Shape results and split by role
+        const sales = [];
+        const rental = [];
+        for (const row of agg) {
+            const agentId = String(row._id);
+            const u = userById[agentId];
+            if (!u)
+                continue;
+            const roles = Array.isArray(u.roles) && u.roles.length ? u.roles.map((r) => String(r)) : [String(u.role || 'agent')];
+            const isSales = roles.includes('sales');
+            const displayName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || agentId;
+            const payload = { agentId, name: displayName, email: u.email, role: isSales ? 'sales' : 'agent', total: Number(row.total || 0) };
+            if (isSales)
+                sales.push(payload);
+            else
+                rental.push(payload);
+        }
+        const topSales = sales[0] || null;
+        const topRental = rental[0] || null;
+        res.json({
+            success: true,
+            data: {
+                year,
+                month,
+                sales,
+                rental,
+                topSales,
+                topRental
+            }
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in getTopAgentsForMonth:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.getTopAgentsForMonth = getTopAgentsForMonth;
 /**
  * Get agent account with summary
  */

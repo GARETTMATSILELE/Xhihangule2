@@ -227,7 +227,7 @@ export class PropertyAccountService {
   /**
    * Recalculate balance for an existing account
    */
-  private async recalculateBalance(account: IPropertyAccount): Promise<void> {
+  async recalculateBalance(account: IPropertyAccount): Promise<void> {
     // Calculate totals from transactions
     const totalIncome = account.transactions
       .filter(t => t.type === 'income' && t.status === 'completed')
@@ -348,9 +348,20 @@ export class PropertyAccountService {
         createdAt: new Date(),
         updatedAt: new Date()
       };
-
-      account.transactions.push(incomeTransaction);
-      await account.save();
+      // Strong idempotency and race-safety:
+      // Atomically push iff this paymentId does not already exist for this account
+      await PropertyAccount.updateOne(
+        { _id: (account as any)._id, 'transactions.paymentId': { $ne: new mongoose.Types.ObjectId(paymentId) } },
+        {
+          $push: { transactions: incomeTransaction },
+          $set: { lastUpdated: new Date() }
+        }
+      );
+      // Recalculate on the latest view to keep totals/running balance consistent
+      const fresh = await PropertyAccount.findById((account as any)._id) as any;
+      if (fresh) {
+        await this.recalculateBalance(fresh as any);
+      }
 
       logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
     } catch (error) {
@@ -805,4 +816,43 @@ export async function migrateSalesLedgerForCompany(
 ): Promise<{ moved: number; propertiesAffected: number }> {
   const service = PropertyAccountService.getInstance();
   return service.migrateSalesLedgerForCompany(companyPropertyIds);
+}
+
+// One-off maintenance: remove duplicate income transactions per (type,paymentId) for a given property ledger
+export async function reconcilePropertyLedgerDuplicates(
+  propertyId: string,
+  ledgerType?: 'rental' | 'sale'
+): Promise<{ removed: number; kept: number; accountId?: string }> {
+  const service = PropertyAccountService.getInstance();
+  const account = await service.getPropertyAccount(propertyId, ledgerType);
+  const tx = Array.isArray(account.transactions) ? account.transactions : [];
+  const byKey: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
+  for (const t of tx) {
+    const pid = (t as any)?.paymentId ? String((t as any).paymentId) : '';
+    if (!pid) continue; // only dedupe entries that reference a payment
+    const key = `${t.type}:${pid}`;
+    if (!byKey[key]) byKey[key] = [];
+    byKey[key].push({ _id: (t as any)._id, date: new Date(t.date) });
+  }
+  const toRemove: any[] = [];
+  let kept = 0;
+  for (const key of Object.keys(byKey)) {
+    const list = byKey[key];
+    if (list.length <= 1) { kept += list.length; continue; }
+    // Keep the earliest by date, remove the rest
+    const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
+    kept += 1;
+    toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+  }
+  if (toRemove.length > 0) {
+    await PropertyAccount.updateOne(
+      { _id: account._id },
+      { $pull: { transactions: { _id: { $in: toRemove } } } }
+    );
+    const fresh = await PropertyAccount.findById(account._id);
+    if (fresh) {
+      await service.recalculateBalance(fresh as any);
+    }
+  }
+  return { removed: toRemove.length, kept, accountId: String(account._id) };
 }

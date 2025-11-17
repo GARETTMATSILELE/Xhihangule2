@@ -112,6 +112,11 @@ userSchema.add({
     commission: { type: Number, default: 0, min: 0 },
     balance: { type: Number, default: 0 }
 });
+// Avatar fields (stored as base64 + mimetype)
+userSchema.add({
+    avatar: { type: String, required: false },
+    avatarMimeType: { type: String, required: false }
+});
 // Hash password before saving
 userSchema.pre('save', function (next) {
     return __awaiter(this, void 0, void 0, function* () {

@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PropertyAccountService = void 0;
 exports.migrateSalesLedgerForCompany = migrateSalesLedgerForCompany;
+exports.reconcilePropertyLedgerDuplicates = reconcilePropertyLedgerDuplicates;
 const mongoose_1 = __importDefault(require("mongoose"));
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const Payment_1 = require("../models/Payment");
@@ -349,8 +350,17 @@ class PropertyAccountService {
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
-                account.transactions.push(incomeTransaction);
-                yield account.save();
+                // Strong idempotency and race-safety:
+                // Atomically push iff this paymentId does not already exist for this account
+                yield PropertyAccount_1.default.updateOne({ _id: account._id, 'transactions.paymentId': { $ne: new mongoose_1.default.Types.ObjectId(paymentId) } }, {
+                    $push: { transactions: incomeTransaction },
+                    $set: { lastUpdated: new Date() }
+                });
+                // Recalculate on the latest view to keep totals/running balance consistent
+                const fresh = yield PropertyAccount_1.default.findById(account._id);
+                if (fresh) {
+                    yield this.recalculateBalance(fresh);
+                }
                 logger_1.logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
             }
             catch (error) {
@@ -743,5 +753,44 @@ function migrateSalesLedgerForCompany(companyPropertyIds) {
     return __awaiter(this, void 0, void 0, function* () {
         const service = PropertyAccountService.getInstance();
         return service.migrateSalesLedgerForCompany(companyPropertyIds);
+    });
+}
+// One-off maintenance: remove duplicate income transactions per (type,paymentId) for a given property ledger
+function reconcilePropertyLedgerDuplicates(propertyId, ledgerType) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const service = PropertyAccountService.getInstance();
+        const account = yield service.getPropertyAccount(propertyId, ledgerType);
+        const tx = Array.isArray(account.transactions) ? account.transactions : [];
+        const byKey = Object.create(null);
+        for (const t of tx) {
+            const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+            if (!pid)
+                continue; // only dedupe entries that reference a payment
+            const key = `${t.type}:${pid}`;
+            if (!byKey[key])
+                byKey[key] = [];
+            byKey[key].push({ _id: t._id, date: new Date(t.date) });
+        }
+        const toRemove = [];
+        let kept = 0;
+        for (const key of Object.keys(byKey)) {
+            const list = byKey[key];
+            if (list.length <= 1) {
+                kept += list.length;
+                continue;
+            }
+            // Keep the earliest by date, remove the rest
+            const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
+            kept += 1;
+            toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+        }
+        if (toRemove.length > 0) {
+            yield PropertyAccount_1.default.updateOne({ _id: account._id }, { $pull: { transactions: { _id: { $in: toRemove } } } });
+            const fresh = yield PropertyAccount_1.default.findById(account._id);
+            if (fresh) {
+                yield service.recalculateBalance(fresh);
+            }
+        }
+        return { removed: toRemove.length, kept, accountId: String(account._id) };
     });
 }

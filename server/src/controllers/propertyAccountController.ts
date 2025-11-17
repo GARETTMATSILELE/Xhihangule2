@@ -5,6 +5,7 @@ import { User } from '../models/User';
 import propertyAccountService from '../services/propertyAccountService';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { reconcilePropertyLedgerDuplicates } from '../services/propertyAccountService';
 
 /**
  * Get property account with summary
@@ -366,6 +367,27 @@ export const getPayoutHistory = async (req: Request, res: Response) => {
       success: false,
       message: 'Internal server error'
     });
+  }
+};
+
+/**
+ * Reconcile and remove duplicate income transactions for a property ledger
+ */
+export const reconcilePropertyDuplicates = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+    const result = await reconcilePropertyLedgerDuplicates(propertyId, ledger as any);
+    return res.json({ success: true, message: 'Reconciliation completed', data: result });
+  } catch (error) {
+    logger.error('Error in reconcilePropertyDuplicates:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 

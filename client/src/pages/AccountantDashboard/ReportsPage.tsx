@@ -4,41 +4,9 @@ import paymentService from '../../services/paymentService';
 import { Payment } from '../../types/payment';
 import { propertyAccountService } from '../../services/propertyAccountService';
 import companyAccountService, { CompanyAccountSummary } from '../../services/companyAccountService';
+import { agentAccountService } from '../../services/agentAccountService';
 
-// Sample data and helpers (no backend wiring yet)
-const SAMPLE_DATA = {
-  revenue: [
-    { date: '2025-01-01', management: 1200, sales: 800 },
-    { date: '2025-02-01', management: 1500, sales: 950 },
-    { date: '2025-03-01', management: 1700, sales: 1200 },
-    { date: '2025-04-01', management: 1400, sales: 900 },
-    { date: '2025-05-01', management: 2100, sales: 1600 },
-    { date: '2025-06-01', management: 1800, sales: 700 },
-    { date: '2025-07-01', management: 2000, sales: 2200 },
-    { date: '2025-08-01', management: 2300, sales: 1500 },
-    { date: '2025-09-01', management: 2500, sales: 2700 }
-  ],
-  transactions: [
-    { id: 'T-1001', date: '2025-09-10', type: 'Management Commission', agent: 'Audrey M.', amount: 500, property: '14 Baker St' },
-    { id: 'T-1002', date: '2025-09-09', type: 'Sales Commission', agent: 'Garett M.', amount: 1500, property: 'Unit 4, Hillside' },
-    { id: 'T-1003', date: '2025-08-30', type: 'Management Commission', agent: 'Audrey M.', amount: 350, property: '3 Rose Ave' },
-    { id: 'T-1004', date: '2025-08-20', type: 'Sales Commission', agent: 'Mandla P.', amount: 2000, property: 'Plot 22' },
-    { id: 'T-1005', date: '2025-07-11', type: 'Management Commission', agent: 'Zoe K.', amount: 420, property: 'Block C, Mews' }
-  ],
-  agents: [
-    { name: 'Audrey M.', total: 8050 },
-    { name: 'Garett M.', total: 6200 },
-    { name: 'Mandla P.', total: 5100 }
-  ],
-  agentsSales: [
-    { name: 'Garett M.', total: 6200 },
-    { name: 'Mandla P.', total: 5100 }
-  ],
-  agentsRental: [
-    { name: 'Audrey M.', total: 8050 },
-    { name: 'Zoe K.', total: 4300 }
-  ]
-};
+// helpers
 
 const COLORS = ['#4F46E5', '#06B6D4'];
 
@@ -68,6 +36,37 @@ const ReportsPage: React.FC = () => {
   const [saleAgentId, setSaleAgentId] = useState<string>('all');
   const [buyerFilter, setBuyerFilter] = useState<string>('');
   const [sellerFilter, setSellerFilter] = useState<string>('');
+
+  // Top Agents card: independent month/year filters and data
+  const [topYear, setTopYear] = useState<number>(now.getFullYear());
+  const [topMonth, setTopMonth] = useState<number>(now.getMonth() + 1); // 1-12
+  const [topAgentsLoading, setTopAgentsLoading] = useState<boolean>(false);
+  const [topAgentsError, setTopAgentsError] = useState<string | null>(null);
+  const [topAgentsData, setTopAgentsData] = useState<{
+    year: number;
+    month: number;
+    sales: Array<{ agentId: string; name: string; email?: string; role: string; total: number }>;
+    rental: Array<{ agentId: string; name: string; email?: string; role: string; total: number }>;
+    topSales: { agentId: string; name: string; email?: string; role: string; total: number } | null;
+    topRental: { agentId: string; name: string; email?: string; role: string; total: number } | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setTopAgentsLoading(true);
+        setTopAgentsError(null);
+        const data = await agentAccountService.getTopAgents(topYear, topMonth);
+        if (!cancelled) setTopAgentsData(data);
+      } catch (e: any) {
+        if (!cancelled) setTopAgentsError(e?.message || 'Failed to load top agents');
+      } finally {
+        if (!cancelled) setTopAgentsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [topYear, topMonth]);
 
   // Helpers: use rental period month/year for rentals, payment date for others
   function getEffectiveDateForFilter(p: any): Date {
@@ -169,7 +168,7 @@ const ReportsPage: React.FC = () => {
     return { salesArr, rentalArr, topSales: salesArr[0], topRental: rentalArr[0] };
   }, [payments, from, to]);
 
-  // Derived data
+  // Derived data (from company accounts transactions; uses source to classify)
   const filteredRevenue = useMemo(() => {
     const start = new Date(from);
     const end = new Date(to);
@@ -177,23 +176,30 @@ const ReportsPage: React.FC = () => {
     const startMs = start.getTime();
     const endMs = end.getTime();
     const map = new Map<string, { date: string; management: number; sales: number }>();
-    (payments || []).forEach(p => {
-      const t = getEffectiveDateForFilter(p).getTime();
-      if (t < startMs || t > endMs) return;
-      const d = getEffectiveDateForFilter(p);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
-      const cur = map.get(key) || { date: key, management: 0, sales: 0 };
-      const agencyShare = Number((p as any).commissionDetails?.agencyShare) || 0;
-      if (p.paymentType === 'sale') {
-        cur.sales += agencyShare;
-      } else if (p.paymentType === 'rental') {
-        cur.management += agencyShare;
-      }
-      map.set(key, cur);
+    const txs = Array.isArray(companyTransactions) ? companyTransactions : [];
+    txs.forEach((t: any) => {
+      try {
+        const d = new Date(t.date || t.postedAt || t.createdAt || t.updatedAt || Date.now());
+        const ts = d.getTime();
+        if (ts < startMs || ts > endMs) return;
+        if (String(t.type) !== 'income') return;
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+        const cur = map.get(key) || { date: key, management: 0, sales: 0 };
+        const amount = Number(t.amount || 0);
+        const source = String(t.source || '').toLowerCase();
+        if (source === 'sales_commission') {
+          cur.sales += amount;
+        } else if (source === 'rental_commission') {
+          cur.management += amount;
+        } else {
+          // ignore 'other' for split; counted neither as management nor sales
+        }
+        map.set(key, cur);
+      } catch {}
     });
     const arr = Array.from(map.values()).sort((a,b)=> new Date(a.date).getTime()-new Date(b.date).getTime());
     return arr.map(r => ({ ...r, total: r.management + r.sales }));
-  }, [payments, from, to]);
+  }, [companyTransactions, from, to]);
 
   const totalManagement = useMemo(() => filteredRevenue.reduce((s, r: any) => s + r.management, 0), [filteredRevenue]);
   const totalSales = useMemo(() => filteredRevenue.reduce((s, r: any) => s + r.sales, 0), [filteredRevenue]);
@@ -227,7 +233,7 @@ const ReportsPage: React.FC = () => {
 
   const balance = useMemo(() => (totalManagement + totalSales) - expensesForPeriod, [totalManagement, totalSales, expensesForPeriod]);
 
-  // Align revenue split with dashboard cards: use agencyShare (company share)
+  // Revenue split from company transactions by source
   const agencyRevenue = useMemo(() => {
     const start = new Date(from);
     const end = new Date(to);
@@ -236,15 +242,21 @@ const ReportsPage: React.FC = () => {
     const endMs = end.getTime();
     let rental = 0;
     let sales = 0;
-    (payments || []).forEach((p) => {
-      const t = getEffectiveDateForFilter(p).getTime();
-      if (t < startMs || t > endMs) return;
-      const agencyShare = Number((p as any).commissionDetails?.agencyShare) || 0;
-      if (p.paymentType === 'sale') sales += agencyShare;
-      else if (p.paymentType === 'rental') rental += agencyShare;
+    const txs = Array.isArray(companyTransactions) ? companyTransactions : [];
+    txs.forEach((t: any) => {
+      try {
+        const d = new Date(t.date || t.postedAt || t.createdAt || t.updatedAt || Date.now());
+        const ts = d.getTime();
+        if (ts < startMs || ts > endMs) return;
+        if (String(t.type) !== 'income') return;
+        const amount = Number(t.amount || 0);
+        const source = String(t.source || '').toLowerCase();
+        if (source === 'sales_commission') sales += amount;
+        else if (source === 'rental_commission') rental += amount;
+      } catch {}
     });
     return { rental, sales };
-  }, [payments, from, to]);
+  }, [companyTransactions, from, to]);
 
   const filteredTransactions = useMemo(() => {
     const start = new Date(from);
@@ -631,13 +643,39 @@ const ReportsPage: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         {/* Top Agents moved here to replace the former Revenue over time chart */}
         <div className="col-span-2 bg-white p-4 rounded-2xl shadow">
-          <h2 className="text-lg font-semibold mb-2">Top Agents</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-semibold">Top Agents</h2>
+            <div className="flex items-center gap-2">
+              <select
+                className="border rounded-md px-2 py-1 text-sm"
+                value={topMonth}
+                onChange={(e) => setTopMonth(Number(e.target.value))}
+              >
+                {[
+                  { v: 1, l: 'Jan' }, { v: 2, l: 'Feb' }, { v: 3, l: 'Mar' }, { v: 4, l: 'Apr' },
+                  { v: 5, l: 'May' }, { v: 6, l: 'Jun' }, { v: 7, l: 'Jul' }, { v: 8, l: 'Aug' },
+                  { v: 9, l: 'Sep' }, { v: 10, l: 'Oct' }, { v: 11, l: 'Nov' }, { v: 12, l: 'Dec' }
+                ].map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+              </select>
+              <select
+                className="border rounded-md px-2 py-1 text-sm"
+                value={topYear}
+                onChange={(e) => setTopYear(Number(e.target.value))}
+              >
+                {Array.from({ length: 10 }).map((_, i) => {
+                  const y = new Date().getFullYear() - i;
+                  return <option key={y} value={y}>{y}</option>;
+                })}
+              </select>
+            </div>
+          </div>
+          {topAgentsError && <div className="text-sm text-red-600 mb-2">{topAgentsError}</div>}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h3 className="text-sm font-medium mb-2">Sales Agents</h3>
               <ul className="divide-y">
-                {(agentsAgg.salesArr?.length ? agentsAgg.salesArr : SAMPLE_DATA.agentsSales).slice(0,5).map((agent: any) => (
-                  <li key={agent.name} className="py-3">
+                {(topAgentsData?.sales ?? []).slice(0,5).map((agent: any) => (
+                  <li key={agent.agentId || agent.name} className="py-3">
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium">{agent.name}</div>
@@ -647,13 +685,16 @@ const ReportsPage: React.FC = () => {
                     </div>
                   </li>
                 ))}
+                {(!topAgentsData || (topAgentsData.sales || []).length === 0) && (
+                  <li className="py-3 text-sm text-slate-500">No sales data for the selected month.</li>
+                )}
               </ul>
             </div>
             <div>
               <h3 className="text-sm font-medium mb-2">Rental Agents</h3>
               <ul className="divide-y">
-                {(agentsAgg.rentalArr?.length ? agentsAgg.rentalArr : SAMPLE_DATA.agentsRental).slice(0,5).map((agent: any) => (
-                  <li key={agent.name} className="py-3">
+                {(topAgentsData?.rental ?? []).slice(0,5).map((agent: any) => (
+                  <li key={agent.agentId || agent.name} className="py-3">
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-medium">{agent.name}</div>
@@ -663,9 +704,13 @@ const ReportsPage: React.FC = () => {
                     </div>
                   </li>
                 ))}
+                {(!topAgentsData || (topAgentsData.rental || []).length === 0) && (
+                  <li className="py-3 text-sm text-slate-500">No rental data for the selected month.</li>
+                )}
               </ul>
             </div>
           </div>
+          {topAgentsLoading && <div className="text-xs text-slate-500 mt-3">Loading top agents…</div>}
         </div>
 
         <div className="bg-white p-4 rounded-2xl shadow">

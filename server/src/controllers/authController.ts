@@ -505,7 +505,11 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
         isActive: user.isActive,
         lastLogin: user.lastLogin,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt
+        updatedAt: user.updatedAt,
+        // Provide avatar as a data URL if present
+        ...(user as any).avatar ? {
+          avatarUrl: `data:${(user as any).avatarMimeType || 'image/png'};base64,${(user as any).avatar}`
+        } : {}
       },
       company
     });

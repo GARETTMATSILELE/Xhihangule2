@@ -42,20 +42,13 @@ router.get('/me', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, f
             });
         }
         const { user, type } = userResult;
-        // Return the structure the client expects
+        // Build avatar URL if present (only for app users, not property owners)
+        const avatarUrl = (type === 'user' && (user === null || user === void 0 ? void 0 : user.avatar))
+            ? `data:${user.avatarMimeType || 'image/png'};base64,${user.avatar}`
+            : undefined;
+        // Return the structure the client expects (include avatarUrl when present)
         res.json({
-            user: {
-                _id: user._id,
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                role: type === 'user' ? user.role : 'owner',
-                companyId: user.companyId,
-                isActive: type === 'user' ? user.isActive : true,
-                lastLogin: type === 'user' ? user.lastLogin : undefined,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt
-            }
+            user: Object.assign({ _id: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName, role: type === 'user' ? user.role : 'owner', companyId: user.companyId, isActive: type === 'user' ? user.isActive : true, lastLogin: type === 'user' ? user.lastLogin : undefined, createdAt: user.createdAt, updatedAt: user.updatedAt }, (avatarUrl ? { avatarUrl } : {}))
         });
     }
     catch (error) {
@@ -102,20 +95,13 @@ router.post('/login', (req, res) => __awaiter(void 0, void 0, void 0, function* 
             path: '/',
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
-        // Return the structure the client expects: { user, company, token, refreshToken }
+        // Build avatar URL if present
+        const avatarUrl = (fullUser === null || fullUser === void 0 ? void 0 : fullUser.avatar)
+            ? `data:${fullUser.avatarMimeType || 'image/png'};base64,${fullUser.avatar}`
+            : undefined;
+        // Return the structure the client expects: { user, company, token, refreshToken } (include avatarUrl)
         res.json({
-            user: {
-                _id: fullUser._id,
-                email: fullUser.email,
-                firstName: fullUser.firstName,
-                lastName: fullUser.lastName,
-                role: type === 'user' ? fullUser.role : 'owner',
-                companyId: (_a = fullUser.companyId) === null || _a === void 0 ? void 0 : _a.toString(),
-                isActive: type === 'user' ? fullUser.isActive : true,
-                lastLogin: type === 'user' ? fullUser.lastLogin : undefined,
-                createdAt: fullUser.createdAt,
-                updatedAt: fullUser.updatedAt
-            },
+            user: Object.assign({ _id: fullUser._id, email: fullUser.email, firstName: fullUser.firstName, lastName: fullUser.lastName, role: type === 'user' ? fullUser.role : 'owner', companyId: (_a = fullUser.companyId) === null || _a === void 0 ? void 0 : _a.toString(), isActive: type === 'user' ? fullUser.isActive : true, lastLogin: type === 'user' ? fullUser.lastLogin : undefined, createdAt: fullUser.createdAt, updatedAt: fullUser.updatedAt }, (avatarUrl ? { avatarUrl } : {})),
             company: company,
             token: result.token,
             refreshToken: result.refreshToken

@@ -31,6 +31,7 @@ import {
   syncPropertyAccounts,
   getPaymentRequestDocument,
   getAcknowledgementDocument,
+  reconcilePropertyDuplicates,
   getCompanyPropertyAccounts
 } from '../controllers/propertyAccountController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
@@ -46,7 +47,8 @@ import {
   updatePayoutStatus as updateAgentPayoutStatus,
   syncAgentAccounts,
   syncAgentCommissions,
-  getAcknowledgementDocument as getAgentAcknowledgementDocument
+  getAcknowledgementDocument as getAgentAcknowledgementDocument,
+  getTopAgentsForMonth
 } from '../controllers/agentAccountController';
 import AgentAccountService from '../services/agentAccountService';
 import { compareAgentCommissionTotals } from '../controllers/agentAccountController';
@@ -164,6 +166,8 @@ router.post('/property-accounts/:propertyId/payout', canViewCommissions, createO
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', canViewCommissions, updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', canViewCommissions, getPayoutHistory);
 router.post('/property-accounts/sync', canViewCommissions, syncPropertyAccounts);
+// Maintenance: remove duplicate income transactions for a property ledger (idempotent)
+router.post('/property-accounts/:propertyId/reconcile-duplicates', canViewCommissions, reconcilePropertyDuplicates);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', canViewCommissions, getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', canViewCommissions, getAcknowledgementDocument);
 
@@ -180,6 +184,7 @@ router.get('/sales/:id', isAccountant, getSalesContract);
 // Agent Account routes - require accountant role
 router.get('/agent-accounts', isAccountant, getCompanyAgentAccounts);
 router.get('/agent-accounts/commission-compare', isAccountant, compareAgentCommissionTotals);
+router.get('/agent-accounts/top-agents', isAccountant, getTopAgentsForMonth);
 router.get('/agent-accounts/:agentId', isAccountant, (req, res) => {
   console.log('Agent account detail route hit:', req.params.agentId);
   console.log('User role:', req.user?.role);

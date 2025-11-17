@@ -176,6 +176,15 @@ export const apiService = {
   updateTwoFactor: (enabled: boolean) => 
     apiInstance.put('/users/me/2fa', { enabled }),
 
+  // User avatar upload
+  uploadUserAvatar: (formData: FormData) => {
+    return apiInstance.post('/users/me/avatar', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+  },
+
   // Impersonation
   impersonateUser: (userId: string) => apiInstance.post('/auth/impersonate', { userId }),
 

@@ -1,6 +1,12 @@
 import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
 
+/**
+ * SECURITY NOTE
+ *  - Company account transactions form an immutable ledger.
+ *  - We forbid any in-place edits/removals of existing items.
+ *  - Only appends to the transactions array are allowed.
+ */
 export type CompanyTransactionType = 'income' | 'expense';
 export type CompanyIncomeSource = 'rental_commission' | 'sales_commission' | 'other';
 export type CompanyPaymentMethod = 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money' | 'other';
@@ -57,6 +63,52 @@ const CompanyAccountSchema = new Schema<ICompanyAccount>({
 }, { timestamps: true });
 
 CompanyAccountSchema.index({ companyId: 1, 'transactions.date': -1 });
+// Prevent double-posting the same payment into company ledger
+CompanyAccountSchema.index({ companyId: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+
+// Immutability guard for update operations
+function isIllegalCompanyLedgerMutation(update: Record<string, any>): boolean {
+  const illegalSetters = ['$set', '$unset', '$inc'];
+  const illegalRemovers = ['$pull', '$pullAll', '$pop'];
+  const allowedAppends = ['$push', '$addToSet'];
+  const root = 'transactions';
+  const startsWithRoot = (k: string) => k === root || k.startsWith(`${root}.`) || k.startsWith(`${root}.$`);
+
+  for (const op of illegalSetters) {
+    const payload = (update as any)[op];
+    if (!payload) continue;
+    for (const path of Object.keys(payload)) {
+      if (startsWithRoot(path)) return true;
+    }
+  }
+  for (const op of illegalRemovers) {
+    const payload = (update as any)[op];
+    if (!payload) continue;
+    for (const path of Object.keys(payload)) {
+      if (startsWithRoot(path)) return true;
+    }
+  }
+  for (const op of allowedAppends) {
+    const payload = (update as any)[op];
+    if (!payload) continue;
+    for (const path of Object.keys(payload)) {
+      if (path !== root) return true; // only allow appending at root transactions
+    }
+  }
+  return false;
+}
+
+CompanyAccountSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
+  try {
+    const update = (this as any).getUpdate?.() || {};
+    if (isIllegalCompanyLedgerMutation(update)) {
+      return next(new Error('CompanyAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
+    }
+    return next();
+  } catch (e) {
+    return next(e as any);
+  }
+});
 
 export const CompanyAccount = accountingConnection.model<ICompanyAccount>('CompanyAccount', CompanyAccountSchema, 'companyaccounts');
 

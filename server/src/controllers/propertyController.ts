@@ -96,6 +96,7 @@ export const getPublicProperties = async (req: Request, res: Response) => {
     const saleOnly = String(req.query.saleOnly) === 'true';
     const fields = typeof req.query.fields === 'string' ? req.query.fields : '';
     const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+    const page = Math.max(1, Number(req.query.page || 1));
 
     if (saleOnly) {
       (query as any).rentalType = 'sale';
@@ -132,6 +133,7 @@ export const getPublicProperties = async (req: Request, res: Response) => {
     const properties = await Property.find(query)
       .select(projection)
       .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
       .limit(limit)
       .lean();
 

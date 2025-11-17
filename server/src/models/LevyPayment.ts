@@ -159,4 +159,38 @@ const LevyPaymentSchema: Schema = new Schema({
 LevyPaymentSchema.index({ companyId: 1, paymentDate: -1 });
 LevyPaymentSchema.index({ propertyId: 1 });
 
+// Enforce immutability of levy payment core fields on bulk updates; allow only status/payout/notes changes
+function isIllegalLevyUpdate(update: Record<string, any>): boolean {
+  const setOps = ['$set', '$unset'];
+  const allowedPrefixes = ['payout', 'payout.', 'notes', 'status'];
+  const protectedKeys = new Set([
+    'amount','paymentDate','paymentMethod','propertyId','companyId','referenceNumber',
+    'currency','processedBy','levyPeriodMonth','levyPeriodYear','advanceMonthsPaid',
+    'advancePeriodStart','advancePeriodEnd'
+  ]);
+  const isAllowedKey = (k: string) =>
+    allowedPrefixes.some(p => k === p || k.startsWith(`${p}`));
+  for (const op of setOps) {
+    const payload = (update as any)[op];
+    if (!payload || typeof payload !== 'object') continue;
+    for (const key of Object.keys(payload)) {
+      if (isAllowedKey(key)) continue;
+      if (protectedKeys.has(key)) return true;
+    }
+  }
+  return false;
+}
+
+LevyPaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
+  try {
+    const update = (this as any).getUpdate?.() || {};
+    if (isIllegalLevyUpdate(update)) {
+      return next(new Error('Levy payments are immutable. Only status and payout information may be updated.'));
+    }
+    return next();
+  } catch (e) {
+    return next(e as any);
+  }
+});
+
 export const LevyPayment = mongoose.model<ILevyPayment>('LevyPayment', LevyPaymentSchema, COLLECTIONS.LEVY_PAYMENTS); 

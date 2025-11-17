@@ -1,6 +1,13 @@
 import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
 
+/**
+ * SECURITY NOTE
+ *  - Property account transactions represent an immutable ledger.
+ *  - We explicitly block any in-place mutation of existing array elements.
+ *  - Only appends (adding new transactions/payouts) are allowed via $push/$addToSet
+ *    on the root array paths. Any $set/$unset/$pull on nested paths is rejected.
+ */
 export interface Transaction {
   _id?: Types.ObjectId;
   type: 'income' | 'expense' | 'owner_payout' | 'repair' | 'maintenance' | 'other';
@@ -261,6 +268,68 @@ PropertyAccountSchema.index(
   { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
   { unique: true, sparse: true }
 );
+
+// Guard helper to detect illegal update operators/paths that would mutate history
+function isIllegalLedgerMutation(update: Record<string, any>, rootArrays: string[]): boolean {
+  const illegalSetters = ['$set', '$unset', '$inc'];
+  const illegalRemovers = ['$pull', '$pullAll', '$pop'];
+  const allowedAppends = ['$push', '$addToSet'];
+  const startsWithAny = (k: string, prefixes: string[]) => prefixes.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
+
+  // Block setters on nested transaction/payout fields
+  for (const op of illegalSetters) {
+    const payload = (update as any)[op];
+    if (!payload || typeof payload !== 'object') continue;
+    for (const path of Object.keys(payload)) {
+      if (startsWithAny(path, rootArrays)) return true;
+    }
+  }
+
+  // Block removals from the arrays entirely
+  for (const op of illegalRemovers) {
+    const payload = (update as any)[op];
+    if (!payload || typeof payload !== 'object') continue;
+    for (const path of Object.keys(payload)) {
+      if (startsWithAny(path, rootArrays)) return true;
+    }
+  }
+
+  // Allow only root-level appends to the arrays. Block nested $push/$addToSet.
+  for (const op of allowedAppends) {
+    const payload = (update as any)[op];
+    if (!payload || typeof payload !== 'object') continue;
+    for (const path of Object.keys(payload)) {
+      // Only allow direct root paths (e.g., 'transactions' or 'ownerPayouts')
+      if (!rootArrays.includes(path)) return true;
+    }
+  }
+  return false;
+}
+
+// Block any history rewrites on updates (immutability enforcement)
+PropertyAccountSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
+  try {
+    const update = (this as any).getUpdate?.() || {};
+    const illegal = isIllegalLedgerMutation(update, ['transactions', 'ownerPayouts']);
+    if (illegal) {
+      return next(new Error('PropertyAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
+    }
+    return next();
+  } catch (e) {
+    return next(e as any);
+  }
+});
+
+// Prevent deletion of ledgers that contain any history
+async function guardPropertyAccountDeletion(this: any, next: (err?: any) => void) {
+  // Tight policy: property account ledgers are never deletable
+  return next(new Error('Deletion of PropertyAccount ledgers is disabled. Ledgers are permanent.'));
+}
+
+PropertyAccountSchema.pre('deleteOne', { document: true, query: false }, guardPropertyAccountDeletion);
+PropertyAccountSchema.pre('deleteOne', guardPropertyAccountDeletion as any);
+PropertyAccountSchema.pre('deleteMany', guardPropertyAccountDeletion as any);
+PropertyAccountSchema.pre('findOneAndDelete', guardPropertyAccountDeletion as any);
 
 // Pre-save middleware to update totals
 PropertyAccountSchema.pre('save', function(next) {

@@ -1678,19 +1678,48 @@ export default function CRM() {
 
 // --- Forms ---
 function AvatarUpload({ user }) {
+  const { refreshUser } = useAuth() as any;
   const [file, setFile] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
   const onSelect = (e: any) => setFile(e.target.files?.[0] || null);
+  const compressImage = (inputFile: File, maxSize = 512): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      try {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return reject(new Error('Canvas not supported'));
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to compress image'));
+          }, 'image/jpeg', 0.85);
+        };
+        img.onerror = () => reject(new Error('Invalid image'));
+        img.src = URL.createObjectURL(inputFile);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
   const onUpload = async () => {
     if (!file) return;
     try {
       setUploading(true);
       const form = new FormData();
-      form.append('avatar', file);
+      let blobToUpload: Blob = file;
+      try {
+        blobToUpload = await compressImage(file, 512);
+      } catch {}
+      form.append('avatar', blobToUpload, 'avatar.jpg');
       if (apiService.uploadUserAvatar) {
         await apiService.uploadUserAvatar(form);
+        try { await refreshUser(); } catch {}
       }
-      window.location.reload();
     } finally {
       setUploading(false);
     }

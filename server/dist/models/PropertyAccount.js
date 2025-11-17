@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = require("mongoose");
 const database_1 = require("../config/database");
@@ -192,6 +201,71 @@ PropertyAccountSchema.index({ runningBalance: 1 });
 PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, sparse: true });
 // Ensure each paymentId is only recorded once per property ledger
 PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+// Guard helper to detect illegal update operators/paths that would mutate history
+function isIllegalLedgerMutation(update, rootArrays) {
+    const illegalSetters = ['$set', '$unset', '$inc'];
+    const illegalRemovers = ['$pull', '$pullAll', '$pop'];
+    const allowedAppends = ['$push', '$addToSet'];
+    const startsWithAny = (k, prefixes) => prefixes.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
+    // Block setters on nested transaction/payout fields
+    for (const op of illegalSetters) {
+        const payload = update[op];
+        if (!payload || typeof payload !== 'object')
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (startsWithAny(path, rootArrays))
+                return true;
+        }
+    }
+    // Block removals from the arrays entirely
+    for (const op of illegalRemovers) {
+        const payload = update[op];
+        if (!payload || typeof payload !== 'object')
+            continue;
+        for (const path of Object.keys(payload)) {
+            if (startsWithAny(path, rootArrays))
+                return true;
+        }
+    }
+    // Allow only root-level appends to the arrays. Block nested $push/$addToSet.
+    for (const op of allowedAppends) {
+        const payload = update[op];
+        if (!payload || typeof payload !== 'object')
+            continue;
+        for (const path of Object.keys(payload)) {
+            // Only allow direct root paths (e.g., 'transactions' or 'ownerPayouts')
+            if (!rootArrays.includes(path))
+                return true;
+        }
+    }
+    return false;
+}
+// Block any history rewrites on updates (immutability enforcement)
+PropertyAccountSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
+    var _a, _b;
+    try {
+        const update = ((_b = (_a = this).getUpdate) === null || _b === void 0 ? void 0 : _b.call(_a)) || {};
+        const illegal = isIllegalLedgerMutation(update, ['transactions', 'ownerPayouts']);
+        if (illegal) {
+            return next(new Error('PropertyAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
+        }
+        return next();
+    }
+    catch (e) {
+        return next(e);
+    }
+});
+// Prevent deletion of ledgers that contain any history
+function guardPropertyAccountDeletion(next) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Tight policy: property account ledgers are never deletable
+        return next(new Error('Deletion of PropertyAccount ledgers is disabled. Ledgers are permanent.'));
+    });
+}
+PropertyAccountSchema.pre('deleteOne', { document: true, query: false }, guardPropertyAccountDeletion);
+PropertyAccountSchema.pre('deleteOne', guardPropertyAccountDeletion);
+PropertyAccountSchema.pre('deleteMany', guardPropertyAccountDeletion);
+PropertyAccountSchema.pre('findOneAndDelete', guardPropertyAccountDeletion);
 // Pre-save middleware to update totals
 PropertyAccountSchema.pre('save', function (next) {
     // Calculate totals from transactions

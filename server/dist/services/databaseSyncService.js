@@ -54,7 +54,6 @@ const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const events_1 = require("events");
-const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const ledgerEventService_1 = __importDefault(require("./ledgerEventService"));
 class DatabaseSyncService extends events_1.EventEmitter {
     constructor() {
@@ -489,61 +488,43 @@ class DatabaseSyncService extends events_1.EventEmitter {
         return __awaiter(this, void 0, void 0, function* () {
             var _a;
             try {
-                // Post owner income to property ledger using unified service (handles rentals and sales)
-                try {
-                    yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
-                }
-                catch (postErr) {
-                    // Enqueue event for retry and bubble up for failure recording
-                    try {
-                        yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(payment._id.toString());
-                    }
-                    catch (_b) { }
-                    throw postErr;
-                }
-                this.recordSyncSuccess();
-                // Record agency commission into company account as revenue
+                // Record agency commission into company account as revenue (idempotent, race-safe)
                 const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
                 if (payment.companyId && ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare)) {
                     const companyId = payment.companyId;
-                    let companyAccount = yield CompanyAccount.findOne({ companyId });
-                    if (!companyAccount) {
-                        companyAccount = new CompanyAccount({ companyId, transactions: [], runningBalance: 0, totalIncome: 0, totalExpenses: 0 });
-                    }
-                    const alreadyLogged = companyAccount.transactions.some((t) => { var _a; return ((_a = t.paymentId) === null || _a === void 0 ? void 0 : _a.toString()) === payment._id.toString() && t.type === 'income'; });
-                    if (!alreadyLogged) {
-                        const agencyShare = payment.commissionDetails.agencyShare;
-                        const source = payment.paymentType === 'introduction' ? 'sales_commission' : 'rental_commission';
-                        companyAccount.transactions.push({
-                            type: 'income',
-                            source,
-                            amount: agencyShare,
-                            date: payment.paymentDate || new Date(),
-                            currency: payment.currency || 'USD',
-                            paymentMethod: payment.paymentMethod,
-                            paymentId: payment._id,
-                            referenceNumber: payment.referenceNumber,
-                            description: source === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
-                            processedBy: payment.processedBy,
-                            notes: payment.notes
+                    // Determine correct source label based on payment type
+                    const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
+                    const agencyShare = payment.commissionDetails.agencyShare;
+                    const txDoc = {
+                        type: 'income',
+                        source: desiredSource,
+                        amount: agencyShare,
+                        date: payment.paymentDate || new Date(),
+                        currency: payment.currency || 'USD',
+                        paymentMethod: payment.paymentMethod,
+                        paymentId: payment._id,
+                        referenceNumber: payment.referenceNumber,
+                        description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+                        processedBy: payment.processedBy,
+                        notes: payment.notes
+                    };
+                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                        // 1) Ensure base account exists (idempotent)
+                        yield CompanyAccount.updateOne({ companyId }, { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
+                        // 2) Append commission transaction only if not already present; do NOT upsert here to avoid duplicate docs
+                        const res = yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id } } } }, {
+                            $push: { transactions: txDoc },
+                            $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
+                            $set: { lastUpdated: new Date() }
                         });
-                        companyAccount.totalIncome += agencyShare;
-                        companyAccount.runningBalance += agencyShare;
-                        companyAccount.lastUpdated = new Date();
-                        yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                            yield companyAccount.save();
-                        }));
-                        logger_1.logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
-                    }
+                        // If already present (matchedCount === 0), treat as success (idempotent)
+                    }));
+                    logger_1.logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
                 }
+                this.recordSyncSuccess();
             }
             catch (error) {
                 logger_1.logger.error(`Failed to sync payment ${payment._id}:`, error);
-                // Also ensure an event exists for retry
-                try {
-                    yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(payment._id.toString());
-                }
-                catch (_c) { }
                 throw error;
             }
         });
