@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.getPropertyAccount = void 0;
+exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.getPropertyAccount = void 0;
 const Property_1 = require("../models/Property");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -493,3 +493,25 @@ const getAcknowledgementDocument = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.getAcknowledgementDocument = getAcknowledgementDocument;
+/**
+ * Ensure development sale ledgers exist and backfill payments into them.
+ * Scoped to the current user's company if available.
+ */
+const ensureDevelopmentLedgers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : undefined;
+        const result = yield propertyAccountService_1.default.ensureDevelopmentLedgersAndBackfillPayments({
+            companyId
+        });
+        return res.json({ success: true, message: 'Development ledgers ensured and payments backfilled', data: result });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in ensureDevelopmentLedgers:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+exports.ensureDevelopmentLedgers = ensureDevelopmentLedgers;

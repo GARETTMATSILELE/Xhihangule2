@@ -50,6 +50,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyOwnerService, PropertyOwner } from '../../services/propertyOwnerService';
 import paymentService from '../../services/paymentService';
 import { Paid as PaidIcon } from '@mui/icons-material';
+import { developmentService } from '../../services/developmentService';
+import { developmentUnitService } from '../../services/developmentUnitService';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -132,12 +134,15 @@ const PropertyAccountDetailPage: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch property first to determine ledger type
+        // Try fetch property first to determine ledger type; gracefully handle development/unit IDs
         const search = new URLSearchParams(location.search);
-        const found = await getProperty(propertyId);
+        let found: any = null;
+        try {
+          found = await getProperty(propertyId);
+        } catch {}
         setProperty(found || null);
 
-        const inferredLedger = (search.get('ledger') === 'sale' || (!search.get('ledger') && (found as any)?.rentalType === 'sale'))
+        const inferredLedger = (search.get('ledger') === 'sale' || (!search.get('ledger') && ((found as any)?.rentalType === 'sale' || !found)))
           ? 'sale'
           : 'rental';
 
@@ -148,28 +153,58 @@ const PropertyAccountDetailPage: React.FC = () => {
         ]);
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
+        // If property could not be fetched (development/unit), fallback to account metadata
+        if (!found && accountData) {
+          const fallback: any = {
+            name: (accountData as any).propertyName || 'Development/Unit Account',
+            address: (accountData as any).propertyAddress || ''
+          };
+          try {
+            // Attempt to enrich using development/development unit endpoints
+            // Development first
+            const dev = await (async () => {
+              try { return await developmentService.getById(propertyId); } catch { return null; }
+            })();
+            if (dev && (dev as any).name) {
+              fallback.name = (dev as any).name;
+              fallback.address = (dev as any).address || fallback.address;
+            } else {
+              // Try unit; if found, attempt to construct label
+              const unit = await (async () => {
+                try { return await (developmentUnitService as any).get?.(propertyId); } catch { return null; }
+              })();
+              if (unit) {
+                const label = (unit as any).unitCode || ((unit as any).unitNumber ? `Unit ${(unit as any).unitNumber}` : 'Development Unit');
+                fallback.name = `${label}${(accountData as any).propertyName ? ` - ${(accountData as any).propertyName}` : ''}`;
+              }
+            }
+          } catch {}
+          setProperty(fallback);
+        }
 
         // Resolve owner name via property-management propertyowners cross-reference
         const map: Record<string, string> = {};
-        try {
-          const owner = await getByPropertyId(propertyId, (company as any)?.id || (company as any)?._id);
-          if (owner && (owner.firstName || owner.lastName)) {
-            map[String((found as any)._id)] = `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
-          }
-        } catch (e) {
-          // Fallback for sales ledger: try sales-owners by property.propertyOwnerId
-          if (inferredLedger === 'sale') {
-            try {
-              const raw = (found as any).propertyOwnerId;
-              const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
-              if (ownerId) {
-                const salesOwner = await getSalesById(ownerId);
-                if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
-                  map[String((found as any)._id)] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+        if (found) {
+          try {
+            const owner = await getByPropertyId(propertyId, (company as any)?.id || (company as any)?._id);
+            if (owner && (owner.firstName || owner.lastName)) {
+              map[String((found as any)._id)] = `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
+            }
+          } catch (e) {
+            // Fallback for sales ledger: try sales-owners by property.propertyOwnerId
+            if (inferredLedger === 'sale') {
+              try {
+                const raw = (found as any).propertyOwnerId;
+                const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
+                if (ownerId) {
+                  const salesOwner = await getSalesById(ownerId);
+                  if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
+                    map[String((found as any)._id)] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+                  }
                 }
+              } catch {
+                // ignore; UI will fall back to account.ownerName
               }
-            } catch {
-              // ignore; UI will fall back to account.ownerName
             }
           }
         }

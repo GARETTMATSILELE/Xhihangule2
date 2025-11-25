@@ -462,7 +462,8 @@ const listUnitsForDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (variationId)
             query.variationId = String(variationId);
         // Restrict to unit collaborators when user is sales and not dev owner/collaborator
-        const isPrivileged = (req.user.role === 'admin' || req.user.role === 'accountant');
+        // Use multi-role aware check (supports users with multiple roles)
+        const isPrivileged = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isOwner = String(dev.createdBy) === String(req.user.userId);
         const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id) => String(id) === String(req.user.userId));
         if (!isPrivileged && !isOwner && !isDevCollaborator) {

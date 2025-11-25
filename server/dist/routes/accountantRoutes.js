@@ -132,6 +132,8 @@ router.post('/property-accounts/:propertyId/payout', roles_1.canViewCommissions,
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.canViewCommissions, propertyAccountController_1.updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', roles_1.canViewCommissions, propertyAccountController_1.getPayoutHistory);
 router.post('/property-accounts/sync', roles_1.canViewCommissions, propertyAccountController_1.syncPropertyAccounts);
+// Ensure development ledgers and backfill sales payments into them (idempotent)
+router.post('/property-accounts/developments/ensure-ledgers', roles_1.canViewCommissions, propertyAccountController_1.ensureDevelopmentLedgers);
 // Maintenance: remove duplicate income transactions for a property ledger (idempotent)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', roles_1.canViewCommissions, propertyAccountController_1.reconcilePropertyDuplicates);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);

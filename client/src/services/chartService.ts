@@ -108,7 +108,7 @@ export const getChartData = async (type: string) => {
 
     if (userRole === 'owner') {
       try {
-        const endpoint = type === 'payment' ? 'payments' : type;
+        const endpoint = (type === 'payment' || type === 'commission') ? 'payments' : type;
         const response = await api.get(`/charts/owner/${endpoint}`);
         if (response.data && response.data.data) {
           return response.data;

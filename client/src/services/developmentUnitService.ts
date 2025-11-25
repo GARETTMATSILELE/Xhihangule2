@@ -15,6 +15,10 @@ export const developmentUnitService = {
     const res = await api.get(`/developments/${params.developmentId}/units`, { params });
     return res.data?.items || res.data?.data || res.data;
   },
+  async get(unitId: string) {
+    const res = await api.get(`/development-units/${unitId}`);
+    return res.data?.data || res.data;
+  },
   async listPayments(developmentId: string, opts?: { unitId?: string; saleMode?: 'quick' | 'installment' }) {
     const res = await api.get(`/developments/${developmentId}/payments`, { params: { unitId: opts?.unitId, saleMode: opts?.saleMode } });
     return res.data?.items || res.data?.data || res.data;

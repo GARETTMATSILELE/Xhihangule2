@@ -239,15 +239,15 @@ export const getProperties = async (req: Request, res: Response) => {
       query.rentalType = req.query.rentalType;
     }
 
-    // Restrict visibility based on role
+    // Restrict visibility based on role (multi-role aware)
     const isAdminOrAccountant = hasAnyRole(req, ['admin', 'accountant']);
     const isSales = hasRole(req, 'sales');
     if (isSales && !isAdminOrAccountant) {
       // Pure sales users should only see their own sales properties
       query.rentalType = 'sale';
       query.agentId = new mongoose.Types.ObjectId(req.user.userId);
-    } else if (req.user.role === 'owner') {
-      // Property owners should see properties they own
+    } else if (!isAdminOrAccountant && hasRole(req, 'owner')) {
+      // Property owners should see properties they own (unless they are also admin/accountant)
       query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
     } else if (!isAdminOrAccountant) {
       // Other non-admin/accountant users only see properties assigned to them as agent

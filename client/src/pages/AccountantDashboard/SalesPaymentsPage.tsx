@@ -52,6 +52,16 @@ const SalesPaymentsPage: React.FC = () => {
   // Cache units per development to avoid repeat network calls when toggling
   const unitsCache = React.useRef<Record<string, any[]>>({});
 
+  // Reset all form-related local state so each new payment starts clean
+  const resetFormState = React.useCallback(() => {
+    setSelectedDevId('');
+    setSelectedUnitId('');
+    setSaleId('');
+    setUnits([]);
+    setCommissionDefaults({});
+    setPrefill(undefined);
+  }, []);
+
   // Consistent newest-first ordering (paymentDate -> createdAt fallback)
   const sortSalesPayments = React.useCallback((list: Payment[]) => {
     const toTime = (p: any) => {
@@ -170,6 +180,8 @@ const SalesPaymentsPage: React.FC = () => {
           return sortSalesPayments(next);
         });
       }
+      // Ensure next entry starts from a clean form
+      resetFormState();
       setShowForm(false);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to create sales payment');
@@ -339,7 +351,11 @@ const SalesPaymentsPage: React.FC = () => {
             await handleCreatePayment(data);
             setShowForm(false);
           }}
-          onCancel={() => setShowForm(false)}
+          onCancel={() => {
+            // Clear any previous selections/prefill when cancelling
+            resetFormState();
+            setShowForm(false);
+          }}
           isInstallment={mode === 'installment'}
           prefill={prefill}
         />

@@ -29,6 +29,10 @@ export const developmentService = {
     const res = await api.post('/developments', input);
     return res.data?.data || res.data;
   },
+  async getById(devId: string) {
+    const res = await api.get(`/developments/${devId}`);
+    return res.data?.data || res.data;
+  },
   async list(params?: { fields?: string; limit?: number; page?: number }) {
     const res = await api.get('/developments', { params });
     return res.data?.data || res.data;

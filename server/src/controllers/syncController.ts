@@ -538,7 +538,7 @@ export const getSyncHealth = async (req: Request, res: Response) => {
     const realTimeStatus = syncService.getSyncStatus();
     const scheduledStatus = scheduledService.getStatus();
     
-    const health = {
+    const health: any = {
       status: 'healthy',
       timestamp: new Date(),
       realTime: {
@@ -557,17 +557,39 @@ export const getSyncHealth = async (req: Request, res: Response) => {
       }
     };
     
-    // Try to perform consistency check, but don't fail if it errors
+    // Try to perform consistency check, but don't fail (or block) if it errors or runs long.
+    // Default to a quick check; allow deep check via ?deep=true
+    const wantsDeep = String(req.query.deep || '').toLowerCase() === 'true';
+    const defaultTimeoutMs = wantsDeep ? 15000 : 2000; // 15s for deep, 2s for quick
+    const timeoutMs = Number(process.env.SYNC_HEALTH_TIMEOUT_MS || defaultTimeoutMs);
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | 'TIMEOUT'> => {
+      return Promise.race([
+        p,
+        new Promise<'TIMEOUT'>(resolve => setTimeout(() => resolve('TIMEOUT'), ms))
+      ]);
+    };
+
+    // Perform the (potentially heavy) consistency check with a timeout guard
     try {
-      const consistency = await syncService.validateDataConsistency();
-      health.dataConsistency = {
-        isConsistent: consistency.isConsistent,
-        issueCount: consistency.inconsistencies.length
-      };
-      
-      // Determine overall health status
-      if (!consistency.isConsistent || consistency.inconsistencies.length > 10) {
+      const result = await withTimeout(syncService.validateDataConsistency(), timeoutMs);
+      if (result === 'TIMEOUT') {
+        health.dataConsistency = {
+          isConsistent: false,
+          issueCount: 0
+        };
+        health.consistencyCheck = 'timeout';
+        // A timeout should not 504 the request; mark as degraded but return promptly
         health.status = 'degraded';
+      } else {
+        const consistency = result as any;
+        health.dataConsistency = {
+          isConsistent: consistency.isConsistent,
+          issueCount: Array.isArray(consistency.inconsistencies) ? consistency.inconsistencies.length : 0
+        };
+        // Determine overall health status
+        if (!consistency.isConsistent || (Array.isArray(consistency.inconsistencies) && consistency.inconsistencies.length > 10)) {
+          health.status = 'degraded';
+        }
       }
     } catch (consistencyError) {
       logger.warn('Could not perform consistency check:', consistencyError);

@@ -548,3 +548,23 @@ export const getAcknowledgementDocument = async (req: Request, res: Response) =>
     });
   }
 }; 
+
+/**
+ * Ensure development sale ledgers exist and backfill payments into them.
+ * Scoped to the current user's company if available.
+ */
+export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId ? String(req.user.companyId) : undefined;
+    const result = await propertyAccountService.ensureDevelopmentLedgersAndBackfillPayments({
+      companyId
+    });
+    return res.json({ success: true, message: 'Development ledgers ensured and payments backfilled', data: result });
+  } catch (error) {
+    logger.error('Error in ensureDevelopmentLedgers:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};

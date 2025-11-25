@@ -441,10 +441,21 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     return property?.commission ?? 0;
   }
   
-  // Only show properties with rentalType = introduction or management
-  const filteredPropertiesForDropdown = (internalProperties || []).filter(
-    (p: Property) => p.rentalType === 'introduction' || p.rentalType === 'management'
-  );
+  // Prefer non-sale (rental) properties for rental/levy/municipal payments.
+  // Include properties where rentalType is not 'sale' (or missing), so rental properties appear reliably.
+  const filteredPropertiesForDropdown = React.useMemo(() => {
+    const list = Array.isArray(internalProperties) ? internalProperties : [];
+    // For rental payments, exclude sale-only properties
+    if (formData.paymentType === 'rental') {
+      return list.filter((p: any) => String((p as any).rentalType || '') !== 'sale');
+    }
+    // For levies/municipal, allow all company properties
+    if (formData.paymentType === 'levy' || formData.paymentType === 'municipal') {
+      return list;
+    }
+    // Default: show all
+    return list;
+  }, [internalProperties, formData.paymentType]);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent

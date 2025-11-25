@@ -445,7 +445,8 @@ export const listUnitsForDevelopment = async (req: Request, res: Response) => {
     if (variationId) query.variationId = String(variationId);
 
     // Restrict to unit collaborators when user is sales and not dev owner/collaborator
-    const isPrivileged = (req.user!.role === 'admin' || req.user!.role === 'accountant');
+    // Use multi-role aware check (supports users with multiple roles)
+    const isPrivileged = hasAnyRole(req, ['admin', 'accountant']);
     const isOwner = String(dev.createdBy) === String(req.user!.userId);
     const isDevCollaborator = Array.isArray(dev.collaborators) && dev.collaborators.some((id:any)=> String(id) === String(req.user!.userId));
     if (!isPrivileged && !isOwner && !isDevCollaborator) {

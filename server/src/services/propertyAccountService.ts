@@ -8,6 +8,7 @@ import { User } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { Development } from '../models/Development';
+import { DevelopmentUnit } from '../models/DevelopmentUnit';
 
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise: Promise<void> | null = null;
@@ -64,10 +65,11 @@ export class PropertyAccountService {
       console.log('Database query result:', account ? 'Found account' : 'No account found');
       
     if (!account) {
-        // Try resolve as a Property; if not found, try as a Development
+        // Try resolve as a Property; if not found, try as a Development; then as a Development Unit
         const property = await Property.findById(propertyId);
         const development = property ? null : await Development.findById(propertyId);
-        if (!property && !development) {
+        const unit = (property || development) ? null : await DevelopmentUnit.findById(propertyId);
+        if (!property && !development && !unit) {
           throw new AppError('Property not found', 404);
         }
 
@@ -100,14 +102,44 @@ export class PropertyAccountService {
           const companyName = development.owner?.companyName || '';
           const combined = `${first} ${last}`.trim();
           ownerName = combined || companyName || 'Unknown Owner';
+        } else if (unit) {
+          // Unit-level: pull owner info from parent development
+          try {
+            const devParent = await Development.findById((unit as any).developmentId);
+            const first = devParent?.owner?.firstName || '';
+            const last = devParent?.owner?.lastName || '';
+            const companyName = devParent?.owner?.companyName || '';
+            const combined = `${first} ${last}`.trim();
+            ownerName = combined || companyName || 'Unknown Owner';
+          } catch {}
+        }
+
+        // Compute display name/address before create
+        let displayName = '';
+        let displayAddress = '';
+        if (property) {
+          displayName = property.name || '';
+          displayAddress = property.address || '';
+        } else if (development) {
+          displayName = (development as any)?.name || '';
+          displayAddress = (development as any)?.address || '';
+        } else if (unit) {
+          let devLabel = '';
+          try {
+            const devParent = await Development.findById((unit as any).developmentId);
+            devLabel = devParent?.name || '';
+            displayAddress = devParent?.address || '';
+          } catch {}
+          const unitLabel = (unit as any)?.unitCode || ((unit as any)?.unitNumber ? `Unit ${(unit as any).unitNumber}` : 'Development Unit');
+          displayName = devLabel ? `${unitLabel} - ${devLabel}` : unitLabel;
         }
 
         // Create new account
         account = new PropertyAccount({
           propertyId: new mongoose.Types.ObjectId(propertyId),
           ledgerType: effectiveLedger,
-          propertyName: property ? property.name : (development as any)?.name,
-          propertyAddress: property ? property.address : (development as any)?.address,
+          propertyName: displayName,
+          propertyAddress: displayAddress,
           ownerId: ownerId,
           ownerName,
           transactions: [],
@@ -297,77 +329,181 @@ export class PropertyAccountService {
         payment.paymentType === 'sale'
           ? 'sale'
           : 'rental';
-      // For sales tied to a development, post owner income to the development ledger
-      const devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
-      const targetEntityId = payment.paymentType === 'sale' && devId ? devId.toString() : payment.propertyId.toString();
-      const account = await this.getOrCreatePropertyAccount(targetEntityId, chosenLedger);
-      
-      // Check if income already recorded for this payment
-      const existingTransaction = account.transactions.find(
-        t => t.paymentId?.toString() === paymentId && t.type === 'income'
-      );
-
-      if (existingTransaction) {
-        logger.info(`Income already recorded for payment: ${paymentId}`);
-        return;
-      }
-
-      // Calculate owner amount (income after commission)
-      const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
-      const totalPaid = payment.amount || 0;
-      const depositPortion = payment.depositAmount || 0;
-      // Use the payment intent to determine sale vs rental behavior
       const isSale = payment.paymentType === 'sale';
-      // For sales, post the full ownerAmount (already net of commission) without deposit apportioning.
-      // For rentals, proportionally exclude the deposit portion from the owner's income.
-      const incomeAmount = isSale
-        ? Math.max(0, ownerAmount)
-        : Math.max(0, totalPaid > 0 ? (totalPaid - depositPortion) * (ownerAmount / totalPaid) : 0);
-
-      if (incomeAmount <= 0) {
-        logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
-        return;
-      }
-
-      // Create income transaction (rental vs sale)
-      const incomeDescription = isSale
-        ? `Sale income - ${payment.referenceNumber}`
-        : `Rental income - ${payment.referenceNumber}`;
-      const incomeCategory = isSale ? 'sale_income' : 'rental_income';
-
-      const incomeTransaction: Transaction = {
-        type: 'income',
-        amount: incomeAmount,
-        date: payment.paymentDate || payment.createdAt,
-        paymentId: new mongoose.Types.ObjectId(paymentId),
-        description: incomeDescription,
-        category: incomeCategory,
-        status: 'completed',
-        processedBy: payment.processedBy,
-        referenceNumber: payment.referenceNumber,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      // Strong idempotency and race-safety:
-      // Atomically push iff this paymentId does not already exist for this account
-      await PropertyAccount.updateOne(
-        { _id: (account as any)._id, 'transactions.paymentId': { $ne: new mongoose.Types.ObjectId(paymentId) } },
-        {
-          $push: { transactions: incomeTransaction },
-          $set: { lastUpdated: new Date() }
+      // For sales tied to developments/units, post to both unit and development ledgers when available
+      let devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
+      const unitId = (payment as any)?.developmentUnitId as mongoose.Types.ObjectId | undefined;
+      const targets: Array<{ id: string; ledger: 'rental' | 'sale' }> = [];
+      if (isSale) {
+        // Always post to the unit ledger when unitId is present
+        if (unitId) {
+          targets.push({ id: unitId.toString(), ledger: 'sale' });
         }
-      );
-      // Recalculate on the latest view to keep totals/running balance consistent
-      const fresh = await PropertyAccount.findById((account as any)._id) as any;
-      if (fresh) {
-        await this.recalculateBalance(fresh as any);
+        // Ensure we also post to the parent development ledger when the sale references a unit
+        if (!devId && unitId) {
+          try {
+            const unitDoc = await DevelopmentUnit.findById(unitId).select('developmentId');
+            devId = unitDoc?.developmentId as any;
+          } catch {}
+        }
+        if (devId) {
+          targets.push({ id: devId.toString(), ledger: 'sale' });
+        }
+        // Fallback to property-level sale ledger if neither unit nor development are linked
+        if (!unitId && !devId) {
+          targets.push({ id: payment.propertyId.toString(), ledger: 'sale' });
+        }
+      } else {
+        targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
+      }
+      // Process each target account independently (idempotent per account)
+      for (const target of targets) {
+        const account = await this.getOrCreatePropertyAccount(target.id, target.ledger);
+      
+        // Check if income already recorded for this payment
+        const existingTransaction = account.transactions.find(
+          t => t.paymentId?.toString() === paymentId && t.type === 'income'
+        );
+
+        if (existingTransaction) {
+          logger.info(`Income already recorded for payment: ${paymentId} on account ${String((account as any)._id)}`);
+          continue;
+        }
+
+        // Calculate owner amount (income after commission)
+        const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
+        const totalPaid = payment.amount || 0;
+        const depositPortion = payment.depositAmount || 0;
+        // For sales, post the full ownerAmount (already net of commission) without deposit apportioning.
+        // For rentals, proportionally exclude the deposit portion from the owner's income.
+        const incomeAmount = isSale
+          ? Math.max(0, ownerAmount)
+          : Math.max(0, totalPaid > 0 ? (totalPaid - depositPortion) * (ownerAmount / totalPaid) : 0);
+
+        if (incomeAmount <= 0) {
+          logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
+          continue;
+        }
+
+        // Create income transaction (rental vs sale)
+        const incomeDescription = isSale
+          ? `Sale income - ${payment.referenceNumber}`
+          : `Rental income - ${payment.referenceNumber}`;
+        const incomeCategory = isSale ? 'sale_income' : 'rental_income';
+
+        const incomeTransaction: Transaction = {
+          type: 'income',
+          amount: incomeAmount,
+          date: payment.paymentDate || payment.createdAt,
+          paymentId: new mongoose.Types.ObjectId(paymentId),
+          description: incomeDescription,
+          category: incomeCategory,
+          status: 'completed',
+          processedBy: payment.processedBy,
+          referenceNumber: payment.referenceNumber,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        // Strong idempotency and race-safety:
+        // Atomically push iff this paymentId does not already exist for this account
+        await PropertyAccount.updateOne(
+          { _id: (account as any)._id, 'transactions.paymentId': { $ne: new mongoose.Types.ObjectId(paymentId) } },
+          {
+            $push: { transactions: incomeTransaction },
+            $set: { lastUpdated: new Date() }
+          }
+        );
+        // Recalculate on the latest view to keep totals/running balance consistent
+        const fresh = await PropertyAccount.findById((account as any)._id) as any;
+        if (fresh) {
+          await this.recalculateBalance(fresh as any);
+        }
+        // Log per-target success
+        logger.info(`Recorded income of ${incomeAmount} to account ${String((account as any)._id)} (target ${target.id}, ledger ${target.ledger}) from payment ${paymentId}`);
       }
 
-      logger.info(`Recorded income of ${incomeAmount} for property ${payment.propertyId} from payment ${paymentId}`);
     } catch (error) {
       logger.error('Error recording income from payment:', error);
       throw error;
     }
+  }
+
+  /**
+   * Ensure ledgers for developments (with units) exist and backfill existing sale payments into those ledgers.
+   * - Cross-references Developments and DevelopmentUnits
+   * - Creates sale ledgers per development if missing (idempotent)
+   * - Posts existing completed sale payments tied to the development or its units
+   */
+  async ensureDevelopmentLedgersAndBackfillPayments(options?: {
+    companyId?: string;
+    limit?: number; // optional cap for developments processed in one run
+  }): Promise<{
+    developmentsProcessed: number;
+    ledgersCreated: number;
+    paymentsScanned: number;
+    backfillInvocations: number;
+  }> {
+    const companyFilter: any = {};
+    if (options?.companyId) {
+      companyFilter.companyId = new mongoose.Types.ObjectId(options.companyId);
+    }
+    // Find all developmentIds that actually have units
+    const devIdsWithUnits = await DevelopmentUnit.distinct('developmentId', {});
+    if (!Array.isArray(devIdsWithUnits) || devIdsWithUnits.length === 0) {
+      return { developmentsProcessed: 0, ledgersCreated: 0, paymentsScanned: 0, backfillInvocations: 0 };
+    }
+    // Load developments that belong to the company (if provided) and have units
+    const devQuery: any = { _id: { $in: devIdsWithUnits } };
+    Object.assign(devQuery, companyFilter);
+    const developments = await Development.find(devQuery)
+      .select('_id name companyId')
+      .limit(typeof options?.limit === 'number' && options.limit > 0 ? options.limit : 0);
+    let ledgersCreated = 0;
+    let paymentsScanned = 0;
+    let backfillInvocations = 0;
+    for (const dev of developments) {
+      // Ensure a 'sale' ledger exists for the development (guarded by unique index)
+      const existing = await PropertyAccount.findOne({
+        propertyId: new mongoose.Types.ObjectId(dev._id),
+        ledgerType: 'sale'
+      });
+      if (!existing) {
+        await this.getOrCreatePropertyAccount(dev._id.toString(), 'sale');
+        ledgersCreated++;
+      }
+      // Find payments tied to this development directly or via its units
+      const unitIds = await DevelopmentUnit.find({ developmentId: dev._id }).select('_id');
+      const unitIdList = unitIds.map((u: any) => u._id);
+      if (unitIdList.length === 0) {
+        continue;
+      }
+      const salePayments = await Payment.find({
+        paymentType: 'sale',
+        status: 'completed',
+        isProvisional: { $ne: true },
+        isInSuspense: { $ne: true },
+        $or: [
+          { developmentId: new mongoose.Types.ObjectId(dev._id) },
+          { developmentUnitId: { $in: unitIdList } }
+        ]
+      }).select('_id');
+      paymentsScanned += salePayments.length;
+      // Backfill incomes into dev ledger (and unit ledger if missing) idempotently
+      for (const p of salePayments) {
+        try {
+          await this.recordIncomeFromPayment(p._id.toString());
+          backfillInvocations++;
+        } catch (e) {
+          console.warn(`Backfill failed for payment ${String((p as any)._id)} on development ${String(dev._id)}:`, (e as any)?.message || e);
+        }
+      }
+    }
+    return {
+      developmentsProcessed: developments.length,
+      ledgersCreated,
+      paymentsScanned,
+      backfillInvocations
+    };
   }
 
   /**
@@ -593,6 +729,21 @@ export class PropertyAccountService {
             const ownerName = combined || companyName || 'Unknown Owner';
             (account as IPropertyAccount).ownerName = ownerName;
             await (account as IPropertyAccount).save();
+          } else {
+            // Fallback: resolve via DevelopmentUnit -> parent Development
+            const unit = await DevelopmentUnit.findById(propertyId);
+            if (unit) {
+              try {
+                const dev = await Development.findById((unit as any).developmentId);
+                const first = dev?.owner?.firstName || '';
+                const last = dev?.owner?.lastName || '';
+                const companyName = dev?.owner?.companyName || '';
+                const combined = `${first} ${last}`.trim();
+                const ownerName = combined || companyName || 'Unknown Owner';
+                (account as IPropertyAccount).ownerName = ownerName;
+                await (account as IPropertyAccount).save();
+              } catch {}
+            }
           }
         }
       }
@@ -600,8 +751,9 @@ export class PropertyAccountService {
       // Defensive backfill for sales ledger: ensure owner income for each completed sale payment exists
       if (effectiveLedger === 'sale') {
         try {
-          // Determine whether this account is for a Development or a Property
+          // Determine whether this account is for a Development, a Development Unit, or a Property
           const devExists = await Development.exists({ _id: pid });
+          const unitExists = await DevelopmentUnit.exists({ _id: pid });
           const present = new Set(
             ((account as IPropertyAccount).transactions || [])
               .filter(t => t.type === 'income' && (t.category === 'sale_income' || !t.category))
@@ -621,6 +773,8 @@ export class PropertyAccountService {
           };
           if (devExists) {
             baseFilter.developmentId = pid;
+          } else if (unitExists) {
+            baseFilter.developmentUnitId = pid;
           } else {
             baseFilter.propertyId = pid;
           }
@@ -666,7 +820,13 @@ export class PropertyAccountService {
       ]);
       const propertyIds = properties.map(p => p._id);
       const developmentIds = developments.map(d => d._id);
-      const allIds = [...propertyIds, ...developmentIds];
+      // Also include development units for these developments
+      let unitIds: any[] = [];
+      try {
+        const units = await DevelopmentUnit.find({ developmentId: { $in: developmentIds } }).select('_id');
+        unitIds = units.map((u: any) => u._id);
+      } catch {}
+      const allIds = [...propertyIds, ...developmentIds, ...unitIds];
 
       const accounts = await PropertyAccount.find({
         propertyId: { $in: allIds }
@@ -855,4 +1015,17 @@ export async function reconcilePropertyLedgerDuplicates(
     }
   }
   return { removed: toRemove.length, kept, accountId: String(account._id) };
+}
+
+// Convenience export to ensure development ledgers exist and backfill payments
+export async function ensureDevelopmentLedgersAndBackfillPayments(
+  opts?: { companyId?: string; limit?: number }
+): Promise<{
+  developmentsProcessed: number;
+  ledgersCreated: number;
+  paymentsScanned: number;
+  backfillInvocations: number;
+}> {
+  const service = PropertyAccountService.getInstance();
+  return service.ensureDevelopmentLedgersAndBackfillPayments(opts);
 }

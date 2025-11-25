@@ -225,7 +225,7 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (typeof req.query.rentalType === 'string' && req.query.rentalType.trim()) {
             query.rentalType = req.query.rentalType;
         }
-        // Restrict visibility based on role
+        // Restrict visibility based on role (multi-role aware)
         const isAdminOrAccountant = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
         const isSales = (0, access_1.hasRole)(req, 'sales');
         if (isSales && !isAdminOrAccountant) {
@@ -233,8 +233,8 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             query.rentalType = 'sale';
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        else if (req.user.role === 'owner') {
-            // Property owners should see properties they own
+        else if (!isAdminOrAccountant && (0, access_1.hasRole)(req, 'owner')) {
+            // Property owners should see properties they own (unless they are also admin/accountant)
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
         else if (!isAdminOrAccountant) {

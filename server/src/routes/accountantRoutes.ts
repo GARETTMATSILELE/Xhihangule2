@@ -32,7 +32,8 @@ import {
   getPaymentRequestDocument,
   getAcknowledgementDocument,
   reconcilePropertyDuplicates,
-  getCompanyPropertyAccounts
+  getCompanyPropertyAccounts,
+  ensureDevelopmentLedgers
 } from '../controllers/propertyAccountController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
 import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
@@ -166,6 +167,8 @@ router.post('/property-accounts/:propertyId/payout', canViewCommissions, createO
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', canViewCommissions, updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', canViewCommissions, getPayoutHistory);
 router.post('/property-accounts/sync', canViewCommissions, syncPropertyAccounts);
+// Ensure development ledgers and backfill sales payments into them (idempotent)
+router.post('/property-accounts/developments/ensure-ledgers', canViewCommissions, ensureDevelopmentLedgers);
 // Maintenance: remove duplicate income transactions for a property ledger (idempotent)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', canViewCommissions, reconcilePropertyDuplicates);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', canViewCommissions, getPaymentRequestDocument);

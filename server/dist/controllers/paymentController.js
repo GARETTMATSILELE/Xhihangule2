@@ -144,8 +144,12 @@ const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, 
             paymentMethod: 1,
             status: 1,
             referenceNumber: 1,
+            // Include notes so client can parse total sale price for outstanding calc
+            notes: 1,
             saleMode: 1,
             developmentId: 1,
+            // Include saleId so client can group payments reliably per sale
+            saleId: 1,
             propertyId: 1,
             tenantId: 1,
             buyerName: 1,
