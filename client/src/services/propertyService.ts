@@ -76,7 +76,7 @@ const validateUserAndCompany = (user: { _id?: string; companyId?: string; role?:
 };
 
 export const usePropertyService = () => {
-  const { user } = useAuth();
+  const { user, activeRole } = useAuth();
 
   // Public method for fetching all properties
   const getPublicProperties = async (): Promise<Property[]> => {
@@ -85,7 +85,11 @@ export const usePropertyService = () => {
       const params: any = {};
       if (user?._id) params.userId = user._id;
       if (user?.companyId) params.companyId = user.companyId;
-      if (user?.role) params.userRole = user.role as any;
+      // Use activeRole if available; when on accountant dashboard, default to 'accountant'
+      const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+      const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
+      const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
+      if (roleForQuery) params.userRole = roleForQuery;
       const response = await publicApi.get('/properties/public-filtered', { params });
       return Array.isArray(response.data) ? response.data : response.data.data;
     } catch (error: any) {
@@ -105,7 +109,11 @@ export const usePropertyService = () => {
       const query: any = {};
       if (user?._id) query.userId = user._id;
       if (user?.companyId) query.companyId = user.companyId;
-      if (user?.role) query.userRole = user.role as any;
+      // Use activeRole if available; when on accountant dashboard, default to 'accountant'
+      const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+      const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
+      const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
+      if (roleForQuery) query.userRole = roleForQuery;
       if (params?.q) query.q = params.q;
       if (typeof params?.saleOnly !== 'undefined') query.saleOnly = params.saleOnly ? 'true' : 'false';
       if (params?.limit) query.limit = params.limit;

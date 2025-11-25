@@ -26,8 +26,10 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
     // Role-based access narrowing: agents/sales users can only see their own payments
     try {
       const roles = (((req.user as any).roles as string[] | undefined) || [req.user.role]).map(r => String(r));
+      const hasElevatedAccess = roles.some(r => r === 'accountant' || r === 'admin');
       const isAgentUser = roles.some(r => r === 'agent' || r === 'sales');
-      if (isAgentUser) {
+      // Only narrow to self when the user is agent/sales WITHOUT accountant/admin role
+      if (isAgentUser && !hasElevatedAccess) {
         const uid = (req.user as any)?.userId;
         if (uid) {
           try {

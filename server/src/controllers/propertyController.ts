@@ -81,8 +81,9 @@ export const getPublicProperties = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(userContext.companyId)
     };
     
-    // If user is neither admin nor accountant, only show their own properties
-    if (userContext.userRole !== 'admin' && userContext.userRole !== 'accountant') {
+    // If user is not in a company-wide visibility role, only show their own properties
+    const companyWideRoles = ['admin', 'accountant', 'principal', 'prea'];
+    if (!companyWideRoles.includes(userContext.userRole)) {
       query.ownerId = new mongoose.Types.ObjectId(userContext.userId);
     }
     

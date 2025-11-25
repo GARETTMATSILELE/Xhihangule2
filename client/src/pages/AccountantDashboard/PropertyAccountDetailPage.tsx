@@ -464,6 +464,39 @@ const PropertyAccountDetailPage: React.FC = () => {
       const netIncomeAfterPayouts = periodIncome - periodPayouts;
       const netIncomeAfterExpenses = netIncomeAfterPayouts - periodExpenses;
 
+      // Fetch commission breakdowns for income transactions with linked paymentId
+      const paymentIdSet = new Set<string>();
+      for (const t of filteredTransactions) {
+        if (t.type === 'income' && (t as any)?.paymentId) {
+          paymentIdSet.add(String((t as any).paymentId));
+        }
+      }
+      const commissionByPaymentId: Record<string, { totalCommission: number; vatOnCommission: number; ownerAmount: number }> = {};
+      if (paymentIdSet.size > 0) {
+        try {
+          const ids = Array.from(paymentIdSet.values());
+          const details = await Promise.all(ids.map(async (id) => {
+            try {
+              const p = await paymentService.getPayment(id);
+              const cd = (p as any)?.commissionDetails || {};
+              const totalCommission = Number(cd?.totalCommission || 0);
+              const vatOnCommission = Number(cd?.vatOnCommission || 0);
+              const ownerAmount = Number(cd?.ownerAmount || Math.max(0, (p as any)?.amount - totalCommission - vatOnCommission));
+              return [id, { totalCommission, vatOnCommission, ownerAmount }] as const;
+            } catch {
+              return null;
+            }
+          }));
+          for (const entry of details) {
+            if (entry && entry[0]) {
+              commissionByPaymentId[entry[0]] = entry[1];
+            }
+          }
+        } catch {
+          // ignore failures; table will omit breakdowns when unavailable
+        }
+      }
+
       // Create the print content
       const printContent = `
         <!DOCTYPE html>
@@ -572,7 +605,10 @@ const PropertyAccountDetailPage: React.FC = () => {
                   <th>Date</th>
                   <th>Type</th>
                   <th>Description</th>
-                  <th>Amount</th>
+                  <th>Total Paid</th>
+                  <th>Commission</th>
+                  <th>VAT on Commission</th>
+                  <th>Owner Amount</th>
                   <th>Balance</th>
                   <th>Status</th>
                 </tr>
@@ -583,13 +619,13 @@ const PropertyAccountDetailPage: React.FC = () => {
                   .map(transaction => {
                     const isIncome = transaction.type === 'income';
                     const isExpense = transaction.type === 'expense';
-                    
-                    let amountDisplay = '';
-                    if (isIncome) {
-                      amountDisplay = `+${propertyAccountService.formatCurrency(transaction.amount)}`;
-                    } else {
-                      amountDisplay = `-${propertyAccountService.formatCurrency(transaction.amount)}`;
-                    }
+                    const totalPaid = Number(transaction.amount || 0);
+                    const amountDisplay = (isIncome ? '+' : '-') + propertyAccountService.formatCurrency(totalPaid);
+                    const pid = String((transaction as any)?.paymentId || '');
+                    const breakdown = pid ? commissionByPaymentId[pid] : undefined;
+                    const commissionCell = breakdown ? propertyAccountService.formatCurrency(breakdown.totalCommission || 0) : (isIncome ? '-' : '');
+                    const vatCell = breakdown ? propertyAccountService.formatCurrency(breakdown.vatOnCommission || 0) : (isIncome ? '-' : '');
+                    const ownerCell = breakdown ? propertyAccountService.formatCurrency(breakdown.ownerAmount || 0) : (isIncome ? '-' : '');
                     
                     return `
                       <tr class="${isIncome ? 'income-row' : 'expense-row'}">
@@ -599,6 +635,9 @@ const PropertyAccountDetailPage: React.FC = () => {
                         <td style="color: ${isIncome ? '#4caf50' : '#f44336'};">
                           ${amountDisplay}
                         </td>
+                        <td>${isIncome ? commissionCell : '-'}</td>
+                        <td>${isIncome ? vatCell : '-'}</td>
+                        <td>${isIncome ? ownerCell : '-'}</td>
                         <td>${propertyAccountService.formatCurrency(transaction.runningBalance || 0)}</td>
                         <td>${transaction.status}</td>
                       </tr>

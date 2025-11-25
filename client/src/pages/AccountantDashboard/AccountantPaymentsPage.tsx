@@ -40,6 +40,7 @@ const AccountantPaymentsPage: React.FC = () => {
     const companyId = (user as any)?.companyId || (user as any)?.company?._id;
     return companyId ? `acct_payments_cache_${CACHE_VERSION}_${companyId}` : null;
   }, [user]);
+  const GLOBAL_CACHE_KEY = useMemo(() => `acct_payments_cache_${CACHE_VERSION}_last`, []);
   const hydratedFromCacheRef = useRef(false);
 
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -136,30 +137,36 @@ const AccountantPaymentsPage: React.FC = () => {
   // Hydrate from cache immediately after auth is ready
   useEffect(() => {
     if (authLoading) return;
-    if (!cacheKey) return;
     if (hydratedFromCacheRef.current) return;
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return;
-      // Basic shape guard
-      const items = Array.isArray(parsed.items) ? parsed.items : [];
-      const total = Number(parsed.totalCount) || 0;
-      const cachedPage = Number(parsed.page) || 1;
-      const cachedLimit = Number(parsed.limit) || 25;
-      const cachedFilters = parsed.filters && typeof parsed.filters === 'object' ? parsed.filters : {};
-      setPayments(sortPayments(items as any[]));
-      setTotalCount(total);
-      setPage(cachedPage);
-      setLimit(cachedLimit);
-      setFilters(cachedFilters);
-      // Do not mark loading false if we're already loading; leave spinner, but UI has data
-      hydratedFromCacheRef.current = true;
-    } catch {
-      // ignore cache errors
+    const tryHydrateFromKey = (key: string | null) => {
+      if (!key) return false;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return false;
+        const items = Array.isArray(parsed.items) ? parsed.items : [];
+        const total = Number(parsed.totalCount) || 0;
+        const cachedPage = Number(parsed.page) || 1;
+        const cachedLimit = Number(parsed.limit) || 25;
+        const cachedFilters = parsed.filters && typeof parsed.filters === 'object' ? parsed.filters : {};
+        setPayments(sortPayments(items as any[]));
+        setTotalCount(total);
+        setPage(cachedPage);
+        setLimit(cachedLimit);
+        setFilters(cachedFilters);
+        hydratedFromCacheRef.current = true;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // Prefer company-scoped cache; fall back to last-known global cache if needed
+    if (!tryHydrateFromKey(cacheKey)) {
+      tryHydrateFromKey(GLOBAL_CACHE_KEY);
     }
-  }, [authLoading, cacheKey, sortPayments]);
+    // Do not mark loading false; we’ll refresh in background
+  }, [authLoading, cacheKey, GLOBAL_CACHE_KEY, sortPayments]);
 
   // Persist to cache after successful loads
   const persistCache = useCallback((payload: { items: Payment[]; total: number; page: number; limit: number; filters: PaymentFilter }) => {
@@ -175,10 +182,12 @@ const AccountantPaymentsPage: React.FC = () => {
         filters: payload.filters
       };
       localStorage.setItem(cacheKey, JSON.stringify(data));
+      // Also persist a last-known global copy for hydration when user context isn't available yet
+      localStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify(data));
     } catch {
       // best-effort only
     }
-  }, [cacheKey]);
+  }, [cacheKey, GLOBAL_CACHE_KEY]);
 
   const initialFetchDone = useRef(false);
   useEffect(() => {

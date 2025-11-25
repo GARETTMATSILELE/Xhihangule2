@@ -102,6 +102,7 @@ router.post('/login', async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     
@@ -148,7 +149,10 @@ router.post('/login', async (req, res) => {
 
 // Logout route
 router.post('/logout', (req, res) => {
-  res.clearCookie('refreshToken');
+  res.clearCookie('refreshToken', {
+    path: '/',
+    ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})
+  });
   res.json({ 
     status: 'success',
     message: 'Logged out successfully' 
@@ -190,6 +194,7 @@ router.post('/refresh-token', async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     

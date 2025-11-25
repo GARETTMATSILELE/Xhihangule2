@@ -105,6 +105,9 @@ const allowedOrigins = [
     process.env.CLIENT_URL || 'http://localhost:3000',
     'http://localhost:5173', // Vite default port
     'http://localhost:3000', // Create React App default port
+    // Production defaults (ensure both apex and www are allowed if env not configured)
+    'https://xhihangule.com',
+    'https://www.xhihangule.com',
     ...allowedOriginsFromEnv
 ];
 app.use((0, cors_1.default)({

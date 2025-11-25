@@ -236,6 +236,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
@@ -325,6 +326,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
@@ -544,6 +546,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 

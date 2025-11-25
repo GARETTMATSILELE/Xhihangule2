@@ -88,13 +88,8 @@ router.post('/login', (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         }
         // Set refresh token as HttpOnly cookie
-        res.cookie('refreshToken', result.refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
+        res.cookie('refreshToken', result.refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
         // Build avatar URL if present
         const avatarUrl = (fullUser === null || fullUser === void 0 ? void 0 : fullUser.avatar)
             ? `data:${fullUser.avatarMimeType || 'image/png'};base64,${fullUser.avatar}`
@@ -126,7 +121,7 @@ router.post('/login', (req, res) => __awaiter(void 0, void 0, void 0, function* 
 }));
 // Logout route
 router.post('/logout', (req, res) => {
-    res.clearCookie('refreshToken');
+    res.clearCookie('refreshToken', Object.assign({ path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})));
     res.json({
         status: 'success',
         message: 'Logged out successfully'
@@ -156,13 +151,8 @@ router.post('/refresh-token', (req, res) => __awaiter(void 0, void 0, void 0, fu
             hasNewRefreshToken: !!result.refreshToken
         });
         // Set new refresh token as HttpOnly cookie
-        res.cookie('refreshToken', result.refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
+        res.cookie('refreshToken', result.refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
         res.json({
             status: 'success',
             token: result.token,

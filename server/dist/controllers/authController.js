@@ -245,13 +245,8 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
             companyId: savedUser === null || savedUser === void 0 ? void 0 : savedUser.companyId
         });
         // Set refresh token as HttpOnly cookie
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-            path: '/',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
+        res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
         res.status(201).json({
             user: {
                 _id: savedUser._id,
@@ -330,13 +325,8 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
             refreshTokenLength: refreshToken === null || refreshToken === void 0 ? void 0 : refreshToken.length,
             environment: process.env.NODE_ENV
         });
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-            path: '/',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
+        res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
         console.log('Refresh token cookie set successfully');
         res.json({
             user: {
@@ -520,13 +510,8 @@ const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
         const { token: newAccessToken, refreshToken: newRefreshToken } = yield authService.refreshToken(refreshToken);
         console.log('Token refresh successful');
         // Set new refresh token as HttpOnly cookie
-        res.cookie('refreshToken', newRefreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-            path: '/',
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
+        res.cookie('refreshToken', newRefreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
         res.json({
             token: newAccessToken,
             refreshToken: newRefreshToken
