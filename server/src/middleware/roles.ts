@@ -53,6 +53,18 @@ export const isAccountant = (req: Request, res: Response, next: NextFunction) =>
   next();
 };
 
+// Read-only access to agent accounts for Admin, Principal, PREA and Accountant
+export const canViewAgentAccounts = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['accountant', 'admin', 'principal', 'prea'].includes(r))) {
+    throw new AppError('Access denied. Admin, Principal, PREA or Accountant role required.', 403);
+  }
+  next();
+};
+
 export const canCreateProperty = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) {
     throw new AppError('Authentication required', 401);

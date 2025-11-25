@@ -69,6 +69,22 @@ export const usePropertyOwnerService = () => {
     }
   };
 
+  // Fetch property owner by propertyId (cross-referenced in propertyowners collection)
+  const getByPropertyId = async (propertyId: string, companyIdOverride?: string) => {
+    try {
+      const companyId = companyIdOverride || getCompanyId();
+      const config: any = {};
+      if (companyId) {
+        config.params = { companyId };
+      }
+      const response = await api.get(`/property-owners/by-property/${propertyId}`, config);
+      return response.data as PropertyOwner;
+    } catch (error: any) {
+      console.error('Error fetching owner by propertyId:', error);
+      throw new Error('Failed to fetch owner for this property');
+    }
+  };
+
   // Fetch sales owner by id (from salesowners collection)
   const getSalesById = async (id: string) => {
     try {
@@ -155,6 +171,7 @@ export const usePropertyOwnerService = () => {
     getAll,
     getAllPublic,
     getById,
+    getByPropertyId,
     getSalesById,
     create,
     update,

@@ -77,8 +77,8 @@ const PropertyDetailsPage: React.FC = () => {
             setOwnerName(null);
             setOwnerEmail(null);
           }
-        } catch {
-          // Fall back to resolving via property.ownerId when available
+          } catch {
+          // Fall back to resolving via property.ownerId when available (authenticated)
           try {
             const rawOwnerId: any = (p as any)?.ownerId;
             let ownerIdStr = '';
@@ -88,14 +88,11 @@ const PropertyDetailsPage: React.FC = () => {
               ownerIdStr = String(rawOwnerId._id || rawOwnerId.$oid || rawOwnerId.id || '');
             }
             if (ownerIdStr) {
-              // Prefer public route to avoid company-scope auth failures
               try {
-                const ownerPublic = await api.get(`/property-owners/public/${ownerIdStr}`, {
-                  params: user?.companyId ? { companyId: user.companyId } : undefined
-                }).then(r => r.data);
-                const full = `${ownerPublic?.firstName || ''} ${ownerPublic?.lastName || ''}`.trim();
+                const ownerAuth = await api.get(`/property-owners/${ownerIdStr}`).then(r => r.data);
+                const full = `${ownerAuth?.firstName || ''} ${ownerAuth?.lastName || ''}`.trim();
                 setOwnerName(full || null);
-                setOwnerEmail(ownerPublic?.email || null);
+                setOwnerEmail(ownerAuth?.email || null);
               } catch {
                 setOwnerName(null);
                 setOwnerEmail(null);

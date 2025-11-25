@@ -33,6 +33,9 @@ interface PropertyListProps {
   onPropertyClick: (property: Property) => void;
   onDeleteProperty: (propertyId: string) => void;
   onAddProperty: () => void;
+  // Optional, for admin dashboard customizations
+  isAdminRoute?: boolean;
+  agentNamesById?: Record<string, string>;
 }
 
 const PropertyList: React.FC<PropertyListProps> = ({
@@ -40,6 +43,8 @@ const PropertyList: React.FC<PropertyListProps> = ({
   onPropertyClick,
   onDeleteProperty,
   onAddProperty,
+  isAdminRoute,
+  agentNamesById,
 }) => {
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -84,7 +89,7 @@ const PropertyList: React.FC<PropertyListProps> = ({
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Name</TableCell>
+              <TableCell>{isAdminRoute ? 'Agent' : 'Name'}</TableCell>
               <TableCell>Address</TableCell>
               <TableCell>Type</TableCell>
               <TableCell>{isAgentRoute ? 'Rent' : 'Amount'}</TableCell>
@@ -112,9 +117,16 @@ const PropertyList: React.FC<PropertyListProps> = ({
                     <Link to={`/agent-dashboard/properties/${property._id}`} style={{ textDecoration: 'none' }}>
                       {property.name}
                     </Link>
-                  ) : (
-                    property.name
-                  )}
+                  ) : isAdminRoute ? (
+                    <Box>
+                      <Typography variant="subtitle2">
+                        {(agentNamesById && agentNamesById[String((property as any).__ownerIdStr || '')]) || 'Unassigned'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {property.name}
+                      </Typography>
+                    </Box>
+                  ) : property.name}
                 </TableCell>
                 <TableCell>{property.address}</TableCell>
                 <TableCell>{property.type}</TableCell>

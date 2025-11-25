@@ -225,8 +225,10 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             query.rentalType = req.query.rentalType;
         }
         // Restrict visibility based on role
-        if (req.user.role === 'sales') {
-            // Sales users should only see sales properties assigned to them
+        const isAdminOrAccountant = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
+        const isSales = (0, access_1.hasRole)(req, 'sales');
+        if (isSales && !isAdminOrAccountant) {
+            // Pure sales users should only see their own sales properties
             query.rentalType = 'sale';
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
@@ -234,7 +236,7 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             // Property owners should see properties they own
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        else if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
+        else if (!isAdminOrAccountant) {
             // Other non-admin/accountant users only see properties assigned to them as agent
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }

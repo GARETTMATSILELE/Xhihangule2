@@ -172,6 +172,8 @@ export interface PaymentFilter {
   paginate?: boolean | string;
   // Filter to exclude development-linked sales
   noDevelopment?: boolean;
+  // Global search term (e.g., reference number, notes, etc.)
+  search?: string;
 }
 
 export interface PaymentSummary {

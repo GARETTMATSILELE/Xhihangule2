@@ -11,6 +11,7 @@ import {
   Avatar,
   CircularProgress,
   Divider,
+  Badge,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -31,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
+import paymentRequestService from '../../services/paymentRequestService';
 
 const drawerWidth = 280;
 
@@ -43,6 +45,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { company } = useCompany();
+  const [pendingApprovalsCount, setPendingApprovalsCount] = React.useState<number>(0);
 
   const baseItems = [
     { 
@@ -139,6 +142,29 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
     return items;
   }, [company?.plan, user?.role, (user as any)?.roles]);
 
+  // Load pending approvals count for Notifications item
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await paymentRequestService.getPaymentRequests({ page: 1, limit: 200 } as any);
+        const list = Array.isArray(resp?.data) ? resp.data : [];
+        // Count requests needing approval (approval.status === 'pending')
+        // Match ApprovalsPage heuristic (sales/disbursement related) to stay consistent
+        const pending = list.filter((r: any) => (r?.approval?.status || 'pending') === 'pending');
+        const salesOnly = pending.filter((r: any) => {
+          const reason = String(r?.reason || '');
+          return Boolean((r as any).reportHtml) || /disbursement|sale|commission/i.test(reason);
+        });
+        const count = salesOnly.length;
+        if (!cancelled) setPendingApprovalsCount(count);
+      } catch {
+        if (!cancelled) setPendingApprovalsCount(0);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);
     navigate(path);
@@ -214,27 +240,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
           </>
         )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, px: 2 }}>
-          <Avatar
-            sx={{
-              width: 40,
-              height: 40,
-              bgcolor: 'primary.main',
-              color: 'white',
-              fontSize: '1.2rem',
-            }}
-          >
-            {user?.firstName?.charAt(0) || 'A'}
-          </Avatar>
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-              {user ? `${user.firstName} ${user.lastName}` : 'Guest User'}
-            </Typography>
-            <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-              {user?.email || 'guest@example.com'}
-            </Typography>
-          </Box>
-        </Box>
+        {/* User block removed as per request; name will be shown in top header */}
 
         <List>
           {menuItems.map((item, index) => (
@@ -261,7 +267,16 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
                 {item.icon}
               </ListItemIcon>
               <ListItemText 
-                primary={item.text} 
+                primary={
+                  item.text === 'Notifications' && pendingApprovalsCount > 0 ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Box component="span" sx={{ mr: 1 }}>
+                        {item.text}
+                      </Box>
+                      <Badge color="error" badgeContent={pendingApprovalsCount} />
+                    </Box>
+                  ) : item.text
+                } 
                 primaryTypographyProps={{
                   fontWeight: activeTab === index ? 600 : 400,
                 }}

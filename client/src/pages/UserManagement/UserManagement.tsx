@@ -25,11 +25,13 @@ import {
   SelectChangeEvent,
   CircularProgress,
   useTheme,
+  InputAdornment,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  Search as SearchIcon,
 } from '@mui/icons-material';
 import api from '../../api/axios';
 import { AdminSidebar } from '../../components/Layout/AdminSidebar';
@@ -122,6 +124,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(7); // 7 is the index for User Management in AdminSidebar
+  const roleLabel = (r: string) => (r === 'agent' ? 'Rental Agent' : r === 'sales' ? 'Sales Agent' : (r.charAt(0).toUpperCase() + r.slice(1)));
+  const [searchQuery, setSearchQuery] = useState('');
+  const filteredUsers = React.useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u => {
+      const fullName = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase();
+      const email = (u.email || '').toLowerCase();
+      const role = (u.role || '').toString().toLowerCase();
+      return fullName.includes(q) || email.includes(q) || role.includes(q);
+    });
+  }, [users, searchQuery]);
 
   useEffect(() => {
     // Restore authentication check for user management
@@ -357,17 +371,35 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
   if (embedded) {
     return (
       <Box sx={{ p: 0 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2, flexWrap: 'wrap' }}>
           <Typography variant="h4" component="h1">
             User Management
           </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => handleOpenDialog()}
-          >
-            Add User
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <TextField
+              id="user-search-embedded"
+              name="userSearch"
+              label="Search users"
+              placeholder="Name, email, or role"
+              size="small"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                )
+              }}
+            />
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => handleOpenDialog()}
+            >
+              Add User
+            </Button>
+          </Box>
         </Box>
 
         <TableContainer component={Paper}>
@@ -382,7 +414,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
               </TableRow>
             </TableHead>
             <TableBody>
-              {users.map((user) => (
+              {filteredUsers.map((user) => (
                 <TableRow key={user.id || user.email}>
                   <TableCell>{`${user.firstName} ${user.lastName}`}</TableCell>
                   <TableCell>{user.email}</TableCell>
@@ -420,11 +452,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
                     value={formData.roles as any}
                     onChange={handleRolesChange as any}
                     label="Roles"
-                    renderValue={(selected) => (selected as string[]).map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')}
+                    renderValue={(selected) => (selected as string[]).map(r => roleLabel(r)).join(', ')}
                   >
                     {ROLES.map((role) => (
                       <MenuItem key={role.id} value={role.name}>
-                        {role.name.charAt(0).toUpperCase() + role.name.slice(1)}
+                        {roleLabel(role.name)}
                       </MenuItem>
                     ))}
                   </Select>
@@ -466,17 +498,35 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
       <Box sx={{ flexGrow: 1 }}>
         <Header />
         <Box sx={{ mt: 8, p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2, flexWrap: 'wrap' }}>
             <Typography variant="h4" component="h1">
               User Management
             </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => handleOpenDialog()}
-            >
-              Add User
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                id="user-search"
+                name="userSearch"
+                label="Search users"
+                placeholder="Name, email, or role"
+                size="small"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" />
+                    </InputAdornment>
+                  )
+                }}
+              />
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => handleOpenDialog()}
+              >
+                Add User
+              </Button>
+            </Box>
           </Box>
 
           <TableContainer component={Paper}>
@@ -491,7 +541,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
                 </TableRow>
               </TableHead>
               <TableBody>
-                {users.map((user) => (
+                {filteredUsers.map((user) => (
                   <TableRow key={user.id || user.email}>
                     <TableCell>{`${user.firstName} ${user.lastName}`}</TableCell>
                     <TableCell>{user.email}</TableCell>
@@ -529,11 +579,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
                       value={formData.roles as any}
                       onChange={handleRolesChange as any}
                       label="Roles"
-                      renderValue={(selected) => (selected as string[]).map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ')}
+                    renderValue={(selected) => (selected as string[]).map(r => roleLabel(r)).join(', ')}
                     >
                       {ROLES.map((role) => (
                         <MenuItem key={role.id} value={role.name}>
-                          {role.name.charAt(0).toUpperCase() + role.name.slice(1)}
+                        {roleLabel(role.name)}
                         </MenuItem>
                       ))}
                     </Select>

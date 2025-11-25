@@ -1,6 +1,6 @@
 import express from 'express';
 import { auth } from '../middleware/auth';
-import { isAccountant, canManagePayments, canViewCommissions, canViewSalesPayments } from '../middleware/roles';
+import { isAccountant, canManagePayments, canViewCommissions, canViewSalesPayments, canViewAgentAccounts } from '../middleware/roles';
 import {
   getAgentCommissions,
   getAgencyCommission,
@@ -181,15 +181,16 @@ router.post('/sales', isAccountant, createSalesContract);
 router.get('/sales', isAccountant, listSalesContracts);
 router.get('/sales/:id', isAccountant, getSalesContract);
 
-// Agent Account routes - require accountant role
-router.get('/agent-accounts', isAccountant, getCompanyAgentAccounts);
-router.get('/agent-accounts/commission-compare', isAccountant, compareAgentCommissionTotals);
-router.get('/agent-accounts/top-agents', isAccountant, getTopAgentsForMonth);
-router.get('/agent-accounts/:agentId', isAccountant, (req, res) => {
+// Agent Account routes - read-only allowed for Admin/Principal/PREA/Accountant
+router.get('/agent-accounts', canViewAgentAccounts, getCompanyAgentAccounts);
+router.get('/agent-accounts/commission-compare', canViewAgentAccounts, compareAgentCommissionTotals);
+router.get('/agent-accounts/top-agents', canViewAgentAccounts, getTopAgentsForMonth);
+router.get('/agent-accounts/:agentId', canViewAgentAccounts, (req, res) => {
   console.log('Agent account detail route hit:', req.params.agentId);
   console.log('User role:', req.user?.role);
   getAgentAccount(req, res);
 });
+// Write operations remain accountant-only
 router.post('/agent-accounts/:agentId/penalty', isAccountant, addPenalty);
 router.post('/agent-accounts/:agentId/payout', isAccountant, createAgentPayout);
 router.put('/agent-accounts/:agentId/payout/:payoutId/status', isAccountant, updateAgentPayoutStatus);

@@ -11,7 +11,13 @@ import {
   Alert,
   useTheme,
   useMediaQuery,
-  IconButton
+  IconButton,
+  Avatar,
+  Menu,
+  MenuItem,
+  Badge,
+  ListItemIcon,
+  Divider
 } from '@mui/material';
 import { 
   Receipt as ReceiptIcon,
@@ -22,6 +28,8 @@ import {
   People as PeopleIcon,
   Assessment as AssessmentIcon,
   Settings as SettingsIcon,
+  Notifications as NotificationsIcon,
+  Logout as LogoutIcon,
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon
 } from '@mui/icons-material';
@@ -49,6 +57,10 @@ const AccountantDashboard: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { logout, user, company: authCompany } = useAuth();
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
+  const isUserMenuOpen = Boolean(menuAnchorEl);
+  const handleOpenUserMenu = (event: React.MouseEvent<HTMLElement>) => setMenuAnchorEl(event.currentTarget);
+  const handleCloseUserMenu = () => setMenuAnchorEl(null);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -161,9 +173,69 @@ const AccountantDashboard: React.FC = () => {
             {company?.name || 'Accountant Dashboard'}
           </Typography>
         </Box>
-        <Button color="inherit" onClick={logout} sx={{ color: '#fff', fontWeight: 600 }}>
-          Logout
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography variant="body1" sx={{ display: { xs: 'none', sm: 'block' } }}>
+            {user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'User' : ''}
+          </Typography>
+          <IconButton
+            onClick={handleOpenUserMenu}
+            size="small"
+            sx={{ p: 0.5, color: 'inherit' }}
+            aria-controls={isUserMenuOpen ? 'user-menu' : undefined}
+            aria-haspopup="true"
+            aria-expanded={isUserMenuOpen ? 'true' : undefined}
+          >
+            <Badge color="error" variant="dot" overlap="circular" invisible>
+              <Avatar
+                src={
+                  ((user as any)?.photoURL ||
+                  (user as any)?.avatarUrl ||
+                  (user as any)?.profileImageUrl ||
+                  (user as any)?.profilePicture ||
+                  '') as string
+                }
+                sx={{ width: 36, height: 36, bgcolor: '#5E72E4' }}
+              >
+                {((user?.firstName?.[0] || '') + (user?.lastName?.[0] || '')).toUpperCase() || (user?.email?.[0]?.toUpperCase() || 'U')}
+              </Avatar>
+            </Badge>
+          </IconButton>
+          <Menu
+            anchorEl={menuAnchorEl}
+            id="user-menu"
+            open={isUserMenuOpen}
+            onClose={handleCloseUserMenu}
+            onClick={handleCloseUserMenu}
+            transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+            anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+            PaperProps={{
+              sx: {
+                mt: 1,
+                minWidth: 220,
+              }
+            }}
+          >
+            <MenuItem onClick={() => { handleCloseUserMenu(); navigate('/accountant-dashboard/tasks'); }}>
+              <ListItemIcon>
+                <NotificationsIcon fontSize="small" />
+              </ListItemIcon>
+              Notifications
+            </MenuItem>
+            <MenuItem onClick={() => { handleCloseUserMenu(); navigate('/accountant-dashboard/settings'); }}>
+              <ListItemIcon>
+                <SettingsIcon fontSize="small" />
+              </ListItemIcon>
+              Settings
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={() => { handleCloseUserMenu(); logout(); }}>
+              <ListItemIcon>
+                <LogoutIcon fontSize="small" />
+              </ListItemIcon>
+              Logout
+            </MenuItem>
+          </Menu>
+        </Box>
       </Box>
       <Box sx={{ display: 'flex', flexGrow: 1, pt: 8 }}>
         {/* Sidebar fixed and visible across accountant routes */}

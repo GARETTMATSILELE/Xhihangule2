@@ -144,16 +144,17 @@ router.post('/company-account/transactions', roles_1.isAccountant, companyAccoun
 router.post('/sales', roles_1.isAccountant, salesContractController_1.createSalesContract);
 router.get('/sales', roles_1.isAccountant, salesContractController_1.listSalesContracts);
 router.get('/sales/:id', roles_1.isAccountant, salesContractController_1.getSalesContract);
-// Agent Account routes - require accountant role
-router.get('/agent-accounts', roles_1.isAccountant, agentAccountController_1.getCompanyAgentAccounts);
-router.get('/agent-accounts/commission-compare', roles_1.isAccountant, agentAccountController_2.compareAgentCommissionTotals);
-router.get('/agent-accounts/top-agents', roles_1.isAccountant, agentAccountController_1.getTopAgentsForMonth);
-router.get('/agent-accounts/:agentId', roles_1.isAccountant, (req, res) => {
+// Agent Account routes - read-only allowed for Admin/Principal/PREA/Accountant
+router.get('/agent-accounts', roles_1.canViewAgentAccounts, agentAccountController_1.getCompanyAgentAccounts);
+router.get('/agent-accounts/commission-compare', roles_1.canViewAgentAccounts, agentAccountController_2.compareAgentCommissionTotals);
+router.get('/agent-accounts/top-agents', roles_1.canViewAgentAccounts, agentAccountController_1.getTopAgentsForMonth);
+router.get('/agent-accounts/:agentId', roles_1.canViewAgentAccounts, (req, res) => {
     var _a;
     console.log('Agent account detail route hit:', req.params.agentId);
     console.log('User role:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.role);
     (0, agentAccountController_1.getAgentAccount)(req, res);
 });
+// Write operations remain accountant-only
 router.post('/agent-accounts/:agentId/penalty', roles_1.isAccountant, agentAccountController_1.addPenalty);
 router.post('/agent-accounts/:agentId/payout', roles_1.isAccountant, agentAccountController_1.createAgentPayout);
 router.put('/agent-accounts/:agentId/payout/:payoutId/status', roles_1.isAccountant, agentAccountController_1.updatePayoutStatus);

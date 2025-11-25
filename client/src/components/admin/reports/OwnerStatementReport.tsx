@@ -5,7 +5,7 @@ interface OwnerStatementReportProps {
   isAuthenticated?: boolean;
 }
 
-const OwnerStatementReport: React.FC<OwnerStatementReportProps> = ({ isAuthenticated = false }) => {
+const OwnerStatementReport: React.FC<OwnerStatementReportProps> = ({ isAuthenticated = true }) => {
   const [data, setData] = useState<OwnerStatementData[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

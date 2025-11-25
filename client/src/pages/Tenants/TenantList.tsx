@@ -122,7 +122,12 @@ export const TenantList: React.FC = () => {
       if (editingTenant) {
         await api.put(`/tenants/${editingTenant._id}`, formData);
       } else {
-        await api.post('/tenants', formData);
+        // Include the user's ID as ownerId when creating new tenants
+        const tenantDataWithOwnerId = {
+          ...formData,
+          ownerId: user?._id // Add the logged-in user's ID as ownerId
+        };
+        await api.post('/tenants', tenantDataWithOwnerId);
       }
       handleClose();
       fetchTenants();

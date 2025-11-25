@@ -1176,6 +1176,25 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
       }
     }
 
+    // Global search (reference number, notes, and other textual fields)
+    if (req.query.search && typeof req.query.search === 'string') {
+      const search = String(req.query.search).trim();
+      if (search) {
+        const regex = new RegExp(search, 'i');
+        query.$or = [
+          { referenceNumber: { $regex: regex } },
+          { notes: { $regex: regex } },
+          { currency: { $regex: regex } },
+          { paymentMethod: { $regex: regex } },
+          { status: { $regex: regex } },
+          { manualPropertyAddress: { $regex: regex } },
+          { manualTenantName: { $regex: regex } },
+          { buyerName: { $regex: regex } },
+          { sellerName: { $regex: regex } },
+        ];
+      }
+    }
+
     // Pagination controls
     const paginate = String(req.query.paginate || 'false') === 'true';
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
@@ -1603,7 +1622,11 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
 export const getPaymentReceiptDownload = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
+    // Prefer authenticated company when available; otherwise allow explicit query/header for public route
+    const companyId =
+      (req.user?.companyId as string | undefined) ||
+      (req.query.companyId as string | undefined) ||
+      (req.headers['x-company-id'] as string | undefined);
     
     console.log('Payment receipt download request:', {
       id,
@@ -1613,10 +1636,20 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
     });
 
     let query: any = { _id: id };
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = new mongoose.Types.ObjectId(companyId);
+    // When authenticated, strictly scope to the user's company
+    if (req.user?.companyId) {
+      try {
+        query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId));
+      } catch {
+        query.companyId = String(req.user.companyId);
+      }
+    } else if (companyId) {
+      // Public path: optional companyId filter
+      try {
+        query.companyId = new mongoose.Types.ObjectId(String(companyId));
+      } catch {
+        query.companyId = String(companyId);
+      }
     }
 
     console.log('Payment receipt download query:', query);
@@ -1750,7 +1783,11 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
 export const getPaymentReceipt = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
+    // Prefer authenticated company when available; otherwise allow explicit query/header for public route
+    const companyId =
+      (req.user?.companyId as string | undefined) ||
+      (req.query.companyId as string | undefined) ||
+      (req.headers['x-company-id'] as string | undefined);
     
     console.log('Payment receipt request:', {
       id,
@@ -1760,10 +1797,20 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
     });
 
     let query: any = { _id: id };
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = new mongoose.Types.ObjectId(companyId);
+    // When authenticated, strictly scope to the user's company
+    if (req.user?.companyId) {
+      try {
+        query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId));
+      } catch {
+        query.companyId = String(req.user.companyId);
+      }
+    } else if (companyId) {
+      // Public path: optional companyId filter
+      try {
+        query.companyId = new mongoose.Types.ObjectId(String(companyId));
+      } catch {
+        query.companyId = String(companyId);
+      }
     }
 
     console.log('Payment receipt query:', query);

@@ -159,26 +159,7 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
           </>
         )}
 
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, px: 2 }}>
-          <Avatar
-            sx={{
-              width: 48,
-              height: 48,
-              bgcolor: 'primary.main',
-              mr: 2,
-            }}
-          >
-            {user?.firstName?.charAt(0) || 'A'}
-          </Avatar>
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-              {user ? `${user.firstName} ${user.lastName}` : 'Agent User'}
-            </Typography>
-            <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-              {user?.email || 'agent@example.com'}
-            </Typography>
-          </Box>
-        </Box>
+        {/* User details removed; name will be shown in header */}
 
         <List>
           {menuItems.map((item, index) => (

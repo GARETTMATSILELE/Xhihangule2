@@ -1123,6 +1123,24 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 // ignore invalid id
             }
         }
+        // Global search (reference number, notes, and other textual fields)
+        if (req.query.search && typeof req.query.search === 'string') {
+            const search = String(req.query.search).trim();
+            if (search) {
+                const regex = new RegExp(search, 'i');
+                query.$or = [
+                    { referenceNumber: { $regex: regex } },
+                    { notes: { $regex: regex } },
+                    { currency: { $regex: regex } },
+                    { paymentMethod: { $regex: regex } },
+                    { status: { $regex: regex } },
+                    { manualPropertyAddress: { $regex: regex } },
+                    { manualTenantName: { $regex: regex } },
+                    { buyerName: { $regex: regex } },
+                    { sellerName: { $regex: regex } },
+                ];
+            }
+        }
         // Pagination controls
         const paginate = String(req.query.paginate || 'false') === 'true';
         const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
@@ -1493,10 +1511,13 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.createPaymentPublic = createPaymentPublic;
 // Public endpoint for downloading a payment receipt as blob (no authentication required)
 const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     try {
         const { id } = req.params;
-        const companyId = req.query.companyId || req.headers['x-company-id'];
+        // Prefer authenticated company when available; otherwise allow explicit query/header for public route
+        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
+            req.query.companyId ||
+            req.headers['x-company-id'];
         console.log('Payment receipt download request:', {
             id,
             companyId,
@@ -1504,9 +1525,23 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
             headers: req.headers
         });
         let query = { _id: id };
-        // Filter by company ID if provided
-        if (companyId) {
-            query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
+        // When authenticated, strictly scope to the user's company
+        if ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) {
+            try {
+                query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
+            }
+            catch (_o) {
+                query.companyId = String(req.user.companyId);
+            }
+        }
+        else if (companyId) {
+            // Public path: optional companyId filter
+            try {
+                query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
+            }
+            catch (_p) {
+                query.companyId = String(companyId);
+            }
         }
         console.log('Payment receipt download query:', query);
         const payment = yield Payment_1.Payment.findOne(query)
@@ -1564,7 +1599,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               <div class="receipt-number">Receipt #${payment.referenceNumber}</div>
             </div>
             
-            <div class="amount">$${((_a = payment.amount) === null || _a === void 0 ? void 0 : _a.toFixed(2)) || '0.00'}</div>
+            <div class="amount">$${((_c = payment.amount) === null || _c === void 0 ? void 0 : _c.toFixed(2)) || '0.00'}</div>
             
             <div class="details">
               <div class="detail-row">
@@ -1573,27 +1608,27 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               </div>
               <div class="detail-row">
                 <span class="label">Payment Method:</span>
-                <span class="value">${((_b = payment.paymentMethod) === null || _b === void 0 ? void 0 : _b.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_d = payment.paymentMethod) === null || _d === void 0 ? void 0 : _d.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Status:</span>
-                <span class="value">${((_c = payment.status) === null || _c === void 0 ? void 0 : _c.toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_e = payment.status) === null || _e === void 0 ? void 0 : _e.toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Property:</span>
-                <span class="value">${((_d = payment.propertyId) === null || _d === void 0 ? void 0 : _d.name) || 'N/A'}</span>
+                <span class="value">${((_f = payment.propertyId) === null || _f === void 0 ? void 0 : _f.name) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Tenant:</span>
-                <span class="value">${(_e = payment.tenantId) === null || _e === void 0 ? void 0 : _e.firstName} ${(_f = payment.tenantId) === null || _f === void 0 ? void 0 : _f.lastName}</span>
+                <span class="value">${(_g = payment.tenantId) === null || _g === void 0 ? void 0 : _g.firstName} ${(_h = payment.tenantId) === null || _h === void 0 ? void 0 : _h.lastName}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Agent:</span>
-                <span class="value">${(_g = payment.agentId) === null || _g === void 0 ? void 0 : _g.firstName} ${((_h = payment.agentId) === null || _h === void 0 ? void 0 : _h.lastName) || 'N/A'}</span>
+                <span class="value">${(_j = payment.agentId) === null || _j === void 0 ? void 0 : _j.firstName} ${((_k = payment.agentId) === null || _k === void 0 ? void 0 : _k.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Processed By:</span>
-                <span class="value">${(_j = payment.processedBy) === null || _j === void 0 ? void 0 : _j.firstName} ${((_k = payment.processedBy) === null || _k === void 0 ? void 0 : _k.lastName) || 'N/A'}</span>
+                <span class="value">${(_l = payment.processedBy) === null || _l === void 0 ? void 0 : _l.firstName} ${((_m = payment.processedBy) === null || _m === void 0 ? void 0 : _m.lastName) || 'N/A'}</span>
               </div>
               ${payment.notes ? `
               <div class="detail-row">
@@ -1629,9 +1664,13 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
 exports.getPaymentReceiptDownload = getPaymentReceiptDownload;
 // Public endpoint for getting a payment receipt for printing
 const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
         const { id } = req.params;
-        const companyId = req.query.companyId || req.headers['x-company-id'];
+        // Prefer authenticated company when available; otherwise allow explicit query/header for public route
+        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
+            req.query.companyId ||
+            req.headers['x-company-id'];
         console.log('Payment receipt request:', {
             id,
             companyId,
@@ -1639,9 +1678,23 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             headers: req.headers
         });
         let query = { _id: id };
-        // Filter by company ID if provided
-        if (companyId) {
-            query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
+        // When authenticated, strictly scope to the user's company
+        if ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) {
+            try {
+                query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
+            }
+            catch (_c) {
+                query.companyId = String(req.user.companyId);
+            }
+        }
+        else if (companyId) {
+            // Public path: optional companyId filter
+            try {
+                query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
+            }
+            catch (_d) {
+                query.companyId = String(companyId);
+            }
         }
         console.log('Payment receipt query:', query);
         const payment = yield Payment_1.Payment.findOne(query)

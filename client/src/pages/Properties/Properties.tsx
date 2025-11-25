@@ -14,6 +14,9 @@ import { useAdminDashboardService } from '../../services/adminDashboardService';
 import { useLocation } from 'react-router-dom';
 import agentService from '../../services/agentService';
 import { Tenant } from '../../types/tenant';
+import { developmentService } from '../../services/developmentService';
+import api from '../../api/axios';
+import { developmentUnitService } from '../../services/developmentUnitService';
 
 export const Properties: React.FC = () => {
   const { user, company } = useAuth();
@@ -50,6 +53,16 @@ export const Properties: React.FC = () => {
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentTenants, setAgentTenants] = useState<Tenant[]>([]);
+  // Admin: users (for agent mapping via ownerId) and developments
+  const [users, setUsers] = useState<any[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>('');
+  const [developments, setDevelopments] = useState<any[]>([]);
+  const [devLoading, setDevLoading] = useState(false);
+  const [devError, setDevError] = useState<string | null>(null);
+  const [expandedDevIds, setExpandedDevIds] = useState<Record<string, boolean>>({});
+  const [unitsByDevId, setUnitsByDevId] = useState<Record<string, any[]>>({});
+  const [unitsLoadingByDevId, setUnitsLoadingByDevId] = useState<Record<string, boolean>>({});
+  const [unitsErrorByDevId, setUnitsErrorByDevId] = useState<Record<string, string | null>>({});
   
   // Use appropriate properties based on route
   let properties: Property[] = [];
@@ -106,6 +119,29 @@ export const Properties: React.FC = () => {
       fetchAdminProperties();
     }
   }, [isAdminRoute, getAdminDashboardProperties]);
+
+  // Fetch agents and developments on admin route
+  useEffect(() => {
+    if (!isAdminRoute) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const [usersResp, devList] = await Promise.all([
+          api.get('/users').then(r => (Array.isArray(r.data) ? r.data : (Array.isArray(r.data?.data) ? r.data.data : []))).catch(() => []),
+          developmentService.list({ limit: 100 }).catch(() => []),
+        ]);
+        if (!mounted) return;
+        setUsers(Array.isArray(usersResp) ? usersResp : []);
+        setDevelopments(Array.isArray(devList) ? devList : Array.isArray((devList as any)?.data) ? (devList as any).data : []);
+      } catch (e) {
+        if (!mounted) return;
+        setDevError('Failed to load developments');
+      } finally {
+        if (mounted) setDevLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [isAdminRoute]);
 
   // Fetch agent properties and tenants when on agent route
   useEffect(() => {
@@ -333,12 +369,22 @@ export const Properties: React.FC = () => {
       property.address.toLowerCase().includes(searchQuery.toLowerCase());
     const isSale = property.rentalType === 'sale';
     const matchesListing = listingFilter === 'all' || (listingFilter === 'sale' ? isSale : !isSale);
+    // Agent is stored in ownerId for properties; filter strictly by ownerId
+    const ownerIdStr = getId((property as any).ownerId);
+    const matchesAgent = !isAdminRoute || !selectedAgentId || ownerIdStr === String(selectedAgentId);
 
-    return matchesStatus && matchesLocation && matchesRent && matchesSearch && matchesListing;
+    return matchesStatus && matchesLocation && matchesRent && matchesSearch && matchesListing && matchesAgent;
   }) || [];
 
   // Map properties to include display status for the list rendering
-  const propertiesForList = filteredProperties.map(p => ({ ...p, status: getPropertyDisplayStatus(p) }));
+  const propertiesForList = filteredProperties.map(p => ({ ...p, status: getPropertyDisplayStatus(p), __ownerIdStr: getId((p as any).ownerId) }));
+  const agentNamesById = (users || []).reduce<Record<string, string>>((acc, a: any) => {
+    const key = String(a._id || a.id || '');
+    if (!key) return acc;
+    const name = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || key;
+    acc[key] = name;
+    return acc;
+  }, {});
 
   if (loading) {
     return (
@@ -400,6 +446,29 @@ export const Properties: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            {isAdminRoute && (
+              <div className="agent-filter" style={{ minWidth: 220 }}>
+                <select
+                  value={selectedAgentId}
+                  onChange={(e) => setSelectedAgentId(e.target.value)}
+                  style={{ padding: '8px', borderRadius: 4 }}
+                  title="Filter by Agent"
+                >
+                  <option value="">All agents</option>
+                  {(users || [])
+                    .filter((u: any) => {
+                      const role = String(u.role || '').toLowerCase();
+                      const rolesArr = Array.isArray(u.roles) ? u.roles.map((r: any) => String(r).toLowerCase()) : [];
+                      return role === 'agent' || role === 'sales' || rolesArr.includes('agent') || rolesArr.includes('sales');
+                    })
+                    .map((a: any) => (
+                      <option key={String(a._id || a.id)} value={String(a._id || a.id)}>
+                        {`${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || String(a._id || a.id)}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
             <div className="listing-filter">
               <select
                 value={listingFilter}
@@ -452,7 +521,140 @@ export const Properties: React.FC = () => {
           onPropertyClick={handleUpdateProperty}
           onDeleteProperty={handleDeleteProperty}
           onAddProperty={() => setShowForm(true)}
+          isAdminRoute={isAdminRoute}
+          agentNamesById={agentNamesById}
         />
+
+        {isAdminRoute && (
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="h5" gutterBottom>
+              Developments
+            </Typography>
+            {devError && (
+              <Alert severity="error" sx={{ mb: 2 }}>{devError}</Alert>
+            )}
+            {devLoading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" minHeight="120px">
+                <CircularProgress size={24} />
+              </Box>
+            ) : (
+              <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }}>
+                {(developments || []).length === 0 ? (
+                  <Typography color="text.secondary">No developments found.</Typography>
+                ) : (
+                  (developments || []).map((d: any) => {
+                    const devId = String(d._id || d.id);
+                    const createdById = getId((d as any).createdBy);
+                    const createdByName = agentNamesById[createdById] || 'Unknown';
+                    const isExpanded = !!expandedDevIds[devId];
+                    const units = unitsByDevId[devId] || [];
+                    const unitsLoading = !!unitsLoadingByDevId[devId];
+                    const unitsError = unitsErrorByDevId[devId] || null;
+                    return (
+                      <Box key={devId} component="li" sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, mb: 1 }}>
+                        <Box
+                          onClick={async () => {
+                            const next = !isExpanded;
+                            setExpandedDevIds(prev => ({ ...prev, [devId]: next }));
+                            if (next && !unitsByDevId[devId]) {
+                              setUnitsLoadingByDevId(prev => ({ ...prev, [devId]: true }));
+                              setUnitsErrorByDevId(prev => ({ ...prev, [devId]: null }));
+                              try {
+                                const list = await developmentUnitService.list({ developmentId: devId });
+                                setUnitsByDevId(prev => ({ ...prev, [devId]: Array.isArray(list) ? list : [] }));
+                              } catch {
+                                setUnitsErrorByDevId(prev => ({ ...prev, [devId]: 'Failed to load units' }));
+                              } finally {
+                                setUnitsLoadingByDevId(prev => ({ ...prev, [devId]: false }));
+                              }
+                            }
+                          }}
+                          sx={{ cursor: 'pointer' }}
+                        >
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{d.name || 'Unnamed Development'}</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {d.address || ''}{d.type ? ` • ${d.type}` : ''}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Agent: {createdByName}
+                          </Typography>
+                        </Box>
+                        {isExpanded && (
+                          <Box sx={{ mt: 2 }}>
+                            {(d.description || d.cachedStats || (d.variations || []).length > 0) && (
+                              <Box sx={{ mb: 1.5 }}>
+                                {d.description && (
+                                  <Typography variant="body2" sx={{ mb: 1 }}>{d.description}</Typography>
+                                )}
+                                {d.cachedStats && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    Total Units: {d.cachedStats.totalUnits ?? 0} • Available: {d.cachedStats.availableUnits ?? 0} • Under Offer: {d.cachedStats.underOfferUnits ?? 0} • Sold: {d.cachedStats.soldUnits ?? 0}
+                                  </Typography>
+                                )}
+                                {(Array.isArray(d.variations) && d.variations.length > 0) && (
+                                  <Box sx={{ mt: 1 }}>
+                                    <Typography variant="subtitle2">Variations</Typography>
+                                    <Box component="ul" sx={{ listStyle: 'disc', pl: 3, m: 0 }}>
+                                      {d.variations.map((v: any) => (
+                                        <li key={String(v._id || v.id)}>
+                                          <Typography variant="body2">
+                                            {(v.label || 'Variation')} — Count: {v.count ?? 0}{typeof v.price === 'number' ? ` • Price: ${v.price}` : ''}
+                                          </Typography>
+                                        </li>
+                                      ))}
+                                    </Box>
+                                  </Box>
+                                )}
+                              </Box>
+                            )}
+                            <Box sx={{ mt: 1 }}>
+                              <Typography variant="subtitle2">Units</Typography>
+                              {unitsLoading && (
+                                <Box display="flex" alignItems="center" gap={1} sx={{ py: 1 }}>
+                                  <CircularProgress size={16} />
+                                  <Typography variant="caption">Loading units…</Typography>
+                                </Box>
+                              )}
+                              {unitsError && (
+                                <Alert severity="error" sx={{ my: 1 }}>{unitsError}</Alert>
+                              )}
+                              {!unitsLoading && !unitsError && (
+                                <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }}>
+                                  {(units || []).length === 0 ? (
+                                    <Typography color="text.secondary" variant="body2">No units found.</Typography>
+                                  ) : (
+                                    (units || []).map((u: any) => {
+                                      const unitCode = u.unitCode || u.code || u.name || String(u._id || u.id);
+                                      const status = u.status || 'unknown';
+                                      const price = typeof u.price === 'number' ? u.price : undefined;
+                                      let variationLabel: string | undefined = undefined;
+                                      if (u.variationId && Array.isArray(d.variations)) {
+                                        const match = d.variations.find((v: any) => String(v.id || v._id) === String(u.variationId));
+                                        variationLabel = match?.label;
+                                      }
+                                      return (
+                                        <Box key={String(u._id || u.id)} component="li" sx={{ borderBottom: '1px solid', borderColor: 'divider', py: 1 }}>
+                                          <Typography variant="body2" sx={{ fontWeight: 500 }}>{unitCode}</Typography>
+                                          <Typography variant="caption" color="text.secondary">
+                                            Status: {status}{variationLabel ? ` • ${variationLabel}` : ''}{typeof price === 'number' ? ` • ${price}` : ''}
+                                          </Typography>
+                                        </Box>
+                                      );
+                                    })
+                                  )}
+                                </Box>
+                              )}
+                            </Box>
+                          </Box>
+                        )}
+                      </Box>
+                    );
+                  })
+                )}
+              </Box>
+            )}
+          </Box>
+        )}
       </div>
     </Box>
   );

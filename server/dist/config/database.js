@@ -15,8 +15,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAccountingDatabaseHealth = exports.isDatabaseAvailable = exports.getDatabaseHealth = exports.closeDatabase = exports.connectDatabase = exports.accountingConnection = exports.mainConnection = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const indexes_1 = require("../models/indexes");
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/property-management';
-const ACCOUNTING_DB_URI = process.env.ACCOUNTING_DB_URI || 'mongodb://localhost:27017/accounting';
+const LOCAL_MAIN_URI = 'mongodb://localhost:27017/property-management';
+const LOCAL_ACCOUNTING_URI = 'mongodb://localhost:27017/accounting';
+const getEffectiveUri = (envValue, localFallback) => {
+    // In production, use the provided env var if present, otherwise fallback
+    if (process.env.NODE_ENV === 'production') {
+        return envValue && envValue.trim() ? envValue : localFallback;
+    }
+    // In development, default to local unless explicitly forced
+    if (process.env.FORCE_DB_URI === 'true') {
+        return envValue && envValue.trim() ? envValue : localFallback;
+    }
+    return localFallback;
+};
+const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
+const ACCOUNTING_DB_URI = getEffectiveUri(process.env.ACCOUNTING_DB_URI, LOCAL_ACCOUNTING_URI);
 exports.mainConnection = mongoose_1.default.createConnection(MONGODB_URI);
 exports.accountingConnection = mongoose_1.default.createConnection(ACCOUNTING_DB_URI);
 // Connection options

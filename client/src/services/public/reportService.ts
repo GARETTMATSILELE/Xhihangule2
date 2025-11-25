@@ -1,6 +1,4 @@
-import publicApi from '../../api/publicApi';
 import authenticatedApi from '../../api/axios';
-import { useAuth } from '../../contexts/AuthContext';
 
 // Types for report data
 export interface OwnerStatementData {
@@ -204,9 +202,9 @@ export interface ForecastData {
   }>;
 }
 
-// Helper function to get the appropriate API instance
-const getApiInstance = (isAuthenticated: boolean) => {
-  return isAuthenticated ? authenticatedApi : publicApi;
+// Helper function to get the API instance (always authenticated)
+const getApiInstance = (_isAuthenticated: boolean) => {
+  return authenticatedApi;
 };
 
 // Report service functions
@@ -218,7 +216,7 @@ export const reportService = {
     if (ownerId) params.append('ownerId', ownerId);
     if (period) params.append('period', period);
     
-    const endpoint = isAuthenticated ? '/reports/owner-statement' : '/public/reports/owner-statement';
+    const endpoint = '/reports/owner-statement';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -230,7 +228,7 @@ export const reportService = {
     if (period) params.append('period', period);
     if (propertyId) params.append('propertyId', propertyId);
     
-    const endpoint = isAuthenticated ? '/reports/income-expense' : '/public/reports/income-expense';
+    const endpoint = '/reports/income-expense';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -241,7 +239,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (propertyId) params.append('propertyId', propertyId);
     
-    const endpoint = isAuthenticated ? '/reports/rent-roll' : '/public/reports/rent-roll';
+    const endpoint = '/reports/rent-roll';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -252,7 +250,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (daysOverdue) params.append('daysOverdue', daysOverdue.toString());
     
-    const endpoint = isAuthenticated ? '/reports/receivables' : '/public/reports/receivables';
+    const endpoint = '/reports/receivables';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -263,7 +261,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     
-    const endpoint = isAuthenticated ? '/reports/payables' : '/public/reports/payables';
+    const endpoint = '/reports/payables';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -275,7 +273,7 @@ export const reportService = {
     if (status) params.append('status', status);
     if (priority) params.append('priority', priority);
     
-    const endpoint = isAuthenticated ? '/reports/maintenance' : '/public/reports/maintenance';
+    const endpoint = '/reports/maintenance';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -283,7 +281,7 @@ export const reportService = {
   // Vacancy Report
   getVacancy: async (isAuthenticated: boolean = false): Promise<VacancyData[]> => {
     const api = getApiInstance(isAuthenticated);
-    const endpoint = isAuthenticated ? '/reports/vacancy' : '/public/reports/vacancy';
+    const endpoint = '/reports/vacancy';
     const res = await api.get(endpoint);
     return res.data;
   },
@@ -291,7 +289,7 @@ export const reportService = {
   // Tenant Ledger Report
   getTenantLedger: async (isAuthenticated: boolean = false, tenantId: string): Promise<TenantLedgerData> => {
     const api = getApiInstance(isAuthenticated);
-    const endpoint = isAuthenticated ? '/reports/tenant-ledger' : '/public/reports/tenant-ledger';
+    const endpoint = '/reports/tenant-ledger';
     const res = await api.get(`${endpoint}?tenantId=${tenantId}`);
     return res.data;
   },
@@ -302,7 +300,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (daysOverdue) params.append('daysOverdue', daysOverdue.toString());
     
-    const endpoint = isAuthenticated ? '/reports/delinquency' : '/public/reports/delinquency';
+    const endpoint = '/reports/delinquency';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -313,7 +311,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (daysUntilExpiry) params.append('daysUntilExpiry', daysUntilExpiry.toString());
     
-    const endpoint = isAuthenticated ? '/reports/lease-expiry' : '/public/reports/lease-expiry';
+    const endpoint = '/reports/lease-expiry';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -321,7 +319,7 @@ export const reportService = {
   // Portfolio Summary Report
   getPortfolioSummary: async (isAuthenticated: boolean = false): Promise<PortfolioSummaryData> => {
     const api = getApiInstance(isAuthenticated);
-    const endpoint = isAuthenticated ? '/reports/portfolio-summary' : '/public/reports/portfolio-summary';
+    const endpoint = '/reports/portfolio-summary';
     const res = await api.get(endpoint);
     return res.data;
   },
@@ -332,7 +330,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (year) params.append('year', year.toString());
     
-    const endpoint = isAuthenticated ? '/reports/capital-expenditure' : '/public/reports/capital-expenditure';
+    const endpoint = '/reports/capital-expenditure';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -343,7 +341,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     
-    const endpoint = isAuthenticated ? '/reports/eviction' : '/public/reports/eviction';
+    const endpoint = '/reports/eviction';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },
@@ -354,7 +352,7 @@ export const reportService = {
     const params = new URLSearchParams();
     if (periods) params.append('periods', periods.toString());
     
-    const endpoint = isAuthenticated ? '/reports/forecast' : '/public/reports/forecast';
+    const endpoint = '/reports/forecast';
     const res = await api.get(`${endpoint}?${params.toString()}`);
     return res.data;
   },

@@ -7,10 +7,8 @@ import {
   ListItemIcon,
   ListItemText,
   Box,
-  Typography,
   Avatar,
   CircularProgress,
-  Divider,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -34,7 +32,7 @@ interface AccountantSidebarProps {
 
 export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab, onTabChange }) => {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const { company } = useCompany();
 
   const menuItems = [
@@ -98,56 +96,21 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
       }}
     >
       <Box sx={{ height: '100%', overflowY: 'auto', px: 2, pb: 2 }}>
-        {company && user && (
-          <>
-            <Box sx={{ px: 2, mb: 2, mt: 2 }}>
-              {/* Company Logo */}
-              {company.logo && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-                  <Avatar
-                    src={`data:image/png;base64,${company.logo}`}
-                    sx={{ 
-                      width: 200, 
-                      height: 100,
-                      border: '0.1px solid rgba(255, 255, 255, 0.2)'
-                    }}
-                    imgProps={{ decoding: 'async', loading: 'lazy' }}
-                    variant="rounded"
-                  />
-                </Box>
-              )}
-              <Typography variant="subtitle2" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                Company
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                {company.name}
-              </Typography>
-            </Box>
-            <Divider sx={{ mb: 2, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
-          </>
-        )}
-
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 4, px: 2 }}>
-          <Avatar
-            sx={{
-              width: 40,
-              height: 40,
-              bgcolor: 'primary.main',
-              color: 'white',
-              fontSize: '1.2rem',
-            }}
-          >
-            {user?.firstName?.charAt(0) || 'A'}
-          </Avatar>
-          <Box sx={{ ml: 2 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-              {user ? `${user.firstName} ${user.lastName}` : 'Guest User'}
-            </Typography>
-            <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)' }} display="block">
-              {user?.email || 'guest@example.com'}
-            </Typography>
+        {/* Company Logo (kept as requested) */}
+        {company?.logo && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 2 }}>
+            <Avatar
+              src={`data:image/png;base64,${company.logo}`}
+              sx={{
+                width: 200,
+                height: 100,
+                border: '0.1px solid rgba(255, 255, 255, 0.2)'
+              }}
+              imgProps={{ decoding: 'async', loading: 'lazy' }}
+              variant="rounded"
+            />
           </Box>
-        </Box>
+        )}
 
         <List>
           {menuItems.map((item, index) => (

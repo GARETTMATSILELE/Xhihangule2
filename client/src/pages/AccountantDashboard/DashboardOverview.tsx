@@ -64,6 +64,21 @@ const DashboardOverview: React.FC = () => {
   const [levyPayments, setLevyPayments] = useState<any[]>([]);
   const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
   const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
+  // Show welcome message only on first visit per session (per browser tab)
+  const [showWelcome] = useState<boolean>(() => {
+    try {
+      return !sessionStorage.getItem('seenAccountantDashboardWelcome');
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (!sessionStorage.getItem('seenAccountantDashboardWelcome')) {
+        sessionStorage.setItem('seenAccountantDashboardWelcome', '1');
+      }
+    } catch {}
+  }, []);
   // Helper to normalize possible id shapes (string, {$oid}, {_id}, or embedded doc)
   function getId(id: any): string {
     if (!id) return '';
@@ -136,37 +151,20 @@ const DashboardOverview: React.FC = () => {
   const loadDeferred = async () => {
     try {
       setDeferredLoading(true);
+      // Authenticated-only data access (no public fallbacks)
       try {
-        // Prefer authenticated endpoints for accuracy and company scoping
         const props = await propertyService.getProperties();
         setProperties(Array.isArray(props) ? props : []);
-      } catch {
-        // Fallback to public list if auth call fails
-        try {
-          const ppub = await propertyService.getPublicProperties();
-          setProperties(Array.isArray(ppub) ? ppub : []);
-        } catch { setProperties([]); }
-      }
+      } catch { setProperties([]); }
       try {
         const tall = await tenantService.getAll();
         const tlist = Array.isArray(tall?.tenants) ? tall.tenants : [];
         setTenants(tlist);
-      } catch {
-        try {
-          const tpub = await tenantService.getAllPublic();
-          const tlist = Array.isArray(tpub?.tenants) ? tpub.tenants : [];
-          setTenants(tlist);
-        } catch { setTenants([]); }
-      }
+      } catch { setTenants([]); }
       try {
         const lall = await leaseService.getAll();
         setLeases(Array.isArray(lall) ? lall : []);
-      } catch {
-        try {
-          const lpub = await leaseService.getAllPublic();
-          setLeases(Array.isArray(lpub) ? lpub : []);
-        } catch { setLeases([]); }
-      }
+      } catch { setLeases([]); }
       try {
         if (user?.companyId) {
           const levy = await paymentService.getLevyPayments(user.companyId);
@@ -497,7 +495,7 @@ const DashboardOverview: React.FC = () => {
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 600 }}>
-        Welcome back, {user?.firstName}!
+        {showWelcome && user?.firstName ? `Welcome back, ${user.firstName}!` : 'Dashboard'}
       </Typography>
 
       {error && (

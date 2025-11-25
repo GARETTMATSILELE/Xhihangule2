@@ -146,8 +146,8 @@ const PaymentsPage: React.FC = () => {
               api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
             ]
           : [
-              propertyService.getPublicProperties(),
-              tenantService.getAllPublic(),
+              propertyService.getProperties(),
+              tenantService.getAll(),
               paymentService.getPayments(includeParams),
               paymentService.getLevyPayments(user.companyId)
             ];
@@ -516,7 +516,7 @@ const PaymentsPage: React.FC = () => {
 
   const handleDownloadReceipt = useCallback(async (payment: Payment) => {
     try {
-      const blob = await paymentService.downloadReceiptPublic(payment._id, user?.companyId);
+      const blob = await paymentService.downloadReceipt(payment._id, user?.companyId);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

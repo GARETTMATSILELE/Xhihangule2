@@ -77,7 +77,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const location = useLocation();
   const { user, company } = useAuth();
   const { getProperty } = usePropertyService();
-  const { getSalesById } = usePropertyOwnerService();
+  const { getSalesById, getByPropertyId } = usePropertyOwnerService();
   
   // State
   const [property, setProperty] = useState<any>(null);
@@ -149,20 +149,28 @@ const PropertyAccountDetailPage: React.FC = () => {
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
 
-        // Resolve owner name efficiently
+        // Resolve owner name via property-management propertyowners cross-reference
         const map: Record<string, string> = {};
-        if (inferredLedger === 'sale') {
-          try {
-            const raw = (found as any).propertyOwnerId;
-            const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
-            if (ownerId) {
-              const salesOwner = await getSalesById(ownerId);
-              if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
-                map[String((found as any)._id)] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+        try {
+          const owner = await getByPropertyId(propertyId, (company as any)?.id || (company as any)?._id);
+          if (owner && (owner.firstName || owner.lastName)) {
+            map[String((found as any)._id)] = `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
+          }
+        } catch (e) {
+          // Fallback for sales ledger: try sales-owners by property.propertyOwnerId
+          if (inferredLedger === 'sale') {
+            try {
+              const raw = (found as any).propertyOwnerId;
+              const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
+              if (ownerId) {
+                const salesOwner = await getSalesById(ownerId);
+                if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
+                  map[String((found as any)._id)] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+                }
               }
+            } catch {
+              // ignore; UI will fall back to account.ownerName
             }
-          } catch (e) {
-            // ignore owner fetch failure; we'll fall back to account.ownerName
           }
         }
         setOwnerMap(map);

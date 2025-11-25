@@ -7,7 +7,7 @@ import { updateChartMetrics } from './chartController';
 import propertyAccountService from '../services/propertyAccountService';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
-import { hasAnyRole } from '../utils/access';
+import { hasAnyRole, hasRole } from '../utils/access';
 
 // Helper function to extract user context from request
 const getUserContext = (req: Request) => {
@@ -239,14 +239,16 @@ export const getProperties = async (req: Request, res: Response) => {
     }
 
     // Restrict visibility based on role
-    if (req.user.role === 'sales') {
-      // Sales users should only see sales properties assigned to them
+    const isAdminOrAccountant = hasAnyRole(req, ['admin', 'accountant']);
+    const isSales = hasRole(req, 'sales');
+    if (isSales && !isAdminOrAccountant) {
+      // Pure sales users should only see their own sales properties
       query.rentalType = 'sale';
       query.agentId = new mongoose.Types.ObjectId(req.user.userId);
     } else if (req.user.role === 'owner') {
       // Property owners should see properties they own
       query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
-    } else if (!hasAnyRole(req, ['admin', 'accountant'])) {
+    } else if (!isAdminOrAccountant) {
       // Other non-admin/accountant users only see properties assigned to them as agent
       query.agentId = new mongoose.Types.ObjectId(req.user.userId);
     }

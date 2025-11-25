@@ -34,6 +34,14 @@ const AccountantPaymentsPage: React.FC = () => {
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
 
+  // Local, non-destructive persistence to survive reloads (no DB writes)
+  const CACHE_VERSION = 'v1';
+  const cacheKey = useMemo(() => {
+    const companyId = (user as any)?.companyId || (user as any)?.company?._id;
+    return companyId ? `acct_payments_cache_${CACHE_VERSION}_${companyId}` : null;
+  }, [user]);
+  const hydratedFromCacheRef = useRef(false);
+
   const [payments, setPayments] = useState<Payment[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
@@ -125,6 +133,53 @@ const AccountantPaymentsPage: React.FC = () => {
     };
   }, [payments]);
 
+  // Hydrate from cache immediately after auth is ready
+  useEffect(() => {
+    if (authLoading) return;
+    if (!cacheKey) return;
+    if (hydratedFromCacheRef.current) return;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      // Basic shape guard
+      const items = Array.isArray(parsed.items) ? parsed.items : [];
+      const total = Number(parsed.totalCount) || 0;
+      const cachedPage = Number(parsed.page) || 1;
+      const cachedLimit = Number(parsed.limit) || 25;
+      const cachedFilters = parsed.filters && typeof parsed.filters === 'object' ? parsed.filters : {};
+      setPayments(sortPayments(items as any[]));
+      setTotalCount(total);
+      setPage(cachedPage);
+      setLimit(cachedLimit);
+      setFilters(cachedFilters);
+      // Do not mark loading false if we're already loading; leave spinner, but UI has data
+      hydratedFromCacheRef.current = true;
+    } catch {
+      // ignore cache errors
+    }
+  }, [authLoading, cacheKey, sortPayments]);
+
+  // Persist to cache after successful loads
+  const persistCache = useCallback((payload: { items: Payment[]; total: number; page: number; limit: number; filters: PaymentFilter }) => {
+    if (!cacheKey) return;
+    try {
+      const data = {
+        version: CACHE_VERSION,
+        savedAt: Date.now(),
+        items: payload.items,
+        totalCount: payload.total,
+        page: payload.page,
+        limit: payload.limit,
+        filters: payload.filters
+      };
+      localStorage.setItem(cacheKey, JSON.stringify(data));
+    } catch {
+      // best-effort only
+    }
+  }, [cacheKey]);
+
   const initialFetchDone = useRef(false);
   useEffect(() => {
     let isMounted = true;
@@ -170,6 +225,7 @@ const AccountantPaymentsPage: React.FC = () => {
         setTenants(tenants);
         setPayments(paymentsList as any[]);
         setTotalCount(total);
+        persistCache({ items: paymentsList as any[], total, page, limit, filters });
       } catch (err: any) {
         if (!isMounted) return;
         // Show partial data if some calls failed
@@ -180,7 +236,7 @@ const AccountantPaymentsPage: React.FC = () => {
     };
     loadData();
     return () => { isMounted = false; };
-  }, [authLoading]);
+  }, [authLoading, filters, limit, page, persistCache, sortPayments]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -200,10 +256,12 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
         if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
+        if ((debouncedFilters as any).search) filterParams.search = (debouncedFilters as any).search;
         // Include provisional payments on accountant view
         const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true' } as any);
         setPayments(sortPayments(items as any[]));
         setTotalCount(total);
+        persistCache({ items: items as any[], total, page, limit, filters });
       } catch (err: any) {
         setError(err instanceof Error ? err.message : 'Failed to load payments');
       } finally {
@@ -211,7 +269,7 @@ const AccountantPaymentsPage: React.FC = () => {
       }
     };
     loadPayments();
-  }, [debouncedFilters, user?.companyId, page, limit, sortPayments]);
+  }, [debouncedFilters, user?.companyId, page, limit, sortPayments, persistCache, filters]);
 
   const handleCreatePayment = async (data: PaymentFormData) => {
     try {

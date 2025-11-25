@@ -91,6 +91,8 @@ const errorHandler_1 = require("./middleware/errorHandler");
 const http_1 = require("http");
 const socket_1 = require("./config/socket");
 const startSyncServices_1 = require("./scripts/startSyncServices");
+const reportRoutes_1 = __importDefault(require("./routes/reportRoutes"));
+const publicReportRoutes_1 = __importDefault(require("./routes/publicReportRoutes"));
 // Load environment variables
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -177,6 +179,9 @@ app.use('/api/sync', syncRoutes_1.default);
 app.use('/api/billing', billingRoutes_1.default);
 app.use('/api/subscription', subscriptionRoutes_1.default);
 app.use('/api/fiscal', fiscalRoutes_1.default);
+// Reports (public and authenticated)
+app.use('/api/public/reports', publicReportRoutes_1.default);
+app.use('/api/reports', reportRoutes_1.default);
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express_1.default.Router();
 sessionRouter.use('/properties', propertyRoutes_1.default);

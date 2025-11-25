@@ -1,4 +1,4 @@
-import publicApi from '../api/publicApi';
+import api from '../api/axios';
 
 /**
  * Sales-specific receipt service. Ensures returned receipt is tagged as a sale
@@ -12,7 +12,7 @@ export const salesReceiptService = {
       config.params = { companyId: defaultCompanyId };
     }
 
-    const resp = await publicApi.get(`/payments/public/${id}/receipt`, config);
+    const resp = await api.get(`/payments/${id}/receipt`, config);
     const receipt = resp.data?.data || resp.data;
     // Force sale-specific semantics for UI (Buyer label, sale totals, etc.)
     return {

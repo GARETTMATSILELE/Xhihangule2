@@ -40,7 +40,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const refreshProperties = useCallback(async () => {
     // Skip if we're on admin routes or user is admin
     if (shouldSkipPropertyContext) {
-      console.log('PropertyContext: Skipping refreshProperties - admin route or admin user');
+      // Reduce noisy logs on admin routes
       setProperties([]);
       setLoading(false);
       setError(null);
@@ -113,7 +113,6 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addProperty = async (property: Property) => {
     // Skip if we're on admin routes or user is admin
     if (shouldSkipPropertyContext) {
-      console.log('PropertyContext: Skipping addProperty - admin route or admin user');
       return;
     }
 
@@ -131,7 +130,6 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateProperty = async (id: string, property: Partial<Property>) => {
     // Skip if we're on admin routes or user is admin
     if (shouldSkipPropertyContext) {
-      console.log('PropertyContext: Skipping updateProperty - admin route or admin user');
       return;
     }
 
@@ -149,7 +147,6 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteProperty = async (id: string) => {
     // Skip if we're on admin routes or user is admin
     if (shouldSkipPropertyContext) {
-      console.log('PropertyContext: Skipping deleteProperty - admin route or admin user');
       return;
     }
 
@@ -172,35 +169,37 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // 5. NOT an admin user
   const hasFetchedForPaymentsPage = React.useRef(false);
   useEffect(() => {
-    console.log('PropertyContext: useEffect triggered', {
-      authLoading,
-      isAuthenticated,
-      hasUser: !!user,
-      hasCompanyId: !!user?.companyId,
-      isAdminRoute,
-      isAdminUser,
-      shouldSkipPropertyContext
-    });
+    // Reduce verbose logs in production
+    if (import.meta.env?.MODE === 'development') {
+      console.log('PropertyContext: useEffect triggered', {
+        authLoading,
+        isAuthenticated,
+        hasUser: !!user,
+        hasCompanyId: !!user?.companyId,
+        isAdminRoute,
+        isAdminUser,
+        shouldSkipPropertyContext
+      });
+    }
 
     // Skip if we're on admin routes or user is admin
     if (shouldSkipPropertyContext) {
-      console.log('PropertyContext: Skipping property fetch - admin route or admin user');
       setProperties([]);
       setError(null);
       setLoading(false);
       return;
     }
 
-    // Allow public fetch for accountant dashboard payments page, but only once per mount
+    // Allow authenticated fetch for accountant dashboard payments page, but only once per mount
     if (location.pathname === '/accountant-dashboard/payments') {
       if (!hasFetchedForPaymentsPage.current) {
         hasFetchedForPaymentsPage.current = true;
-        // Direct fetch for payments page without calling refreshProperties
+        // Direct authenticated fetch for payments page without calling refreshProperties
         const fetchPaymentsProperties = async () => {
           try {
             setLoading(true);
             setError(null);
-            const fetchedProperties = await propertyService.getPublicProperties();
+            const fetchedProperties = await propertyService.getProperties();
             if (Array.isArray(fetchedProperties)) {
               setProperties(fetchedProperties);
             } else {

@@ -55,6 +55,10 @@ router.get('/company', authWithCompany, canManagePayments, getCompanyPayments);
 // Get payment details
 router.get('/:id', authWithCompany, canManagePayments, getPaymentDetails);
 
+// Authenticated receipt endpoints (JSON + HTML download)
+router.get('/:id/receipt', authWithCompany, canManagePayments, getPaymentReceipt);
+router.get('/:id/receipt/download', authWithCompany, canManagePayments, getPaymentReceiptDownload);
+
 // Update payment status
 router.patch('/:id/status', authWithCompany, canManagePayments, updatePaymentStatus);
 

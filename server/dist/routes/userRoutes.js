@@ -41,7 +41,7 @@ router.get('/public/agents', (req, res) => __awaiter(void 0, void 0, void 0, fun
         // Get company ID from query params or headers (for admin dashboard)
         const companyId = req.query.companyId || req.headers['x-company-id'];
         const role = req.query.role || 'agent';
-        let query = { role };
+        let query = { $or: [{ role }, { roles: role }] };
         // Filter by company ID if provided
         if (companyId) {
             query.companyId = companyId;
@@ -218,14 +218,17 @@ router.get('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(
         next(error);
     }
 }));
-// Get agents for current company - Admin, Accountant, Agent, and Sales
-router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent', 'sales']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+// Get agents for current company - Admin, Accountant, Agent, Sales, Principal, PREA
+router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent', 'sales', 'principal', 'prea']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
         console.log('GET /agents route hit');
         const role = req.query.role || 'agent';
-        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId, role };
-        const agents = yield User_1.User.find(query).select('firstName lastName email role companyId');
+        const query = {
+            companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId,
+            $or: [{ role }, { roles: role }]
+        };
+        const agents = yield User_1.User.find(query).select('firstName lastName email role roles companyId');
         console.log('Found agents:', agents.length);
         res.json(agents);
     }

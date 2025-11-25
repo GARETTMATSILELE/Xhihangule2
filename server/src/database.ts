@@ -3,7 +3,19 @@ import { config } from 'dotenv';
 
 config();
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/xhihangule';
+const LOCAL_MAIN_URI = 'mongodb://localhost:27017/xhihangule';
+
+const getEffectiveUri = (envValue: string | undefined, localFallback: string): string => {
+  if (process.env.NODE_ENV === 'production') {
+    return envValue && envValue.trim() ? envValue : localFallback;
+  }
+  if (process.env.FORCE_DB_URI === 'true') {
+    return envValue && envValue.trim() ? envValue : localFallback;
+  }
+  return localFallback;
+};
+
+const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
 
 let isConnected = false;
 let connectionAttempts = 0;

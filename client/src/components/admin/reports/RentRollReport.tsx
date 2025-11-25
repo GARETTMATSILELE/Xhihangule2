@@ -5,7 +5,7 @@ interface RentRollReportProps {
   isAuthenticated?: boolean;
 }
 
-const RentRollReport: React.FC<RentRollReportProps> = ({ isAuthenticated = false }) => {
+const RentRollReport: React.FC<RentRollReportProps> = ({ isAuthenticated = true }) => {
   const [data, setData] = useState<RentRollData[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

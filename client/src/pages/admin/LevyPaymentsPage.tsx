@@ -146,7 +146,7 @@ const LevyPaymentsPage: React.FC = () => {
 
   const handleDownload = async (id: string, reference?: string) => {
     try {
-      const blob = await paymentService.downloadReceiptPublic(id, user?.companyId);
+      const blob = await paymentService.downloadReceipt(id, user?.companyId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

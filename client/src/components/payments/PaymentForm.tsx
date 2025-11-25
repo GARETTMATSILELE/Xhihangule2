@@ -30,7 +30,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
-import publicApi from '../../api/publicApi';
+// Removed public API usage for security; use authenticated services only
 
 export interface PaymentFormProps {
   onSubmit: (data: PaymentFormData) => Promise<void>;
@@ -149,44 +149,19 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         let propsList: Property[] = Array.isArray(properties) && properties.length ? properties : [];
         let tenantList: Tenant[] = Array.isArray(tenants) && tenants.length ? tenants : [];
 
-        // INDIVIDUAL plan: always use authenticated, company-scoped data
-        if (company?.plan === 'INDIVIDUAL') {
-          try {
-            if (!propsList.length) {
-              propsList = await propertyService.getProperties();
-            }
-          } catch {}
-          try {
-            if (!tenantList.length) {
-              const res = await tenantService.getAll();
-              tenantList = res.tenants || [];
-            }
-          } catch {}
-        } else {
-          // Other plans: keep existing public-first fallback
+        // Authenticated-only data access for security
+        try {
           if (!propsList.length) {
-            try {
-              propsList = await propertyService.getPublicProperties();
-            } catch {
-              try {
-                const uid = user?._id as any;
-                const cid = user?.companyId as any;
-                const role = user?.role as any;
-                propsList = await propertyService.getPropertiesForUser(uid, cid, role);
-              } catch {
-                try {
-                  propsList = await propertyService.getProperties();
-                } catch {}
-              }
-            }
+            propsList = await propertyService.getProperties();
           }
+        } catch {}
+        try {
           if (!tenantList.length) {
-            try {
-              const resp = await tenantService.getAllPublic();
-              tenantList = Array.isArray(resp?.tenants) ? resp.tenants : [];
-            } catch {}
+            const res = await tenantService.getAll();
+            tenantList = res.tenants || [];
           }
-        }
+        } catch {}
+
         setInternalProperties(propsList);
         setInternalTenants(tenantList);
       } catch (e) {
@@ -234,28 +209,49 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
   // When propertyId or paymentType changes, fetch rent or levy
   useEffect(() => {
-    if (!formData.propertyId) {
-      setPropertyRent(null);
-      return;
-    }
-    // For levy payments, show the levy amount from the property
-    if (formData.paymentType === 'levy') {
-      const property = internalProperties.find(p => String(p._id) === String(formData.propertyId));
-      if (property && property.levyOrMunicipalType === 'levy' && property.levyOrMunicipalAmount) {
-        setPropertyRent(property.levyOrMunicipalAmount);
-      } else {
-        setPropertyRent(null);
+    let cancelled = false;
+    const loadAmounts = async () => {
+      if (!formData.propertyId) {
+        if (!cancelled) setPropertyRent(null);
+        return;
       }
-      return;
-    }
-    // For other payment types, show rent
-    const property = internalProperties.find(p => String(p._id) === String(formData.propertyId));
-    if (property && property.rent) {
-      setPropertyRent(property.rent);
-    } else {
-      setPropertyRent(null);
-    }
-  }, [formData.propertyId, formData.paymentType, internalProperties]);
+      const pid = String(formData.propertyId);
+      const propertySummary = internalProperties.find(p => String(p._id) === pid);
+      // Levy flow
+      if (formData.paymentType === 'levy') {
+        let levyAmount: number | null = null;
+        if (propertySummary?.levyOrMunicipalType === 'levy' && typeof propertySummary.levyOrMunicipalAmount !== 'undefined') {
+          levyAmount = Number(propertySummary.levyOrMunicipalAmount as any);
+        }
+        if (levyAmount === null || isNaN(levyAmount)) {
+          try {
+            const full = await propertyService.getProperty(pid);
+            if (!cancelled && full?.levyOrMunicipalType === 'levy' && typeof full.levyOrMunicipalAmount !== 'undefined') {
+              levyAmount = Number((full as any).levyOrMunicipalAmount);
+            }
+          } catch {}
+        }
+        if (!cancelled) setPropertyRent(typeof levyAmount === 'number' && !isNaN(levyAmount) ? levyAmount : null);
+        return;
+      }
+      // Rental/other flow: use rent
+      let rentAmount: number | null = null;
+      if (typeof propertySummary?.rent !== 'undefined' && propertySummary?.rent !== null) {
+        rentAmount = Number((propertySummary as any).rent);
+      }
+      if (rentAmount === null || isNaN(rentAmount)) {
+        try {
+          const full = await propertyService.getProperty(pid);
+          if (!cancelled && typeof full?.rent !== 'undefined' && full?.rent !== null) {
+            rentAmount = Number((full as any).rent);
+          }
+        } catch {}
+      }
+      if (!cancelled) setPropertyRent(typeof rentAmount === 'number' && !isNaN(rentAmount) ? rentAmount : null);
+    };
+    loadAmounts();
+    return () => { cancelled = true; };
+  }, [formData.propertyId, formData.paymentType, internalProperties, propertyService]);
 
   // Fetch remaining balance for the selected rental period (only for real property/tenant and rental payments)
   useEffect(() => {
@@ -444,6 +440,11 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     const property = properties.find(p => String(p._id) === String(propertyId));
     return property?.commission ?? 0;
   }
+  
+  // Only show properties with rentalType = introduction or management
+  const filteredPropertiesForDropdown = (internalProperties || []).filter(
+    (p: Property) => p.rentalType === 'introduction' || p.rentalType === 'management'
+  );
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent
@@ -544,11 +545,15 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <Grid item xs={12}>
               <Autocomplete
-                options={internalProperties}
+                options={filteredPropertiesForDropdown}
                 getOptionLabel={(option: Property) => `${option.name} - ${option.address}`}
-                value={internalProperties.find((p) => String(p._id) === String(formData.propertyId)) || null}
+                value={filteredPropertiesForDropdown.find((p) => String(p._id) === String(formData.propertyId)) || null}
+                isOptionEqualToValue={(option, value) => String(option._id) === String(value._id)}
+                filterOptions={(options) => options}
                 onChange={(_, newValue: Property | null) => {
                   const newPropertyId = newValue ? String(newValue._id) : '';
+                  const newPropertyType = newValue?.type === 'commercial' ? 'commercial' : 'residential';
+                  const newRent = newValue?.rent ?? null;
                   // Find tenant linked to this property (prefer Active)
                   let autoTenantId = '';
                   let autoAgentId = '';
@@ -567,11 +572,17 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                     }
                   }
                   const agentExists = agents.some(a => String(a._id) === String(autoAgentId));
+                  // Immediately reflect rent and derived amount upon property selection
+                  if (newRent !== null && newRent !== undefined) {
+                    setPropertyRent(newRent);
+                  }
                   setFormData((prev) => ({
                     ...prev,
                     propertyId: newPropertyId,
                     tenantId: newPropertyId ? autoTenantId : '',
                     agentId: newPropertyId ? (agentExists ? autoAgentId : '') : '',
+                    propertyType: newPropertyType,
+                    amount: (newRent ?? 0),
                   }));
                 }}
                 renderInput={(params) => (
@@ -694,17 +705,21 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                   ? propertyRent !== null ? propertyRent : ''
                   : formData.paymentType === 'municipal'
                     ? formData.amount || ''
-                    : propertyRent !== null ? propertyRent : ''
+                    : useManualProperty
+                      ? (formData.amount || '')
+                      : propertyRent !== null ? propertyRent : ''
               }
-              onChange={formData.paymentType === 'municipal' ? handleInputChange : undefined}
-              name={formData.paymentType === 'municipal' ? 'amount' : undefined}
-              InputProps={{ readOnly: formData.paymentType !== 'municipal' }}
+              onChange={(formData.paymentType === 'municipal' || useManualProperty) ? handleInputChange : undefined}
+              name={(formData.paymentType === 'municipal' || useManualProperty) ? 'amount' : undefined}
+              InputProps={{ readOnly: !(formData.paymentType === 'municipal' || useManualProperty) }}
               helperText={
                 formData.paymentType === 'levy'
                   ? 'This is the levies for the selected property.'
                   : formData.paymentType === 'municipal'
                     ? 'Enter the municipal fee for this month.'
-                    : 'This is the rent for the selected property.'
+                    : useManualProperty
+                      ? 'Enter the rent for the selected manual property.'
+                      : 'This is the rent for the selected property.'
               }
             />
           </Grid>

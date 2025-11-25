@@ -14,6 +14,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
+const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
+const PropertyOwner_1 = require("../models/PropertyOwner");
+const SalesOwner_1 = require("../models/SalesOwner");
 const router = express_1.default.Router();
 // Debug middleware to log all requests
 router.use((req, res, next) => {
@@ -33,41 +36,134 @@ router.get('/health', (req, res) => {
 });
 // Owner Statement Report
 router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d, _e;
     try {
-        console.log('Owner statement report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
-        // Mock data for now - replace with actual database queries
-        const mockData = [
-            {
-                ownerId: 'owner-1',
-                ownerName: 'John Smith',
-                properties: [
-                    {
-                        propertyId: 'prop-1',
-                        propertyName: 'Sunset Apartments',
-                        address: '123 Main St, City, State',
-                        rentCollected: 2500,
-                        expenses: 800,
-                        netIncome: 1700,
-                        period: '2024-01'
-                    },
-                    {
-                        propertyId: 'prop-2',
-                        propertyName: 'Ocean View Condos',
-                        address: '456 Beach Blvd, City, State',
-                        rentCollected: 3200,
-                        expenses: 1200,
-                        netIncome: 2000,
-                        period: '2024-01'
-                    }
-                ],
-                totalRentCollected: 5700,
-                totalExpenses: 2000,
-                totalNetIncome: 3700,
-                period: '2024-01'
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(400).json({ message: 'Company ID is required' });
+        }
+        // Optional period filter: 'YYYY-MM'. Defaults to current month.
+        const periodParam = req.query.period || '';
+        const now = new Date();
+        const [yearStr, monthStr] = periodParam.split('-');
+        const year = yearStr ? parseInt(yearStr, 10) : now.getUTCFullYear();
+        const month = monthStr ? parseInt(monthStr, 10) : (now.getUTCMonth() + 1);
+        const period = `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}`;
+        const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+        const endDate = new Date(Date.UTC(year, month, 1, 0, 0, 0)); // exclusive
+        console.log('Owner statement report requested', { companyId, period, startDate, endDate });
+        const accounts = yield propertyAccountService_1.default.getCompanyPropertyAccounts(companyId);
+        // Build propertyId -> owner lookup from owners collections (company-scoped)
+        const rentalPropertyIds = accounts
+            .filter((a) => !a.ledgerType || a.ledgerType === 'rental')
+            .map((a) => { var _a, _b; return (_b = (_a = a.propertyId) === null || _a === void 0 ? void 0 : _a.toString) === null || _b === void 0 ? void 0 : _b.call(_a); })
+            .filter(Boolean);
+        const salePropertyIds = accounts
+            .filter((a) => a.ledgerType === 'sale')
+            .map((a) => { var _a, _b; return (_b = (_a = a.propertyId) === null || _a === void 0 ? void 0 : _a.toString) === null || _b === void 0 ? void 0 : _b.call(_a); })
+            .filter(Boolean);
+        const uniqueRentalIds = Array.from(new Set(rentalPropertyIds));
+        const uniqueSaleIds = Array.from(new Set(salePropertyIds));
+        const [rentalOwners, salesOwners] = yield Promise.all([
+            PropertyOwner_1.PropertyOwner.find(Object.assign({ companyId }, (uniqueRentalIds.length > 0 ? { properties: { $in: uniqueRentalIds } } : {}))).select('_id email firstName lastName phone properties companyId'),
+            SalesOwner_1.SalesOwner.find(Object.assign({ companyId }, (uniqueSaleIds.length > 0 ? { properties: { $in: uniqueSaleIds } } : {}))).select('_id email firstName lastName phone properties companyId')
+        ]);
+        const propertyIdToOwner = {};
+        for (const o of rentalOwners) {
+            const props = Array.isArray(o === null || o === void 0 ? void 0 : o.properties) ? o.properties : [];
+            for (const p of props) {
+                const key = typeof p === 'string' ? p : (((_b = p === null || p === void 0 ? void 0 : p.toString) === null || _b === void 0 ? void 0 : _b.call(p)) || (p === null || p === void 0 ? void 0 : p.$oid) || (p === null || p === void 0 ? void 0 : p._id) || (p === null || p === void 0 ? void 0 : p.id) || '');
+                if (key) {
+                    propertyIdToOwner[String(key)] = {
+                        _id: o._id.toString(),
+                        email: o.email,
+                        firstName: o.firstName,
+                        lastName: o.lastName,
+                        phone: o.phone,
+                        ownerType: 'rental'
+                    };
+                }
             }
-        ];
-        res.json(mockData);
+        }
+        for (const o of salesOwners) {
+            const props = Array.isArray(o === null || o === void 0 ? void 0 : o.properties) ? o.properties : [];
+            for (const p of props) {
+                const key = typeof p === 'string' ? p : (((_c = p === null || p === void 0 ? void 0 : p.toString) === null || _c === void 0 ? void 0 : _c.call(p)) || (p === null || p === void 0 ? void 0 : p.$oid) || (p === null || p === void 0 ? void 0 : p._id) || (p === null || p === void 0 ? void 0 : p.id) || '');
+                if (key) {
+                    propertyIdToOwner[String(key)] = {
+                        _id: o._id.toString(),
+                        email: o.email,
+                        firstName: o.firstName,
+                        lastName: o.lastName,
+                        phone: o.phone,
+                        ownerType: 'sale'
+                    };
+                }
+            }
+        }
+        const owners = {};
+        for (const acc of accounts) {
+            const propertyIdStr = ((_e = (_d = acc.propertyId) === null || _d === void 0 ? void 0 : _d.toString) === null || _e === void 0 ? void 0 : _e.call(_d)) || '';
+            const refOwner = propertyIdStr ? propertyIdToOwner[propertyIdStr] : undefined;
+            // Use cross-referenced owner if available, else fall back to account's stored owner fields
+            const ownerId = (refOwner === null || refOwner === void 0 ? void 0 : refOwner._id) || (acc.ownerId ? acc.ownerId.toString() : 'unknown-owner');
+            const ownerName = refOwner ? `${refOwner.firstName || ''} ${refOwner.lastName || ''}`.trim() || acc.ownerName || 'Unknown Owner' : (acc.ownerName || 'Unknown Owner');
+            // Sum transactions for the requested month
+            const tx = Array.isArray(acc.transactions) ? acc.transactions : [];
+            const inPeriod = tx.filter((t) => {
+                try {
+                    const d = new Date(t.date);
+                    return d >= startDate && d < endDate && t.status !== 'cancelled';
+                }
+                catch (_a) {
+                    return false;
+                }
+            });
+            const income = inPeriod
+                .filter((t) => t.type === 'income')
+                .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+            const expenseTypes = new Set(['expense', 'repair', 'maintenance']);
+            const expenses = inPeriod
+                .filter((t) => expenseTypes.has(t.type))
+                .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+            const netIncome = income - expenses;
+            const propertyItem = {
+                propertyId: propertyIdStr,
+                propertyName: acc.propertyName || '',
+                address: acc.propertyAddress || '',
+                rentCollected: income,
+                expenses,
+                netIncome,
+                period
+            };
+            if (!owners[ownerId]) {
+                owners[ownerId] = {
+                    ownerId,
+                    ownerName,
+                    properties: [],
+                    totalRentCollected: 0,
+                    totalExpenses: 0,
+                    totalNetIncome: 0,
+                    period
+                };
+            }
+            owners[ownerId].properties.push(propertyItem);
+            owners[ownerId].totalRentCollected += income;
+            owners[ownerId].totalExpenses += expenses;
+            owners[ownerId].totalNetIncome += netIncome;
+            // Attach enriched owner details (non-breaking additional field)
+            if (refOwner) {
+                owners[ownerId].ownerDetails = owners[ownerId].ownerDetails || {
+                    id: refOwner._id,
+                    email: refOwner.email,
+                    firstName: refOwner.firstName,
+                    lastName: refOwner.lastName,
+                    phone: refOwner.phone
+                };
+            }
+        }
+        const payload = Object.values(owners);
+        return res.json(payload);
     }
     catch (error) {
         console.error('Error fetching owner statement report:', error);

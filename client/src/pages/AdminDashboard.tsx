@@ -92,6 +92,9 @@ import AdminLeasesPage from './AdminLeasesPage';
 import LevyPaymentsPage from './admin/LevyPaymentsPage';
 import DatabaseSyncDashboard from '../components/admin/DatabaseSyncDashboard';
 import { Link } from 'react-router-dom';
+import { agentAccountService } from '../services/agentAccountService';
+import api from '../api/axios';
+import AgentDetailPage from './admin/AgentDetailPage';
 
 // Theme colors
 const lightTheme = {
@@ -215,6 +218,9 @@ const AdminDashboard: React.FC = () => {
   const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
   const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
   const [propertyListFilter, setPropertyListFilter] = useState<null | 'total' | 'vacant' | 'tenanted' | 'maintenance'>(null);
+  const [rentalAgents, setRentalAgents] = useState<any[]>([]);
+  const [salesAgents, setSalesAgents] = useState<any[]>([]);
+  const [agentStats, setAgentStats] = useState<Record<string, { propertyCount: number; totalCommission: number; monthCommission: number }>>({});
 
   // Update active tab based on current route
   useEffect(() => {
@@ -271,8 +277,11 @@ const AdminDashboard: React.FC = () => {
     fetchProperties();
   }, [fetchProperties]);
 
-  // Load company-wide tenants, leases, payments, and levy payments
+  // Load company-wide tenants, leases, payments, and levy payments (skip on agent detail routes)
   useEffect(() => {
+    if ((location.pathname || '').includes('/admin-dashboard/agents/')) {
+      return;
+    }
     (async () => {
       try {
         const [tpub, lpub, pays, levy] = await Promise.all([
@@ -289,7 +298,71 @@ const AdminDashboard: React.FC = () => {
         setTenants([]); setLeases([]); setPayments([]); setLevyPayments([]);
       }
     })();
-  }, [user?.companyId]);
+  }, [user?.companyId, location.pathname]);
+
+  // Load agents and compute summary stats (prefer public API; skip on agent detail routes)
+  useEffect(() => {
+    let cancelled = false;
+    if ((location.pathname || '').includes('/admin-dashboard/agents/')) {
+      return () => { cancelled = true; };
+    }
+    (async () => {
+      try {
+        const companyId = String(user?.companyId || (company as any)?._id || '');
+        const [rentals, sales] = await Promise.all([
+          paymentService.getAgentsPublic(companyId, 'agent').catch(() => []),
+          paymentService.getAgentsPublic(companyId, 'sales').catch(() => []),
+        ]);
+        if (cancelled) return;
+        setRentalAgents(Array.isArray(rentals) ? rentals : []);
+        setSalesAgents(Array.isArray(sales) ? sales : []);
+
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        const computePropertyCount = (agentId: string, isSales: boolean) => {
+          const agentIdStr = String(agentId);
+          const list = (properties || []).filter((p: any) => {
+            const owner = (p as any)?.ownerId;
+            const ownerId = String((owner && (owner as any)._id) || owner || '');
+            if (!ownerId || ownerId !== agentIdStr) return false;
+            const rt = (p?.rentalType || '').toString().toLowerCase();
+            return isSales ? (rt === 'sale' || rt === 'sales') : (rt !== 'sale' && rt !== 'sales');
+          });
+          return list.length;
+        };
+
+        const allAgents: Array<{ id: string; isSales: boolean }> = [
+          ...((Array.isArray(rentals) ? rentals : []) as any[]).map((a: any) => ({ id: String(a?._id || a?.id || ''), isSales: false })),
+          ...((Array.isArray(sales) ? sales : []) as any[]).map((a: any) => ({ id: String(a?._id || a?.id || ''), isSales: true })),
+        ].filter(a => a.id);
+
+        const statsPairs = await Promise.all(allAgents.map(async (a) => {
+          const propertyCount = computePropertyCount(a.id, a.isSales);
+          let totalCommission = 0;
+          try {
+            // Use commission summary endpoint for all-time total (authorized for admin/principal/prea)
+            const totalResp = await api.get(`/users/${a.id}/commission`);
+            totalCommission = Number((totalResp as any)?.data?.totalAgentCommission ?? (totalResp as any)?.data?.data?.totalAgentCommission ?? 0);
+          } catch {}
+          let monthCommission = 0;
+          try {
+            const resp = await api.get(`/users/${a.id}/commission`, { params: { startDate: startOfMonth.toISOString(), endDate: endOfMonth.toISOString() } });
+            monthCommission = Number((resp as any)?.data?.totalAgentCommission ?? (resp as any)?.data?.data?.totalAgentCommission ?? 0);
+          } catch {}
+          return [a.id, { propertyCount, totalCommission, monthCommission }] as const;
+        }));
+        if (cancelled) return;
+        setAgentStats(Object.fromEntries(statsPairs));
+      } catch {
+        if (!cancelled) {
+          setRentalAgents([]); setSalesAgents([]); setAgentStats({});
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [properties]);
 
   // Filter out sale/sales properties
   const rentalProperties = useMemo(() => (properties || []).filter((p: any) => {
@@ -1018,15 +1091,77 @@ const AdminDashboard: React.FC = () => {
           </Box>
         )}
 
-        <Box sx={{ mt: 4, p: 3, backgroundColor: theme.cardBackground, borderRadius: 2, border: `1px solid ${theme.border}` }}>
-          <Typography variant="h6" gutterBottom sx={chartStyles.text}>
-            Note
-          </Typography>
-          <Typography variant="body2" sx={chartStyles.textSecondary}>
-            This dashboard shows property statistics without requiring authentication. 
-            To access detailed property management features, please log in to your account.
-          </Typography>
-        </Box>
+        {/* Agents section replacing Note */}
+        <Grid container spacing={3} sx={{ mt: 4 }}>
+          <Grid item xs={12} md={6}>
+            <Box sx={{ p: 2, backgroundColor: theme.cardBackground, border: `1px solid ${theme.border}`, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom sx={chartStyles.text}>Rental Agents</Typography>
+              <Grid container spacing={2}>
+                {(rentalAgents || []).map((a: any) => {
+                  const id = String(a?._id || a?.id || '');
+                  const st = agentStats[id] || { propertyCount: 0, totalCommission: 0, monthCommission: 0 };
+                  const fullName = `${a?.firstName || ''} ${a?.lastName || ''}`.trim() || (a?.email || 'Unnamed');
+                  return (
+                    <Grid item xs={12} key={id}>
+                      <Card sx={{ cursor: 'pointer' }} onClick={() => navigate(`/admin-dashboard/agents/${id}`)}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                            <Box>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{fullName}</Typography>
+                              <Typography variant="body2" color="textSecondary">Properties added: {st.propertyCount}</Typography>
+                            </Box>
+                            <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+                              <Typography variant="body2" color="textSecondary">Total commission</Typography>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>${Number(st.totalCommission || 0).toLocaleString()}</Typography>
+                              <Typography variant="body2" color="textSecondary">This month: ${Number(st.monthCommission || 0).toLocaleString()}</Typography>
+                            </Box>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  );
+                })}
+                {(!rentalAgents || rentalAgents.length === 0) && (
+                  <Grid item xs={12}><Typography variant="body2" color="textSecondary">No rental agents found.</Typography></Grid>
+                )}
+              </Grid>
+            </Box>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Box sx={{ p: 2, backgroundColor: theme.cardBackground, border: `1px solid ${theme.border}`, borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom sx={chartStyles.text}>Sales Agents</Typography>
+              <Grid container spacing={2}>
+                {(salesAgents || []).map((a: any) => {
+                  const id = String(a?._id || a?.id || '');
+                  const st = agentStats[id] || { propertyCount: 0, totalCommission: 0, monthCommission: 0 };
+                  const fullName = `${a?.firstName || ''} ${a?.lastName || ''}`.trim() || (a?.email || 'Unnamed');
+                  return (
+                    <Grid item xs={12} key={id}>
+                      <Card sx={{ cursor: 'pointer' }} onClick={() => navigate(`/admin-dashboard/agents/${id}`)}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                            <Box>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{fullName}</Typography>
+                              <Typography variant="body2" color="textSecondary">Properties added: {st.propertyCount}</Typography>
+                            </Box>
+                            <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+                              <Typography variant="body2" color="textSecondary">Total commission</Typography>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>${Number(st.totalCommission || 0).toLocaleString()}</Typography>
+                              <Typography variant="body2" color="textSecondary">This month: ${Number(st.monthCommission || 0).toLocaleString()}</Typography>
+                            </Box>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  );
+                })}
+                {(!salesAgents || salesAgents.length === 0) && (
+                  <Grid item xs={12}><Typography variant="body2" color="textSecondary">No sales agents found.</Typography></Grid>
+                )}
+              </Grid>
+            </Box>
+          </Grid>
+        </Grid>
       </Box>
     );
   };
@@ -1079,6 +1214,7 @@ const AdminDashboard: React.FC = () => {
             <Route path="/approvals" element={<ApprovalsPage />} />
             <Route path="/sync" element={<DatabaseSyncDashboard />} />
             <Route path="/settings" element={<AdminSettings />} />
+            <Route path="/agents/:agentId" element={<AgentDetailPage />} />
             {company?.plan === 'INDIVIDUAL' && (
               <>
                 <Route

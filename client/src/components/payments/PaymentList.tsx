@@ -14,6 +14,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  TextField,
   IconButton,
   Chip,
   Card,
@@ -195,7 +196,17 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
       setPrintReceipt(true);
     } catch (error) {
       console.error('Error fetching receipt:', error);
-      setDownloadError('Failed to load receipt');
+      // Fallback: open authenticated HTML receipt directly if JSON receipt endpoint is unavailable (404)
+      try {
+        const blob = await paymentService.downloadReceipt(payment._id, user?.companyId);
+        const url = URL.createObjectURL(blob);
+        // Open in a new tab/window so user can print from browser
+        window.open(url, '_blank');
+        // We won't revoke the URL immediately to avoid breaking the print window; browser will GC later
+      } catch (fallbackErr) {
+        console.error('Fallback receipt download failed:', fallbackErr);
+        setDownloadError('Failed to load receipt');
+      }
     } finally {
       setLoadingReceipt(false);
     }
@@ -473,6 +484,20 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
               <MenuItem value="deposits">Deposits Only</MenuItem>
             </Select>
           </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <TextField
+            fullWidth
+            size="small"
+            label="Search (reference, notes, etc.)"
+            value={(filters as any).search || ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val !== (filters as any).search) {
+                handleFilterChange('search' as keyof PaymentFilter, val);
+              }
+            }}
+          />
         </Grid>
       </Grid>
 

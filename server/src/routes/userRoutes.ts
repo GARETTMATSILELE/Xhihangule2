@@ -33,7 +33,7 @@ router.get('/public/agents', async (req: Request, res: Response) => {
     const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
     const role = (req.query.role as string) || 'agent';
     
-    let query: any = { role };
+    let query: any = { $or: [{ role }, { roles: role }] };
     
     // Filter by company ID if provided
     if (companyId) {
@@ -228,13 +228,16 @@ router.get('/', authorize(['admin']), async (req: Request, res, next) => {
   }
 });
 
-// Get agents for current company - Admin, Accountant, Agent, and Sales
-router.get('/agents', authorize(['admin', 'accountant', 'agent', 'sales']), async (req: Request, res, next) => {
+// Get agents for current company - Admin, Accountant, Agent, Sales, Principal, PREA
+router.get('/agents', authorize(['admin', 'accountant', 'agent', 'sales', 'principal', 'prea']), async (req: Request, res, next) => {
   try {
     console.log('GET /agents route hit');
     const role = (req.query.role as string) || 'agent';
-    const query: any = { companyId: req.user?.companyId, role };
-    const agents = await User.find(query).select('firstName lastName email role companyId');
+    const query: any = { 
+      companyId: req.user?.companyId, 
+      $or: [{ role }, { roles: role }]
+    };
+    const agents = await User.find(query).select('firstName lastName email role roles companyId');
     console.log('Found agents:', agents.length);
     res.json(agents);
   } catch (error) {

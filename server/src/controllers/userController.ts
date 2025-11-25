@@ -13,8 +13,8 @@ export const getUserCommissionSummary = async (req: Request, res: Response) => {
     const targetUserId = req.params.id;
     const { saleOnly, startDate, endDate, limit } = req.query as any;
 
-    // Authorization: allow self, admin, or accountant within same company
-    if (String(req.user.userId) !== String(targetUserId) && !hasAnyRole(req, ['admin','accountant'])) {
+    // Authorization: allow self, admin, accountant, principal, or prea within same company
+    if (String(req.user.userId) !== String(targetUserId) && !hasAnyRole(req, ['admin','accountant','principal','prea'])) {
       throw new AppError('Forbidden', 403);
     }
 

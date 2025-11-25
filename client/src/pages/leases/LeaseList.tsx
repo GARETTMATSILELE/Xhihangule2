@@ -66,8 +66,8 @@ export const LeaseList: React.FC<LeaseListProps> = ({
       
       const [leasesRes, propertiesRes, tenantsRes] = await Promise.all([
         leaseService.getAll(),
-        propertyService.getPublicProperties(),
-        tenantService.getAllPublic()
+        propertyService.getProperties(),
+        tenantService.getAll()
       ]);
 
       setLeases(leasesRes);

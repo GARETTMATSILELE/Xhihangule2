@@ -127,11 +127,16 @@ export const getLevyPayments = async (req: Request, res: Response) => {
 export const getLevyReceiptPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = (req.query.companyId as string) || (req.headers['x-company-id'] as string);
+    const companyId =
+      (req.user?.companyId as string | undefined) ||
+      (req.query.companyId as string | undefined) ||
+      (req.headers['x-company-id'] as string | undefined);
 
     const query: any = { _id: id };
-    if (companyId) {
-      query.companyId = new mongoose.Types.ObjectId(companyId);
+    if (req.user?.companyId) {
+      try { query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId)); } catch { query.companyId = String(req.user.companyId); }
+    } else if (companyId) {
+      try { query.companyId = new mongoose.Types.ObjectId(companyId); } catch { query.companyId = companyId; }
     }
 
     const levy = await LevyPayment.findOne(query)
@@ -316,11 +321,16 @@ export const getLevyPayoutAcknowledgement = async (req: Request, res: Response) 
 export const getLevyReceiptDownload = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = (req.query.companyId as string) || (req.headers['x-company-id'] as string);
+    const companyId =
+      (req.user?.companyId as string | undefined) ||
+      (req.query.companyId as string | undefined) ||
+      (req.headers['x-company-id'] as string | undefined);
 
     const query: any = { _id: id };
-    if (companyId) {
-      query.companyId = new mongoose.Types.ObjectId(companyId);
+    if (req.user?.companyId) {
+      try { query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId)); } catch { query.companyId = String(req.user.companyId); }
+    } else if (companyId) {
+      try { query.companyId = new mongoose.Types.ObjectId(companyId); } catch { query.companyId = companyId; }
     }
 
     const levy = await LevyPayment.findOne(query)

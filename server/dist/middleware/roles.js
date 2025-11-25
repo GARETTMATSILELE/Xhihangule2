@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
+exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.canViewAgentAccounts = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
 const errorHandler_1 = require("./errorHandler");
 const isAgent = (req, res, next) => {
     if (!req.user) {
@@ -46,6 +46,18 @@ const isAccountant = (req, res, next) => {
     next();
 };
 exports.isAccountant = isAccountant;
+// Read-only access to agent accounts for Admin, Principal, PREA and Accountant
+const canViewAgentAccounts = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    const roles = req.user.roles || [req.user.role];
+    if (!roles.some(r => ['accountant', 'admin', 'principal', 'prea'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin, Principal, PREA or Accountant role required.', 403);
+    }
+    next();
+};
+exports.canViewAgentAccounts = canViewAgentAccounts;
 const canCreateProperty = (req, res, next) => {
     if (!req.user) {
         throw new errorHandler_1.AppError('Authentication required', 401);

@@ -44,6 +44,8 @@ import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
 import { initializeSocket } from './config/socket';
 import { initializeSyncServices } from './scripts/startSyncServices';
+import reportRoutes from './routes/reportRoutes';
+import publicReportRoutes from './routes/publicReportRoutes';
 
 // Load environment variables
 dotenv.config();
@@ -139,6 +141,9 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/fiscal', fiscalRoutes);
+// Reports (public and authenticated)
+app.use('/api/public/reports', publicReportRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express.Router();

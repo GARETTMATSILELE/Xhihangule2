@@ -274,18 +274,6 @@ class PaymentService {
     }
   }
 
-  async downloadReceipt(id: string): Promise<Blob> {
-    try {
-      return await this.db.executeWithRetry(async () => {
-        const response = await api.get(`/payments/${id}/receipt`, {
-          responseType: 'blob'
-        });
-        return response.data;
-      });
-    } catch (error: any) {
-      return this.handleAuthError(error);
-    }
-  }
 
   async getExchangeRate(fromCurrency: string, toCurrency: string): Promise<number> {
     try {
@@ -407,49 +395,47 @@ class PaymentService {
     }
   }
 
-  // Public method for getting payment receipt for printing
+  // Authenticated method for getting payment receipt for printing
   async getPaymentReceipt(id: string, companyId?: string): Promise<any> {
     try {
-      const config: any = {};
-      const defaultCompanyId = companyId || (typeof window !== 'undefined' ? localStorage.getItem('companyId') || undefined : undefined);
-      if (defaultCompanyId) {
-        config.params = { companyId: defaultCompanyId };
-      }
-      
-      // Try rental/standard payment first; if not found, try levy receipt endpoint
-      try {
-        const response = await publicApi.get(`/payments/public/${id}/receipt`, config);
-        return response.data.data;
-      } catch (err: any) {
-        // Fallback to levy route
-        const levyResp = await publicApi.get(`/levy-payments/public/${id}/receipt`, config);
-        return levyResp.data.data;
-      }
+      return await this.db.executeWithRetry(async () => {
+        const config: any = {};
+        if (companyId) {
+          config.params = { companyId };
+        }
+        // Try rental/standard payment first; if not found, try levy receipt endpoint
+        try {
+          const response = await api.get(`/payments/${id}/receipt`, config);
+          return response.data?.data ?? response.data;
+        } catch (err: any) {
+          const levyResp = await api.get(`/levy-payments/${id}/receipt`, config);
+          return levyResp.data?.data ?? levyResp.data;
+        }
+      });
     } catch (error: any) {
       console.error('Error fetching payment receipt:', error);
       throw new Error(error.response?.data?.message || 'Failed to fetch receipt');
     }
   }
 
-  // Public method for downloading payment receipt as blob (no authentication required)
-  async downloadReceiptPublic(id: string, companyId?: string): Promise<Blob> {
+  // Authenticated method for downloading payment receipt as blob
+  async downloadReceipt(id: string, companyId?: string): Promise<Blob> {
     try {
-      const config: any = {
-        responseType: 'blob'
-      };
-      const defaultCompanyId = companyId || (typeof window !== 'undefined' ? localStorage.getItem('companyId') || undefined : undefined);
-      if (defaultCompanyId) {
-        config.params = { companyId: defaultCompanyId };
-      }
-      try {
-        const response = await publicApi.get(`/payments/public/${id}/receipt/download`, config);
-        return response.data;
-      } catch (err: any) {
-        const levyResp = await publicApi.get(`/levy-payments/public/${id}/receipt/download`, config);
-        return levyResp.data;
-      }
+      return await this.db.executeWithRetry(async () => {
+        const config: any = { responseType: 'blob' };
+        if (companyId) {
+          config.params = { companyId };
+        }
+        try {
+          const response = await api.get(`/payments/${id}/receipt/download`, config);
+          return response.data;
+        } catch (err: any) {
+          const levyResp = await api.get(`/levy-payments/${id}/receipt/download`, config);
+          return levyResp.data;
+        }
+      });
     } catch (error: any) {
-      console.error('Error downloading payment receipt (public):', error);
+      console.error('Error downloading payment receipt:', error);
       throw new Error(error.response?.data?.message || 'Failed to download receipt');
     }
   }

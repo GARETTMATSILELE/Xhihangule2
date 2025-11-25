@@ -5,7 +5,7 @@ interface IncomeExpenseReportProps {
   isAuthenticated?: boolean;
 }
 
-const IncomeExpenseReport: React.FC<IncomeExpenseReportProps> = ({ isAuthenticated = false }) => {
+const IncomeExpenseReport: React.FC<IncomeExpenseReportProps> = ({ isAuthenticated = true }) => {
   const [data, setData] = useState<IncomeExpenseData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

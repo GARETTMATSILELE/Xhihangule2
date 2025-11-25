@@ -16,7 +16,17 @@ exports.getDatabaseHealth = exports.connectDatabase = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const dotenv_1 = require("dotenv");
 (0, dotenv_1.config)();
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/xhihangule';
+const LOCAL_MAIN_URI = 'mongodb://localhost:27017/xhihangule';
+const getEffectiveUri = (envValue, localFallback) => {
+    if (process.env.NODE_ENV === 'production') {
+        return envValue && envValue.trim() ? envValue : localFallback;
+    }
+    if (process.env.FORCE_DB_URI === 'true') {
+        return envValue && envValue.trim() ? envValue : localFallback;
+    }
+    return localFallback;
+};
+const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
 let isConnected = false;
 let connectionAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;

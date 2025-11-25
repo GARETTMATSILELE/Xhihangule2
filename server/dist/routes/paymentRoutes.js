@@ -49,6 +49,9 @@ router.post('/', auth_1.authWithCompany, roles_1.canManagePayments, paymentContr
 router.get('/company', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getCompanyPayments);
 // Get payment details
 router.get('/:id', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentDetails);
+// Authenticated receipt endpoints (JSON + HTML download)
+router.get('/:id/receipt', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentReceipt);
+router.get('/:id/receipt/download', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentReceiptDownload);
 // Update payment status
 router.patch('/:id/status', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
 exports.default = router;
