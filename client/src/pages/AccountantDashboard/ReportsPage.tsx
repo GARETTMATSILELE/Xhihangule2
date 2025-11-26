@@ -14,6 +14,9 @@ function currency(amount: number) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(amount);
 }
 
+type StatementRow = { date: string; property: string; reference: string; amount: number };
+type PartyStatement = { id: string; name: string; total: number; count: number; payments: StatementRow[] };
+
 const ReportsPage: React.FC = () => {
   // Filters (default to current month)
   const now = new Date();
@@ -36,6 +39,7 @@ const ReportsPage: React.FC = () => {
   const [saleAgentId, setSaleAgentId] = useState<string>('all');
   const [buyerFilter, setBuyerFilter] = useState<string>('');
   const [sellerFilter, setSellerFilter] = useState<string>('');
+  const [partySearch, setPartySearch] = useState<string>('');
 
   // Top Agents card: independent month/year filters and data
   const [topYear, setTopYear] = useState<number>(now.getFullYear());
@@ -493,6 +497,207 @@ const ReportsPage: React.FC = () => {
     } catch {}
   }
 
+  // Build Tenant statements from rental payments
+  const tenantStatements = useMemo(() => {
+    const map = new Map<string, PartyStatement>();
+    (payments || [])
+      .filter((p: any) => p && p.paymentType === 'rental' && (p.status ? String(p.status) === 'completed' : true))
+      .forEach((p: any) => {
+        try {
+          const tenantObj = p.tenantId;
+          const tenantId = tenantObj && typeof tenantObj === 'object'
+            ? String(tenantObj._id || tenantObj.id || '')
+            : (typeof tenantObj === 'string' ? tenantObj : (p.manualTenantName || 'unknown'));
+          const tenantName = tenantObj && typeof tenantObj === 'object'
+            ? (`${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || (p.manualTenantName || 'Unknown tenant'))
+            : (p.manualTenantName || 'Unknown tenant');
+          const propertyObj = p.propertyId;
+          const propertyName = propertyObj && typeof propertyObj === 'object'
+            ? (propertyObj.address || propertyObj.name || p.manualPropertyAddress || 'Unknown Property')
+            : (p.manualPropertyAddress || 'Unknown Property');
+          const d = getEffectiveDateForFilter(p);
+          const row: StatementRow = {
+            date: d.toISOString().slice(0, 10),
+            property: propertyName,
+            reference: String(p.referenceNumber || p._id || ''),
+            amount: Number(p.amount || 0),
+          };
+          const cur = map.get(tenantId) || { id: tenantId, name: tenantName, total: 0, count: 0, payments: [] as StatementRow[] };
+          cur.total += row.amount;
+          cur.count += 1;
+          cur.payments.push(row);
+          map.set(tenantId, cur);
+        } catch {}
+      });
+    const list = Array.from(map.values());
+    list.forEach(s => s.payments.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()));
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [payments]);
+
+  // Build Buyer statements from sale payments
+  const buyerStatements = useMemo(() => {
+    const map = new Map<string, PartyStatement>();
+    (payments || [])
+      .filter((p: any) => p && p.paymentType === 'sale' && (p.status ? String(p.status) === 'completed' : true))
+      .forEach((p: any) => {
+        try {
+          const buyerNameRaw =
+            p.buyerName ||
+            p.manualTenantName ||
+            ((p.tenantId && typeof p.tenantId === 'object') ? `${p.tenantId.firstName || ''} ${p.tenantId.lastName || ''}`.trim() : '');
+          const buyerName = buyerNameRaw || 'Unknown buyer';
+          const key = buyerName.toLowerCase();
+          const propertyObj = p.propertyId;
+          const propertyName = propertyObj && typeof propertyObj === 'object'
+            ? (propertyObj.address || propertyObj.name || p.manualPropertyAddress || 'Unknown Property')
+            : (p.manualPropertyAddress || 'Unknown Property');
+          const d = getEffectiveDateForFilter(p);
+          const row: StatementRow = {
+            date: d.toISOString().slice(0, 10),
+            property: propertyName,
+            reference: String(p.referenceNumber || p._id || ''),
+            amount: Number(p.amount || 0),
+          };
+          const cur = map.get(key) || { id: key, name: buyerName, total: 0, count: 0, payments: [] as StatementRow[] };
+          cur.total += row.amount;
+          cur.count += 1;
+          cur.payments.push(row);
+          map.set(key, cur);
+        } catch {}
+      });
+    const list = Array.from(map.values());
+    list.forEach(s => s.payments.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()));
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [payments]);
+
+  function printTenantStatement(s: { name: string; payments: Array<{ date: string; property: string; reference: string; amount: number }>; total: number }) {
+    try {
+      const html = `<!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Tenant Statement — ${s.name}</title>
+            <style>
+              body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 24px; color: #0f172a; }
+              h1 { font-size: 18px; margin: 0 0 12px; }
+              .muted { color: #64748b; font-size: 12px; margin-bottom: 16px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+              th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+              .right { text-align: right; }
+              .total { font-weight: 600; }
+              @media print { button { display: none; } }
+            </style>
+          </head>
+          <body>
+            <h1>Tenant Payment Statement</h1>
+            <div class="muted">Tenant: ${s.name}</div>
+            <table>
+              <thead>
+                <tr><th>Date</th><th>Property</th><th>Reference</th><th class="right">Amount</th></tr>
+              </thead>
+              <tbody>
+                ${s.payments.map(p => `<tr><td>${p.date}</td><td>${(p.property || '').toString()}</td><td>${(p.reference || '').toString()}</td><td class="right">${currency(p.amount)}</td></tr>`).join('')}
+                <tr class="total"><td colspan="3">Total</td><td class="right">${currency(s.total)}</td></tr>
+              </tbody>
+            </table>
+            <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 200); };</script>
+          </body>
+        </html>`;
+      const iframe = document.createElement('iframe') as HTMLIFrameElement;
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      const onLoad = () => {
+        try {
+          iframe.contentDocument?.defaultView?.focus();
+          iframe.contentDocument?.defaultView?.print();
+        } finally {
+          setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 500);
+        }
+      };
+      iframe.onload = onLoad as any;
+      try {
+        (iframe as any).srcdoc = html;
+        document.body.appendChild(iframe);
+      } catch {
+        document.body.appendChild(iframe);
+        const doc = iframe.contentDocument as (Document | null);
+        doc?.open();
+        doc?.write(html);
+        doc?.close();
+        setTimeout(onLoad, 50);
+      }
+    } catch {}
+  }
+
+  function printBuyerStatement(s: { name: string; payments: Array<{ date: string; property: string; reference: string; amount: number }>; total: number }) {
+    try {
+      const html = `<!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Buyer Statement — ${s.name}</title>
+            <style>
+              body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 24px; color: #0f172a; }
+              h1 { font-size: 18px; margin: 0 0 12px; }
+              .muted { color: #64748b; font-size: 12px; margin-bottom: 16px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+              th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+              .right { text-align: right; }
+              .total { font-weight: 600; }
+              @media print { button { display: none; } }
+            </style>
+          </head>
+          <body>
+            <h1>Buyer Payment Statement</h1>
+            <div class="muted">Buyer: ${s.name}</div>
+            <table>
+              <thead>
+                <tr><th>Date</th><th>Property</th><th>Reference</th><th class="right">Amount</th></tr>
+              </thead>
+              <tbody>
+                ${s.payments.map(p => `<tr><td>${p.date}</td><td>${(p.property || '').toString()}</td><td>${(p.reference || '').toString()}</td><td class="right">${currency(p.amount)}</td></tr>`).join('')}
+                <tr class="total"><td colspan="3">Total</td><td class="right">${currency(s.total)}</td></tr>
+              </tbody>
+            </table>
+            <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 200); };</script>
+          </body>
+        </html>`;
+      const iframe = document.createElement('iframe') as HTMLIFrameElement;
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      const onLoad = () => {
+        try {
+          iframe.contentDocument?.defaultView?.focus();
+          iframe.contentDocument?.defaultView?.print();
+        } finally {
+          setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 500);
+        }
+      };
+      iframe.onload = onLoad as any;
+      try {
+        (iframe as any).srcdoc = html;
+        document.body.appendChild(iframe);
+      } catch {
+        document.body.appendChild(iframe);
+        const doc = iframe.contentDocument as (Document | null);
+        doc?.open();
+        doc?.write(html);
+        doc?.close();
+        setTimeout(onLoad, 50);
+      }
+    } catch {}
+  }
+
   // Drill handlers
   function handlePieClick(entry: any) {
     setDrill({ type: 'revenue-split', filter: { kind: entry.name } });
@@ -868,34 +1073,88 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Payroll Report */}
+        {/* Tenant and Buyer reports (replaces Payroll + Budget vs Actual) */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Payroll Report</h2>
+            <h2 className="text-lg font-semibold">Tenant and Buyer reports</h2>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">Month</label>
-              <input className="border rounded px-2 py-1" type="month" defaultValue={to.slice(0,7)} />
-              <input placeholder="Search employee" className="border rounded px-2 py-1" />
-              <button onClick={printReport} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
+              <label className="text-xs text-slate-500">Search</label>
+              <input value={partySearch} onChange={(e)=>setPartySearch(e.target.value)} placeholder="Search name" className="border rounded px-2 py-1" />
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="py-2">Employee</th>
-                  <th>Role</th>
-                  <th className="text-right">Gross</th>
-                  <th className="text-right">Deductions</th>
-                  <th className="text-right">Net</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td className="py-2">Alice K.</td><td>Accountant</td><td className="text-right">{currency(1800)}</td><td className="text-right">{currency(220)}</td><td className="text-right">{currency(1580)}</td></tr>
-                <tr><td className="py-2">Brian T.</td><td>Sales Agent</td><td className="text-right">{currency(1500)}</td><td className="text-right">{currency(180)}</td><td className="text-right">{currency(1320)}</td></tr>
-                <tr className="font-semibold"><td className="py-2">Total</td><td></td><td className="text-right">{currency(3300)}</td><td className="text-right">{currency(400)}</td><td className="text-right">{currency(2900)}</td></tr>
-              </tbody>
-            </table>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-sm font-medium mb-2">Tenants (rental payments)</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2">Tenant</th>
+                      <th className="text-right">Count</th>
+                      <th className="text-right">Total Paid</th>
+                      <th className="text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenantStatements
+                      .filter(s => {
+                        const needle = partySearch.trim().toLowerCase();
+                        if (!needle) return true;
+                        return s.name.toLowerCase().includes(needle);
+                      })
+                      .map(s => (
+                        <tr key={`tenant-${s.id}`} className="border-t">
+                          <td className="py-2">{s.name}</td>
+                          <td className="text-right">{s.count}</td>
+                          <td className="text-right">{currency(s.total)}</td>
+                          <td className="text-right">
+                            <button onClick={() => printTenantStatement(s)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
+                          </td>
+                        </tr>
+                      ))}
+                    {tenantStatements.length === 0 && (
+                      <tr><td colSpan={4} className="py-6 text-center text-slate-500">No tenant transactions found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium mb-2">Buyers (sales payments)</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2">Buyer</th>
+                      <th className="text-right">Count</th>
+                      <th className="text-right">Total Paid</th>
+                      <th className="text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buyerStatements
+                      .filter(s => {
+                        const needle = partySearch.trim().toLowerCase();
+                        if (!needle) return true;
+                        return s.name.toLowerCase().includes(needle);
+                      })
+                      .map(s => (
+                        <tr key={`buyer-${s.id}`} className="border-t">
+                          <td className="py-2">{s.name}</td>
+                          <td className="text-right">{s.count}</td>
+                          <td className="text-right">{currency(s.total)}</td>
+                          <td className="text-right">
+                            <button onClick={() => printBuyerStatement(s)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
+                          </td>
+                        </tr>
+                      ))}
+                    {buyerStatements.length === 0 && (
+                      <tr><td colSpan={4} className="py-6 text-center text-slate-500">No buyer transactions found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -917,34 +1176,7 @@ const ReportsPage: React.FC = () => {
           </ul>
         </div>
 
-        {/* Budget vs Actual */}
-        <div className="bg-white p-4 rounded-2xl shadow">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Budget vs Actual</h2>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">Year</label>
-              <input className="border rounded px-2 py-1" type="number" defaultValue={Number(to.slice(0,4))} />
-              <button onClick={printReport} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="py-2">Category</th>
-                  <th className="text-right">Budget</th>
-                  <th className="text-right">Actual</th>
-                  <th className="text-right">Variance</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td className="py-2">Income</td><td className="text-right">{currency(24000)}</td><td className="text-right">{currency(22950)}</td><td className="text-right">{currency(-1050)}</td></tr>
-                <tr><td className="py-2">Expenses</td><td className="text-right">{currency(11000)}</td><td className="text-right">{currency(9950)}</td><td className="text-right">{currency(1050)}</td></tr>
-                <tr className="font-semibold"><td className="py-2">Net</td><td className="text-right">{currency(13000)}</td><td className="text-right">{currency(13000)}</td><td className="text-right">{currency(0)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* Budget vs Actual removed in favor of Tenant and Buyer reports */}
 
         {/* Income Statement */}
         <div className="bg-white p-4 rounded-2xl shadow">
