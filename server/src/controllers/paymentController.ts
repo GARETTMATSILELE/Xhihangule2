@@ -1633,6 +1633,7 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
       (req.user?.companyId as string | undefined) ||
       (req.query.companyId as string | undefined) ||
       (req.headers['x-company-id'] as string | undefined);
+    const format = String((req.query as any)?.format || '').toLowerCase();
     
     console.log('Payment receipt download request:', {
       id,
@@ -1770,11 +1771,30 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
 
     console.log('Generated HTML receipt for payment:', { id: payment._id, amount: payment.amount });
 
-    // Set headers for HTML file download
+    // If PDF format requested, attempt PDF generation via puppeteer; fallback to HTML on failure
+    if (format === 'pdf') {
+      try {
+        const puppeteer = (await import('puppeteer')).default;
+        const browser = await puppeteer.launch({
+          // improve compatibility in containerized environments
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        await page.setContent(htmlReceipt, { waitUntil: 'networkidle0' });
+        const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', left: '15mm', right: '15mm', bottom: '20mm' } });
+        await browser.close();
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.referenceNumber || payment._id}.pdf"`);
+        return res.send(pdfBuffer);
+      } catch (pdfErr) {
+        console.warn('PDF generation failed, falling back to HTML download:', (pdfErr as any)?.message || pdfErr);
+      }
+    }
+
+    // Default: HTML file download
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.referenceNumber || payment._id}.html"`);
-    
-    res.send(htmlReceipt);
+    return res.send(htmlReceipt);
   } catch (error) {
     console.error('Error generating payment receipt download:', error);
     res.status(500).json({

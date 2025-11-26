@@ -16,6 +16,11 @@ function currency(amount: number) {
 
 type StatementRow = { date: string; property: string; reference: string; amount: number };
 type PartyStatement = { id: string; name: string; total: number; count: number; payments: StatementRow[] };
+type TenantMonthItem = { period: string; expected: number; paid: number; outstanding: number; rows: StatementRow[] };
+type TenantPropertyGroup = { propertyId: string; propertyName: string; months: TenantMonthItem[]; totalPaid: number; totalOutstanding: number };
+type TenantPartyStatement = PartyStatement & { properties: TenantPropertyGroup[]; outstandingTotal: number };
+type BuyerPropertyGroup = { saleKey: string; propertyId?: string; propertyName: string; expectedTotal?: number; totalPaid: number; outstanding: number; rows: StatementRow[] };
+type BuyerPartyStatement = PartyStatement & { properties: BuyerPropertyGroup[]; outstandingTotal: number };
 
 const ReportsPage: React.FC = () => {
   // Filters (default to current month)
@@ -262,6 +267,22 @@ const ReportsPage: React.FC = () => {
     return { rental, sales };
   }, [companyTransactions, from, to]);
 
+  // Utility: parse total sale price from notes (pick the largest number)
+  function parseSaleTotalFromNotes(notes?: string): number | undefined {
+    try {
+      const s = String(notes || '');
+      const matches = s.match(/(\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?/g);
+      if (!matches || matches.length === 0) return undefined;
+      const nums = matches
+        .map(t => Number(String(t).replace(/[,\s]/g, '')))
+        .filter(n => isFinite(n) && n > 0);
+      if (nums.length === 0) return undefined;
+      return nums.reduce((a, b) => Math.max(a, b), 0);
+    } catch {
+      return undefined;
+    }
+  }
+
   const filteredTransactions = useMemo(() => {
     const start = new Date(from);
     const end = new Date(to);
@@ -497,9 +518,9 @@ const ReportsPage: React.FC = () => {
     } catch {}
   }
 
-  // Build Tenant statements from rental payments
+  // Build Tenant statements from rental payments (grouped by property and month with outstanding)
   const tenantStatements = useMemo(() => {
-    const map = new Map<string, PartyStatement>();
+    const map = new Map<string, TenantPartyStatement>();
     (payments || [])
       .filter((p: any) => p && p.paymentType === 'rental' && (p.status ? String(p.status) === 'completed' : true))
       .forEach((p: any) => {
@@ -512,6 +533,7 @@ const ReportsPage: React.FC = () => {
             ? (`${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || (p.manualTenantName || 'Unknown tenant'))
             : (p.manualTenantName || 'Unknown tenant');
           const propertyObj = p.propertyId;
+          const propertyId = (propertyObj && typeof propertyObj === 'object') ? String(propertyObj._id || propertyObj.id || '') : (typeof propertyObj === 'string' ? propertyObj : (p.manualPropertyAddress || 'unknown'));
           const propertyName = propertyObj && typeof propertyObj === 'object'
             ? (propertyObj.address || propertyObj.name || p.manualPropertyAddress || 'Unknown Property')
             : (p.manualPropertyAddress || 'Unknown Property');
@@ -522,21 +544,57 @@ const ReportsPage: React.FC = () => {
             reference: String(p.referenceNumber || p._id || ''),
             amount: Number(p.amount || 0),
           };
-          const cur = map.get(tenantId) || { id: tenantId, name: tenantName, total: 0, count: 0, payments: [] as StatementRow[] };
-          cur.total += row.amount;
+          const rentUsed = Number((p as any).rentUsed || 0);
+          const deposit = Number((p as any).depositAmount || 0);
+          const credited = Math.max(0, row.amount - deposit);
+          const period = (() => {
+            const y = Number((p as any).rentalPeriodYear);
+            const m = Number((p as any).rentalPeriodMonth);
+            if (y && m) return `${y}-${String(m).padStart(2, '0')}`;
+            const dt = d;
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+          })();
+
+          const cur = map.get(tenantId) || { id: tenantId, name: tenantName, total: 0, count: 0, payments: [] as StatementRow[], properties: [] as TenantPropertyGroup[], outstandingTotal: 0 };
+          cur.total += credited;
           cur.count += 1;
           cur.payments.push(row);
+          // Property group
+          let pg = cur.properties.find(g => g.propertyId === propertyId);
+          if (!pg) {
+            pg = { propertyId, propertyName, months: [], totalPaid: 0, totalOutstanding: 0 };
+            cur.properties.push(pg);
+          }
+          // Month item
+          let mi = pg.months.find(m => m.period === period);
+          if (!mi) {
+            mi = { period, expected: 0, paid: 0, outstanding: 0, rows: [] };
+            pg.months.push(mi);
+          }
+          mi.rows.push(row);
+          mi.paid += credited;
+          if (rentUsed > mi.expected) mi.expected = rentUsed;
+          mi.outstanding = Math.max(0, (mi.expected || 0) - (mi.paid || 0));
+          pg.totalPaid = pg.months.reduce((s, m) => s + (m.paid || 0), 0);
+          pg.totalOutstanding = pg.months.reduce((s, m) => s + (m.outstanding || 0), 0);
+          cur.outstandingTotal = cur.properties.reduce((s, g) => s + (g.totalOutstanding || 0), 0);
           map.set(tenantId, cur);
         } catch {}
       });
+    // Sort months within each property without relying on iterator downleveling
+    Array.from(map.values()).forEach((party: TenantPartyStatement) => {
+      party.properties.forEach((prop: TenantPropertyGroup) => {
+        prop.months.sort((a: TenantMonthItem, b: TenantMonthItem) => a.period.localeCompare(b.period));
+      });
+    });
     const list = Array.from(map.values());
     list.forEach(s => s.payments.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()));
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [payments]);
 
-  // Build Buyer statements from sale payments
+  // Build Buyer statements from sale payments (grouped by property/sale with outstanding)
   const buyerStatements = useMemo(() => {
-    const map = new Map<string, PartyStatement>();
+    const map = new Map<string, BuyerPartyStatement>();
     (payments || [])
       .filter((p: any) => p && p.paymentType === 'sale' && (p.status ? String(p.status) === 'completed' : true))
       .forEach((p: any) => {
@@ -548,6 +606,7 @@ const ReportsPage: React.FC = () => {
           const buyerName = buyerNameRaw || 'Unknown buyer';
           const key = buyerName.toLowerCase();
           const propertyObj = p.propertyId;
+          const propertyId = (propertyObj && typeof propertyObj === 'object') ? String(propertyObj._id || propertyObj.id || '') : (typeof propertyObj === 'string' ? propertyObj : (p.manualPropertyAddress || 'unknown'));
           const propertyName = propertyObj && typeof propertyObj === 'object'
             ? (propertyObj.address || propertyObj.name || p.manualPropertyAddress || 'Unknown Property')
             : (p.manualPropertyAddress || 'Unknown Property');
@@ -558,10 +617,28 @@ const ReportsPage: React.FC = () => {
             reference: String(p.referenceNumber || p._id || ''),
             amount: Number(p.amount || 0),
           };
-          const cur = map.get(key) || { id: key, name: buyerName, total: 0, count: 0, payments: [] as StatementRow[] };
+          const saleId = (p as any).saleId ? String((p as any).saleId) : undefined;
+          const saleKey = saleId ? `sale:${saleId}` : `prop:${propertyId}`;
+          const notes = String((p as any).notes || '');
+
+          const cur = map.get(key) || { id: key, name: buyerName, total: 0, count: 0, payments: [] as StatementRow[], properties: [] as BuyerPropertyGroup[], outstandingTotal: 0 };
           cur.total += row.amount;
           cur.count += 1;
           cur.payments.push(row);
+          // Property/sale group
+          let pg = cur.properties.find(g => g.saleKey === saleKey);
+          if (!pg) {
+            pg = { saleKey, propertyId, propertyName, expectedTotal: undefined, totalPaid: 0, outstanding: 0, rows: [] };
+            cur.properties.push(pg);
+          }
+          pg.rows.push(row);
+          pg.totalPaid += row.amount;
+          const parsedTotal = parseSaleTotalFromNotes(notes);
+          if (parsedTotal && (!pg.expectedTotal || parsedTotal > (pg.expectedTotal || 0))) {
+            pg.expectedTotal = parsedTotal;
+          }
+          pg.outstanding = Math.max(0, (pg.expectedTotal || 0) - (pg.totalPaid || 0));
+          cur.outstandingTotal = cur.properties.reduce((s, g) => s + (g.outstanding || 0), 0);
           map.set(key, cur);
         } catch {}
       });
@@ -570,7 +647,7 @@ const ReportsPage: React.FC = () => {
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [payments]);
 
-  function printTenantStatement(s: { name: string; payments: Array<{ date: string; property: string; reference: string; amount: number }>; total: number }) {
+  function printTenantStatement(s: TenantPartyStatement) {
     try {
       const html = `<!doctype html>
         <html>
@@ -592,15 +669,27 @@ const ReportsPage: React.FC = () => {
           <body>
             <h1>Tenant Payment Statement</h1>
             <div class="muted">Tenant: ${s.name}</div>
-            <table>
-              <thead>
-                <tr><th>Date</th><th>Property</th><th>Reference</th><th class="right">Amount</th></tr>
-              </thead>
-              <tbody>
-                ${s.payments.map(p => `<tr><td>${p.date}</td><td>${(p.property || '').toString()}</td><td>${(p.reference || '').toString()}</td><td class="right">${currency(p.amount)}</td></tr>`).join('')}
-                <tr class="total"><td colspan="3">Total</td><td class="right">${currency(s.total)}</td></tr>
-              </tbody>
-            </table>
+            ${s.properties.map(prop => `
+              <h2 style="font-size:14px;margin-top:18px;margin-bottom:4px;">Property: ${prop.propertyName}</h2>
+              <table>
+                <thead>
+                  <tr><th>Period</th><th class="right">Expected</th><th class="right">Paid</th><th class="right">Outstanding</th></tr>
+                </thead>
+                <tbody>
+                  ${prop.months.map(m => `<tr><td>${m.period}</td><td class="right">${currency(m.expected || 0)}</td><td class="right">${currency(m.paid || 0)}</td><td class="right">${currency(m.outstanding || 0)}</td></tr>`).join('')}
+                  <tr class="total"><td>Total</td><td></td><td class="right">${currency(prop.totalPaid || 0)}</td><td class="right">${currency(prop.totalOutstanding || 0)}</td></tr>
+                </tbody>
+              </table>
+              <table>
+                <thead>
+                  <tr><th>Date</th><th>Reference</th><th class="right">Amount</th></tr>
+                </thead>
+                <tbody>
+                  ${prop.months.flatMap(m => m.rows).map(r => `<tr><td>${r.date}</td><td>${(r.reference || '').toString()}</td><td class="right">${currency(r.amount || 0)}</td></tr>`).join('')}
+                </tbody>
+              </table>
+            `).join('')}
+            <div style="margin-top:12px;font-weight:600;">Total outstanding across properties: ${currency(s.outstandingTotal || 0)}</div>
             <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 200); };</script>
           </body>
         </html>`;
@@ -634,7 +723,7 @@ const ReportsPage: React.FC = () => {
     } catch {}
   }
 
-  function printBuyerStatement(s: { name: string; payments: Array<{ date: string; property: string; reference: string; amount: number }>; total: number }) {
+  function printBuyerStatement(s: BuyerPartyStatement) {
     try {
       const html = `<!doctype html>
         <html>
@@ -656,15 +745,21 @@ const ReportsPage: React.FC = () => {
           <body>
             <h1>Buyer Payment Statement</h1>
             <div class="muted">Buyer: ${s.name}</div>
-            <table>
-              <thead>
-                <tr><th>Date</th><th>Property</th><th>Reference</th><th class="right">Amount</th></tr>
-              </thead>
-              <tbody>
-                ${s.payments.map(p => `<tr><td>${p.date}</td><td>${(p.property || '').toString()}</td><td>${(p.reference || '').toString()}</td><td class="right">${currency(p.amount)}</td></tr>`).join('')}
-                <tr class="total"><td colspan="3">Total</td><td class="right">${currency(s.total)}</td></tr>
-              </tbody>
-            </table>
+            ${s.properties.map(prop => `
+              <h2 style="font-size:14px;margin-top:18px;margin-bottom:4px;">Property: ${prop.propertyName}</h2>
+              <div>Expected total: ${prop.expectedTotal ? currency(prop.expectedTotal) : '-'}</div>
+              <div>Total paid: ${currency(prop.totalPaid || 0)}</div>
+              <div style="margin-bottom:8px;">Outstanding: ${currency(prop.outstanding || 0)}</div>
+              <table>
+                <thead>
+                  <tr><th>Date</th><th>Reference</th><th class="right">Amount</th></tr>
+                </thead>
+                <tbody>
+                  ${prop.rows.map(r => `<tr><td>${r.date}</td><td>${(r.reference || '').toString()}</td><td class="right">${currency(r.amount || 0)}</td></tr>`).join('')}
+                </tbody>
+              </table>
+            `).join('')}
+            <div style="margin-top:12px;font-weight:600;">Total outstanding across properties: ${currency(s.outstandingTotal || 0)}</div>
             <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 200); };</script>
           </body>
         </html>`;
@@ -844,6 +939,102 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* Top Agents and Revenue split (positioned under Total Revenue & Average Monthly) */}
+      {/* Top Agents and Revenue split moved above */}
+
+      {/* Tenant and Buyer reports full width */}
+      <section className="mb-6">
+        <div className="bg-white p-4 rounded-2xl shadow">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Tenant and Buyer reports</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-500">Search</label>
+              <input value={partySearch} onChange={(e)=>setPartySearch(e.target.value)} placeholder="Search name" className="border rounded px-2 py-1" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-sm font-medium mb-2">Tenants (rental payments)</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2">Tenant</th>
+                      <th className="text-right">Count</th>
+                      <th className="text-right">Total Paid</th>
+                      <th className="text-right">Outstanding</th>
+                      <th className="text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenantStatements
+                      .filter(s => {
+                        const needle = partySearch.trim().toLowerCase();
+                        if (!needle) return true;
+                        return s.name.toLowerCase().includes(needle);
+                      })
+                      .map(s => (
+                        <tr key={`tenant-${s.id}`} className="border-t">
+                          <td className="py-2">{s.name}</td>
+                          <td className="text-right">{s.count}</td>
+                          <td className="text-right">{currency(s.total)}</td>
+                          <td className="text-right">{currency((s as any).outstandingTotal || 0)}</td>
+                          <td className="text-right">
+                            <button onClick={() => printTenantStatement(s as any)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
+                          </td>
+                        </tr>
+                      ))}
+                    {tenantStatements.length === 0 && (
+                      <tr><td colSpan={5} className="py-6 text-center text-slate-500">No tenant transactions found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium mb-2">Buyers (sales payments)</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2">Buyer</th>
+                      <th className="text-right">Count</th>
+                      <th className="text-right">Total Paid</th>
+                      <th className="text-right">Outstanding</th>
+                      <th className="text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buyerStatements
+                      .filter(s => {
+                        const needle = partySearch.trim().toLowerCase();
+                        if (!needle) return true;
+                        return s.name.toLowerCase().includes(needle);
+                      })
+                      .map(s => (
+                        <tr key={`buyer-${s.id}`} className="border-t">
+                          <td className="py-2">{s.name}</td>
+                          <td className="text-right">{s.count}</td>
+                          <td className="text-right">{currency(s.total)}</td>
+                          <td className="text-right">{currency((s as any).outstandingTotal || 0)}</td>
+                          <td className="text-right">
+                            <button onClick={() => printBuyerStatement(s as any)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
+                          </td>
+                        </tr>
+                      ))}
+                    {buyerStatements.length === 0 && (
+                      <tr><td colSpan={5} className="py-6 text-center text-slate-500">No buyer transactions found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      {/* Tenant and Buyer reports moved below Top Agents & Revenue split */}
+      {/* Tenant and Buyer reports moved below Top Agents & Revenue split */}
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         {/* Top Agents moved here to replace the former Revenue over time chart */}
@@ -1033,131 +1224,8 @@ const ReportsPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Income vs Expenses, Payroll, Taxes, Budget vs Actual, Income Statement, Trust Accounts */}
+      {/* Taxes and Income Statement */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        {/* Income vs Expenses */}
-        <div className="bg-white p-4 rounded-2xl shadow">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold">Income vs Expenses</h2>
-            <button onClick={printIncomeExpensesSummary} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
-          </div>
-          <div className="flex items-center gap-2 mb-3">
-            <label className="text-xs text-slate-500">From</label>
-            <input className="border rounded px-2 py-1" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            <label className="text-xs text-slate-500">To</label>
-            <input className="border rounded px-2 py-1" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            <input placeholder="Search" className="border rounded px-2 py-1" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <h3 className="text-sm font-medium mb-2">Income</h3>
-              <ul className="divide-y text-sm">
-                <li className="py-2 flex justify-between"><span>Management Commission</span><span>{currency(totalManagement)}</span></li>
-                <li className="py-2 flex justify-between"><span>Sales Commissions</span><span>{currency(totalSales)}</span></li>
-                <li className="py-2 flex justify-between font-semibold"><span>Total Income</span><span>{currency(totalManagement + totalSales)}</span></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium mb-2">Expenses</h3>
-              <ul className="divide-y text-sm">
-                <li className="py-2 flex justify-between"><span>Company Expenses (period)</span><span>{currency(expensesForPeriod)}</span></li>
-                <li className="py-2 flex justify-between font-semibold"><span>Total Expenses</span><span>{currency(expensesForPeriod)}</span></li>
-              </ul>
-            </div>
-          </div>
-          <div className="mt-4 pt-3 border-t flex items-center justify-between">
-            <div className="text-sm font-medium">Balance</div>
-            <div className={balance >= 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
-              {balance >= 0 ? currency(balance) : `(${currency(Math.abs(balance))})`}
-            </div>
-          </div>
-        </div>
-
-        {/* Tenant and Buyer reports (replaces Payroll + Budget vs Actual) */}
-        <div className="bg-white p-4 rounded-2xl shadow">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Tenant and Buyer reports</h2>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">Search</label>
-              <input value={partySearch} onChange={(e)=>setPartySearch(e.target.value)} placeholder="Search name" className="border rounded px-2 py-1" />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <h3 className="text-sm font-medium mb-2">Tenants (rental payments)</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="text-slate-500">
-                    <tr>
-                      <th className="py-2">Tenant</th>
-                      <th className="text-right">Count</th>
-                      <th className="text-right">Total Paid</th>
-                      <th className="text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tenantStatements
-                      .filter(s => {
-                        const needle = partySearch.trim().toLowerCase();
-                        if (!needle) return true;
-                        return s.name.toLowerCase().includes(needle);
-                      })
-                      .map(s => (
-                        <tr key={`tenant-${s.id}`} className="border-t">
-                          <td className="py-2">{s.name}</td>
-                          <td className="text-right">{s.count}</td>
-                          <td className="text-right">{currency(s.total)}</td>
-                          <td className="text-right">
-                            <button onClick={() => printTenantStatement(s)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
-                          </td>
-                        </tr>
-                      ))}
-                    {tenantStatements.length === 0 && (
-                      <tr><td colSpan={4} className="py-6 text-center text-slate-500">No tenant transactions found.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium mb-2">Buyers (sales payments)</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="text-slate-500">
-                    <tr>
-                      <th className="py-2">Buyer</th>
-                      <th className="text-right">Count</th>
-                      <th className="text-right">Total Paid</th>
-                      <th className="text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {buyerStatements
-                      .filter(s => {
-                        const needle = partySearch.trim().toLowerCase();
-                        if (!needle) return true;
-                        return s.name.toLowerCase().includes(needle);
-                      })
-                      .map(s => (
-                        <tr key={`buyer-${s.id}`} className="border-t">
-                          <td className="py-2">{s.name}</td>
-                          <td className="text-right">{s.count}</td>
-                          <td className="text-right">{currency(s.total)}</td>
-                          <td className="text-right">
-                            <button onClick={() => printBuyerStatement(s)} className="px-2 py-1 rounded border text-xs hover:bg-slate-50">Print</button>
-                          </td>
-                        </tr>
-                      ))}
-                    {buyerStatements.length === 0 && (
-                      <tr><td colSpan={4} className="py-6 text-center text-slate-500">No buyer transactions found.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Tax Reports */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <div className="flex items-center justify-between mb-3">
@@ -1262,6 +1330,114 @@ const ReportsPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      {/* Trust Accounts and Income vs Expenses side-by-side */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        {/* Trust Accounts */}
+        <div className="bg-white p-4 rounded-2xl shadow">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Trust Accounts (Rental Deposits)</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-500">Search</label>
+              <input className="border rounded px-2 py-1" placeholder="Property" value={trustSearch} onChange={(e)=>setTrustSearch(e.target.value)} />
+              <button onClick={printReport} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="py-2">Property</th>
+                  <th>Address</th>
+                  <th className="text-right">Held</th>
+                  <th className="text-right">Total Paid</th>
+                  <th className="text-right">Total Payout</th>
+                  <th>Payouts (recent)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trustAccounts
+                  .filter((r)=>{
+                    if (!trustSearch.trim()) return true;
+                    const t = trustSearch.trim().toLowerCase();
+                    return (r.propertyName||'').toLowerCase().includes(t) || (r.propertyAddress||'').toLowerCase().includes(t);
+                  })
+                  .map((row) => (
+                  <tr key={row.propertyId}>
+                    <td className="py-2">{row.propertyName || row.propertyId}</td>
+                    <td>{row.propertyAddress || '-'}</td>
+                    <td className="text-right">{currency(row.held || 0)}</td>
+                    <td className="text-right">{currency(row.totalPaid || 0)}</td>
+                    <td className="text-right">{currency(row.totalPayout || 0)}</td>
+                    <td>
+                      <div className="flex flex-col gap-1">
+                        {(row.payouts||[]).slice(0,3).map((p, idx)=> (
+                          <div key={idx} className="text-xs text-slate-600">
+                            {new Date(p.depositDate).toLocaleDateString()} — {currency(p.amount)} {p.recipientName ? `to ${p.recipientName}` : ''}
+                          </div>
+                        ))}
+                        {(row.payouts||[]).length === 0 && <div className="text-xs text-slate-400">No payouts</div>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {trustAccounts.length > 0 && (
+                  <tr className="font-semibold">
+                    <td className="py-2">Total</td>
+                    <td></td>
+                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.held||0), 0))}</td>
+                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.totalPaid||0), 0))}</td>
+                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.totalPayout||0), 0))}</td>
+                    <td></td>
+                  </tr>
+                )}
+                {trustAccounts.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-500">No rental deposits found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {/* Income vs Expenses */}
+        <div className="bg-white p-4 rounded-2xl shadow">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-semibold">Income vs Expenses</h2>
+            <button onClick={printIncomeExpensesSummary} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
+          </div>
+          <div className="flex items-center gap-2 mb-3">
+            <label className="text-xs text-slate-500">From</label>
+            <input className="border rounded px-2 py-1" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <label className="text-xs text-slate-500">To</label>
+            <input className="border rounded px-2 py-1" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <input placeholder="Search" className="border rounded px-2 py-1" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-sm font-medium mb-2">Income</h3>
+              <ul className="divide-y text-sm">
+                <li className="py-2 flex justify-between"><span>Management Commission</span><span>{currency(totalManagement)}</span></li>
+                <li className="py-2 flex justify-between"><span>Sales Commissions</span><span>{currency(totalSales)}</span></li>
+                <li className="py-2 flex justify-between font-semibold"><span>Total Income</span><span>{currency(totalManagement + totalSales)}</span></li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium mb-2">Expenses</h3>
+              <ul className="divide-y text-sm">
+                <li className="py-2 flex justify-between"><span>Company Expenses (period)</span><span>{currency(expensesForPeriod)}</span></li>
+                <li className="py-2 flex justify-between font-semibold"><span>Total Expenses</span><span>{currency(expensesForPeriod)}</span></li>
+              </ul>
+            </div>
+          </div>
+          <div className="mt-4 pt-3 border-t flex items-center justify-between">
+            <div className="text-sm font-medium">Balance</div>
+            <div className={balance >= 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
+              {balance >= 0 ? currency(balance) : `(${currency(Math.abs(balance))})`}
+            </div>
           </div>
         </div>
       </section>

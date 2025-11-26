@@ -1517,13 +1517,14 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.createPaymentPublic = createPaymentPublic;
 // Public endpoint for downloading a payment receipt as blob (no authentication required)
 const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     try {
         const { id } = req.params;
         // Prefer authenticated company when available; otherwise allow explicit query/header for public route
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
             req.query.companyId ||
             req.headers['x-company-id'];
+        const format = String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.format) || '').toLowerCase();
         console.log('Payment receipt download request:', {
             id,
             companyId,
@@ -1532,11 +1533,11 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
         });
         let query = { _id: id };
         // When authenticated, strictly scope to the user's company
-        if ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) {
+        if ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) {
             try {
                 query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
             }
-            catch (_o) {
+            catch (_p) {
                 query.companyId = String(req.user.companyId);
             }
         }
@@ -1545,7 +1546,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
             try {
                 query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
             }
-            catch (_p) {
+            catch (_q) {
                 query.companyId = String(companyId);
             }
         }
@@ -1605,7 +1606,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               <div class="receipt-number">Receipt #${payment.referenceNumber}</div>
             </div>
             
-            <div class="amount">$${((_c = payment.amount) === null || _c === void 0 ? void 0 : _c.toFixed(2)) || '0.00'}</div>
+            <div class="amount">$${((_d = payment.amount) === null || _d === void 0 ? void 0 : _d.toFixed(2)) || '0.00'}</div>
             
             <div class="details">
               <div class="detail-row">
@@ -1614,27 +1615,27 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               </div>
               <div class="detail-row">
                 <span class="label">Payment Method:</span>
-                <span class="value">${((_d = payment.paymentMethod) === null || _d === void 0 ? void 0 : _d.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_e = payment.paymentMethod) === null || _e === void 0 ? void 0 : _e.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Status:</span>
-                <span class="value">${((_e = payment.status) === null || _e === void 0 ? void 0 : _e.toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_f = payment.status) === null || _f === void 0 ? void 0 : _f.toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Property:</span>
-                <span class="value">${((_f = payment.propertyId) === null || _f === void 0 ? void 0 : _f.name) || 'N/A'}</span>
+                <span class="value">${((_g = payment.propertyId) === null || _g === void 0 ? void 0 : _g.name) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Tenant:</span>
-                <span class="value">${(_g = payment.tenantId) === null || _g === void 0 ? void 0 : _g.firstName} ${(_h = payment.tenantId) === null || _h === void 0 ? void 0 : _h.lastName}</span>
+                <span class="value">${(_h = payment.tenantId) === null || _h === void 0 ? void 0 : _h.firstName} ${(_j = payment.tenantId) === null || _j === void 0 ? void 0 : _j.lastName}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Agent:</span>
-                <span class="value">${(_j = payment.agentId) === null || _j === void 0 ? void 0 : _j.firstName} ${((_k = payment.agentId) === null || _k === void 0 ? void 0 : _k.lastName) || 'N/A'}</span>
+                <span class="value">${(_k = payment.agentId) === null || _k === void 0 ? void 0 : _k.firstName} ${((_l = payment.agentId) === null || _l === void 0 ? void 0 : _l.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Processed By:</span>
-                <span class="value">${(_l = payment.processedBy) === null || _l === void 0 ? void 0 : _l.firstName} ${((_m = payment.processedBy) === null || _m === void 0 ? void 0 : _m.lastName) || 'N/A'}</span>
+                <span class="value">${(_m = payment.processedBy) === null || _m === void 0 ? void 0 : _m.firstName} ${((_o = payment.processedBy) === null || _o === void 0 ? void 0 : _o.lastName) || 'N/A'}</span>
               </div>
               ${payment.notes ? `
               <div class="detail-row">
@@ -1653,10 +1654,30 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
       </html>
     `;
         console.log('Generated HTML receipt for payment:', { id: payment._id, amount: payment.amount });
-        // Set headers for HTML file download
+        // If PDF format requested, attempt PDF generation via puppeteer; fallback to HTML on failure
+        if (format === 'pdf') {
+            try {
+                const puppeteer = (yield Promise.resolve().then(() => __importStar(require('puppeteer')))).default;
+                const browser = yield puppeteer.launch({
+                    // improve compatibility in containerized environments
+                    args: ['--no-sandbox', '--disable-setuid-sandbox']
+                });
+                const page = yield browser.newPage();
+                yield page.setContent(htmlReceipt, { waitUntil: 'networkidle0' });
+                const pdfBuffer = yield page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', left: '15mm', right: '15mm', bottom: '20mm' } });
+                yield browser.close();
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.referenceNumber || payment._id}.pdf"`);
+                return res.send(pdfBuffer);
+            }
+            catch (pdfErr) {
+                console.warn('PDF generation failed, falling back to HTML download:', (pdfErr === null || pdfErr === void 0 ? void 0 : pdfErr.message) || pdfErr);
+            }
+        }
+        // Default: HTML file download
         res.setHeader('Content-Type', 'text/html');
         res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.referenceNumber || payment._id}.html"`);
-        res.send(htmlReceipt);
+        return res.send(htmlReceipt);
     }
     catch (error) {
         console.error('Error generating payment receipt download:', error);

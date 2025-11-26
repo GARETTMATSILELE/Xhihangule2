@@ -325,6 +325,7 @@ export const getLevyReceiptDownload = async (req: Request, res: Response) => {
       (req.user?.companyId as string | undefined) ||
       (req.query.companyId as string | undefined) ||
       (req.headers['x-company-id'] as string | undefined);
+    const format = String((req.query as any)?.format || '').toLowerCase();
 
     const query: any = { _id: id };
     if (req.user?.companyId) {
@@ -419,9 +420,26 @@ export const getLevyReceiptDownload = async (req: Request, res: Response) => {
       </body>
       </html>`;
 
+    // If PDF requested, try to generate with puppeteer first; fallback to HTML on failure
+    if (format === 'pdf') {
+      try {
+        const puppeteer = (await import('puppeteer')).default;
+        const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', left: '15mm', right: '15mm', bottom: '20mm' } });
+        await browser.close();
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="levy-receipt-${levy.referenceNumber || levy._id}.pdf"`);
+        return res.send(pdfBuffer);
+      } catch (pdfErr) {
+        console.warn('Levy PDF generation failed, falling back to HTML:', (pdfErr as any)?.message || pdfErr);
+      }
+    }
+
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="levy-receipt-${levy.referenceNumber || levy._id}.html"`);
-    res.send(html);
+    return res.send(html);
   } catch (error: any) {
     console.error('Error generating levy receipt download:', error);
     res.status(500).send('Failed to generate levy receipt');

@@ -422,15 +422,13 @@ class PaymentService {
   async downloadReceipt(id: string, companyId?: string): Promise<Blob> {
     try {
       return await this.db.executeWithRetry(async () => {
-        const config: any = { responseType: 'blob' };
-        if (companyId) {
-          config.params = { companyId };
-        }
+        const config: any = { responseType: 'blob', params: { format: 'pdf' } };
+        if (companyId) config.params.companyId = companyId;
         try {
           const response = await api.get(`/payments/${id}/receipt/download`, config);
           return response.data;
         } catch (err: any) {
-          const levyResp = await api.get(`/levy-payments/${id}/receipt/download`, config);
+          const levyResp = await api.get(`/levy-payments/${id}/receipt/download`, { responseType: 'blob', params: { ...(companyId ? { companyId } : {}), format: 'pdf' } });
           return levyResp.data;
         }
       });

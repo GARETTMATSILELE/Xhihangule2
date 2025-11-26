@@ -520,7 +520,11 @@ const PaymentsPage: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `receipt-${payment._id}.json`;
+      const ref = (payment as any)?.referenceNumber ? String((payment as any).referenceNumber) : String(payment._id);
+      const contentType = (blob && (blob as any).type) ? String((blob as any).type) : '';
+      const isPdf = contentType.includes('pdf');
+      const isHtml = contentType.includes('html') || contentType.includes('text/');
+      a.download = `receipt-${ref}.${isPdf ? 'pdf' : (isHtml ? 'html' : 'bin')}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

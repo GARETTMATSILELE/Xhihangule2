@@ -382,7 +382,25 @@ const AccountantPaymentsPage: React.FC = () => {
             setFinalizePayment(payment);
             setFinalizeOpen(true);
           }}
-          onDownloadReceipt={async () => {}}
+          onDownloadReceipt={async (payment) => {
+            try {
+              const blob = await paymentService.downloadReceipt(payment._id, user?.companyId);
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              const ref = (payment as any)?.referenceNumber ? String((payment as any).referenceNumber) : String(payment._id);
+              const contentType = (blob && (blob as any).type) ? String((blob as any).type) : '';
+              const isPdf = contentType.includes('pdf');
+              const isHtml = contentType.includes('html') || contentType.includes('text/');
+              a.href = url;
+              a.download = `receipt-${ref}.${isPdf ? 'pdf' : (isHtml ? 'html' : 'bin')}`;
+              document.body.appendChild(a);
+              a.click();
+              window.URL.revokeObjectURL(url);
+              document.body.removeChild(a);
+            } catch (err: any) {
+              setError('Failed to download receipt');
+            }
+          }}
           onFilterChange={(next) => {
             const n = next as any;
             if (typeof n.page === 'number') setPage(n.page);

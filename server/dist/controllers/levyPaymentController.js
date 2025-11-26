@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -331,18 +364,19 @@ const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, voi
 exports.getLevyPayoutAcknowledgement = getLevyPayoutAcknowledgement;
 // Public: Download levy receipt as HTML (formatted for A4 print/PDF)
 const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const { id } = req.params;
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
             req.query.companyId ||
             req.headers['x-company-id'];
+        const format = String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.format) || '').toLowerCase();
         const query = { _id: id };
-        if ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) {
+        if ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) {
             try {
                 query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
             }
-            catch (_f) {
+            catch (_g) {
                 query.companyId = String(req.user.companyId);
             }
         }
@@ -350,7 +384,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
             try {
                 query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
             }
-            catch (_g) {
+            catch (_h) {
                 query.companyId = companyId;
             }
         }
@@ -374,7 +408,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
                     tenantName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
             }
         }
-        catch (_h) { }
+        catch (_j) { }
         // Load company details for header/logo
         let company = null;
         try {
@@ -382,7 +416,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
                 company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
             }
         }
-        catch (_j) { }
+        catch (_k) { }
         const html = `<!DOCTYPE html>
       <html>
       <head>
@@ -422,9 +456,9 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
             <div class="row"><div class="label">Date:</div><div class="value">${new Date(levy.paymentDate).toLocaleDateString()}</div></div>
             <div class="row"><div class="label">Method:</div><div class="value">${String(levy.paymentMethod).replace('_', ' ').toUpperCase()}</div></div>
             <div class="row"><div class="label">Status:</div><div class="value">${String(levy.status).toUpperCase()}</div></div>
-            <div class="row"><div class="label">Property:</div><div class="value">${((_c = levy.propertyId) === null || _c === void 0 ? void 0 : _c.name) || 'N/A'}</div></div>
+            <div class="row"><div class="label">Property:</div><div class="value">${((_d = levy.propertyId) === null || _d === void 0 ? void 0 : _d.name) || 'N/A'}</div></div>
             <div class="row"><div class="label">Tenant:</div><div class="value">${tenantName || 'N/A'}</div></div>
-            <div class="row"><div class="label">Processed By:</div><div class="value">${(((_d = levy.processedBy) === null || _d === void 0 ? void 0 : _d.firstName) || '')} ${(((_e = levy.processedBy) === null || _e === void 0 ? void 0 : _e.lastName) || '')}</div></div>
+            <div class="row"><div class="label">Processed By:</div><div class="value">${(((_e = levy.processedBy) === null || _e === void 0 ? void 0 : _e.firstName) || '')} ${(((_f = levy.processedBy) === null || _f === void 0 ? void 0 : _f.lastName) || '')}</div></div>
             ${levy.notes ? `<div class="row"><div class="label">Notes:</div><div class="value">${levy.notes}</div></div>` : ''}
           </div>
           <div class="footer">
@@ -437,9 +471,26 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
         </div>
       </body>
       </html>`;
+        // If PDF requested, try to generate with puppeteer first; fallback to HTML on failure
+        if (format === 'pdf') {
+            try {
+                const puppeteer = (yield Promise.resolve().then(() => __importStar(require('puppeteer')))).default;
+                const browser = yield puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+                const page = yield browser.newPage();
+                yield page.setContent(html, { waitUntil: 'networkidle0' });
+                const pdfBuffer = yield page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', left: '15mm', right: '15mm', bottom: '20mm' } });
+                yield browser.close();
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `attachment; filename="levy-receipt-${levy.referenceNumber || levy._id}.pdf"`);
+                return res.send(pdfBuffer);
+            }
+            catch (pdfErr) {
+                console.warn('Levy PDF generation failed, falling back to HTML:', (pdfErr === null || pdfErr === void 0 ? void 0 : pdfErr.message) || pdfErr);
+            }
+        }
         res.setHeader('Content-Type', 'text/html');
         res.setHeader('Content-Disposition', `attachment; filename="levy-receipt-${levy.referenceNumber || levy._id}.html"`);
-        res.send(html);
+        return res.send(html);
     }
     catch (error) {
         console.error('Error generating levy receipt download:', error);
