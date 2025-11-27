@@ -45,11 +45,15 @@ const notificationRoutes_1 = __importDefault(require("./routes/notificationRoute
 // Load environment variables
 (0, dotenv_1.config)();
 const app = (0, express_1.default)();
+// Trust proxy (needed for correct req.protocol behind reverse proxies/SSL terminators)
+app.set('trust proxy', 1);
 // CORS configuration
 const corsOptions = {
     origin: (origin, callback) => {
         const allowedOrigins = [
             process.env.CLIENT_URL,
+            'https://www.xhihangule.com',
+            'https://xhihangule.com',
             'http://localhost:3000',
             'http://127.0.0.1:3000',
             'http://localhost:5173', // Vite default port

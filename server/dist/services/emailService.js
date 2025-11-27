@@ -127,12 +127,137 @@ function sendViaMailtrapApi(params) {
         }
     });
 }
+function sendViaResendApi(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const brand = getActiveBrandKey();
+        const key = getEnvByBrand('RESEND_API_KEY', brand);
+        if (!key)
+            return false;
+        const from = parseFromHeaderForBrand();
+        const fromHeader = from.name ? `${from.name} <${from.email}>` : from.email;
+        try {
+            const res = yield fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${key}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    from: fromHeader,
+                    to: [params.to],
+                    subject: params.subject,
+                    html: params.html,
+                    text: params.text || ''
+                })
+            });
+            if (!res.ok) {
+                const text = yield res.text().catch(() => '');
+                console.error('[emailService] Resend API error:', res.status, text);
+                return false;
+            }
+            return true;
+        }
+        catch (err) {
+            console.error('[emailService] Resend API request failed:', err);
+            return false;
+        }
+    });
+}
+function sendViaSendgridApi(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const brand = getActiveBrandKey();
+        const key = getEnvByBrand('SENDGRID_API_KEY', brand);
+        if (!key)
+            return false;
+        const from = parseFromHeaderForBrand();
+        try {
+            const res = yield fetch('https://api.sendgrid.com/v3/mail/send', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${key}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    personalizations: [{ to: [{ email: params.to }] }],
+                    from: Object.assign({ email: from.email }, (from.name ? { name: from.name } : {})),
+                    subject: params.subject,
+                    content: [
+                        { type: 'text/plain', value: params.text || '' },
+                        { type: 'text/html', value: params.html }
+                    ]
+                })
+            });
+            if (!res.ok) {
+                const text = yield res.text().catch(() => '');
+                console.error('[emailService] SendGrid API error:', res.status, text);
+                return false;
+            }
+            return true;
+        }
+        catch (err) {
+            console.error('[emailService] SendGrid API request failed:', err);
+            return false;
+        }
+    });
+}
+function sendViaMailgunApi(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const brand = getActiveBrandKey();
+        const key = getEnvByBrand('MAILGUN_API_KEY', brand);
+        const domain = getEnvByBrand('MAILGUN_DOMAIN', brand);
+        if (!key || !domain)
+            return false;
+        const apiBase = getEnvByBrand('MAILGUN_API_BASE', brand) || 'https://api.mailgun.net/v3';
+        const from = parseFromHeaderForBrand();
+        try {
+            const body = new URLSearchParams();
+            body.set('from', from.name ? `${from.name} <${from.email}>` : from.email);
+            body.set('to', params.to);
+            body.set('subject', params.subject);
+            if (params.text)
+                body.set('text', params.text);
+            body.set('html', params.html);
+            const res = yield fetch(`${apiBase}/${domain}/messages`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Basic ${Buffer.from(`api:${key}`).toString('base64')}`,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body
+            });
+            if (!res.ok) {
+                const text = yield res.text().catch(() => '');
+                console.error('[emailService] Mailgun API error:', res.status, text);
+                return false;
+            }
+            return true;
+        }
+        catch (err) {
+            console.error('[emailService] Mailgun API request failed:', err);
+            return false;
+        }
+    });
+}
+function tryApiFallbacks(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Try common production providers first, then dev/testing Mailtrap
+        if (yield sendViaResendApi(params))
+            return true;
+        if (yield sendViaSendgridApi(params))
+            return true;
+        if (yield sendViaMailgunApi(params))
+            return true;
+        if (yield sendViaMailtrapApi(params))
+            return true;
+        return false;
+    });
+}
 function sendMail(params) {
     return __awaiter(this, void 0, void 0, function* () {
         const tx = getTransporter();
         if (!tx) {
-            // Try Mailtrap Send API as a fallback when SMTP isn't configured
-            const sentViaApi = yield sendViaMailtrapApi(params);
+            // Try API-based providers when SMTP isn't configured
+            const sentViaApi = yield tryApiFallbacks(params);
             if (!sentViaApi) {
                 console.log('[emailService] SMTP/API not configured. Would send email:', {
                     to: params.to,
@@ -153,14 +278,12 @@ function sendMail(params) {
             });
         }
         catch (err) {
-            // If SMTP auth fails (e.g., 535) or any SMTP error occurs, try API fallback
+            // If SMTP fails, try API-based fallbacks
             const message = (err && (err.message || err.toString())) || 'SMTP send failed';
-            console.error('[emailService] SMTP send failed, attempting API fallback:', message);
-            const sentViaApi = yield sendViaMailtrapApi(params);
-            if (sentViaApi) {
-                console.warn('[emailService] Email sent via Mailtrap API fallback after SMTP failure');
+            console.error('[emailService] SMTP send failed, attempting API fallback(s):', message);
+            const sentViaApi = yield tryApiFallbacks(params);
+            if (sentViaApi)
                 return;
-            }
             throw err;
         }
     });

@@ -45,11 +45,16 @@ config();
 
 const app = express();
 
+// Trust proxy (needed for correct req.protocol behind reverse proxies/SSL terminators)
+app.set('trust proxy', 1);
+
 // CORS configuration
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     const allowedOrigins = [
       process.env.CLIENT_URL,
+      'https://www.xhihangule.com',
+      'https://xhihangule.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'http://localhost:5173', // Vite default port

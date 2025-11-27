@@ -100,8 +100,8 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <NotificationProvider>
-          <AuthProvider>
+        <AuthProvider>
+          <NotificationProvider>
             <Suspense fallback={<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}><CircularProgress /></Box>}>
               <Routes>
               {/* Public Routes - No PropertyProvider or CompanyProvider */}
@@ -379,8 +379,8 @@ const App: React.FC = () => {
               } />
               </Routes>
             </Suspense>
-          </AuthProvider>
-        </NotificationProvider>
+          </NotificationProvider>
+        </AuthProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

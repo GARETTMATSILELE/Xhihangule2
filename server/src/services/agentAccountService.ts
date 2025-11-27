@@ -625,7 +625,13 @@ export class AgentAccountService {
   async getCompanyAgentAccounts(companyId: string): Promise<IAgentAccount[]> {
     try {
       // Get all agents for the company
-      const agents = await User.find({ companyId: new mongoose.Types.ObjectId(companyId), role: { $in: ['agent', 'sales'] } });
+      const agents = await User.find({
+        companyId: new mongoose.Types.ObjectId(companyId),
+        $or: [
+          { role: { $in: ['agent', 'sales'] } },
+          { roles: { $in: ['agent', 'sales'] } }
+        ]
+      });
       const agentIds = agents.map(agent => agent._id);
 
       // For each agent, sync commission transactions (covers rentals and sales, including split roles),
@@ -856,7 +862,10 @@ export class AgentAccountService {
       // Get all agents for the company
       const agents = await User.find({
         companyId: new mongoose.Types.ObjectId(companyId),
-        role: { $in: ['agent', 'sales'] }
+        $or: [
+          { role: { $in: ['agent', 'sales'] } },
+          { roles: { $in: ['agent', 'sales'] } }
+        ]
       });
       
       for (const agent of agents) {

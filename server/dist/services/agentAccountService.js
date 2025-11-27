@@ -585,7 +585,13 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 // Get all agents for the company
-                const agents = yield User_1.User.find({ companyId: new mongoose_1.default.Types.ObjectId(companyId), role: { $in: ['agent', 'sales'] } });
+                const agents = yield User_1.User.find({
+                    companyId: new mongoose_1.default.Types.ObjectId(companyId),
+                    $or: [
+                        { role: { $in: ['agent', 'sales'] } },
+                        { roles: { $in: ['agent', 'sales'] } }
+                    ]
+                });
                 const agentIds = agents.map(agent => agent._id);
                 // For each agent, sync commission transactions (covers rentals and sales, including split roles),
                 // then fetch the updated account to ensure totals and balances are current for the list view.
@@ -826,7 +832,10 @@ class AgentAccountService {
                 // Get all agents for the company
                 const agents = yield User_1.User.find({
                     companyId: new mongoose_1.default.Types.ObjectId(companyId),
-                    role: { $in: ['agent', 'sales'] }
+                    $or: [
+                        { role: { $in: ['agent', 'sales'] } },
+                        { roles: { $in: ['agent', 'sales'] } }
+                    ]
                 });
                 for (const agent of agents) {
                     yield this.syncCommissionTransactions(agent._id.toString());
