@@ -1266,7 +1266,7 @@ const ReportsPage: React.FC = () => {
         </div>
 
         {/* Trust Accounts */}
-        <div className="bg-white p-4 rounded-2xl shadow">
+        <div className="bg-white p-4 rounded-2xl shadow lg:col-span-2">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Trust Accounts (Rental Deposits)</h2>
             <div className="flex items-center gap-2">
@@ -1336,73 +1336,6 @@ const ReportsPage: React.FC = () => {
 
       {/* Trust Accounts and Income vs Expenses side-by-side */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        {/* Trust Accounts */}
-        <div className="bg-white p-4 rounded-2xl shadow">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Trust Accounts (Rental Deposits)</h2>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">Search</label>
-              <input className="border rounded px-2 py-1" placeholder="Property" value={trustSearch} onChange={(e)=>setTrustSearch(e.target.value)} />
-              <button onClick={printReport} className="px-3 py-1 rounded bg-slate-900 text-white">Print</button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="py-2">Property</th>
-                  <th>Address</th>
-                  <th className="text-right">Held</th>
-                  <th className="text-right">Total Paid</th>
-                  <th className="text-right">Total Payout</th>
-                  <th>Payouts (recent)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trustAccounts
-                  .filter((r)=>{
-                    if (!trustSearch.trim()) return true;
-                    const t = trustSearch.trim().toLowerCase();
-                    return (r.propertyName||'').toLowerCase().includes(t) || (r.propertyAddress||'').toLowerCase().includes(t);
-                  })
-                  .map((row) => (
-                  <tr key={row.propertyId}>
-                    <td className="py-2">{row.propertyName || row.propertyId}</td>
-                    <td>{row.propertyAddress || '-'}</td>
-                    <td className="text-right">{currency(row.held || 0)}</td>
-                    <td className="text-right">{currency(row.totalPaid || 0)}</td>
-                    <td className="text-right">{currency(row.totalPayout || 0)}</td>
-                    <td>
-                      <div className="flex flex-col gap-1">
-                        {(row.payouts||[]).slice(0,3).map((p, idx)=> (
-                          <div key={idx} className="text-xs text-slate-600">
-                            {new Date(p.depositDate).toLocaleDateString()} — {currency(p.amount)} {p.recipientName ? `to ${p.recipientName}` : ''}
-                          </div>
-                        ))}
-                        {(row.payouts||[]).length === 0 && <div className="text-xs text-slate-400">No payouts</div>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {trustAccounts.length > 0 && (
-                  <tr className="font-semibold">
-                    <td className="py-2">Total</td>
-                    <td></td>
-                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.held||0), 0))}</td>
-                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.totalPaid||0), 0))}</td>
-                    <td className="text-right">{currency(trustAccounts.reduce((s,r)=> s + (r.totalPayout||0), 0))}</td>
-                    <td></td>
-                  </tr>
-                )}
-                {trustAccounts.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-500">No rental deposits found.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
         {/* Income vs Expenses */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <div className="flex items-center justify-between mb-2">

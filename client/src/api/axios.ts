@@ -89,6 +89,16 @@ api.interceptors.response.use(
 
     // If the error is 401 and we haven't tried to refresh the token yet
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // Only attempt refresh if we appear to have been authenticated
+      // i.e., the request had an Authorization header or we have a stored access token.
+      const hadAuthHeader = !!originalRequest.headers?.Authorization;
+      const hasStoredAccess = !!getAccessToken();
+      const isRefreshCall = Boolean(originalRequest.url && /\/auth\/refresh-token(?:\?|$|\/)?/.test(originalRequest.url));
+
+      // Skip refresh for public requests (no auth) or if the failing call was the refresh itself
+      if ((!hadAuthHeader && !hasStoredAccess) || isRefreshCall) {
+        return Promise.reject(error);
+      }
       console.log('401 error detected, attempting token refresh');
       
       if (isRefreshing) {

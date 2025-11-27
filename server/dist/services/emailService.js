@@ -21,13 +21,35 @@ catch (_a) {
     nodemailer = null;
 }
 let transporter = null;
+function getActiveBrandKey() {
+    const forced = (process.env.BRAND_ACTIVE || '').toUpperCase();
+    if (forced === 'MANTIS')
+        return 'MANTIS';
+    if (forced === 'XHI')
+        return 'XHI';
+    const cutoff = process.env.BRAND_CUTOFF_ISO;
+    if (cutoff) {
+        const now = new Date();
+        const cut = new Date(cutoff);
+        if (!isNaN(cut.getTime()) && now >= cut) {
+            return 'MANTIS';
+        }
+    }
+    return 'XHI';
+}
+function getEnvByBrand(base, brand) {
+    const byBrand = process.env[`${base}_${brand}`];
+    return byBrand !== undefined ? byBrand : process.env[base];
+}
 function getTransporter() {
     if (transporter !== null)
         return transporter;
-    const host = process.env.SMTP_HOST;
-    const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined;
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
+    const brand = getActiveBrandKey();
+    const host = getEnvByBrand('SMTP_HOST', brand);
+    const portStr = getEnvByBrand('SMTP_PORT', brand);
+    const port = portStr ? Number(portStr) : undefined;
+    const user = getEnvByBrand('SMTP_USER', brand);
+    const pass = getEnvByBrand('SMTP_PASS', brand);
     if (!host || !port || !user || !pass) {
         // No SMTP configured; fall back to console logging
         return null;
@@ -44,24 +66,102 @@ function getTransporter() {
     });
     return transporter;
 }
+function parseFromHeaderForBrand() {
+    const brand = getActiveBrandKey();
+    // Prefer explicit Mailtrap FROM for brand
+    const explicitEmail = getEnvByBrand('MAILTRAP_FROM_EMAIL', brand);
+    const explicitName = getEnvByBrand('MAILTRAP_FROM_NAME', brand);
+    if (explicitEmail) {
+        return { email: explicitEmail, name: explicitName || undefined };
+    }
+    // Parse brand-specific SMTP_FROM like "Name <email@domain>"
+    const fromEnv = getEnvByBrand('SMTP_FROM', brand) || '';
+    const match = fromEnv.match(/^(.*)<(.+)>/);
+    if (match) {
+        const name = String(match[1] || '').trim().replace(/^"|"$/g, '');
+        const email = String(match[2] || '').trim();
+        if (email)
+            return { email, name: name || undefined };
+    }
+    // Fallbacks
+    const possibleEmail = getEnvByBrand('SMTP_USER', brand);
+    if (possibleEmail && possibleEmail.includes('@')) {
+        return { email: possibleEmail, name: undefined };
+    }
+    // Mailtrap demo sender as last resort (works for Send API demos)
+    return { email: 'hello@demomailtrap.co', name: 'Mailtrap Test' };
+}
+function sendViaMailtrapApi(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const brand = getActiveBrandKey();
+        const token = getEnvByBrand('MAILTRAP_API_TOKEN', brand);
+        if (!token)
+            return false;
+        const from = parseFromHeaderForBrand();
+        try {
+            const res = yield fetch('https://send.api.mailtrap.io/api/send', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    from: Object.assign({ email: from.email }, (from.name ? { name: from.name } : {})),
+                    to: [{ email: params.to }],
+                    subject: params.subject,
+                    text: params.text || '',
+                    html: params.html,
+                    category: 'App Notification'
+                })
+            });
+            if (!res.ok) {
+                const text = yield res.text().catch(() => '');
+                console.error('[emailService] Mailtrap Send API error:', res.status, text);
+                return false;
+            }
+            return true;
+        }
+        catch (err) {
+            console.error('[emailService] Mailtrap Send API request failed:', err);
+            return false;
+        }
+    });
+}
 function sendMail(params) {
     return __awaiter(this, void 0, void 0, function* () {
         const tx = getTransporter();
         if (!tx) {
-            console.log('[emailService] SMTP not configured. Would send email:', {
+            // Try Mailtrap Send API as a fallback when SMTP isn't configured
+            const sentViaApi = yield sendViaMailtrapApi(params);
+            if (!sentViaApi) {
+                console.log('[emailService] SMTP/API not configured. Would send email:', {
+                    to: params.to,
+                    subject: params.subject,
+                    text: params.text,
+                    html: params.html
+                });
+            }
+            return;
+        }
+        try {
+            yield tx.sendMail({
+                from: getEnvByBrand('SMTP_FROM', getActiveBrandKey()) || getEnvByBrand('SMTP_USER', getActiveBrandKey()),
                 to: params.to,
                 subject: params.subject,
                 text: params.text,
                 html: params.html
             });
-            return;
         }
-        yield tx.sendMail({
-            from: process.env.SMTP_FROM || process.env.SMTP_USER,
-            to: params.to,
-            subject: params.subject,
-            text: params.text,
-            html: params.html
-        });
+        catch (err) {
+            // If SMTP auth fails (e.g., 535) or any SMTP error occurs, try API fallback
+            const message = (err && (err.message || err.toString())) || 'SMTP send failed';
+            console.error('[emailService] SMTP send failed, attempting API fallback:', message);
+            const sentViaApi = yield sendViaMailtrapApi(params);
+            if (sentViaApi) {
+                console.warn('[emailService] Email sent via Mailtrap API fallback after SMTP failure');
+                return;
+            }
+            throw err;
+        }
     });
 }
