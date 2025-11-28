@@ -93,8 +93,9 @@ const socket_1 = require("./config/socket");
 const startSyncServices_1 = require("./scripts/startSyncServices");
 const reportRoutes_1 = __importDefault(require("./routes/reportRoutes"));
 const publicReportRoutes_1 = __importDefault(require("./routes/publicReportRoutes"));
-// Load environment variables
-dotenv_1.default.config();
+// Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
+const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
+dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
 // Middleware
 const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')

@@ -47,8 +47,9 @@ import { initializeSyncServices } from './scripts/startSyncServices';
 import reportRoutes from './routes/reportRoutes';
 import publicReportRoutes from './routes/publicReportRoutes';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
+const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
+dotenv.config({ path: ENV_PATH });
 
 const app = express();
 
