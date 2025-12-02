@@ -464,9 +464,14 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         const rawLeaseId = extractId(req.body.leaseId);
         const rawOwnerId = extractId(req.body.ownerId);
         const rawSaleId = extractId(req.body.saleId);
-        // Validate required fields
-        if (!amount || !paymentDate) {
-            return { error: { status: 400, message: 'Missing required fields: amount and paymentDate' } };
+        // Validate required fields: paymentDate must be present; at least amount or depositAmount > 0
+        if (!paymentDate) {
+            return { error: { status: 400, message: 'Missing required field: paymentDate' } };
+        }
+        const numericAmount = Number(amount || 0);
+        const numericDeposit = Number(depositAmount || 0);
+        if (numericAmount <= 0 && numericDeposit <= 0) {
+            return { error: { status: 400, message: 'Either amount or depositAmount must be greater than 0' } };
         }
         // Check if using manual entries
         const manualProperty = typeof rawPropertyId === 'string' && rawPropertyId.startsWith('manual_');
@@ -507,72 +512,158 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (rawOwnerId && !mongoose_1.default.Types.ObjectId.isValid(rawOwnerId)) {
             return { error: { status: 400, message: 'Invalid ownerId format' } };
         }
-        // Calculate commission if not provided
+        // Calculate commission: apply "single-month" rule only for introduction; management uses full amount (including advance periods)
         let finalCommissionDetails = commissionDetails;
-        if (!finalCommissionDetails) {
-            try {
-                // Use property's current commission percent when a real property is provided
-                if (!manualProperty && rawPropertyId) {
-                    const prop = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(rawPropertyId));
-                    const commissionPercent = typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number'
-                        ? prop.commission
-                        : ((propertyType || 'residential') === 'residential' ? 15 : 10);
-                    finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+        try {
+            const isRental = (paymentType || 'rental') === 'rental';
+            const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose_1.default.Types.ObjectId(rawTenantId) : undefined);
+            const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose_1.default.Types.ObjectId(rawPropertyId) : undefined);
+            const amountNum = Number(amount || 0);
+            const depositNum = Number(depositAmount || 0);
+            const isDepositOnly = amountNum <= 0 && depositNum > 0;
+            // Fetch property to resolve commission percent and rentalType
+            let commissionPercentResolved = (propertyType || 'residential') === 'residential' ? 15 : 10;
+            let rentalTypeResolved = undefined;
+            if (!manualProperty && rawPropertyId) {
+                const prop = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(rawPropertyId)).select('commission rentalType').lean();
+                if (prop) {
+                    if (typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number') {
+                        commissionPercentResolved = Number(prop.commission);
+                    }
+                    if (prop === null || prop === void 0 ? void 0 : prop.rentalType) {
+                        rentalTypeResolved = prop.rentalType;
+                    }
+                }
+            }
+            const isIntroduction = rentalTypeResolved === 'introduction';
+            // Compute server-enforced commission
+            let computed = undefined;
+            if (isRental && tenantObjectId && propertyObjectId) {
+                if (isIntroduction && !isDepositOnly) {
+                    // Introduction: commission once, capped to one month's rent (first rental payment only)
+                    const priorCount = yield Payment_1.Payment.countDocuments({
+                        companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
+                        paymentType: 'rental',
+                        tenantId: tenantObjectId,
+                        propertyId: propertyObjectId,
+                        status: 'completed',
+                        isProvisional: { $ne: true },
+                        isInSuspense: { $ne: true }
+                    });
+                    const isFirstCommissionable = priorCount === 0;
+                    if (isFirstCommissionable && commissionPercentResolved > 0) {
+                        // Determine one-month rent
+                        let oneMonthRent = typeof rentUsed === 'number' ? Number(rentUsed) : 0;
+                        if (!oneMonthRent) {
+                            try {
+                                const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
+                                oneMonthRent = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
+                            }
+                            catch (_b) { }
+                        }
+                        const commissionable = oneMonthRent > 0 ? Math.min(Math.max(0, amountNum), oneMonthRent) : Math.max(0, amountNum);
+                        if (commissionable > 0) {
+                            const tmp = yield commissionService_1.CommissionService.calculate(commissionable, commissionPercentResolved, new mongoose_1.default.Types.ObjectId(user.companyId));
+                            computed = {
+                                totalCommission: tmp.totalCommission,
+                                preaFee: tmp.preaFee,
+                                agentShare: tmp.agentShare,
+                                agencyShare: tmp.agencyShare,
+                                ownerAmount: Math.max(0, amountNum - tmp.totalCommission)
+                            };
+                        }
+                    }
+                    // Not first or zero commissionable → zero commission
+                    if (!computed) {
+                        computed = { totalCommission: 0, preaFee: 0, agentShare: 0, agencyShare: 0, ownerAmount: amountNum };
+                    }
                 }
                 else {
-                    // Manual entries have no linked property; fall back to default base rates
-                    const commissionPercent = (propertyType || 'residential') === 'residential' ? 15 : 10;
-                    finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+                    // Management (or unknown): standard commission on the full rent amount (advance supported)
+                    const tmp = yield commissionService_1.CommissionService.calculate(Math.max(0, amountNum), commissionPercentResolved, new mongoose_1.default.Types.ObjectId(user.companyId));
+                    computed = tmp;
                 }
             }
-            catch (err) {
-                // As a safety net, fall back to default split if anything goes wrong
-                const baseCommissionRate = (propertyType || 'residential') === 'residential' ? 15 : 10;
-                const { totalCommission, preaFee, agentShare, agencyShare, ownerAmount } = (yield Promise.resolve().then(() => __importStar(require('../utils/money')))).computeCommissionFallback(amount, baseCommissionRate);
-                finalCommissionDetails = {
-                    totalCommission,
-                    preaFee,
-                    agentShare,
-                    agencyShare,
-                    ownerAmount,
-                };
+            else {
+                // Non-rental or insufficient linkage: default to standard on amount (safe)
+                const tmp = yield commissionService_1.CommissionService.calculate(Math.max(0, amountNum), commissionPercentResolved, new mongoose_1.default.Types.ObjectId(user.companyId));
+                computed = tmp;
             }
+            // Always enforce server rule over client-provided commissionDetails
+            finalCommissionDetails = computed;
         }
-        // Remaining-balance enforcement for rental payments (single month or advance)
+        catch (err) {
+            // Fallback: give full amount to owner
+            const amountNum = Number(amount || 0);
+            finalCommissionDetails = {
+                totalCommission: 0,
+                preaFee: 0,
+                agentShare: 0,
+                agencyShare: 0,
+                ownerAmount: amountNum
+            };
+        }
+        // Remaining-balance enforcement for rental payments (single month) and advance-payment handling
         if ((paymentType || 'rental') === 'rental') {
             const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose_1.default.Types.ObjectId(rawTenantId) : undefined);
             const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose_1.default.Types.ObjectId(rawPropertyId) : undefined);
-            // Only enforce when both real tenant and property are present
-            if (tenantObjectId && propertyObjectId && rentalPeriodMonth && rentalPeriodYear) {
-                const [agg] = yield Payment_1.Payment.aggregate([
-                    {
-                        $match: {
-                            companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
-                            paymentType: 'rental',
-                            tenantId: tenantObjectId,
-                            propertyId: propertyObjectId,
-                            rentalPeriodYear,
-                            rentalPeriodMonth,
-                            status: { $in: ['pending', 'completed'] }
-                        }
-                    },
-                    { $group: { _id: null, total: { $sum: '$amount' } } }
-                ]);
-                const rentBaseline = typeof rentUsed === 'number' ? rentUsed : (() => {
-                    const fallback = 0;
-                    return fallback;
-                })();
-                // If commissionDetails was computed above and property was fetched, prefer rentUsed or compute from property when possible
-                const rentCents = Math.round((rentBaseline || 0) * 100);
-                const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
-                const remainingCents = rentCents - alreadyPaidCents;
-                if (rentCents > 0) {
-                    if (remainingCents <= 0) {
-                        return { error: { status: 409, message: 'This month is fully paid. Change rental month.' } };
+            const isAdvanceRental = typeof advanceMonthsPaid === 'number' && advanceMonthsPaid > 1;
+            // For advance payments: require amount to equal rent × months when rent is known, and skip single-month cap
+            if (isAdvanceRental) {
+                let rentBaseline = typeof rentUsed === 'number' ? rentUsed : 0;
+                // Try to fetch rent if not provided and a real property is present
+                if (!rentBaseline && propertyObjectId) {
+                    try {
+                        const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
+                        rentBaseline = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
                     }
+                    catch (_c) { }
+                }
+                if (rentBaseline > 0) {
+                    const expectedCents = Math.round(rentBaseline * 100) * Number(advanceMonthsPaid);
                     const amountCents = Math.round((amount || 0) * 100);
-                    if (amountCents > remainingCents) {
-                        return { error: { status: 400, message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` } };
+                    if (amountCents !== expectedCents) {
+                        return { error: { status: 400, message: `Amount must equal rent (${rentBaseline}) x months (${advanceMonthsPaid}) = ${(expectedCents / 100).toFixed(2)}` } };
+                    }
+                }
+                // Skip per-month remaining enforcement for advance payments
+            }
+            else {
+                // Only enforce when both real tenant and property are present (single-month payment)
+                if (tenantObjectId && propertyObjectId && rentalPeriodMonth && rentalPeriodYear) {
+                    const [agg] = yield Payment_1.Payment.aggregate([
+                        {
+                            $match: {
+                                companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
+                                paymentType: 'rental',
+                                tenantId: tenantObjectId,
+                                propertyId: propertyObjectId,
+                                rentalPeriodYear,
+                                rentalPeriodMonth,
+                                status: { $in: ['pending', 'completed'] }
+                            }
+                        },
+                        { $group: { _id: null, total: { $sum: '$amount' } } }
+                    ]);
+                    const rentBaseline = typeof rentUsed === 'number' ? rentUsed : (() => {
+                        const fallback = 0;
+                        return fallback;
+                    })();
+                    const rentCents = Math.round((rentBaseline || 0) * 100);
+                    const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                    const remainingCents = rentCents - alreadyPaidCents;
+                    if (rentCents > 0) {
+                        const amountCents = Math.round((amount || 0) * 100);
+                        const depositCents = Math.round((Number(depositAmount || 0)) * 100);
+                        const isDepositOnly = amountCents === 0 && depositCents > 0;
+                        if (!isDepositOnly) {
+                            if (remainingCents <= 0) {
+                                return { error: { status: 409, message: 'This month is fully paid. Change rental month.' } };
+                            }
+                            if (amountCents > remainingCents) {
+                                return { error: { status: 400, message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` } };
+                            }
+                        }
                     }
                 }
             }
@@ -664,7 +755,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_b) { }
+            catch (_d) { }
             console.error('Failed to record income in property account, enqueued for retry:', error);
         }
         // Notify the primary agent (and split participants) when a completed sale payment is created
@@ -697,7 +788,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             }
                         }
                     }
-                    catch (_c) { }
+                    catch (_e) { }
                 }
             }
         }
@@ -1517,7 +1608,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.createPaymentPublic = createPaymentPublic;
 // Public endpoint for downloading a payment receipt as blob (no authentication required)
 const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     try {
         const { id } = req.params;
         // Prefer authenticated company when available; otherwise allow explicit query/header for public route
@@ -1537,7 +1628,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
             try {
                 query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
             }
-            catch (_p) {
+            catch (_o) {
                 query.companyId = String(req.user.companyId);
             }
         }
@@ -1546,7 +1637,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
             try {
                 query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
             }
-            catch (_q) {
+            catch (_p) {
                 query.companyId = String(companyId);
             }
         }
@@ -1606,7 +1697,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               <div class="receipt-number">Receipt #${payment.referenceNumber}</div>
             </div>
             
-            <div class="amount">$${((_d = payment.amount) === null || _d === void 0 ? void 0 : _d.toFixed(2)) || '0.00'}</div>
+            <div class="amount">$${((Number(payment.amount || 0) + Number(payment.depositAmount || 0))).toFixed(2)}</div>
             
             <div class="details">
               <div class="detail-row">
@@ -1615,27 +1706,40 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               </div>
               <div class="detail-row">
                 <span class="label">Payment Method:</span>
-                <span class="value">${((_e = payment.paymentMethod) === null || _e === void 0 ? void 0 : _e.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_d = payment.paymentMethod) === null || _d === void 0 ? void 0 : _d.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Status:</span>
-                <span class="value">${((_f = payment.status) === null || _f === void 0 ? void 0 : _f.toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_e = payment.status) === null || _e === void 0 ? void 0 : _e.toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Property:</span>
-                <span class="value">${((_g = payment.propertyId) === null || _g === void 0 ? void 0 : _g.name) || 'N/A'}</span>
+                <span class="value">${((_f = payment.propertyId) === null || _f === void 0 ? void 0 : _f.name) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Tenant:</span>
-                <span class="value">${(_h = payment.tenantId) === null || _h === void 0 ? void 0 : _h.firstName} ${(_j = payment.tenantId) === null || _j === void 0 ? void 0 : _j.lastName}</span>
+                <span class="value">${(_g = payment.tenantId) === null || _g === void 0 ? void 0 : _g.firstName} ${(_h = payment.tenantId) === null || _h === void 0 ? void 0 : _h.lastName}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Agent:</span>
-                <span class="value">${(_k = payment.agentId) === null || _k === void 0 ? void 0 : _k.firstName} ${((_l = payment.agentId) === null || _l === void 0 ? void 0 : _l.lastName) || 'N/A'}</span>
+                <span class="value">${(_j = payment.agentId) === null || _j === void 0 ? void 0 : _j.firstName} ${((_k = payment.agentId) === null || _k === void 0 ? void 0 : _k.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Processed By:</span>
-                <span class="value">${(_m = payment.processedBy) === null || _m === void 0 ? void 0 : _m.firstName} ${((_o = payment.processedBy) === null || _o === void 0 ? void 0 : _o.lastName) || 'N/A'}</span>
+                <span class="value">${(_l = payment.processedBy) === null || _l === void 0 ? void 0 : _l.firstName} ${((_m = payment.processedBy) === null || _m === void 0 ? void 0 : _m.lastName) || 'N/A'}</span>
+              </div>
+              <div class="detail-row">
+                <span class="label">Rent Amount:</span>
+                <span class="value">$${(Number(payment.amount || 0)).toFixed(2)}</span>
+              </div>
+              ${(payment.depositAmount && Number(payment.depositAmount) > 0) ? `
+              <div class="detail-row">
+                <span class="label">Deposit Amount:</span>
+                <span class="value">$${(Number(payment.depositAmount || 0)).toFixed(2)}</span>
+              </div>` : ''}
+              <div class="detail-row">
+                <span class="label">Total Paid:</span>
+                <span class="value">$${(Number(payment.amount || 0) + Number(payment.depositAmount || 0)).toFixed(2)}</span>
               </div>
               ${payment.notes ? `
               <div class="detail-row">
@@ -1747,6 +1851,8 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             receiptNumber: payment.referenceNumber,
             paymentDate: payment.paymentDate,
             amount: payment.amount,
+            depositAmount: payment.depositAmount,
+            totalPaid: Number(payment.amount || 0) + Number(payment.depositAmount || 0),
             currency: 'USD', // Default currency
             paymentMethod: payment.paymentMethod,
             status: payment.status,
@@ -1895,7 +2001,64 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
             return res.status(404).json({ message: 'Property not found' });
         }
         const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
-        const finalCommission = yield commissionService_1.CommissionService.calculate(payment.amount, commissionPercent, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        // Apply rules based on relationshipType: 'introduction' → single-month once; 'management' → standard on full amount
+        let finalCommission = {
+            totalCommission: 0,
+            preaFee: 0,
+            agentShare: 0,
+            agencyShare: 0,
+            ownerAmount: payment.amount || 0
+        };
+        try {
+            const applyIntroductionRule = (relationshipType === 'introduction') || (property.rentalType === 'introduction');
+            if (applyIntroductionRule) {
+                const priorCount = yield Payment_1.Payment.countDocuments({
+                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                    paymentType: 'rental',
+                    tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
+                    propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                    status: 'completed',
+                    isProvisional: { $ne: true },
+                    isInSuspense: { $ne: true },
+                    _id: { $ne: new mongoose_1.default.Types.ObjectId(payment._id) }
+                });
+                const isFirstCommissionable = priorCount === 0;
+                const isDepositOnly = Number(payment.amount || 0) <= 0 && Number(payment.depositAmount || 0) > 0;
+                if (isFirstCommissionable && !isDepositOnly && commissionPercent > 0) {
+                    const oneMonthRent = typeof payment.rentUsed === 'number' && payment.rentUsed > 0
+                        ? Number(payment.rentUsed)
+                        : Number(property.rent || 0);
+                    const rentPortion = Math.max(0, Number(payment.amount || 0));
+                    const commissionable = oneMonthRent > 0
+                        ? Math.min(rentPortion, oneMonthRent)
+                        : rentPortion;
+                    if (commissionable > 0) {
+                        const tmp = yield commissionService_1.CommissionService.calculate(commissionable, Number(commissionPercent), new mongoose_1.default.Types.ObjectId(req.user.companyId));
+                        finalCommission = {
+                            totalCommission: tmp.totalCommission,
+                            preaFee: tmp.preaFee,
+                            agentShare: tmp.agentShare,
+                            agencyShare: tmp.agencyShare,
+                            ownerAmount: Math.max(0, Number(payment.amount || 0) - Number(tmp.totalCommission || 0))
+                        };
+                    }
+                }
+            }
+            else {
+                // Management or other: standard commission on full amount (advance supported)
+                const tmp = yield commissionService_1.CommissionService.calculate(Math.max(0, Number(payment.amount || 0)), Number(commissionPercent), new mongoose_1.default.Types.ObjectId(req.user.companyId));
+                finalCommission = tmp;
+            }
+        }
+        catch (_b) {
+            finalCommission = {
+                totalCommission: 0,
+                preaFee: 0,
+                agentShare: 0,
+                agencyShare: 0,
+                ownerAmount: payment.amount || 0
+            };
+        }
         payment.propertyId = new mongoose_1.default.Types.ObjectId(propertyId);
         payment.tenantId = new mongoose_1.default.Types.ObjectId(tenantId);
         if (ownerId) {
@@ -1922,7 +2085,7 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_b) { }
+            catch (_c) { }
             console.error('Failed to record income in property account during finalize; enqueued for retry:', err);
         }
         // Return populated payment so the UI can immediately show property/tenant details

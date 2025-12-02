@@ -53,6 +53,9 @@ dotenv.config({ path: ENV_PATH });
 
 const app = express();
 
+// Trust proxy (so req.protocol reflects https behind reverse proxies)
+app.set('trust proxy', 1);
+
 // Middleware
 const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
   .split(',')

@@ -97,6 +97,8 @@ const publicReportRoutes_1 = __importDefault(require("./routes/publicReportRoute
 const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
+// Trust proxy (so req.protocol reflects https behind reverse proxies)
+app.set('trust proxy', 1);
 // Middleware
 const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
     .split(',')

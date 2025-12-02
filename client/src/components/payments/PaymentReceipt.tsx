@@ -64,6 +64,9 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     return parsedTotalSale;
   }, [serverTotal, saleTotal, parsedTotalSale]);
   const preferredCurrency = useMemo(() => (saleCurrency || currency), [saleCurrency, currency]);
+  const rentAmount = useMemo(() => Number(receipt?.amount || 0), [receipt?.amount]);
+  const depositAmount = useMemo(() => Number(receipt?.depositAmount || 0), [receipt?.depositAmount]);
+  const totalPaid = useMemo(() => rentAmount + depositAmount, [rentAmount, depositAmount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +126,11 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 <div class="detail-row"><span class="label">Paid To Date:</span><span class="value">${preferredCurrency} ${(paidToDate || 0).toLocaleString()}</span></div>
                 <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${preferredCurrency} ${((preferredTotalSale || 0) - (paidToDate || 0) > 0 ? ((preferredTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
               ` : '';
+      const depositBreakdownHtml = `
+                <div class="detail-row"><span class="label">Rent Amount:</span><span class="value">$${(rentAmount || 0).toFixed(2)}</span></div>
+                ${depositAmount > 0 ? `<div class="detail-row"><span class="label">Deposit Amount:</span><span class="value">$${(depositAmount || 0).toFixed(2)}</span></div>` : ''}
+                <div class="detail-row"><span class="label">Total Paid:</span><span class="value">$${(totalPaid || 0).toFixed(2)}</span></div>
+              `;
       printWindow.document.write(`
         <!DOCTYPE html>
         <html>
@@ -227,7 +235,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
               </div>
               
               <div class="amount">
-                $${receipt.amount?.toFixed(2) || '0.00'}
+                $${(totalPaid || 0).toFixed(2)}
               </div>
               
               <div class="details">
@@ -271,6 +279,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                     <span class="value">${preferredCurrency} ${(outstanding || 0).toLocaleString()}</span>
                   </div>` : ''}
                 </div>
+                ${depositBreakdownHtml}
                 ${saleTotalsHtml}
                 ${receipt.notes ? `
                 <div class="detail-row">
@@ -375,7 +384,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
 
       <Box textAlign="center" mb={3}>
         <Typography variant="h4" color="primary" fontWeight="bold">
-          ${receipt.amount?.toFixed(2) || '0.00'}
+          ${totalPaid.toFixed(2)}
         </Typography>
         <Typography variant="h6" color="textSecondary">
           Receipt #{displayReceiptNumber}
@@ -431,6 +440,29 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
             <Typography variant="body1">{receipt.notes}</Typography>
           </Grid>
         )}
+      </Grid>
+
+      <Grid container spacing={2} sx={{ mt: 1 }}>
+        <Grid item xs={12} sm={6}>
+          <Typography variant="subtitle2" color="textSecondary">Rent Amount</Typography>
+          <Typography variant="body1">
+            ${rentAmount.toFixed(2)}
+          </Typography>
+        </Grid>
+        {depositAmount > 0 && (
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2" color="textSecondary">Deposit Amount</Typography>
+            <Typography variant="body1">
+              ${depositAmount.toFixed(2)}
+            </Typography>
+          </Grid>
+        )}
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" color="textSecondary">Total Paid</Typography>
+          <Typography variant="body1">
+            ${totalPaid.toFixed(2)}
+          </Typography>
+        </Grid>
       </Grid>
 
       <Divider sx={{ my: 2 }} />

@@ -374,11 +374,12 @@ export class PropertyAccountService {
         const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
         const totalPaid = payment.amount || 0;
         const depositPortion = payment.depositAmount || 0;
-        // For sales, post the full ownerAmount (already net of commission) without deposit apportioning.
-        // For rentals, proportionally exclude the deposit portion from the owner's income.
+        const totalCommission = payment.commissionDetails?.totalCommission || 0;
+        // For sales, post the full ownerAmount (already net of commission).
+        // For rentals, exclude deposit portion entirely and subtract full commission from the rent portion.
         const incomeAmount = isSale
           ? Math.max(0, ownerAmount)
-          : Math.max(0, totalPaid > 0 ? (totalPaid - depositPortion) * (ownerAmount / totalPaid) : 0);
+          : Math.max(0, (totalPaid - depositPortion) - totalCommission);
 
         if (incomeAmount <= 0) {
           logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
@@ -589,7 +590,8 @@ export class PropertyAccountService {
         throw new AppError('Payout amount must be greater than 0', 400);
       }
 
-      const account = await this.getOrCreatePropertyAccount(propertyId);
+      // Use the effective ledger for this property to ensure payouts are recorded on the correct ledger
+      const account = await this.getPropertyAccount(propertyId);
       
       // Check if account has sufficient balance
       if (account.runningBalance < payoutData.amount) {
@@ -638,32 +640,44 @@ export class PropertyAccountService {
     processedBy: string
   ): Promise<IPropertyAccount> {
     try {
-      const account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId) });
-      if (!account) {
+      const pid = new mongoose.Types.ObjectId(propertyId);
+      // Fetch all ledgers for this property (rental/sale) and locate the payout
+      const accounts = await PropertyAccount.find({ propertyId: pid });
+      if (!accounts || accounts.length === 0) {
         throw new AppError('Property account not found', 404);
       }
 
-      const payout = account.ownerPayouts.find(p => p._id?.toString() === payoutId);
-      if (!payout) {
+      let targetAccount: IPropertyAccount | null = null;
+      let targetPayout: OwnerPayout | undefined;
+      for (const acc of accounts as unknown as IPropertyAccount[]) {
+        const found = acc.ownerPayouts.find(p => p._id?.toString() === payoutId);
+        if (found) {
+          targetAccount = acc as unknown as IPropertyAccount;
+          targetPayout = found;
+          break;
+        }
+      }
+
+      if (!targetAccount || !targetPayout) {
         throw new AppError('Payout not found', 404);
       }
 
-      // If changing from pending to completed, check balance
-      if (payout.status === 'pending' && status === 'completed') {
-        if (account.runningBalance < payout.amount) {
+      // If changing from pending to completed, check balance on the specific ledger
+      if (targetPayout.status === 'pending' && status === 'completed') {
+        if (targetAccount.runningBalance < targetPayout.amount) {
           throw new AppError('Insufficient balance to complete payout', 400);
         }
       }
 
-      payout.status = status;
-      payout.updatedAt = new Date();
+      targetPayout.status = status;
+      targetPayout.updatedAt = new Date();
       
       // Save the account (this will trigger pre-save middleware to recalculate balance)
-      await account.save();
+      await targetAccount.save();
 
-      logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId}`);
+      logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId} on ledger ${String((targetAccount as any).ledgerType || 'unknown')}`);
       
-      return account;
+      return targetAccount;
     } catch (error) {
       logger.error('Error updating payout status:', error);
       throw error;

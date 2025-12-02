@@ -15,7 +15,9 @@ const ForgotPassword: React.FC = () => {
       await api.post('/auth/forgot-password', { email });
       setSubmitted(true);
     } catch (err: any) {
-      setSubmitted(true); // still show success message to prevent enumeration
+      const message = err?.response?.data?.message || 'Failed to send password reset email';
+      setError(message);
+      setSubmitted(false);
     } finally {
       setLoading(false);
     }

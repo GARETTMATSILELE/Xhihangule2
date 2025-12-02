@@ -322,7 +322,7 @@ class PropertyAccountService {
      */
     recordIncomeFromPayment(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
+            var _a, _b;
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId);
                 if (!payment) {
@@ -360,7 +360,7 @@ class PropertyAccountService {
                             const unitDoc = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).select('developmentId');
                             devId = unitDoc === null || unitDoc === void 0 ? void 0 : unitDoc.developmentId;
                         }
-                        catch (_b) { }
+                        catch (_c) { }
                     }
                     if (devId) {
                         targets.push({ id: devId.toString(), ledger: 'sale' });
@@ -386,11 +386,12 @@ class PropertyAccountService {
                     const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
                     const totalPaid = payment.amount || 0;
                     const depositPortion = payment.depositAmount || 0;
-                    // For sales, post the full ownerAmount (already net of commission) without deposit apportioning.
-                    // For rentals, proportionally exclude the deposit portion from the owner's income.
+                    const totalCommission = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.totalCommission) || 0;
+                    // For sales, post the full ownerAmount (already net of commission).
+                    // For rentals, exclude deposit portion entirely and subtract full commission from the rent portion.
                     const incomeAmount = isSale
                         ? Math.max(0, ownerAmount)
-                        : Math.max(0, totalPaid > 0 ? (totalPaid - depositPortion) * (ownerAmount / totalPaid) : 0);
+                        : Math.max(0, (totalPaid - depositPortion) - totalCommission);
                     if (incomeAmount <= 0) {
                         logger_1.logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
                         continue;
@@ -557,7 +558,8 @@ class PropertyAccountService {
                 if (payoutData.amount <= 0) {
                     throw new errorHandler_1.AppError('Payout amount must be greater than 0', 400);
                 }
-                const account = yield this.getOrCreatePropertyAccount(propertyId);
+                // Use the effective ledger for this property to ensure payouts are recorded on the correct ledger
+                const account = yield this.getPropertyAccount(propertyId);
                 // Check if account has sufficient balance
                 if (account.runningBalance < payoutData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this payout', 400);
@@ -596,26 +598,37 @@ class PropertyAccountService {
     updatePayoutStatus(propertyId, payoutId, status, processedBy) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const account = yield PropertyAccount_1.default.findOne({ propertyId: new mongoose_1.default.Types.ObjectId(propertyId) });
-                if (!account) {
+                const pid = new mongoose_1.default.Types.ObjectId(propertyId);
+                // Fetch all ledgers for this property (rental/sale) and locate the payout
+                const accounts = yield PropertyAccount_1.default.find({ propertyId: pid });
+                if (!accounts || accounts.length === 0) {
                     throw new errorHandler_1.AppError('Property account not found', 404);
                 }
-                const payout = account.ownerPayouts.find(p => { var _a; return ((_a = p._id) === null || _a === void 0 ? void 0 : _a.toString()) === payoutId; });
-                if (!payout) {
+                let targetAccount = null;
+                let targetPayout;
+                for (const acc of accounts) {
+                    const found = acc.ownerPayouts.find(p => { var _a; return ((_a = p._id) === null || _a === void 0 ? void 0 : _a.toString()) === payoutId; });
+                    if (found) {
+                        targetAccount = acc;
+                        targetPayout = found;
+                        break;
+                    }
+                }
+                if (!targetAccount || !targetPayout) {
                     throw new errorHandler_1.AppError('Payout not found', 404);
                 }
-                // If changing from pending to completed, check balance
-                if (payout.status === 'pending' && status === 'completed') {
-                    if (account.runningBalance < payout.amount) {
+                // If changing from pending to completed, check balance on the specific ledger
+                if (targetPayout.status === 'pending' && status === 'completed') {
+                    if (targetAccount.runningBalance < targetPayout.amount) {
                         throw new errorHandler_1.AppError('Insufficient balance to complete payout', 400);
                     }
                 }
-                payout.status = status;
-                payout.updatedAt = new Date();
+                targetPayout.status = status;
+                targetPayout.updatedAt = new Date();
                 // Save the account (this will trigger pre-save middleware to recalculate balance)
-                yield account.save();
-                logger_1.logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId}`);
-                return account;
+                yield targetAccount.save();
+                logger_1.logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId} on ledger ${String(targetAccount.ledgerType || 'unknown')}`);
+                return targetAccount;
             }
             catch (error) {
                 logger_1.logger.error('Error updating payout status:', error);

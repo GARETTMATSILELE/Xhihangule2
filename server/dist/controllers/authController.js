@@ -393,9 +393,9 @@ const requestPasswordReset = (req, res, next) => __awaiter(void 0, void 0, void 
             throw new errorHandler_1.AppError('Email is required', 400, 'VALIDATION_ERROR');
         }
         const user = yield User_1.User.findOne({ email: String(email).toLowerCase() });
-        // To prevent user enumeration, respond 200 even if not found
+        // Return 404 when email is not found (explicit behavior as requested)
         if (!user) {
-            return res.json({ message: 'If that email exists, a reset link has been sent' });
+            return res.status(404).json({ message: 'Email not found' });
         }
         const token = crypto_1.default.randomBytes(32).toString('hex');
         const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
@@ -415,7 +415,7 @@ const requestPasswordReset = (req, res, next) => __awaiter(void 0, void 0, void 
       `,
             text: `Reset your password: ${resetUrl}`
         });
-        return res.json({ message: 'If that email exists, a reset link has been sent' });
+        return res.json({ message: 'A password reset link has been sent to your email' });
     }
     catch (error) {
         next(error);

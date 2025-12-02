@@ -127,6 +127,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [advanceStartYear, setAdvanceStartYear] = useState(formData.rentalPeriodYear);
   const [propertyRent, setPropertyRent] = useState<number | null>(null);
   const [remainingForPeriod, setRemainingForPeriod] = useState<number | null>(null);
+  const [depositOnly, setDepositOnly] = useState(false);
 
   // Regenerate reference number every time the form is opened for a new payment
   useEffect(() => {
@@ -285,6 +286,18 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
   // When rent or advance months change, update amount
   useEffect(() => {
+    if (depositOnly) {
+      setFormData(prev => {
+        const nextAmount = 0;
+        if (prev.amount === nextAmount && prev.rentUsed === (propertyRent ?? prev.rentUsed)) return prev;
+        return {
+          ...prev,
+          amount: nextAmount,
+          rentUsed: propertyRent ?? prev.rentUsed,
+        };
+      });
+      return;
+    }
     if (propertyRent) {
       if (isAdvance) {
         setFormData(prev => ({
@@ -300,7 +313,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         }));
       }
     }
-  }, [propertyRent, isAdvance, advanceMonths]);
+  }, [propertyRent, isAdvance, advanceMonths, depositOnly]);
 
   function calculateAdvanceEnd(startMonth: number, startYear: number, months: number) {
     const endMonth = ((startMonth - 1 + months - 1) % 12) + 1;
@@ -355,6 +368,15 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     try {
       setError(null);
 
+      // Deposit-only validation
+      if (depositOnly) {
+        const dep = Number(formData.depositAmount || 0);
+        if (dep <= 0) {
+          setError('Enter a deposit amount for a deposit-only payment.');
+          return;
+        }
+      }
+
       // Validate manual entries
       if (useManualProperty && !manualPropertyAddress.trim()) {
         setError('Please enter a property address');
@@ -366,6 +388,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       }
 
       let dataToSubmit = { ...formData };
+      if (depositOnly) {
+        dataToSubmit.amount = 0;
+        dataToSubmit.notes = `${dataToSubmit.notes ? dataToSubmit.notes + '\n' : ''}Deposit only payment`;
+      }
       
       // Handle manual property entry
       if (useManualProperty) {
@@ -416,7 +442,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       }
 
       // Inline guard: fully paid or exceeding remaining
-      if (formData.paymentType === 'rental' && remainingForPeriod !== null) {
+      if (formData.paymentType === 'rental' && remainingForPeriod !== null && !isAdvance) {
         const amount = Number(dataToSubmit.amount || 0);
         if (remainingForPeriod <= 0) {
           setError('This month is fully paid. Change rental month.');
@@ -743,9 +769,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               name="amount"
               value={formData.amount || ''}
               onChange={handleInputChange}
-              required
-              InputProps={{ readOnly: isAdvance }}
-              helperText={isAdvance ? `Total for ${advanceMonths} months` : 'Enter the amount the client is actually paying'}
+              required={!depositOnly}
+              InputProps={{ readOnly: isAdvance || depositOnly }}
+              helperText={
+                depositOnly
+                  ? 'Deposit-only mode: rent amount will be set to 0'
+                  : (isAdvance ? `Total for ${advanceMonths} months` : 'Enter the amount the client is actually paying')
+              }
             />
           </Grid>
 
@@ -761,6 +791,27 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                 helperText="Deposit is typically only paid on the first month"
                 inputProps={{ min: 0 }}
               />
+            </Grid>
+          )}
+
+          {formData.paymentType !== 'levy' && formData.paymentType !== 'municipal' && (
+            <Grid item xs={12}>
+              <Button
+                variant={depositOnly ? 'contained' : 'outlined'}
+                color="secondary"
+                size="small"
+                onClick={() => {
+                  setDepositOnly((prev) => !prev);
+                  setFormData(prev => ({ ...prev, amount: 0 }));
+                }}
+              >
+                {depositOnly ? 'Deposit Only Mode: ON' : 'Deposit Only Payment'}
+              </Button>
+              {depositOnly && (
+                <Typography variant="caption" color="textSecondary" sx={{ ml: 1 }}>
+                  Only the deposit will be receipted; rent amount will be ignored.
+                </Typography>
+              )}
             </Grid>
           )}
 
