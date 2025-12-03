@@ -1397,6 +1397,16 @@ export class DatabaseSyncService extends EventEmitter {
       logger.warn('verifyAndReconcilePaymentPosting encountered an error:', (outer as any)?.message || outer);
     }
   }
+
+  /**
+   * Public wrapper to reconcile postings for a given payment:
+   * - Ensures property/development ledger income exists
+   * - Ensures company commission is recorded when applicable
+   * - Attempts to dedupe related duplicates
+   */
+  public async reconcilePaymentPosting(paymentId: string): Promise<void> {
+    await this.verifyAndReconcilePaymentPosting(paymentId);
+  }
 }
 
 export default DatabaseSyncService;

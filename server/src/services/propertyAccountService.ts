@@ -63,6 +63,58 @@ export class PropertyAccountService {
 
       let account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
       console.log('Database query result:', account ? 'Found account' : 'No account found');
+      // If a legacy ledger (without ledgerType) also exists for this property, prefer it when it appears more complete.
+      // This ensures older, accurate ledgers remain visible in the UI when a newer, partial ledger was created.
+      if (account) {
+        try {
+          const legacy = await PropertyAccount.findOne({
+            propertyId: new mongoose.Types.ObjectId(propertyId),
+            $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }]
+          });
+          if (legacy) {
+            const legacyIncome = Number((legacy as any)?.totalIncome || 0);
+            const currentIncome = Number((account as any)?.totalIncome || 0);
+            const legacyTxCount = Array.isArray((legacy as any)?.transactions) ? (legacy as any).transactions.length : 0;
+            const currentTxCount = Array.isArray((account as any)?.transactions) ? (account as any).transactions.length : 0;
+            // Prefer legacy if it has equal/greater totalIncome or more transactions (heuristic for completeness)
+            if (legacyIncome >= currentIncome || legacyTxCount > currentTxCount) {
+              account = legacy as any;
+            }
+          }
+        } catch {}
+      }
+      // If no account of the requested ledgerType exists, but a legacy ledger exists,
+      // adopt the legacy ledger by assigning the appropriate ledgerType instead of creating a new doc.
+      if (!account) {
+        try {
+          const legacy = await PropertyAccount.findOne({
+            propertyId: new mongoose.Types.ObjectId(propertyId),
+            $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }]
+          });
+          if (legacy) {
+            (legacy as any).ledgerType = effectiveLedger;
+            try {
+              await (legacy as any).save();
+              await this.recalculateBalance(legacy as any);
+              account = legacy as any;
+            } catch (adoptErr: any) {
+              // If a concurrent create slipped in and caused a duplicate-key on (propertyId, ledgerType),
+              // fall back to loading the newly created account.
+              const isDup = (adoptErr?.code === 11000) || /E11000 duplicate key error/.test(String(adoptErr?.message || ''));
+              if (isDup) {
+                const reloaded = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
+                if (reloaded) {
+                  account = reloaded as any;
+                } else {
+                  throw adoptErr;
+                }
+              } else {
+                throw adoptErr;
+              }
+            }
+          }
+        } catch {}
+      }
       
     if (!account) {
         // Try resolve as a Property; if not found, try as a Development; then as a Development Unit
@@ -356,9 +408,11 @@ export class PropertyAccountService {
         const totalPaid = payment.amount || 0;
         const depositPortion = payment.depositAmount || 0;
         const totalCommission = payment.commissionDetails?.totalCommission || 0;
+        // Align rental income with commission-calculated owner amount (legacy behavior).
+        // Deposit-only payments are already excluded above.
         const incomeAmount = isSale
           ? Math.max(0, ownerAmount)
-          : Math.max(0, (totalPaid - depositPortion) - totalCommission);
+          : Math.max(0, ownerAmount);
 
         if (incomeAmount <= 0) {
           logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);

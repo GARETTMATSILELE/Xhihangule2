@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button, TextField, Chip, Alert } from '@mui/material';
+import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button, TextField, Chip, Alert, InputAdornment } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { propertyAccountService, PropertyAccount } from '../../services/propertyAccountService';
 
@@ -90,18 +90,6 @@ const PropertyAccountsPage: React.FC = () => {
     navigate(`/accountant-dashboard/property-accounts/${acc.propertyId}${isSale ? '?ledger=sale' : ''}`);
   };
 
-  if (loading) {
-    return <Box display="flex" justifyContent="center" alignItems="center" minHeight="300px"><CircularProgress /></Box>;
-  }
-  if (error) {
-    return (
-      <Box sx={{ p: 2 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
-        <Button variant="outlined" onClick={() => loadFirstPage(debouncedSearch)}>Retry</Button>
-      </Box>
-    );
-  }
-
   const visibleAccounts = filteredAccounts;
 
   return (
@@ -114,8 +102,21 @@ const PropertyAccountsPage: React.FC = () => {
           label="Search properties, owners, addresses"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                {loading ? <CircularProgress size={18} /> : null}
+              </InputAdornment>
+            )
+          }}
         />
       </Box>
+      {error && (
+        <Box sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>
+          <Button size="small" variant="outlined" onClick={() => loadFirstPage(debouncedSearch)}>Retry</Button>
+        </Box>
+      )}
       <Grid container spacing={3}>
         {visibleAccounts.length === 0 && (
           <Grid item xs={12}>

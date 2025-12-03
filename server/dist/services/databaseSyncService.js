@@ -1371,6 +1371,17 @@ class DatabaseSyncService extends events_1.EventEmitter {
             }
         });
     }
+    /**
+     * Public wrapper to reconcile postings for a given payment:
+     * - Ensures property/development ledger income exists
+     * - Ensures company commission is recorded when applicable
+     * - Attempts to dedupe related duplicates
+     */
+    reconcilePaymentPosting(paymentId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield this.verifyAndReconcilePaymentPosting(paymentId);
+        });
+    }
 }
 exports.DatabaseSyncService = DatabaseSyncService;
 exports.default = DatabaseSyncService;

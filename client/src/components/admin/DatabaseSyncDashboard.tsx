@@ -101,6 +101,13 @@ interface SyncHealth {
     isConsistent: boolean;
     issueCount: number;
   };
+  // Optional diagnostic hint (e.g., 'timeout') when computing health
+  consistencyCheck?: string;
+}
+
+interface ConsistencyResult {
+  isConsistent: boolean;
+  inconsistencies: Array<{ type: string; description: string; count: number }>;
 }
 
 const DatabaseSyncDashboard: React.FC = () => {
@@ -126,6 +133,14 @@ const DatabaseSyncDashboard: React.FC = () => {
     description: '',
     enabled: true
   });
+  const [consistency, setConsistency] = useState<ConsistencyResult | null>(null);
+  const [consistencyLoading, setConsistencyLoading] = useState(false);
+  const [consistencyError, setConsistencyError] = useState<string | null>(null);
+  const [consistencyDialogOpen, setConsistencyDialogOpen] = useState(false);
+  const [failures, setFailures] = useState<any[]>([]);
+  const [failuresLoading, setFailuresLoading] = useState(false);
+  const [failuresError, setFailuresError] = useState<string | null>(null);
+  const [retryingFailureId, setRetryingFailureId] = useState<string | null>(null);
 
   useEffect(() => {
     loadSyncData();
@@ -170,17 +185,23 @@ const DatabaseSyncDashboard: React.FC = () => {
       setSchedulesLoading(true);
       setHealthLoading(true);
       try {
-        const [schedulesRes, healthRes] = await Promise.all([
+        setFailuresLoading(true);
+        const [schedulesRes, healthRes, failuresRes] = await Promise.all([
           api.get('/sync/schedules'),
-          api.get('/sync/health')
+          api.get('/sync/health'),
+          api.get('/sync/failures')
         ]);
         setSyncSchedules(schedulesRes.data.data);
         setSyncHealth(healthRes.data.data);
+        setFailures(failuresRes.data.data || []);
+        setFailuresError(null);
       } catch (e: any) {
         setError((e as any)?.message || 'Some sync data failed to load');
+        setFailuresError((e as any)?.message || 'Failed to load failures');
       } finally {
         setSchedulesLoading(false);
         setHealthLoading(false);
+        setFailuresLoading(false);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load sync data');
@@ -315,6 +336,60 @@ const DatabaseSyncDashboard: React.FC = () => {
     }
   };
 
+  const runConsistencyCheck = async () => {
+    try {
+      setConsistencyLoading(true);
+      setConsistencyError(null);
+      const res = await api.get('/sync/consistency');
+      setConsistency((res as any)?.data?.data || null);
+      setConsistencyDialogOpen(true);
+    } catch (e: any) {
+      setConsistencyError(e?.message || 'Failed to run consistency check');
+      setConsistency(null);
+      setConsistencyDialogOpen(true);
+    } finally {
+      setConsistencyLoading(false);
+    }
+  };
+
+  const handleRetryFailure = async (id: string) => {
+    try {
+      setRetryingFailureId(id);
+      await api.post('/sync/failures/retry', { id });
+      // refresh failures list
+      const failuresRes = await api.get('/sync/failures');
+      setFailures(failuresRes.data.data || []);
+    } catch (e: any) {
+      setFailuresError(e?.message || 'Failed to retry');
+    } finally {
+      setRetryingFailureId(null);
+    }
+  };
+
+  const extractPaymentIdFromDescription = (desc: string): string | null => {
+    try {
+      const m = desc.match(/Payment\s+([a-f0-9]{24})/i);
+      return m ? m[1] : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleReconcilePayment = async (paymentId: string) => {
+    try {
+      setActionLoading(`reconcile_${paymentId}`);
+      await api.post(`/sync/reconcile/payment/${paymentId}`);
+      // Re-run consistency to reflect changes
+      await runConsistencyCheck();
+      // Also refresh status cards
+      await loadSyncData(true);
+    } catch (e: any) {
+      setConsistencyError(e?.message || 'Failed to reconcile payment posting');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const formatDuration = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -356,6 +431,37 @@ const DatabaseSyncDashboard: React.FC = () => {
                 color={getStatusColor(syncHealth.status) as any}
                 icon={syncHealth.status === 'healthy' ? <CheckCircle /> : <Warning />}
               />
+            </Box>
+            {(syncHealth.status === 'degraded' || syncHealth.status === 'unhealthy') && (
+              <Box sx={{ mt: 2 }}>
+                <Alert severity={syncHealth.status === 'unhealthy' ? 'error' : 'warning'}>
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Why {syncHealth.status}:
+                    </Typography>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {!syncHealth.realTime.isRunning && <li>Real-time sync is stopped</li>}
+                      {syncHealth.scheduled.enabledSchedules === 0 && <li>No sync schedules are enabled</li>}
+                      {(syncHealth.dataConsistency.issueCount || 0) > 0 && (
+                        <li>{syncHealth.dataConsistency.issueCount} data consistency issue(s) detected</li>
+                      )}
+                      {syncHealth.consistencyCheck === 'timeout' && (
+                        <li>Consistency check timed out; run a detailed check for specifics</li>
+                      )}
+                    </ul>
+                  </Box>
+                </Alert>
+              </Box>
+            )}
+            <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+              <Button
+                variant="outlined"
+                onClick={runConsistencyCheck}
+                disabled={consistencyLoading}
+                startIcon={consistencyLoading ? <CircularProgress size={16} /> : <Error />}
+              >
+                {consistencyLoading ? 'Checking…' : 'Check consistency'}
+              </Button>
             </Box>
             <Grid container spacing={2} sx={{ mt: 2 }}>
               <Grid item xs={12} md={4}>
@@ -607,6 +713,74 @@ const DatabaseSyncDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Sync Failures */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="h6">Sync Failures</Typography>
+            <Button variant="text" onClick={async () => {
+              try {
+                setFailuresLoading(true);
+                const failuresRes = await api.get('/sync/failures');
+                setFailures(failuresRes.data.data || []);
+                setFailuresError(null);
+              } catch (e: any) {
+                setFailuresError(e?.message || 'Failed to refresh failures');
+              } finally {
+                setFailuresLoading(false);
+              }
+            }}>
+              Refresh
+            </Button>
+          </Box>
+          {failuresError && <Alert severity="error" sx={{ mb: 2 }}>{failuresError}</Alert>}
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Document</TableCell>
+                  <TableCell>Error</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Attempts</TableCell>
+                  <TableCell>Next Attempt</TableCell>
+                  <TableCell>Last Error</TableCell>
+                  <TableCell align="right">Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {failuresLoading && failures.length === 0 ? (
+                  <TableRow><TableCell colSpan={8}><Box display="flex" justifyContent="center"><CircularProgress size={20} /></Box></TableCell></TableRow>
+                ) : (failures || []).map((f: any) => (
+                  <TableRow key={String(f._id)}>
+                    <TableCell>{f.type}</TableCell>
+                    <TableCell>{f.documentId}</TableCell>
+                    <TableCell>{f.errorMessage}</TableCell>
+                    <TableCell>{f.status}</TableCell>
+                    <TableCell>{f.attemptCount}</TableCell>
+                    <TableCell>{f.nextAttemptAt ? formatDate(f.nextAttemptAt) : '—'}</TableCell>
+                    <TableCell>{f.lastErrorAt ? formatDate(f.lastErrorAt) : '—'}</TableCell>
+                    <TableCell align="right">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => handleRetryFailure(String(f._id))}
+                        disabled={retryingFailureId === String(f._id)}
+                      >
+                        {retryingFailureId === String(f._id) ? <CircularProgress size={16} /> : 'Retry'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(failures || []).length === 0 && !failuresLoading && (
+                  <TableRow><TableCell colSpan={8}><Typography variant="body2" color="text.secondary">No failures found.</Typography></TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
+
       {/* Error Log */}
       {syncStatus && syncStatus.stats.errors.length > 0 && (
         <Card>
@@ -743,6 +917,89 @@ const DatabaseSyncDashboard: React.FC = () => {
           </Button>
                  </DialogActions>
        </Dialog>
+
+      {/* Consistency Details Dialog */}
+      <Dialog
+        open={consistencyDialogOpen}
+        onClose={() => setConsistencyDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Data Consistency Details</DialogTitle>
+        <DialogContent dividers>
+          {consistencyLoading && (
+            <Box display="flex" justifyContent="center" alignItems="center" minHeight="120px">
+              <CircularProgress />
+            </Box>
+          )}
+          {!consistencyLoading && consistencyError && (
+            <Alert severity="error">{consistencyError}</Alert>
+          )}
+          {!consistencyLoading && !consistencyError && consistency && (
+            <Box>
+              {consistency.isConsistent ? (
+                <Alert severity="success">No inconsistencies detected.</Alert>
+              ) : (
+                <>
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    {consistency.inconsistencies.length} inconsistency item(s) found.
+                  </Alert>
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Type</TableCell>
+                          <TableCell>Description (example)</TableCell>
+                          <TableCell align="right">Count</TableCell>
+                          <TableCell align="right">Action</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {consistency.inconsistencies.slice(0, 50).map((inc, idx) => {
+                          const paymentId = (inc.type === 'missing_property_ledger_income' || inc.type === 'missing_company_commission')
+                            ? extractPaymentIdFromDescription(inc.description)
+                            : null;
+                          const canReconcile = Boolean(paymentId);
+                          const loadingKey = `reconcile_${paymentId}`;
+                          return (
+                            <TableRow key={`${inc.type}-${idx}`}>
+                              <TableCell>{inc.type}</TableCell>
+                              <TableCell>{inc.description}</TableCell>
+                              <TableCell align="right">{inc.count}</TableCell>
+                              <TableCell align="right">
+                                {canReconcile ? (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => handleReconcilePayment(paymentId as string)}
+                                    disabled={actionLoading === loadingKey}
+                                  >
+                                    {actionLoading === loadingKey ? <CircularProgress size={16} /> : 'Reconcile'}
+                                  </Button>
+                                ) : (
+                                  <Typography variant="caption" color="text.secondary">—</Typography>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  {consistency.inconsistencies.length > 50 && (
+                    <Typography variant="caption" color="text.secondary">
+                      Showing first 50 items…
+                    </Typography>
+                  )}
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConsistencyDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
        {/* Delete Confirmation Dialog */}
       <Dialog open={deleteConfirmDialog.open} onClose={() => setDeleteConfirmDialog({ open: false, scheduleName: '' })}>

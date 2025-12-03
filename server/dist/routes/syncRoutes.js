@@ -31,4 +31,6 @@ router.post('/schedules/stop-all', auth_1.auth, (0, auth_1.authorize)(['admin', 
 // Failure listing and retry (Admin and Accountant)
 router.get('/failures', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.listSyncFailures);
 router.post('/failures/retry', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.retrySyncFailure);
+// Reconciliation endpoints
+router.post('/reconcile/payment/:paymentId', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.reconcilePaymentPosting);
 exports.default = router;

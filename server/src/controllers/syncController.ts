@@ -661,3 +661,21 @@ export const retrySyncFailure = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: 'Failed to retry sync failure' });
   }
 };
+
+/**
+ * Reconcile postings for a specific payment
+ */
+export const reconcilePaymentPosting = async (req: Request, res: Response) => {
+  try {
+    const { paymentId } = req.params as any;
+    if (!paymentId) {
+      return res.status(400).json({ success: false, message: 'paymentId is required' });
+    }
+    const syncService = DatabaseSyncService.getInstance();
+    await syncService.reconcilePaymentPosting(paymentId);
+    res.json({ success: true, message: 'Reconciliation triggered' });
+  } catch (error) {
+    logger.error('Error reconciling payment posting:', error);
+    res.status(500).json({ success: false, message: 'Failed to reconcile payment posting' });
+  }
+};

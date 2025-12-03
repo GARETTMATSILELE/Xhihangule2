@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.retrySyncFailure = exports.listSyncFailures = exports.getSyncHealth = exports.removeSyncSchedule = exports.addSyncSchedule = exports.stopAllSchedules = exports.startAllSchedules = exports.disableSyncSchedule = exports.enableSyncSchedule = exports.updateSyncSchedule = exports.getSyncSchedules = exports.validateDataConsistency = exports.getSyncStats = exports.getSyncStatus = exports.performFullSync = exports.stopRealTimeSync = exports.startRealTimeSync = void 0;
+exports.reconcilePaymentPosting = exports.retrySyncFailure = exports.listSyncFailures = exports.getSyncHealth = exports.removeSyncSchedule = exports.addSyncSchedule = exports.stopAllSchedules = exports.startAllSchedules = exports.disableSyncSchedule = exports.enableSyncSchedule = exports.updateSyncSchedule = exports.getSyncSchedules = exports.validateDataConsistency = exports.getSyncStats = exports.getSyncStatus = exports.performFullSync = exports.stopRealTimeSync = exports.startRealTimeSync = void 0;
 const databaseSyncService_1 = __importDefault(require("../services/databaseSyncService"));
 const scheduledSyncService_1 = __importDefault(require("../services/scheduledSyncService"));
 const logger_1 = require("../utils/logger");
@@ -622,3 +622,22 @@ const retrySyncFailure = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.retrySyncFailure = retrySyncFailure;
+/**
+ * Reconcile postings for a specific payment
+ */
+const reconcilePaymentPosting = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { paymentId } = req.params;
+        if (!paymentId) {
+            return res.status(400).json({ success: false, message: 'paymentId is required' });
+        }
+        const syncService = databaseSyncService_1.default.getInstance();
+        yield syncService.reconcilePaymentPosting(paymentId);
+        res.json({ success: true, message: 'Reconciliation triggered' });
+    }
+    catch (error) {
+        logger_1.logger.error('Error reconciling payment posting:', error);
+        res.status(500).json({ success: false, message: 'Failed to reconcile payment posting' });
+    }
+});
+exports.reconcilePaymentPosting = reconcilePaymentPosting;

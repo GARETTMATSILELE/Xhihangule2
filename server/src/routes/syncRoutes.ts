@@ -16,7 +16,8 @@ import {
   removeSyncSchedule,
   getSyncHealth,
   listSyncFailures,
-  retrySyncFailure
+  retrySyncFailure,
+  reconcilePaymentPosting
 } from '../controllers/syncController';
 import { isAdmin, isAccountant } from '../middleware/roles';
 import { auth, authorize } from '../middleware/auth';
@@ -63,6 +64,9 @@ router.post('/schedules/stop-all', auth, authorize(['admin','accountant']), stop
 router.get('/failures', auth, authorize(['admin','accountant']), listSyncFailures);
 
 router.post('/failures/retry', auth, authorize(['admin','accountant']), retrySyncFailure);
+
+// Reconciliation endpoints
+router.post('/reconcile/payment/:paymentId', auth, authorize(['admin','accountant']), reconcilePaymentPosting);
 
 export default router;
 

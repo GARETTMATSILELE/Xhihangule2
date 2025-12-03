@@ -80,6 +80,63 @@ class PropertyAccountService {
                 const effectiveLedger = ledgerType || (yield this.inferLedgerTypeForProperty(propertyId));
                 let account = yield PropertyAccount_1.default.findOne({ propertyId: new mongoose_1.default.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
                 console.log('Database query result:', account ? 'Found account' : 'No account found');
+                // If a legacy ledger (without ledgerType) also exists for this property, prefer it when it appears more complete.
+                // This ensures older, accurate ledgers remain visible in the UI when a newer, partial ledger was created.
+                if (account) {
+                    try {
+                        const legacy = yield PropertyAccount_1.default.findOne({
+                            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                            $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }]
+                        });
+                        if (legacy) {
+                            const legacyIncome = Number((legacy === null || legacy === void 0 ? void 0 : legacy.totalIncome) || 0);
+                            const currentIncome = Number((account === null || account === void 0 ? void 0 : account.totalIncome) || 0);
+                            const legacyTxCount = Array.isArray(legacy === null || legacy === void 0 ? void 0 : legacy.transactions) ? legacy.transactions.length : 0;
+                            const currentTxCount = Array.isArray(account === null || account === void 0 ? void 0 : account.transactions) ? account.transactions.length : 0;
+                            // Prefer legacy if it has equal/greater totalIncome or more transactions (heuristic for completeness)
+                            if (legacyIncome >= currentIncome || legacyTxCount > currentTxCount) {
+                                account = legacy;
+                            }
+                        }
+                    }
+                    catch (_g) { }
+                }
+                // If no account of the requested ledgerType exists, but a legacy ledger exists,
+                // adopt the legacy ledger by assigning the appropriate ledgerType instead of creating a new doc.
+                if (!account) {
+                    try {
+                        const legacy = yield PropertyAccount_1.default.findOne({
+                            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                            $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }]
+                        });
+                        if (legacy) {
+                            legacy.ledgerType = effectiveLedger;
+                            try {
+                                yield legacy.save();
+                                yield this.recalculateBalance(legacy);
+                                account = legacy;
+                            }
+                            catch (adoptErr) {
+                                // If a concurrent create slipped in and caused a duplicate-key on (propertyId, ledgerType),
+                                // fall back to loading the newly created account.
+                                const isDup = ((adoptErr === null || adoptErr === void 0 ? void 0 : adoptErr.code) === 11000) || /E11000 duplicate key error/.test(String((adoptErr === null || adoptErr === void 0 ? void 0 : adoptErr.message) || ''));
+                                if (isDup) {
+                                    const reloaded = yield PropertyAccount_1.default.findOne({ propertyId: new mongoose_1.default.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
+                                    if (reloaded) {
+                                        account = reloaded;
+                                    }
+                                    else {
+                                        throw adoptErr;
+                                    }
+                                }
+                                else {
+                                    throw adoptErr;
+                                }
+                            }
+                        }
+                    }
+                    catch (_h) { }
+                }
                 if (!account) {
                     // Try resolve as a Property; if not found, try as a Development; then as a Development Unit
                     const property = yield Property_1.Property.findById(propertyId);
@@ -128,7 +185,7 @@ class PropertyAccountService {
                             const combined = `${first} ${last}`.trim();
                             ownerName = combined || companyName || 'Unknown Owner';
                         }
-                        catch (_g) { }
+                        catch (_j) { }
                     }
                     // Compute display name/address before create
                     let displayName = '';
@@ -148,7 +205,7 @@ class PropertyAccountService {
                             devLabel = (devParent === null || devParent === void 0 ? void 0 : devParent.name) || '';
                             displayAddress = (devParent === null || devParent === void 0 ? void 0 : devParent.address) || '';
                         }
-                        catch (_h) { }
+                        catch (_k) { }
                         const unitLabel = (unit === null || unit === void 0 ? void 0 : unit.unitCode) || ((unit === null || unit === void 0 ? void 0 : unit.unitNumber) ? `Unit ${unit.unitNumber}` : 'Development Unit');
                         displayName = devLabel ? `${unitLabel} - ${devLabel}` : unitLabel;
                     }
@@ -374,9 +431,11 @@ class PropertyAccountService {
                     const totalPaid = payment.amount || 0;
                     const depositPortion = payment.depositAmount || 0;
                     const totalCommission = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.totalCommission) || 0;
+                    // Align rental income with commission-calculated owner amount (legacy behavior).
+                    // Deposit-only payments are already excluded above.
                     const incomeAmount = isSale
                         ? Math.max(0, ownerAmount)
-                        : Math.max(0, (totalPaid - depositPortion) - totalCommission);
+                        : Math.max(0, ownerAmount);
                     if (incomeAmount <= 0) {
                         logger_1.logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
                         continue;
