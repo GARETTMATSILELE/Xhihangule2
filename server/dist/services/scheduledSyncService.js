@@ -351,6 +351,7 @@ class ScheduledSyncService {
      */
     executeLedgerReconciliation() {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c;
             const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
             try {
                 // 1) Re-post recent completed payments (idempotent, guarded by unique indexes)
@@ -363,11 +364,47 @@ class ScheduledSyncService {
                         try {
                             yield (yield Promise.resolve().then(() => __importStar(require('./ledgerEventService')))).default.enqueueOwnerIncomeEvent(String(p._id));
                         }
-                        catch (_a) { }
+                        catch (_d) { }
                         logger_1.logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e === null || e === void 0 ? void 0 : e.message) || e);
                     }
                 }
-                // 2) Dedupe any property accounts updated recently
+                // 2) Ensure company commissions are present for recent payments (idempotent)
+                try {
+                    const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
+                    const payList = yield Payment_1.Payment.find({
+                        status: 'completed',
+                        paymentDate: { $gte: since },
+                        'commissionDetails.agencyShare': { $gt: 0 }
+                    }).select('_id companyId paymentType commissionDetails paymentDate currency paymentMethod referenceNumber processedBy notes');
+                    for (const p of payList) {
+                        if (!p.companyId)
+                            continue;
+                        const desiredSource = p.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
+                        const txDoc = {
+                            type: 'income',
+                            source: desiredSource,
+                            amount: Number(((_a = p.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare) || 0),
+                            date: p.paymentDate || new Date(),
+                            currency: p.currency || 'USD',
+                            paymentMethod: p.paymentMethod,
+                            paymentId: p._id,
+                            referenceNumber: p.referenceNumber,
+                            description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+                            processedBy: p.processedBy,
+                            notes: p.notes
+                        };
+                        yield CompanyAccount.updateOne({ companyId: p.companyId }, { $setOnInsert: { companyId: p.companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
+                        yield CompanyAccount.updateOne({ companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id } } } }, {
+                            $push: { transactions: txDoc },
+                            $inc: { totalIncome: Number(((_b = p.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare) || 0), runningBalance: Number(((_c = p.commissionDetails) === null || _c === void 0 ? void 0 : _c.agencyShare) || 0) },
+                            $set: { lastUpdated: new Date() }
+                        });
+                    }
+                }
+                catch (ensureErr) {
+                    logger_1.logger.warn('Reconciliation: ensuring company commissions skipped:', (ensureErr === null || ensureErr === void 0 ? void 0 : ensureErr.message) || ensureErr);
+                }
+                // 3) Dedupe any property accounts updated recently
                 const recentAccounts = yield PropertyAccount_1.default.find({ lastUpdated: { $gte: since } }).select('_id propertyId ledgerType');
                 for (const acct of recentAccounts) {
                     try {
@@ -376,6 +413,44 @@ class ScheduledSyncService {
                     catch (e) {
                         logger_1.logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String(acct._id), err: (e === null || e === void 0 ? void 0 : e.message) || e });
                     }
+                }
+                // 4) Dedupe company accounts updated recently (keep earliest for each paymentId)
+                try {
+                    const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
+                    const companyAccounts = yield CompanyAccount.find({ lastUpdated: { $gte: since } }).select('_id companyId transactions');
+                    for (const ca of companyAccounts) {
+                        const grouped = Object.create(null);
+                        for (const t of (ca.transactions || [])) {
+                            const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+                            if (!pid)
+                                continue;
+                            if (!grouped[pid])
+                                grouped[pid] = [];
+                            grouped[pid].push({ _id: t._id, date: new Date(t.date) });
+                        }
+                        const toRemove = [];
+                        for (const pid of Object.keys(grouped)) {
+                            const list = grouped[pid];
+                            if (list.length <= 1)
+                                continue;
+                            const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
+                            toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+                        }
+                        if (toRemove.length > 0) {
+                            yield CompanyAccount.updateOne({ _id: ca._id }, { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } });
+                            // Recalculate totals
+                            const fresh = yield CompanyAccount.findById(ca._id);
+                            if (fresh) {
+                                const list = (fresh.transactions || []);
+                                const income = list.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                const expenses = list.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
+                            }
+                        }
+                    }
+                }
+                catch (dedupeErr) {
+                    logger_1.logger.warn('Reconciliation: company ledger dedupe skipped:', (dedupeErr === null || dedupeErr === void 0 ? void 0 : dedupeErr.message) || dedupeErr);
                 }
             }
             catch (err) {

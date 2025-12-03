@@ -262,6 +262,8 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
 
 // Indexes for better query performance
 PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1 }, { unique: true });
+// Accelerate list queries that filter by propertyId and sort by lastUpdated
+PropertyAccountSchema.index({ propertyId: 1, lastUpdated: -1 });
 PropertyAccountSchema.index({ ownerId: 1 });
 PropertyAccountSchema.index({ 'transactions.date': -1 });
 PropertyAccountSchema.index({ 'ownerPayouts.date': -1 });

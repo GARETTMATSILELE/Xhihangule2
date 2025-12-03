@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { SalesOwner } from '../models/SalesOwner';
 
 export const createSalesOwner = async (req: Request, res: Response) => {
@@ -151,6 +152,37 @@ export const deleteSalesOwner = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error deleting sales owner:', error);
     res.status(500).json({ message: 'Error deleting sales owner' });
+  }
+};
+
+/**
+ * Find a sales owner by property membership (non-development sale properties).
+ * Matches the provided propertyId against the SalesOwner.properties array.
+ */
+export const getSalesOwnerByPropertyId = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Company ID not found' });
+    }
+    const { propertyId } = req.params as { propertyId: string };
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+    const pid = new mongoose.Types.ObjectId(propertyId);
+    const role = (req.user as any)?.role;
+    const filter: any = { companyId: req.user.companyId, properties: pid };
+    // Sales agents can only view owners they created
+    if (!role || String(role).toLowerCase() === 'sales') {
+      filter.creatorId = req.user.userId;
+    }
+    const owner = await SalesOwner.findOne(filter).select('-password');
+    if (!owner) {
+      return res.status(404).json({ message: 'Sales owner not found for this property' });
+    }
+    res.json(owner);
+  } catch (error) {
+    console.error('Error fetching sales owner by propertyId:', error);
+    res.status(500).json({ message: 'Error fetching sales owner by propertyId' });
   }
 };
 

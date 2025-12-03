@@ -363,7 +363,49 @@ export class ScheduledSyncService {
         }
       }
 
-      // 2) Dedupe any property accounts updated recently
+      // 2) Ensure company commissions are present for recent payments (idempotent)
+      try {
+        const { CompanyAccount } = await import('../models/CompanyAccount');
+        const payList = await Payment.find({
+          status: 'completed',
+          paymentDate: { $gte: since },
+          'commissionDetails.agencyShare': { $gt: 0 }
+        }).select('_id companyId paymentType commissionDetails paymentDate currency paymentMethod referenceNumber processedBy notes');
+        for (const p of payList as any[]) {
+          if (!p.companyId) continue;
+          const desiredSource = p.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
+          const txDoc = {
+            type: 'income',
+            source: desiredSource,
+            amount: Number(p.commissionDetails?.agencyShare || 0),
+            date: p.paymentDate || new Date(),
+            currency: p.currency || 'USD',
+            paymentMethod: p.paymentMethod,
+            paymentId: p._id,
+            referenceNumber: p.referenceNumber,
+            description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+            processedBy: p.processedBy,
+            notes: p.notes
+          };
+          await CompanyAccount.updateOne(
+            { companyId: p.companyId },
+            { $setOnInsert: { companyId: p.companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } },
+            { upsert: true }
+          );
+          await CompanyAccount.updateOne(
+            { companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id } } } },
+            {
+              $push: { transactions: txDoc },
+              $inc: { totalIncome: Number(p.commissionDetails?.agencyShare || 0), runningBalance: Number(p.commissionDetails?.agencyShare || 0) },
+              $set: { lastUpdated: new Date() }
+            }
+          );
+        }
+      } catch (ensureErr) {
+        logger.warn('Reconciliation: ensuring company commissions skipped:', (ensureErr as any)?.message || ensureErr);
+      }
+
+      // 3) Dedupe any property accounts updated recently
       const recentAccounts = await PropertyAccount.find({ lastUpdated: { $gte: since } }).select('_id propertyId ledgerType');
       for (const acct of recentAccounts) {
         try {
@@ -371,6 +413,47 @@ export class ScheduledSyncService {
         } catch (e) {
           logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String((acct as any)._id), err: (e as any)?.message || e });
         }
+      }
+
+      // 4) Dedupe company accounts updated recently (keep earliest for each paymentId)
+      try {
+        const { CompanyAccount } = await import('../models/CompanyAccount');
+        const companyAccounts = await CompanyAccount.find({ lastUpdated: { $gte: since } }).select('_id companyId transactions');
+        for (const ca of companyAccounts as any[]) {
+          const grouped: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
+          for (const t of (ca.transactions || [])) {
+            const pid = t?.paymentId ? String(t.paymentId) : '';
+            if (!pid) continue;
+            if (!grouped[pid]) grouped[pid] = [];
+            grouped[pid].push({ _id: (t as any)._id, date: new Date(t.date) });
+          }
+          const toRemove: any[] = [];
+          for (const pid of Object.keys(grouped)) {
+            const list = grouped[pid];
+            if (list.length <= 1) continue;
+            const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
+            toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+          }
+          if (toRemove.length > 0) {
+            await CompanyAccount.updateOne(
+              { _id: ca._id },
+              { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } }
+            );
+            // Recalculate totals
+            const fresh = await CompanyAccount.findById(ca._id) as any;
+            if (fresh) {
+              const list = (fresh.transactions || []);
+              const income = list.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+              const expenses = list.filter((t: any) => t.type !== 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+              await CompanyAccount.updateOne(
+                { _id: fresh._id },
+                { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } }
+              );
+            }
+          }
+        }
+      } catch (dedupeErr) {
+        logger.warn('Reconciliation: company ledger dedupe skipped:', (dedupeErr as any)?.message || dedupeErr);
       }
     } catch (err) {
       logger.error('Ledger reconciliation job failed:', err);

@@ -120,6 +120,7 @@ router.post('/payments/finalize-bulk', roles_1.canManagePayments, (req, res) => 
 }));
 // Property Account routes - allow admin and accountant
 router.get('/property-accounts', roles_1.canViewCommissions, propertyAccountController_1.getCompanyPropertyAccounts);
+router.post('/property-accounts/migrate-legacy-ledgers', roles_1.canViewCommissions, propertyAccountController_1.migrateLegacyLedgerTypes);
 router.get('/property-accounts/:propertyId', roles_1.canViewCommissions, (req, res) => {
     var _a;
     console.log('Property account detail route hit:', req.params.propertyId);

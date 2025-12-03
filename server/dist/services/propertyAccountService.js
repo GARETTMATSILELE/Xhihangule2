@@ -531,8 +531,13 @@ class PropertyAccountService {
                 }
                 catch (e) {
                     if (e && (e.code === 11000 || ((e === null || e === void 0 ? void 0 : e.message) || '').includes('E11000'))) {
-                        // Duplicate by index – treat as success
-                        logger_1.logger.warn('Duplicate expense prevented by unique index/idempotency guard');
+                        // Duplicate by index – fetch fresh state to avoid returning in-memory unpersisted changes
+                        logger_1.logger.warn('Duplicate expense prevented by unique index/idempotency guard; returning fresh account');
+                        const fresh = yield PropertyAccount_1.default.findById(account._id);
+                        if (fresh) {
+                            yield this.recalculateBalance(fresh);
+                            return fresh;
+                        }
                     }
                     else {
                         throw e;
@@ -590,7 +595,14 @@ class PropertyAccountService {
                 }
                 catch (e) {
                     if (e && (e.code === 11000 || ((e === null || e === void 0 ? void 0 : e.message) || '').includes('E11000'))) {
-                        logger_1.logger.warn('Duplicate owner payout prevented by unique index/idempotency guard');
+                        logger_1.logger.warn('Duplicate owner payout prevented by unique index/idempotency guard; returning fresh persisted state');
+                        const fresh = yield PropertyAccount_1.default.findById(account._id);
+                        if (fresh) {
+                            yield this.recalculateBalance(fresh);
+                            // Try to locate the persisted payout by unique referenceNumber
+                            const persisted = (fresh.ownerPayouts || []).find((op) => op.referenceNumber === referenceNumber);
+                            return { account: fresh, payout: persisted };
+                        }
                     }
                     else {
                         throw e;
@@ -978,8 +990,10 @@ class PropertyAccountService {
                             ? `pid:${pid}`
                             : `free:${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
                         if (!txKeys.has(key)) {
-                            // Push shallow copy without _id to let MongoDB assign a new one
-                            keeper.transactions.push(Object.assign(Object.assign({}, t), { _id: undefined }));
+                            // Push shallow copy and remove _id to let MongoDB assign a new one
+                            const copy = Object.assign({}, t);
+                            delete copy._id;
+                            keeper.transactions.push(copy);
                             txKeys.add(key);
                         }
                     }
@@ -987,7 +1001,9 @@ class PropertyAccountService {
                     for (const p of (dup.ownerPayouts || [])) {
                         const ref = p.referenceNumber || String(p._id || '');
                         if (!payoutKeys.has(ref)) {
-                            keeper.ownerPayouts.push(Object.assign(Object.assign({}, p), { _id: undefined }));
+                            const copy = Object.assign({}, p);
+                            delete copy._id;
+                            keeper.ownerPayouts.push(copy);
                             payoutKeys.set(ref, (keeper.ownerPayouts || []).length - 1);
                         }
                         else {
@@ -1049,7 +1065,11 @@ class PropertyAccountService {
                     const exists = saleAccount.transactions.some(st => st.type === 'income' && st.paymentId && tx.paymentId && st.paymentId.toString() === tx.paymentId.toString());
                     if (exists)
                         continue;
-                    saleAccount.transactions.push(Object.assign(Object.assign({}, tx), { _id: undefined }));
+                    {
+                        const copy = Object.assign({}, tx);
+                        delete copy._id;
+                        saleAccount.transactions.push(copy);
+                    }
                     movedHere++;
                     moved++;
                 }
@@ -1064,6 +1084,174 @@ class PropertyAccountService {
                 }
             }
             return { moved, propertiesAffected };
+        });
+    }
+    /**
+     * Merge a source PropertyAccount into a target PropertyAccount (cross-ledger merge).
+     * Deduplicates transactions by paymentId or derived key, and payouts by referenceNumber.
+     */
+    mergeAccountsCrossLedger(source, target) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let mergedTransactions = 0;
+            let mergedPayouts = 0;
+            // Build uniqueness sets from target
+            const txKeys = new Set();
+            for (const t of (target.transactions || [])) {
+                const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+                const key = pid
+                    ? `pid:${pid}`
+                    : `free:${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+                txKeys.add(key);
+            }
+            const payoutKeys = new Map(); // referenceNumber -> index
+            for (let i = 0; i < (target.ownerPayouts || []).length; i++) {
+                const p = target.ownerPayouts[i];
+                const ref = p.referenceNumber || String(p._id || '');
+                payoutKeys.set(ref, i);
+            }
+            // Merge transactions
+            for (const t of (source.transactions || [])) {
+                const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+                const key = pid
+                    ? `pid:${pid}`
+                    : `free:${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+                if (!txKeys.has(key)) {
+                    const copy = Object.assign({}, t);
+                    delete copy._id;
+                    target.transactions.push(copy);
+                    txKeys.add(key);
+                    mergedTransactions++;
+                }
+            }
+            // Merge payouts (prefer completed or latest updatedAt)
+            for (const p of (source.ownerPayouts || [])) {
+                const ref = p.referenceNumber || String(p._id || '');
+                if (!payoutKeys.has(ref)) {
+                    const copy = Object.assign({}, p);
+                    delete copy._id;
+                    target.ownerPayouts.push(copy);
+                    payoutKeys.set(ref, (target.ownerPayouts || []).length - 1);
+                    mergedPayouts++;
+                }
+                else {
+                    const idx = payoutKeys.get(ref);
+                    const existing = target.ownerPayouts[idx];
+                    const preferNew = (existing.status !== 'completed' && p.status === 'completed') ||
+                        (new Date(p.updatedAt || p.createdAt).getTime() > new Date(existing.updatedAt || existing.createdAt).getTime());
+                    if (preferNew) {
+                        target.ownerPayouts[idx] = Object.assign(Object.assign({}, p), { _id: existing._id });
+                    }
+                }
+            }
+            yield target.save();
+            yield this.recalculateBalance(target);
+            // Bypass Mongoose middleware to delete the source document permanently
+            yield PropertyAccount_1.default.collection.deleteOne({ _id: source._id });
+            return { mergedTransactions, mergedPayouts };
+        });
+    }
+    /**
+     * One-off migration: Normalize legacy ledger types to 'sale' where appropriate.
+     * - For properties with rentalType 'sale', or when the id is a development/development unit.
+     * - Merges into existing sale ledgers if present (cross-ledger), otherwise updates ledgerType.
+     */
+    migrateLegacyLedgerTypesForCompany(companyId, options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const dryRun = Boolean(options === null || options === void 0 ? void 0 : options.dryRun);
+            const details = [];
+            let examined = 0;
+            let updated = 0;
+            let merged = 0;
+            let skipped = 0;
+            let errors = 0;
+            try {
+                // Discover all property-like ids scoped by company when provided
+                let propertyFilter = {};
+                let developmentFilter = {};
+                if (companyId) {
+                    propertyFilter.companyId = companyId;
+                    developmentFilter.companyId = companyId;
+                }
+                const [properties, developments] = yield Promise.all([
+                    Property_1.Property.find(propertyFilter).select('_id rentalType').lean(),
+                    Development_1.Development.find(developmentFilter).select('_id').lean()
+                ]);
+                const propertyIds = properties.map(p => String(p._id));
+                const developmentIds = developments.map(d => String(d._id));
+                let unitIds = [];
+                if (developmentIds.length > 0) {
+                    try {
+                        const units = yield DevelopmentUnit_1.DevelopmentUnit.find({ developmentId: { $in: developmentIds } }).select('_id').lean();
+                        unitIds = units.map(u => String(u._id));
+                    }
+                    catch (_a) {
+                        // ignore unit lookup failures
+                    }
+                }
+                const salePropertyIdSet = new Set(properties
+                    .filter((p) => String((p === null || p === void 0 ? void 0 : p.rentalType) || '').toLowerCase() === 'sale')
+                    .map((p) => String(p._id)));
+                const developmentIdSet = new Set(developmentIds);
+                const unitIdSet = new Set(unitIds);
+                const allIdsSet = new Set([...propertyIds, ...developmentIds, ...unitIds]);
+                // Query candidate legacy accounts: missing ledgerType or 'rental'
+                const candidates = yield PropertyAccount_1.default.find({
+                    propertyId: { $in: Array.from(allIdsSet).map(id => new mongoose_1.default.Types.ObjectId(id)) },
+                    $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }, { ledgerType: 'rental' }]
+                });
+                for (const acc of candidates) {
+                    examined++;
+                    const pid = String(acc.propertyId);
+                    const shouldBeSale = salePropertyIdSet.has(pid) || developmentIdSet.has(pid) || unitIdSet.has(pid);
+                    if (!shouldBeSale) {
+                        skipped++;
+                        details.push({ propertyId: pid, action: 'skipped', reason: 'Not a sale/development entity' });
+                        continue;
+                    }
+                    if (acc.ledgerType === 'sale') {
+                        skipped++;
+                        details.push({ propertyId: pid, action: 'skipped', reason: 'Already sale ledger' });
+                        continue;
+                    }
+                    try {
+                        // If a sale ledger already exists for this property, merge into it; else update this one to sale
+                        const existingSale = yield PropertyAccount_1.default.findOne({ propertyId: acc.propertyId, ledgerType: 'sale' });
+                        if (existingSale && String(existingSale._id) !== String(acc._id)) {
+                            if (dryRun) {
+                                merged++;
+                                details.push({ propertyId: pid, action: 'merged', reason: 'Would merge into existing sale ledger (dry-run)' });
+                            }
+                            else {
+                                yield this.mergeAccountsCrossLedger(acc, existingSale);
+                                merged++;
+                                details.push({ propertyId: pid, action: 'merged' });
+                            }
+                            continue;
+                        }
+                        // No existing sale ledger: flip ledgerType to 'sale'
+                        if (dryRun) {
+                            updated++;
+                            details.push({ propertyId: pid, action: 'updated', reason: 'Would set ledgerType to sale (dry-run)' });
+                        }
+                        else {
+                            acc.ledgerType = 'sale';
+                            yield acc.save();
+                            yield this.recalculateBalance(acc);
+                            updated++;
+                            details.push({ propertyId: pid, action: 'updated' });
+                        }
+                    }
+                    catch (e) {
+                        errors++;
+                        details.push({ propertyId: String(acc.propertyId), action: 'error', reason: (e === null || e === void 0 ? void 0 : e.message) || 'unknown' });
+                    }
+                }
+            }
+            catch (outer) {
+                errors++;
+                details.push({ propertyId: '', action: 'error', reason: (outer === null || outer === void 0 ? void 0 : outer.message) || 'migration failed' });
+            }
+            return { examined, updated, merged, skipped, errors, details };
         });
     }
 }

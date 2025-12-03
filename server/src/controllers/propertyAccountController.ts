@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import { Property } from '../models/Property';
+import { Development } from '../models/Development';
+import { DevelopmentUnit } from '../models/DevelopmentUnit';
+import PropertyAccount from '../models/PropertyAccount';
 import { Payment } from '../models/Payment';
 import { User } from '../models/User';
 import propertyAccountService from '../services/propertyAccountService';
@@ -48,6 +51,22 @@ export const getPropertyAccount = async (req: Request, res: Response) => {
 };
 
 /**
+ * One-off migration to normalize legacy ledger types to 'sale' where applicable.
+ */
+export const migrateLegacyLedgerTypes = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId ? String(req.user.companyId) : undefined;
+    const dryRunFlag = String(req.body?.dryRun ?? req.query?.dryRun ?? '').toLowerCase();
+    const dryRun = dryRunFlag === '1' || dryRunFlag === 'true' || dryRunFlag === 'yes';
+    const result = await (propertyAccountService as any).migrateLegacyLedgerTypesForCompany(companyId, { dryRun });
+    return res.json({ success: true, data: result, dryRun });
+  } catch (error) {
+    logger.error('Error in migrateLegacyLedgerTypes:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+/**
  * Get all property accounts for company
  */
 export const getCompanyPropertyAccounts = async (req: Request, res: Response) => {
@@ -56,6 +75,96 @@ export const getCompanyPropertyAccounts = async (req: Request, res: Response) =>
       return res.status(400).json({ message: 'Company ID is required' });
     }
 
+    // Fast, lightweight listing mode for UI lists:
+    // Accepts ?summary=1&search=...&page=1&limit=24&ledger=rental|sale
+    const summaryFlag = String(req.query.summary || '').toLowerCase();
+    const isSummary = summaryFlag === '1' || summaryFlag === 'true' || summaryFlag === 'yes';
+    if (isSummary) {
+      const rawPage = Number(req.query.page || 1);
+      const rawLimit = Number(req.query.limit || 24);
+      const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+      const limitBase = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 24;
+      const limit = Math.min(Math.max(limitBase, 1), 100); // clamp 1..100
+      const search = String(req.query.search || '').trim();
+      const ledger = (String(req.query.ledger || '').toLowerCase() === 'sale') ? 'sale' : (String(req.query.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined);
+
+      // Resolve all property-like IDs (properties, developments, units) for this company
+      const [properties, developments] = await Promise.all([
+        Property.find({ companyId: req.user.companyId }).select('_id rentalType').lean(),
+        Development.find({ companyId: req.user.companyId }).select('_id').lean()
+      ]);
+      const propertyIds = properties.map(p => p._id);
+      const developmentIds = developments.map(d => d._id);
+      const salePropertyIdSet = new Set<string>(
+        properties
+          .filter((p: any) => String((p as any)?.rentalType || '').toLowerCase() === 'sale')
+          .map((p: any) => String(p._id))
+      );
+      let unitIds: any[] = [];
+      if (developmentIds.length > 0) {
+        try {
+          const units = await DevelopmentUnit.find({ developmentId: { $in: developmentIds } }).select('_id').lean();
+          unitIds = units.map(u => u._id);
+        } catch {
+          // ignore unit lookup errors in summary path
+        }
+      }
+      const allIds = [...propertyIds, ...developmentIds, ...unitIds];
+      const developmentIdSet = new Set<string>(developmentIds.map((d: any) => String(d)));
+      const unitIdSet = new Set<string>(unitIds.map((u: any) => String(u)));
+
+      const query: Record<string, any> = {
+        ...(allIds.length > 0 ? { propertyId: { $in: allIds } } : { _id: null }) // empty result if no ids
+      };
+      if (ledger) query.ledgerType = ledger;
+      if (search) {
+        const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        query.$or = [
+          { propertyName: { $regex: regex } },
+          { propertyAddress: { $regex: regex } },
+          { ownerName: { $regex: regex } }
+        ];
+      }
+
+      // Fetch one extra record to compute hasMore without a separate count()
+      const pageSkip = (page - 1) * limit;
+      const rows = await PropertyAccount.find(query)
+        .select('propertyId ledgerType propertyName propertyAddress ownerId ownerName runningBalance totalIncome totalExpenses totalOwnerPayouts lastUpdated createdAt updatedAt')
+        .sort({ lastUpdated: -1 })
+        .skip(pageSkip)
+        .limit(limit + 1)
+        .lean();
+
+      const hasMore = rows.length > limit;
+      const itemsRaw = hasMore ? rows.slice(0, limit) : rows;
+      // Normalize/mend ledger type for legacy records:
+      // - If ledgerType is missing or 'rental' but the source entity implies sale, mark as 'sale' for response
+      const items = (itemsRaw as any[]).map((it: any) => {
+        const pid = String((it as any)?.propertyId || '');
+        let ledger = String((it as any)?.ledgerType || '').toLowerCase();
+        const looksLikeSale =
+          salePropertyIdSet.has(pid) ||
+          developmentIdSet.has(pid) ||
+          unitIdSet.has(pid);
+        if ((!ledger || ledger === 'rental') && looksLikeSale) {
+          ledger = 'sale';
+        }
+        return { ...it, ledgerType: ledger || (looksLikeSale ? 'sale' : (it as any)?.ledgerType) };
+      });
+
+      return res.json({
+        success: true,
+        data: items,
+        meta: {
+          page,
+          limit,
+          hasMore,
+          nextPage: hasMore ? page + 1 : null
+        }
+      });
+    }
+
+    // Full payload mode (backward compatible; includes transactions/payouts and performs maintenance)
     const accounts = await propertyAccountService.getCompanyPropertyAccounts(req.user.companyId);
     
     res.json({

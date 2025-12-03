@@ -8,8 +8,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteSalesOwner = exports.updateSalesOwner = exports.getSalesOwnerById = exports.getSalesOwners = exports.createSalesOwner = void 0;
+exports.getSalesOwnerByPropertyId = exports.deleteSalesOwner = exports.updateSalesOwner = exports.getSalesOwnerById = exports.getSalesOwners = exports.createSalesOwner = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const SalesOwner_1 = require("../models/SalesOwner");
 const createSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -166,3 +170,36 @@ const deleteSalesOwner = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.deleteSalesOwner = deleteSalesOwner;
+/**
+ * Find a sales owner by property membership (non-development sale properties).
+ * Matches the provided propertyId against the SalesOwner.properties array.
+ */
+const getSalesOwnerByPropertyId = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Company ID not found' });
+        }
+        const { propertyId } = req.params;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        const pid = new mongoose_1.default.Types.ObjectId(propertyId);
+        const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
+        const filter = { companyId: req.user.companyId, properties: pid };
+        // Sales agents can only view owners they created
+        if (!role || String(role).toLowerCase() === 'sales') {
+            filter.creatorId = req.user.userId;
+        }
+        const owner = yield SalesOwner_1.SalesOwner.findOne(filter).select('-password');
+        if (!owner) {
+            return res.status(404).json({ message: 'Sales owner not found for this property' });
+        }
+        res.json(owner);
+    }
+    catch (error) {
+        console.error('Error fetching sales owner by propertyId:', error);
+        res.status(500).json({ message: 'Error fetching sales owner by propertyId' });
+    }
+});
+exports.getSalesOwnerByPropertyId = getSalesOwnerByPropertyId;

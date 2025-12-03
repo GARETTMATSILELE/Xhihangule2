@@ -96,6 +96,17 @@ export const usePropertyOwnerService = () => {
     }
   };
 
+  // Fetch sales owner by property membership (matches propertyId in sales owners' properties array)
+  const getSalesByPropertyId = async (propertyId: string) => {
+    try {
+      const response = await api.get(`/sales-owners/by-property/${propertyId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error fetching sales owner by property:', error);
+      throw new Error('Failed to fetch sales owner by property');
+    }
+  };
+
   const create = async (ownerData: CreatePropertyOwnerData, opts?: { channel?: 'sales' | 'default' }) => {
     try {
       const companyId = getCompanyId();
@@ -173,6 +184,7 @@ export const usePropertyOwnerService = () => {
     getById,
     getByPropertyId,
     getSalesById,
+    getSalesByPropertyId,
     create,
     update,
     remove,

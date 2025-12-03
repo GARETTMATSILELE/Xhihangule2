@@ -79,7 +79,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const location = useLocation();
   const { user, company } = useAuth();
   const { getProperty } = usePropertyService();
-  const { getSalesById, getByPropertyId } = usePropertyOwnerService();
+  const { getSalesById, getByPropertyId, getSalesByPropertyId } = usePropertyOwnerService();
   
   // State
   const [property, setProperty] = useState<any>(null);
@@ -182,28 +182,47 @@ const PropertyAccountDetailPage: React.FC = () => {
           setProperty(fallback);
         }
 
-        // Resolve owner name via property-management propertyowners cross-reference
+        // Resolve owner name:
+        // - For non-development sale properties: prefer SalesOwner matched by properties array
+        // - Otherwise: use property-owners cross-reference
         const map: Record<string, string> = {};
         if (found) {
-          try {
-            const owner = await getByPropertyId(propertyId, (company as any)?.id || (company as any)?._id);
-            if (owner && (owner.firstName || owner.lastName)) {
-              map[String((found as any)._id)] = `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
+          const key = String((found as any)._id);
+          let resolved = false;
+          if (inferredLedger === 'sale') {
+            try {
+              const salesOwner = await getSalesByPropertyId(propertyId);
+              if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
+                map[key] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+                resolved = true;
+              }
+            } catch {
+              // proceed to fallback
             }
-          } catch (e) {
-            // Fallback for sales ledger: try sales-owners by property.propertyOwnerId
-            if (inferredLedger === 'sale') {
-              try {
-                const raw = (found as any).propertyOwnerId;
-                const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
-                if (ownerId) {
-                  const salesOwner = await getSalesById(ownerId);
-                  if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
-                    map[String((found as any)._id)] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+          }
+          if (!resolved) {
+            try {
+              const owner = await getByPropertyId(propertyId, (company as any)?.id || (company as any)?._id);
+              if (owner && (owner.firstName || owner.lastName)) {
+                map[key] = `${owner.firstName || ''} ${owner.lastName || ''}`.trim();
+                resolved = true;
+              }
+            } catch {
+              // Fallback for historical sales: try sales-owners by propertyOwnerId
+              if (inferredLedger === 'sale') {
+                try {
+                  const raw = (found as any).propertyOwnerId;
+                  const ownerId = typeof raw === 'object' && raw && (raw as any).$oid ? (raw as any).$oid : (raw ? String(raw) : '');
+                  if (ownerId) {
+                    const salesOwner = await getSalesById(ownerId);
+                    if (salesOwner && (salesOwner.firstName || salesOwner.lastName)) {
+                      map[key] = `${salesOwner.firstName || ''} ${salesOwner.lastName || ''}`.trim();
+                      resolved = true;
+                    }
                   }
+                } catch {
+                  // ignore; UI will fall back to account.ownerName
                 }
-              } catch {
-                // ignore; UI will fall back to account.ownerName
               }
             }
           }

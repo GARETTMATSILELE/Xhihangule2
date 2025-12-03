@@ -12,8 +12,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.getPropertyAccount = void 0;
+exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
 const Property_1 = require("../models/Property");
+const Development_1 = require("../models/Development");
+const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
+const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
@@ -54,6 +57,24 @@ const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, funct
 });
 exports.getPropertyAccount = getPropertyAccount;
 /**
+ * One-off migration to normalize legacy ledger types to 'sale' where applicable.
+ */
+const migrateLegacyLedgerTypes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : undefined;
+        const dryRunFlag = String((_e = (_c = (_b = req.body) === null || _b === void 0 ? void 0 : _b.dryRun) !== null && _c !== void 0 ? _c : (_d = req.query) === null || _d === void 0 ? void 0 : _d.dryRun) !== null && _e !== void 0 ? _e : '').toLowerCase();
+        const dryRun = dryRunFlag === '1' || dryRunFlag === 'true' || dryRunFlag === 'yes';
+        const result = yield propertyAccountService_1.default.migrateLegacyLedgerTypesForCompany(companyId, { dryRun });
+        return res.json({ success: true, data: result, dryRun });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in migrateLegacyLedgerTypes:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+exports.migrateLegacyLedgerTypes = migrateLegacyLedgerTypes;
+/**
  * Get all property accounts for company
  */
 const getCompanyPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -62,6 +83,88 @@ const getCompanyPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             return res.status(400).json({ message: 'Company ID is required' });
         }
+        // Fast, lightweight listing mode for UI lists:
+        // Accepts ?summary=1&search=...&page=1&limit=24&ledger=rental|sale
+        const summaryFlag = String(req.query.summary || '').toLowerCase();
+        const isSummary = summaryFlag === '1' || summaryFlag === 'true' || summaryFlag === 'yes';
+        if (isSummary) {
+            const rawPage = Number(req.query.page || 1);
+            const rawLimit = Number(req.query.limit || 24);
+            const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+            const limitBase = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 24;
+            const limit = Math.min(Math.max(limitBase, 1), 100); // clamp 1..100
+            const search = String(req.query.search || '').trim();
+            const ledger = (String(req.query.ledger || '').toLowerCase() === 'sale') ? 'sale' : (String(req.query.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined);
+            // Resolve all property-like IDs (properties, developments, units) for this company
+            const [properties, developments] = yield Promise.all([
+                Property_1.Property.find({ companyId: req.user.companyId }).select('_id rentalType').lean(),
+                Development_1.Development.find({ companyId: req.user.companyId }).select('_id').lean()
+            ]);
+            const propertyIds = properties.map(p => p._id);
+            const developmentIds = developments.map(d => d._id);
+            const salePropertyIdSet = new Set(properties
+                .filter((p) => String((p === null || p === void 0 ? void 0 : p.rentalType) || '').toLowerCase() === 'sale')
+                .map((p) => String(p._id)));
+            let unitIds = [];
+            if (developmentIds.length > 0) {
+                try {
+                    const units = yield DevelopmentUnit_1.DevelopmentUnit.find({ developmentId: { $in: developmentIds } }).select('_id').lean();
+                    unitIds = units.map(u => u._id);
+                }
+                catch (_b) {
+                    // ignore unit lookup errors in summary path
+                }
+            }
+            const allIds = [...propertyIds, ...developmentIds, ...unitIds];
+            const developmentIdSet = new Set(developmentIds.map((d) => String(d)));
+            const unitIdSet = new Set(unitIds.map((u) => String(u)));
+            const query = Object.assign({}, (allIds.length > 0 ? { propertyId: { $in: allIds } } : { _id: null }) // empty result if no ids
+            );
+            if (ledger)
+                query.ledgerType = ledger;
+            if (search) {
+                const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+                query.$or = [
+                    { propertyName: { $regex: regex } },
+                    { propertyAddress: { $regex: regex } },
+                    { ownerName: { $regex: regex } }
+                ];
+            }
+            // Fetch one extra record to compute hasMore without a separate count()
+            const pageSkip = (page - 1) * limit;
+            const rows = yield PropertyAccount_1.default.find(query)
+                .select('propertyId ledgerType propertyName propertyAddress ownerId ownerName runningBalance totalIncome totalExpenses totalOwnerPayouts lastUpdated createdAt updatedAt')
+                .sort({ lastUpdated: -1 })
+                .skip(pageSkip)
+                .limit(limit + 1)
+                .lean();
+            const hasMore = rows.length > limit;
+            const itemsRaw = hasMore ? rows.slice(0, limit) : rows;
+            // Normalize/mend ledger type for legacy records:
+            // - If ledgerType is missing or 'rental' but the source entity implies sale, mark as 'sale' for response
+            const items = itemsRaw.map((it) => {
+                const pid = String((it === null || it === void 0 ? void 0 : it.propertyId) || '');
+                let ledger = String((it === null || it === void 0 ? void 0 : it.ledgerType) || '').toLowerCase();
+                const looksLikeSale = salePropertyIdSet.has(pid) ||
+                    developmentIdSet.has(pid) ||
+                    unitIdSet.has(pid);
+                if ((!ledger || ledger === 'rental') && looksLikeSale) {
+                    ledger = 'sale';
+                }
+                return Object.assign(Object.assign({}, it), { ledgerType: ledger || (looksLikeSale ? 'sale' : it === null || it === void 0 ? void 0 : it.ledgerType) });
+            });
+            return res.json({
+                success: true,
+                data: items,
+                meta: {
+                    page,
+                    limit,
+                    hasMore,
+                    nextPage: hasMore ? page + 1 : null
+                }
+            });
+        }
+        // Full payload mode (backward compatible; includes transactions/payouts and performs maintenance)
         const accounts = yield propertyAccountService_1.default.getCompanyPropertyAccounts(req.user.companyId);
         res.json({
             success: true,

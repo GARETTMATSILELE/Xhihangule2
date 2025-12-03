@@ -33,7 +33,8 @@ import {
   getAcknowledgementDocument,
   reconcilePropertyDuplicates,
   getCompanyPropertyAccounts,
-  ensureDevelopmentLedgers
+  ensureDevelopmentLedgers,
+  migrateLegacyLedgerTypes
 } from '../controllers/propertyAccountController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
 import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
@@ -156,6 +157,7 @@ router.post('/payments/finalize-bulk', canManagePayments, async (req: Request, r
 
 // Property Account routes - allow admin and accountant
 router.get('/property-accounts', canViewCommissions, getCompanyPropertyAccounts);
+router.post('/property-accounts/migrate-legacy-ledgers', canViewCommissions, migrateLegacyLedgerTypes);
 router.get('/property-accounts/:propertyId', canViewCommissions, (req, res) => {
   console.log('Property account detail route hit:', req.params.propertyId);
   console.log('User role:', req.user?.role);

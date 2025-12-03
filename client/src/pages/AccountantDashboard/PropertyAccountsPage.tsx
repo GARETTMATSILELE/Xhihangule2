@@ -8,16 +8,21 @@ const PropertyAccountsPage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<PropertyAccount[]>([]);
+  const [page, setPage] = useState<number>(1);
+  const [hasMore, setHasMore] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
-  const loadAccounts = async () => {
+  const loadFirstPage = async (q: string) => {
     try {
       setLoading(true);
       setError(null);
-      const list = await propertyAccountService.getCompanyPropertyAccounts();
-      setAccounts(Array.isArray(list) ? list : []);
+      const { items, hasMore, nextPage } = await propertyAccountService.getCompanyPropertyAccountsPaged({ page: 1, limit: 24, search: q });
+      setAccounts(items);
+      setHasMore(Boolean(hasMore));
+      setPage(nextPage || 2);
     } catch (err: any) {
       console.error('Error fetching property accounts:', err);
       setError(err?.response?.data?.message || err?.message || 'Failed to load property accounts');
@@ -26,9 +31,31 @@ const PropertyAccountsPage: React.FC = () => {
     }
   };
 
+  const loadMore = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { items, hasMore, nextPage } = await propertyAccountService.getCompanyPropertyAccountsPaged({ page, limit: 24, search: debouncedSearch });
+      setAccounts(prev => [...prev, ...items]);
+      setHasMore(Boolean(hasMore));
+      setPage(nextPage || (page + 1));
+    } catch (err: any) {
+      console.error('Error loading more property accounts:', err);
+      setError(err?.response?.data?.message || err?.message || 'Failed to load property accounts');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    loadAccounts();
-  }, []);
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    loadFirstPage(debouncedSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
 
   const uniqueAccounts = useMemo(() => {
     const seen = new Set<string>();
@@ -70,7 +97,7 @@ const PropertyAccountsPage: React.FC = () => {
     return (
       <Box sx={{ p: 2 }}>
         <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
-        <Button variant="outlined" onClick={loadAccounts}>Retry</Button>
+        <Button variant="outlined" onClick={() => loadFirstPage(debouncedSearch)}>Retry</Button>
       </Box>
     );
   }
@@ -101,7 +128,7 @@ const PropertyAccountsPage: React.FC = () => {
                 try {
                   setLoading(true);
                   await propertyAccountService.syncPropertyAccounts();
-                  await loadAccounts();
+                  await loadFirstPage(debouncedSearch);
                 } finally {
                   setLoading(false);
                 }
@@ -133,6 +160,15 @@ const PropertyAccountsPage: React.FC = () => {
             </Card>
           </Grid>
         ))}
+        {hasMore && (
+          <Grid item xs={12}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+              <Button variant="outlined" disabled={loading} onClick={loadMore}>
+                {loading ? 'Loading…' : 'Load more'}
+              </Button>
+            </Box>
+          </Grid>
+        )}
       </Grid>
     </Box>
   );

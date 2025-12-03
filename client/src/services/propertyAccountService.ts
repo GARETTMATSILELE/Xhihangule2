@@ -120,6 +120,45 @@ class PropertyAccountService {
   }
 
   /**
+   * Get paged property accounts for lightweight listing (summary only)
+   */
+  async getCompanyPropertyAccountsPaged(params?: { page?: number; limit?: number; search?: string; ledger?: 'rental' | 'sale' }): Promise<{
+    items: PropertyAccount[];
+    page: number;
+    limit: number;
+    hasMore: boolean;
+    nextPage: number | null;
+  }> {
+    const page = params?.page ?? 1;
+    const limit = params?.limit ?? 24;
+    const search = params?.search ?? '';
+    const ledger = params?.ledger;
+    try {
+      const response = await api.get('/accountants/property-accounts', {
+        params: {
+          summary: 1,
+          page,
+          limit,
+          search: search || undefined,
+          ledger: ledger || undefined
+        }
+      });
+      const items: PropertyAccount[] = Array.isArray(response.data?.data) ? response.data.data : [];
+      const meta = (response.data?.meta || {}) as { page?: number; limit?: number; hasMore?: boolean; nextPage?: number | null };
+      return {
+        items,
+        page: Number(meta.page ?? page),
+        limit: Number(meta.limit ?? limit),
+        hasMore: Boolean(meta.hasMore),
+        nextPage: (typeof meta.nextPage === 'number') ? meta.nextPage : (items.length === limit ? page + 1 : null)
+      };
+    } catch (error) {
+      console.error('Error fetching paged property accounts:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get property account by ID
    */
   async getPropertyAccount(propertyId: string, ledger?: 'rental' | 'sale'): Promise<PropertyAccount> {

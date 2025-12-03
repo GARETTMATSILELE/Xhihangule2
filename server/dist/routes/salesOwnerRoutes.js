@@ -9,6 +9,7 @@ const salesOwnerController_1 = require("../controllers/salesOwnerController");
 const router = express_1.default.Router();
 router.post('/', auth_1.authWithCompany, salesOwnerController_1.createSalesOwner);
 router.get('/', auth_1.authWithCompany, salesOwnerController_1.getSalesOwners);
+router.get('/by-property/:propertyId', auth_1.authWithCompany, salesOwnerController_1.getSalesOwnerByPropertyId);
 router.get('/:id', auth_1.authWithCompany, salesOwnerController_1.getSalesOwnerById);
 router.patch('/:id', auth_1.authWithCompany, salesOwnerController_1.updateSalesOwner);
 // Accept PUT for clients that use PUT semantics for updates
