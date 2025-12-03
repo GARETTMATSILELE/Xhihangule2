@@ -22,12 +22,11 @@ declare global {
 // Basic auth middleware that doesn't require companyId
 export const auth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    // Get token from Authorization header or cookie
-    const token = req.headers.authorization?.split(' ')[1] || req.cookies?.token;
+    // Get token from Authorization header (no cookie fallback)
+    const token = req.headers.authorization?.split(' ')[1];
 
     console.log('Auth middleware check:', {
       hasAuthHeader: !!req.headers.authorization,
-      hasCookie: !!req.cookies?.token,
       hasToken: !!token,
       url: req.url
     });
@@ -95,8 +94,8 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
 // PropertyOwner-specific auth middleware
 export const propertyOwnerAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    // Get token from Authorization header or cookie
-    const token = req.headers.authorization?.split(' ')[1] || req.cookies?.token;
+    // Get token from Authorization header (no cookie fallback)
+    const token = req.headers.authorization?.split(' ')[1];
 
     if (!token) {
       return res.status(401).json({ 
@@ -165,8 +164,8 @@ export const propertyOwnerAuth = async (req: AuthRequest, res: Response, next: N
 // Auth middleware that requires companyId
 export const authWithCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    // Get token from Authorization header or cookie
-    const token = req.headers.authorization?.split(' ')[1] || req.cookies?.token;
+    // Get token from Authorization header (no cookie fallback)
+    const token = req.headers.authorization?.split(' ')[1];
 
     if (!token) {
       return res.status(401).json({ 

@@ -89,10 +89,14 @@ app.use(cookieParser());
 // Log all requests in development
 if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
+    const redactedHeaders = {
+      ...req.headers,
+      authorization: req.headers.authorization ? '[redacted]' : undefined,
+      cookie: req.headers.cookie ? '[redacted]' : undefined
+    };
     console.log(`${req.method} ${req.path}`, {
       origin: req.headers.origin,
-      headers: req.headers,
-      cookies: req.cookies
+      headers: redactedHeaders
     });
     next();
   });

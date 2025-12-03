@@ -18,7 +18,7 @@ const indexes_1 = require("../models/indexes");
 const LOCAL_MAIN_URI = 'mongodb://localhost:27017/property-management';
 const LOCAL_ACCOUNTING_URI = 'mongodb://localhost:27017/accounting';
 const getEffectiveUri = (envValue, localFallback) => {
-    // In production, use the provided env var if present, otherwise fallback
+    // In production, prefer env value; otherwise safely fall back to local (server startup will fail fast in index.ts)
     if (process.env.NODE_ENV === 'production') {
         return envValue && envValue.trim() ? envValue : localFallback;
     }
@@ -125,6 +125,9 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
         }
         // Migrate accounting PropertyAccount ownerPayouts.referenceNumber unique index to compound index
         try {
+            // Initialize secondary/accounting connection lazily
+            // Ensure accounting connection is established (createConnection is sync; .asPromise ensures ready)
+            yield exports.accountingConnection.asPromise();
             // Ensure accounting collection exists to avoid NamespaceNotFound (26)
             try {
                 yield exports.accountingConnection.db.createCollection('propertyaccounts');
@@ -278,10 +281,10 @@ const isDatabaseAvailable = () => {
 exports.isDatabaseAvailable = isDatabaseAvailable;
 const getAccountingDatabaseHealth = () => {
     return {
-        isConnected: exports.accountingConnection.readyState === 1,
-        dbName: exports.accountingConnection.name,
-        host: exports.accountingConnection.host,
-        port: exports.accountingConnection.port
+        isConnected: exports.accountingConnection ? exports.accountingConnection.readyState === 1 : false,
+        dbName: exports.accountingConnection ? exports.accountingConnection.name : undefined,
+        host: exports.accountingConnection ? exports.accountingConnection.host : undefined,
+        port: exports.accountingConnection ? exports.accountingConnection.port : undefined
     };
 };
 exports.getAccountingDatabaseHealth = getAccountingDatabaseHealth;

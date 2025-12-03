@@ -647,6 +647,20 @@ const ReportsPage: React.FC = () => {
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [payments]);
 
+  // Minimal HTML escaping for print templates
+  const escapeHtml = (value: any): string => {
+    try {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    } catch {
+      return '';
+    }
+  };
+
   function printTenantStatement(s: TenantPartyStatement) {
     try {
       const html = `<!doctype html>
@@ -654,7 +668,7 @@ const ReportsPage: React.FC = () => {
           <head>
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <title>Tenant Statement — ${s.name}</title>
+            <title>Tenant Statement — ${escapeHtml(s.name)}</title>
             <style>
               body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 24px; color: #0f172a; }
               h1 { font-size: 18px; margin: 0 0 12px; }
@@ -668,9 +682,9 @@ const ReportsPage: React.FC = () => {
           </head>
           <body>
             <h1>Tenant Payment Statement</h1>
-            <div class="muted">Tenant: ${s.name}</div>
+            <div class="muted">Tenant: ${escapeHtml(s.name)}</div>
             ${s.properties.map(prop => `
-              <h2 style="font-size:14px;margin-top:18px;margin-bottom:4px;">Property: ${prop.propertyName}</h2>
+              <h2 style="font-size:14px;margin-top:18px;margin-bottom:4px;">Property: ${escapeHtml(prop.propertyName)}</h2>
               <table>
                 <thead>
                   <tr><th>Period</th><th class="right">Expected</th><th class="right">Paid</th><th class="right">Outstanding</th></tr>
@@ -685,7 +699,7 @@ const ReportsPage: React.FC = () => {
                   <tr><th>Date</th><th>Reference</th><th class="right">Amount</th></tr>
                 </thead>
                 <tbody>
-                  ${prop.months.flatMap(m => m.rows).map(r => `<tr><td>${r.date}</td><td>${(r.reference || '').toString()}</td><td class="right">${currency(r.amount || 0)}</td></tr>`).join('')}
+                  ${prop.months.flatMap(m => m.rows).map(r => `<tr><td>${r.date}</td><td>${escapeHtml((r.reference || '').toString())}</td><td class="right">${currency(r.amount || 0)}</td></tr>`).join('')}
                 </tbody>
               </table>
             `).join('')}
@@ -730,7 +744,7 @@ const ReportsPage: React.FC = () => {
           <head>
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <title>Buyer Statement — ${s.name}</title>
+            <title>Buyer Statement — ${escapeHtml(s.name)}</title>
             <style>
               body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 24px; color: #0f172a; }
               h1 { font-size: 18px; margin: 0 0 12px; }

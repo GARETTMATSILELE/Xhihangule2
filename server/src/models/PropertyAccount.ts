@@ -14,6 +14,7 @@ export interface Transaction {
   amount: number;
   date: Date;
   paymentId?: Types.ObjectId;
+  idempotencyKey?: string;
   description: string;
   category?: string;
   recipientId?: Types.ObjectId | string;
@@ -33,6 +34,7 @@ export interface OwnerPayout {
   date: Date;
   paymentMethod: 'bank_transfer' | 'cash' | 'mobile_money' | 'check';
   referenceNumber: string;
+  idempotencyKey?: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled';
   processedBy: Types.ObjectId;
   recipientId: Types.ObjectId;
@@ -88,6 +90,9 @@ const TransactionSchema = new Schema<Transaction>({
   paymentId: { 
     type: Schema.Types.ObjectId, 
     ref: 'Payment' 
+  },
+  idempotencyKey: {
+    type: String
   },
   description: { 
     type: String, 
@@ -151,6 +156,9 @@ const OwnerPayoutSchema = new Schema<OwnerPayout>({
     type: String, 
     required: true,
     // uniqueness is enforced via a compound index on the parent schema
+  },
+  idempotencyKey: {
+    type: String
   },
   status: { 
     type: String, 
@@ -267,6 +275,27 @@ PropertyAccountSchema.index(
 PropertyAccountSchema.index(
   { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
   { unique: true, sparse: true }
+);
+// Optional idempotency unique guards for transactions and payouts when a key is provided
+PropertyAccountSchema.index(
+  { propertyId: 1, ledgerType: 1, 'transactions.idempotencyKey': 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+      'transactions.idempotencyKey': { $exists: true, $type: 'string' }
+    }
+  }
+);
+PropertyAccountSchema.index(
+  { propertyId: 1, ledgerType: 1, 'ownerPayouts.idempotencyKey': 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+      'ownerPayouts.idempotencyKey': { $exists: true, $type: 'string' }
+    }
+  }
 );
 
 // Guard helper to detect illegal update operators/paths that would mutate history

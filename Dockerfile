@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------- Base with system deps (for puppeteer/chromium etc.) ----------
-FROM node:18-bullseye AS base
+FROM node:20-bullseye AS base
 
 # Install fonts and chromium for puppeteer compatibility
 RUN apt-get update \
@@ -38,7 +38,7 @@ COPY server/ ./
 RUN npm run build
 
 # ---------- Production runtime ----------
-FROM node:18-bullseye-slim AS runtime
+FROM node:20-bullseye-slim AS runtime
 
 # Install chromium and minimal deps for runtime puppeteer usage
 RUN apt-get update \
@@ -70,5 +70,9 @@ COPY --from=build-server /app/server/dist ./server/dist
 COPY --from=build-client /app/client/build ./server/dist/public
 
 EXPOSE 8080
+
+# Run as non-root user
+RUN chown -R node:node /app
+USER node
 
 CMD ["node", "server/dist/index.js"]

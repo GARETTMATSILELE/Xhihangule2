@@ -130,7 +130,7 @@ exports.getPropertyTransactions = getPropertyTransactions;
  * Add expense to property account
  */
 const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const { propertyId } = req.params;
         const { amount, date, description, category, recipientId, recipientType, notes } = req.body;
@@ -146,6 +146,7 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
+        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
         const expenseData = {
             amount: Number(amount),
             date: date ? new Date(date) : new Date(),
@@ -154,7 +155,8 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             recipientId,
             recipientType,
             processedBy: req.user.userId,
-            notes
+            notes,
+            idempotencyKey
         };
         const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData);
         res.json({
@@ -182,7 +184,7 @@ exports.addExpense = addExpense;
  * Create owner payout
  */
 const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const { propertyId } = req.params;
         const { amount, paymentMethod, recipientId, recipientName, recipientBankDetails, notes } = req.body;
@@ -223,6 +225,7 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!finalRecipientName) {
             return res.status(400).json({ message: 'Recipient name is required' });
         }
+        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
         const payoutData = {
             amount: Number(amount),
             paymentMethod,
@@ -230,7 +233,8 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
             recipientName: finalRecipientName,
             recipientBankDetails,
             processedBy: req.user.userId,
-            notes
+            notes,
+            idempotencyKey
         };
         const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData);
         res.json({

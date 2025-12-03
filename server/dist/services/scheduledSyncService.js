@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -17,6 +50,9 @@ const cron_1 = require("cron");
 const databaseSyncService_1 = __importDefault(require("./databaseSyncService"));
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const logger_1 = require("../utils/logger");
+const Payment_1 = require("../models/Payment");
+const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
+const propertyAccountService_1 = __importStar(require("./propertyAccountService"));
 class ScheduledSyncService {
     constructor() {
         this.syncJobs = new Map();
@@ -48,6 +84,15 @@ class ScheduledSyncService {
             name: 'hourly_sync',
             cronExpression: '0 * * * *',
             description: 'Hourly synchronization of payments and properties',
+            enabled: true,
+            runCount: 0,
+            averageDuration: 0
+        });
+        // Frequent ledger reconciliation (keep small and cheap)
+        this.addSyncSchedule({
+            name: 'ledger_reconciliation',
+            cronExpression: '*/5 * * * *',
+            description: 'Re-post recent payments and dedupe property ledgers',
             enabled: true,
             runCount: 0,
             averageDuration: 0
@@ -177,6 +222,9 @@ class ScheduledSyncService {
                     case 'hourly_sync':
                         yield this.executeHourlySync();
                         break;
+                    case 'ledger_reconciliation':
+                        yield this.executeLedgerReconciliation();
+                        break;
                     case 'weekly_consistency_check':
                         yield this.executeWeeklyConsistencyCheck();
                         break;
@@ -296,6 +344,44 @@ class ScheduledSyncService {
             // For now, we'll do a quick sync of critical data
             yield this.syncRecentChanges(oneHourAgo);
             logger_1.logger.info('Hourly synchronization completed');
+        });
+    }
+    /**
+     * Execute ledger reconciliation
+     */
+    executeLedgerReconciliation() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+            try {
+                // 1) Re-post recent completed payments (idempotent, guarded by unique indexes)
+                const recentPayments = yield Payment_1.Payment.find({ status: 'completed', paymentDate: { $gte: since } }).select('_id');
+                for (const p of recentPayments) {
+                    try {
+                        yield propertyAccountService_1.default.recordIncomeFromPayment(String(p._id));
+                    }
+                    catch (e) {
+                        try {
+                            yield (yield Promise.resolve().then(() => __importStar(require('./ledgerEventService')))).default.enqueueOwnerIncomeEvent(String(p._id));
+                        }
+                        catch (_a) { }
+                        logger_1.logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                    }
+                }
+                // 2) Dedupe any property accounts updated recently
+                const recentAccounts = yield PropertyAccount_1.default.find({ lastUpdated: { $gte: since } }).select('_id propertyId ledgerType');
+                for (const acct of recentAccounts) {
+                    try {
+                        yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acct.propertyId), acct.ledgerType);
+                    }
+                    catch (e) {
+                        logger_1.logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String(acct._id), err: (e === null || e === void 0 ? void 0 : e.message) || e });
+                    }
+                }
+            }
+            catch (err) {
+                logger_1.logger.error('Ledger reconciliation job failed:', err);
+                throw err;
+            }
         });
     }
     /**

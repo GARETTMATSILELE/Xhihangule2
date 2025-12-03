@@ -5,7 +5,7 @@ const LOCAL_MAIN_URI = 'mongodb://localhost:27017/property-management';
 const LOCAL_ACCOUNTING_URI = 'mongodb://localhost:27017/accounting';
 
 const getEffectiveUri = (envValue: string | undefined, localFallback: string): string => {
-  // In production, use the provided env var if present, otherwise fallback
+  // In production, prefer env value; otherwise safely fall back to local (server startup will fail fast in index.ts)
   if (process.env.NODE_ENV === 'production') {
     return envValue && envValue.trim() ? envValue : localFallback;
   }
@@ -20,7 +20,6 @@ const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
 const ACCOUNTING_DB_URI = getEffectiveUri(process.env.ACCOUNTING_DB_URI, LOCAL_ACCOUNTING_URI);
 
 export const mainConnection = mongoose.createConnection(MONGODB_URI);
-
 export const accountingConnection = mongoose.createConnection(ACCOUNTING_DB_URI);
 
 // Connection options
@@ -129,6 +128,9 @@ export const connectDatabase = async (): Promise<void> => {
 
     // Migrate accounting PropertyAccount ownerPayouts.referenceNumber unique index to compound index
     try {
+      // Initialize secondary/accounting connection lazily
+      // Ensure accounting connection is established (createConnection is sync; .asPromise ensures ready)
+      await accountingConnection.asPromise();
       // Ensure accounting collection exists to avoid NamespaceNotFound (26)
       try {
         await accountingConnection.db.createCollection('propertyaccounts');
@@ -137,7 +139,6 @@ export const connectDatabase = async (): Promise<void> => {
           throw ensureErr;
         }
       }
-
       const acct = accountingConnection.collection('propertyaccounts');
       const idx = await acct.indexes();
       // Drop legacy subdocument unique index if present
@@ -297,9 +298,9 @@ export const isDatabaseAvailable = (): boolean => {
 
 export const getAccountingDatabaseHealth = () => {
   return {
-    isConnected: accountingConnection.readyState === 1,
-    dbName: accountingConnection.name,
-    host: accountingConnection.host,
-    port: accountingConnection.port
+    isConnected: accountingConnection ? accountingConnection.readyState === 1 : false,
+    dbName: accountingConnection ? accountingConnection.name : undefined,
+    host: accountingConnection ? (accountingConnection as any).host : undefined,
+    port: accountingConnection ? (accountingConnection as any).port : undefined
   };
 }; 

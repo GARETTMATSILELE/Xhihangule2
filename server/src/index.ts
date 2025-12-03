@@ -3,6 +3,8 @@ import compression from 'compression';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import propertyRoutes from './routes/propertyRoutes';
 import billingRoutes from './routes/billingRoutes';
@@ -56,6 +58,19 @@ const app = express();
 // Trust proxy (so req.protocol reflects https behind reverse proxies)
 app.set('trust proxy', 1);
 
+// Fail fast on missing critical environment in production
+if (process.env.NODE_ENV === 'production') {
+  const missing: string[] = [];
+  if (!process.env.JWT_SECRET) missing.push('JWT_SECRET');
+  if (!process.env.JWT_REFRESH_SECRET) missing.push('JWT_REFRESH_SECRET');
+  if (!process.env.MONGODB_URI) missing.push('MONGODB_URI');
+  if (missing.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(`Missing required environment variables in production: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
+
 // Middleware
 const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -70,6 +85,27 @@ const allowedOrigins = [
   'https://www.xhihangule.com',
   ...allowedOriginsFromEnv
 ];
+
+// Security headers (production)
+if (process.env.NODE_ENV === 'production') {
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'", ...allowedOrigins],
+        frameSrc: ["'self'", "blob:", "data:", "about:"],
+        objectSrc: ["'none'"]
+      }
+    },
+    frameguard: { action: 'deny' },
+    referrerPolicy: { policy: 'no-referrer' }
+  }));
+}
 
 app.use(cors({
   origin: function(origin, callback) {
@@ -96,16 +132,43 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Enable gzip compression
 app.use(compression());
 
+// Rate limiting
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many attempts, please try again later.' }
+});
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many refresh attempts, slow down.' }
+});
+const fileLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 // Debug middleware only in development
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
+    const redactedHeaders = {
+      ...req.headers,
+      authorization: req.headers.authorization ? '[redacted]' : undefined,
+      cookie: req.headers.cookie ? '[redacted]' : undefined
+    };
     console.log('Incoming request:', {
       method: req.method,
       url: req.url,
       path: req.path,
       baseUrl: req.baseUrl,
       originalUrl: req.originalUrl,
-      headers: req.headers,
+      headers: redactedHeaders,
       body: req.body
     });
     next();
@@ -118,6 +181,12 @@ app.use('/api/tenants', tenantRoutes);
 app.use('/api/leases', leaseRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/charts', chartRoutes);
+// Apply targeted rate limits to sensitive endpoints
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/signup', authLimiter);
+app.use('/api/auth/refresh-token', refreshLimiter);
+app.use('/api/files/upload', fileLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/users', userRoutes);

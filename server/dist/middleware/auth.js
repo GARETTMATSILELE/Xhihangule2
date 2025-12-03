@@ -14,13 +14,12 @@ const authService_1 = require("../services/authService");
 const authService = authService_1.AuthService.getInstance();
 // Basic auth middleware that doesn't require companyId
 const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d;
     try {
-        // Get token from Authorization header or cookie
-        const token = ((_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1]) || ((_b = req.cookies) === null || _b === void 0 ? void 0 : _b.token);
+        // Get token from Authorization header (no cookie fallback)
+        const token = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
         console.log('Auth middleware check:', {
             hasAuthHeader: !!req.headers.authorization,
-            hasCookie: !!((_c = req.cookies) === null || _c === void 0 ? void 0 : _c.token),
             hasToken: !!token,
             url: req.url
         });
@@ -47,9 +46,9 @@ const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () 
             companyId: userData.companyId
         };
         console.log('User object set in request:', {
-            userId: (_d = req.user) === null || _d === void 0 ? void 0 : _d.userId,
-            role: (_e = req.user) === null || _e === void 0 ? void 0 : _e.role,
-            companyId: (_f = req.user) === null || _f === void 0 ? void 0 : _f.companyId
+            userId: (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId,
+            role: (_c = req.user) === null || _c === void 0 ? void 0 : _c.role,
+            companyId: (_d = req.user) === null || _d === void 0 ? void 0 : _d.companyId
         });
         next();
     }
@@ -81,10 +80,10 @@ const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () 
 exports.auth = auth;
 // PropertyOwner-specific auth middleware
 const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     try {
-        // Get token from Authorization header or cookie
-        const token = ((_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1]) || ((_b = req.cookies) === null || _b === void 0 ? void 0 : _b.token);
+        // Get token from Authorization header (no cookie fallback)
+        const token = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
         if (!token) {
             return res.status(401).json({
                 status: 'error',
@@ -146,10 +145,10 @@ const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, 
 exports.propertyOwnerAuth = propertyOwnerAuth;
 // Auth middleware that requires companyId
 const authWithCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     try {
-        // Get token from Authorization header or cookie
-        const token = ((_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1]) || ((_b = req.cookies) === null || _b === void 0 ? void 0 : _b.token);
+        // Get token from Authorization header (no cookie fallback)
+        const token = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
         if (!token) {
             return res.status(401).json({
                 status: 'error',

@@ -338,23 +338,15 @@ class PropertyAccountService {
                     logger_1.logger.info(`Skipping income for deposit-only payment ${paymentId} (amount: ${payment.amount}, deposit: ${deposit})`);
                     return;
                 }
-                // Get or create property account.
-                // IMPORTANT: For sales, always use the 'sale' ledger regardless of agent roles.
-                // Rentals continue to use inference to support legacy setups.
-                const chosenLedger = payment.paymentType === 'sale'
-                    ? 'sale'
-                    : 'rental';
+                // Get or create property account (rental vs sale)
+                const chosenLedger = payment.paymentType === 'sale' ? 'sale' : 'rental';
                 const isSale = payment.paymentType === 'sale';
-                // For sales tied to developments/units, post to both unit and development ledgers when available
                 let devId = payment === null || payment === void 0 ? void 0 : payment.developmentId;
                 const unitId = payment === null || payment === void 0 ? void 0 : payment.developmentUnitId;
                 const targets = [];
                 if (isSale) {
-                    // Always post to the unit ledger when unitId is present
-                    if (unitId) {
+                    if (unitId)
                         targets.push({ id: unitId.toString(), ledger: 'sale' });
-                    }
-                    // Ensure we also post to the parent development ledger when the sale references a unit
                     if (!devId && unitId) {
                         try {
                             const unitDoc = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).select('developmentId');
@@ -362,18 +354,14 @@ class PropertyAccountService {
                         }
                         catch (_c) { }
                     }
-                    if (devId) {
+                    if (devId)
                         targets.push({ id: devId.toString(), ledger: 'sale' });
-                    }
-                    // Fallback to property-level sale ledger if neither unit nor development are linked
-                    if (!unitId && !devId) {
+                    if (!unitId && !devId)
                         targets.push({ id: payment.propertyId.toString(), ledger: 'sale' });
-                    }
                 }
                 else {
                     targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
                 }
-                // Process each target account independently (idempotent per account)
                 for (const target of targets) {
                     const account = yield this.getOrCreatePropertyAccount(target.id, target.ledger);
                     // Check if income already recorded for this payment
@@ -382,13 +370,10 @@ class PropertyAccountService {
                         logger_1.logger.info(`Income already recorded for payment: ${paymentId} on account ${String(account._id)}`);
                         continue;
                     }
-                    // Calculate owner amount (income after commission)
                     const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
                     const totalPaid = payment.amount || 0;
                     const depositPortion = payment.depositAmount || 0;
                     const totalCommission = ((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.totalCommission) || 0;
-                    // For sales, post the full ownerAmount (already net of commission).
-                    // For rentals, exclude deposit portion entirely and subtract full commission from the rent portion.
                     const incomeAmount = isSale
                         ? Math.max(0, ownerAmount)
                         : Math.max(0, (totalPaid - depositPortion) - totalCommission);
@@ -396,7 +381,6 @@ class PropertyAccountService {
                         logger_1.logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
                         continue;
                     }
-                    // Create income transaction (rental vs sale)
                     const incomeDescription = isSale
                         ? `Sale income - ${payment.referenceNumber}`
                         : `Rental income - ${payment.referenceNumber}`;
@@ -406,6 +390,7 @@ class PropertyAccountService {
                         amount: incomeAmount,
                         date: payment.paymentDate || payment.createdAt,
                         paymentId: new mongoose_1.default.Types.ObjectId(paymentId),
+                        idempotencyKey: `payment:${paymentId}`,
                         description: incomeDescription,
                         category: incomeCategory,
                         status: 'completed',
@@ -414,18 +399,14 @@ class PropertyAccountService {
                         createdAt: new Date(),
                         updatedAt: new Date()
                     };
-                    // Strong idempotency and race-safety:
-                    // Atomically push iff this paymentId does not already exist for this account
                     yield PropertyAccount_1.default.updateOne({ _id: account._id, 'transactions.paymentId': { $ne: new mongoose_1.default.Types.ObjectId(paymentId) } }, {
                         $push: { transactions: incomeTransaction },
                         $set: { lastUpdated: new Date() }
                     });
-                    // Recalculate on the latest view to keep totals/running balance consistent
                     const fresh = yield PropertyAccount_1.default.findById(account._id);
                     if (fresh) {
                         yield this.recalculateBalance(fresh);
                     }
-                    // Log per-target success
                     logger_1.logger.info(`Recorded income of ${incomeAmount} to account ${String(account._id)} (target ${target.id}, ledger ${target.ledger}) from payment ${paymentId}`);
                 }
             }
@@ -517,7 +498,6 @@ class PropertyAccountService {
                     throw new errorHandler_1.AppError('Expense amount must be greater than 0', 400);
                 }
                 const account = yield this.getOrCreatePropertyAccount(propertyId);
-                // Check if account has sufficient balance
                 if (account.runningBalance < expenseData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this expense', 400);
                 }
@@ -533,13 +513,31 @@ class PropertyAccountService {
                     processedBy: new mongoose_1.default.Types.ObjectId(expenseData.processedBy),
                     notes: expenseData.notes,
                     referenceNumber: `EXP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    idempotencyKey: expenseData.idempotencyKey,
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
-                // Add transaction to account
+                if (expenseData.idempotencyKey && expenseData.idempotencyKey.trim().length > 0) {
+                    yield PropertyAccount_1.default.updateOne({ _id: account._id, 'transactions.idempotencyKey': { $ne: expenseData.idempotencyKey } }, { $push: { transactions: expenseTransaction }, $set: { lastUpdated: new Date() } });
+                    const fresh = yield PropertyAccount_1.default.findById(account._id);
+                    if (fresh)
+                        yield this.recalculateBalance(fresh);
+                    logger_1.logger.info(`Added expense (idempotent) of ${expenseData.amount} to property ${propertyId}`);
+                    return (yield this.getPropertyAccount(propertyId));
+                }
                 account.transactions.push(expenseTransaction);
-                // Save the account (this will trigger pre-save middleware to recalculate balance)
-                yield account.save();
+                try {
+                    yield account.save();
+                }
+                catch (e) {
+                    if (e && (e.code === 11000 || ((e === null || e === void 0 ? void 0 : e.message) || '').includes('E11000'))) {
+                        // Duplicate by index – treat as success
+                        logger_1.logger.warn('Duplicate expense prevented by unique index/idempotency guard');
+                    }
+                    else {
+                        throw e;
+                    }
+                }
                 logger_1.logger.info(`Added expense of ${expenseData.amount} to property ${propertyId}`);
                 return account;
             }
@@ -558,19 +556,17 @@ class PropertyAccountService {
                 if (payoutData.amount <= 0) {
                     throw new errorHandler_1.AppError('Payout amount must be greater than 0', 400);
                 }
-                // Use the effective ledger for this property to ensure payouts are recorded on the correct ledger
                 const account = yield this.getPropertyAccount(propertyId);
-                // Check if account has sufficient balance
                 if (account.runningBalance < payoutData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this payout', 400);
                 }
-                // Generate unique reference number
                 const referenceNumber = `PAYOUT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
                 const payout = {
                     amount: payoutData.amount,
                     date: new Date(),
                     paymentMethod: payoutData.paymentMethod,
                     referenceNumber,
+                    idempotencyKey: payoutData.idempotencyKey,
                     status: 'pending',
                     processedBy: new mongoose_1.default.Types.ObjectId(payoutData.processedBy),
                     recipientId: new mongoose_1.default.Types.ObjectId(payoutData.recipientId),
@@ -580,9 +576,26 @@ class PropertyAccountService {
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
+                if (payoutData.idempotencyKey && payoutData.idempotencyKey.trim().length > 0) {
+                    yield PropertyAccount_1.default.updateOne({ _id: account._id, 'ownerPayouts.idempotencyKey': { $ne: payoutData.idempotencyKey } }, { $push: { ownerPayouts: payout }, $set: { lastUpdated: new Date() } });
+                    const fresh = yield PropertyAccount_1.default.findById(account._id);
+                    if (fresh)
+                        yield this.recalculateBalance(fresh);
+                    logger_1.logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
+                    return { account: (yield this.getPropertyAccount(propertyId)), payout };
+                }
                 account.ownerPayouts.push(payout);
-                // Save the account (this will trigger pre-save middleware to recalculate balance)
-                yield account.save();
+                try {
+                    yield account.save();
+                }
+                catch (e) {
+                    if (e && (e.code === 11000 || ((e === null || e === void 0 ? void 0 : e.message) || '').includes('E11000'))) {
+                        logger_1.logger.warn('Duplicate owner payout prevented by unique index/idempotency guard');
+                    }
+                    else {
+                        throw e;
+                    }
+                }
                 logger_1.logger.info(`Created owner payout of ${payoutData.amount} for property ${propertyId}`);
                 return { account, payout };
             }
@@ -794,9 +807,18 @@ class PropertyAccountService {
                 }
                 catch (_a) { }
                 const allIds = [...propertyIds, ...developmentIds, ...unitIds];
-                const accounts = yield PropertyAccount_1.default.find({
+                let accounts = yield PropertyAccount_1.default.find({
                     propertyId: { $in: allIds }
                 }).sort({ lastUpdated: -1 });
+                // Opportunistic deduplication: merge duplicates by (propertyId, ledgerType)
+                // Treat missing/null ledgerType as 'rental' for legacy documents
+                const changed = yield this.mergeDuplicateAccounts(accounts);
+                if (changed) {
+                    // Reload after cleanup to return the canonical set
+                    accounts = yield PropertyAccount_1.default.find({
+                        propertyId: { $in: allIds }
+                    }).sort({ lastUpdated: -1 });
+                }
                 return accounts;
             }
             catch (error) {
@@ -883,6 +905,127 @@ class PropertyAccountService {
         });
     }
     /**
+     * Merge duplicate PropertyAccount documents in-memory and persist the cleanup.
+     * Duplicates are defined by same propertyId and effective ledgerType
+     * (null/undefined ledgerType is normalized to 'rental' for legacy records).
+     *
+     * Returns true if any changes were made (merged or deleted).
+     */
+    mergeDuplicateAccounts(accounts) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!Array.isArray(accounts) || accounts.length === 0)
+                return false;
+            const groupsMap = Object.create(null);
+            for (const acc of accounts) {
+                const pid = String(acc.propertyId);
+                const ledgerRaw = acc.ledgerType;
+                const ledger = ledgerRaw === 'sale' ? 'sale' : 'rental';
+                const key = `${pid}|${ledger}`;
+                if (!groupsMap[key])
+                    groupsMap[key] = [];
+                groupsMap[key].push(acc);
+            }
+            const groups = Object.entries(groupsMap).map(([key, items]) => ({ key, items }));
+            let anyChanged = false;
+            for (const group of groups) {
+                if (group.items.length <= 1)
+                    continue;
+                // Choose keeper: prefer with explicit ledgerType set (not null), then by most entries, then latest lastUpdated
+                const withExplicitLedger = group.items.filter(i => i.ledgerType === 'sale' || i.ledgerType === 'rental');
+                const candidates = withExplicitLedger.length > 0 ? withExplicitLedger : group.items;
+                const pickScore = (i) => {
+                    const count = (Array.isArray(i.transactions) ? i.transactions.length : 0) + (Array.isArray(i.ownerPayouts) ? i.ownerPayouts.length : 0);
+                    const updated = i.lastUpdated ? new Date(i.lastUpdated).getTime() : 0;
+                    return { count, updated };
+                };
+                let keeper = candidates[0];
+                for (const c of candidates.slice(1)) {
+                    const a = pickScore(keeper);
+                    const b = pickScore(c);
+                    if (b.count > a.count || (b.count === a.count && b.updated > a.updated)) {
+                        keeper = c;
+                    }
+                }
+                const toMergeAndDelete = group.items.filter(i => String(i._id) !== String(keeper._id));
+                if (toMergeAndDelete.length === 0)
+                    continue;
+                // Build uniqueness sets for transactions and payouts on keeper
+                const txKeys = new Set();
+                for (const t of (keeper.transactions || [])) {
+                    const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+                    const key = pid
+                        ? `pid:${pid}`
+                        : `free:${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+                    txKeys.add(key);
+                }
+                const payoutKeys = new Map(); // referenceNumber -> index in keeper.ownerPayouts
+                for (let i = 0; i < (keeper.ownerPayouts || []).length; i++) {
+                    const p = keeper.ownerPayouts[i];
+                    const ref = p.referenceNumber || String(p._id || '');
+                    payoutKeys.set(ref, i);
+                }
+                // Normalize ledgerType on keeper if missing
+                if (!keeper.ledgerType) {
+                    const ledger = group.key.endsWith('|sale') ? 'sale' : 'rental';
+                    keeper.ledgerType = ledger;
+                }
+                // Merge each duplicate into keeper
+                for (const dup of toMergeAndDelete) {
+                    // Merge transactions (dedupe by paymentId if present, else by derived key)
+                    for (const t of (dup.transactions || [])) {
+                        const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+                        const key = pid
+                            ? `pid:${pid}`
+                            : `free:${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+                        if (!txKeys.has(key)) {
+                            // Push shallow copy without _id to let MongoDB assign a new one
+                            keeper.transactions.push(Object.assign(Object.assign({}, t), { _id: undefined }));
+                            txKeys.add(key);
+                        }
+                    }
+                    // Merge owner payouts (dedupe by referenceNumber; prefer completed or latest updatedAt)
+                    for (const p of (dup.ownerPayouts || [])) {
+                        const ref = p.referenceNumber || String(p._id || '');
+                        if (!payoutKeys.has(ref)) {
+                            keeper.ownerPayouts.push(Object.assign(Object.assign({}, p), { _id: undefined }));
+                            payoutKeys.set(ref, (keeper.ownerPayouts || []).length - 1);
+                        }
+                        else {
+                            const idx = payoutKeys.get(ref);
+                            const existing = keeper.ownerPayouts[idx];
+                            const preferNew = (existing.status !== 'completed' && p.status === 'completed') ||
+                                (new Date(p.updatedAt || p.createdAt).getTime() > new Date(existing.updatedAt || existing.createdAt).getTime());
+                            if (preferNew) {
+                                keeper.ownerPayouts[idx] = Object.assign(Object.assign({}, p), { _id: existing._id }); // keep existing _id slot
+                            }
+                        }
+                    }
+                }
+                // Persist keeper and recalculate balance
+                try {
+                    yield keeper.save();
+                    yield this.recalculateBalance(keeper);
+                }
+                catch (e) {
+                    console.warn('Keeper save failed during account dedupe:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                }
+                // Delete duplicates from DB
+                try {
+                    const ids = toMergeAndDelete.map(d => d._id);
+                    if (ids.length > 0) {
+                        yield PropertyAccount_1.default.deleteMany({ _id: { $in: ids } });
+                    }
+                    anyChanged = true;
+                    logger_1.logger.info(`Merged and removed ${ids.length} duplicate account(s) for key ${group.key}`);
+                }
+                catch (e) {
+                    console.warn('Failed to delete duplicates during account dedupe:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                }
+            }
+            return anyChanged;
+        });
+    }
+    /**
      * One-time migration: move sale income transactions from rental ledger to sale ledger per property.
      * Safe to run multiple times (idempotent using transaction.paymentId uniqueness).
      */
@@ -963,7 +1106,8 @@ function reconcilePropertyLedgerDuplicates(propertyId, ledgerType) {
             toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
         }
         if (toRemove.length > 0) {
-            yield PropertyAccount_1.default.updateOne({ _id: account._id }, { $pull: { transactions: { _id: { $in: toRemove } } } });
+            // Use native collection update to bypass immutability middleware intentionally for repair
+            yield PropertyAccount_1.default.collection.updateOne({ _id: account._id }, { $pull: { transactions: { _id: { $in: toRemove } } } });
             const fresh = yield PropertyAccount_1.default.findById(account._id);
             if (fresh) {
                 yield service.recalculateBalance(fresh);

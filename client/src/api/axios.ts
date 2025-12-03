@@ -23,19 +23,13 @@ const getAccessToken = (): string | null => {
   }
 };
 
-const setTokens = (newAccessToken: string | null, newRefreshToken: string | null) => {
+const setTokens = (newAccessToken: string | null, _newRefreshToken: string | null) => {
   if (newAccessToken) {
     api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
     try { localStorage.setItem('accessToken', newAccessToken); } catch {}
   } else {
     delete api.defaults.headers.common['Authorization'];
     try { localStorage.removeItem('accessToken'); } catch {}
-  }
-  if (newRefreshToken !== null) {
-    try {
-      if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
-      else localStorage.removeItem('refreshToken');
-    } catch {}
   }
 };
 
@@ -58,6 +52,17 @@ const processQueue = (error: any, token: string | null = null) => {
   failedQueue = [];
 };
 
+// Helper to read non-HttpOnly CSRF cookie set by server for refresh flow
+const getCookieValue = (name: string): string | null => {
+  try {
+    const safeName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + safeName + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+};
+
 // Request interceptor
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -66,6 +71,16 @@ api.interceptors.request.use(
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Attach CSRF header for refresh endpoint
+    try {
+      const url = config.url || '';
+      if (url.includes('/auth/refresh-token')) {
+        const csrf = getCookieValue('refreshCsrf');
+        if (csrf && config.headers) {
+          (config.headers as any)['x-refresh-csrf'] = csrf;
+        }
+      }
+    } catch {}
     
     return config;
   },
@@ -122,9 +137,11 @@ api.interceptors.response.use(
       try {
         // Refresh token is stored as HttpOnly cookie, so we don't need to check memory
         console.log('Calling refresh token endpoint');
+        const refreshCsrf = getCookieValue('refreshCsrf');
         const refreshResponse = await axios.post(`${API_URL}/auth/refresh-token`, {}, {
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(refreshCsrf ? { 'x-refresh-csrf': refreshCsrf } : {})
           },
           withCredentials: true // This ensures cookies are sent
         });
@@ -132,20 +149,16 @@ api.interceptors.response.use(
         console.log('Refresh response received:', {
           status: refreshResponse.status,
           data: refreshResponse.data,
-          hasToken: !!refreshResponse.data.token,
-          hasRefreshToken: !!refreshResponse.data.refreshToken
+          hasToken: !!refreshResponse.data.token
         });
 
-        const { token: newAccessToken, refreshToken: newRefreshToken } = refreshResponse.data;
+        const { token: newAccessToken } = refreshResponse.data;
         
         if (newAccessToken) {
           console.log('Token refresh successful');
           // Update tokens in memory and localStorage
-          setTokens(newAccessToken, newRefreshToken);
+          setTokens(newAccessToken, null);
           localStorage.setItem('accessToken', newAccessToken);
-          if (newRefreshToken) {
-            localStorage.setItem('refreshToken', newRefreshToken);
-          }
           
           // Process queued requests
           processQueue(null, newAccessToken);
@@ -171,7 +184,6 @@ api.interceptors.response.use(
         // Refresh failed - clear all tokens and redirect to login
         setTokens(null, null);
         localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
         
         processQueue(refreshError, null);
         isRefreshing = false;

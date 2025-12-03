@@ -375,6 +375,14 @@ export class DatabaseSyncService extends EventEmitter {
         if (fullDocument && fullDocument.status === 'completed' && (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale')) {
           try {
             await this.syncPaymentToAccounting(fullDocument);
+            // Reflect to property ledger as well (idempotent)
+            try {
+              await propertyAccountService.recordIncomeFromPayment(documentId);
+            } catch (ledgerErr) {
+              // Enqueue for retry via ledger event service if immediate posting fails
+              try { await ledgerEventService.enqueueOwnerIncomeEvent(documentId); } catch {}
+              logger.warn('Ledger post failed on change stream; enqueued for retry:', (ledgerErr as any)?.message || ledgerErr);
+            }
             await this.clearFailureRecord('payment', documentId);
           } catch (e) {
             // error recorded in syncPaymentToAccounting

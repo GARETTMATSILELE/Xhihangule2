@@ -239,6 +239,16 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
+    // Set a non-HttpOnly CSRF token cookie for refresh protection
+    const signupCsrf = crypto.randomBytes(32).toString('hex');
+    res.cookie('refreshCsrf', signupCsrf, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
 
     res.status(201).json({
       user: {
@@ -250,8 +260,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
         companyId: savedUser!.companyId
       },
       company: companyData,
-      token,
-      refreshToken
+      token
     });
   } catch (error: any) {
     console.error('Signup error:', {
@@ -330,6 +339,17 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
+    // Also set a non-HttpOnly CSRF token cookie for refresh endpoint
+    const loginCsrf = crypto.randomBytes(32).toString('hex');
+    res.cookie('refreshCsrf', loginCsrf, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     console.log('Refresh token cookie set successfully');
 
     res.json({
@@ -370,8 +390,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         createdAt: (company as any).createdAt,
         updatedAt: (company as any).updatedAt
       } : null,
-      token,
-      refreshToken
+      token
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -460,8 +479,16 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 
 // Logout
 export const logout = (req: Request, res: Response) => {
-  // Clear refresh token cookie
-  res.clearCookie('refreshToken');
+  // Clear refresh token + CSRF cookies with correct options
+  const prod = process.env.NODE_ENV === 'production';
+  const base: any = {
+    path: '/',
+    sameSite: prod ? 'strict' : 'lax',
+    secure: prod,
+    ...(prod ? { domain: '.xhihangule.com' } : {})
+  };
+  try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
+  try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
   res.json({ message: 'Logged out successfully' });
 };
 
@@ -533,6 +560,13 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       throw new AppError('No refresh token available', 401);
     }
 
+    // Double-submit cookie CSRF protection
+    const csrfHeader = (req.headers['x-refresh-csrf'] as string) || req.get('x-refresh-csrf');
+    const csrfCookie = req.cookies?.refreshCsrf as string | undefined;
+    if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
+      throw new AppError('CSRF token missing or invalid', 403, 'CSRF_MISMATCH');
+    }
+
     console.log('Refresh token found, attempting to refresh...');
     
     // Use auth service to refresh token
@@ -550,9 +584,19 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
+    // Rotate CSRF cookie
+    const rotatedCsrf = crypto.randomBytes(32).toString('hex');
+    res.cookie('refreshCsrf', rotatedCsrf, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     res.json({
-      token: newAccessToken,
-      refreshToken: newRefreshToken
+      token: newAccessToken
     });
   } catch (error) {
     console.error('Refresh token error:', error);

@@ -111,11 +111,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Check if we have tokens in localStorage (for persistence across page reloads)
         const storedAccessToken = localStorage.getItem('accessToken');
-        const storedRefreshToken = localStorage.getItem('refreshToken');
+        const storedRefreshToken = null; // refresh handled via HttpOnly cookie; do not rely on storage
         const storedImpersonating = localStorage.getItem('impersonating') === 'true';
         
-        if (storedAccessToken && storedRefreshToken) {
-          setTokens(storedAccessToken, storedRefreshToken);
+        if (storedAccessToken) {
+          setTokens(storedAccessToken, null);
           setIsImpersonating(storedImpersonating);
           
           try {
@@ -154,15 +154,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             try {
               const refreshResponse = await api.post('/auth/refresh-token', {});
               
-              const { token: newAccessToken, refreshToken: newRefreshToken } = refreshResponse.data;
+              const { token: newAccessToken } = refreshResponse.data;
               
               if (newAccessToken) {
                 // Update tokens
-                setTokens(newAccessToken, newRefreshToken);
+                setTokens(newAccessToken, null);
                 localStorage.setItem('accessToken', newAccessToken);
-                if (newRefreshToken) {
-                  localStorage.setItem('refreshToken', newRefreshToken);
-                }
                 
                 // Try to get user data again
                 const userResponse = await api.get('/auth/me');
@@ -307,12 +304,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Starting login process for:', email);
       
       const response = await api.post('/auth/login', { email, password });
-      const { user: userData, company: companyData, token, refreshToken: newRefreshToken } = response.data;
+      const { user: userData, company: companyData, token } = response.data;
       
       console.log('Login response received:', { 
         hasUser: !!userData, 
         hasToken: !!token, 
-        hasRefreshToken: !!newRefreshToken,
+        hasRefreshToken: false,
         userRole: userData?.role 
       });
       
@@ -320,12 +317,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('No access token received');
       }
 
-      // Store tokens in memory and localStorage
-      setTokens(token, newRefreshToken);
+      // Store token in memory and localStorage
+      setTokens(token, null);
       localStorage.setItem('accessToken', token);
-      if (newRefreshToken) {
-        localStorage.setItem('refreshToken', newRefreshToken);
-      }
       
       // Store user data in localStorage for other services to access
       localStorage.setItem('user', JSON.stringify(userData));
@@ -382,11 +376,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Small backoff before one retry
             await new Promise((resolve) => setTimeout(resolve, 3000));
             const retryResp = await api.post('/auth/login', { email, password });
-            const { user: userData, company: companyData, token, refreshToken: newRefreshToken } = retryResp.data;
+            const { user: userData, company: companyData, token } = retryResp.data;
             if (!token) throw new Error('No access token received');
-            setTokens(token, newRefreshToken);
+            setTokens(token, null);
             localStorage.setItem('accessToken', token);
-            if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
             localStorage.setItem('user', JSON.stringify(userData));
             setUser(userData);
             setCompany(companyData);
@@ -462,18 +455,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         payload.adminSignup = true;
       }
       const response = await api.post('/auth/signup', payload);
-      const { user: userData, company: companyData, token, refreshToken: newRefreshToken } = response.data;
+      const { user: userData, company: companyData, token } = response.data;
       
       if (!token) {
         throw new Error('No access token received');
       }
 
-      // Store tokens
-      setTokens(token, newRefreshToken);
+      // Store token
+      setTokens(token, null);
       localStorage.setItem('accessToken', token);
-      if (newRefreshToken) {
-        localStorage.setItem('refreshToken', newRefreshToken);
-      }
       
       // Store user data in localStorage for other services to access
       localStorage.setItem('user', JSON.stringify(userData));
@@ -519,9 +509,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!newAccessToken) {
         throw new Error('No access token received for impersonation');
       }
-      setTokens(newAccessToken, newRefreshToken);
+      setTokens(newAccessToken, null);
       localStorage.setItem('accessToken', newAccessToken);
-      if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
       localStorage.setItem('user', JSON.stringify(impersonatedUser));
       localStorage.setItem('impersonating', 'true');
       setUser(impersonatedUser);
@@ -544,17 +533,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Fallback: try refresh-token to restore original
         try {
           const refreshResponse = await api.post('/auth/refresh-token');
-          const { token, refreshToken } = refreshResponse.data;
-          setTokens(token, refreshToken);
+          const { token } = refreshResponse.data;
+          setTokens(token, null);
           localStorage.setItem('accessToken', token);
-          if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
         } catch (e) {
           console.warn('Failed to refresh token after stop impersonation');
         }
       } else {
-        setTokens(newAccessToken, newRefreshToken);
+        setTokens(newAccessToken, null);
         localStorage.setItem('accessToken', newAccessToken);
-        if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken);
       }
       // Reload /auth/me to get current user
       await refreshUser();

@@ -54,6 +54,7 @@ const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const events_1 = require("events");
+const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const ledgerEventService_1 = __importDefault(require("./ledgerEventService"));
 class DatabaseSyncService extends events_1.EventEmitter {
     constructor() {
@@ -390,6 +391,18 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     if (fullDocument && fullDocument.status === 'completed' && (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale')) {
                         try {
                             yield this.syncPaymentToAccounting(fullDocument);
+                            // Reflect to property ledger as well (idempotent)
+                            try {
+                                yield propertyAccountService_1.default.recordIncomeFromPayment(documentId);
+                            }
+                            catch (ledgerErr) {
+                                // Enqueue for retry via ledger event service if immediate posting fails
+                                try {
+                                    yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(documentId);
+                                }
+                                catch (_a) { }
+                                logger_1.logger.warn('Ledger post failed on change stream; enqueued for retry:', (ledgerErr === null || ledgerErr === void 0 ? void 0 : ledgerErr.message) || ledgerErr);
+                            }
                             yield this.clearFailureRecord('payment', documentId);
                         }
                         catch (e) {

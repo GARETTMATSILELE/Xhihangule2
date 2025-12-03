@@ -154,6 +154,8 @@ export const addExpense = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'User authentication required' });
     }
 
+    const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
+
     const expenseData = {
       amount: Number(amount),
       date: date ? new Date(date) : new Date(),
@@ -162,7 +164,8 @@ export const addExpense = async (req: Request, res: Response) => {
       recipientId,
       recipientType,
       processedBy: req.user.userId,
-      notes
+      notes,
+      idempotencyKey
     };
 
     const account = await propertyAccountService.addExpense(propertyId, expenseData);
@@ -249,6 +252,8 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Recipient name is required' });
     }
 
+    const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
+
     const payoutData = {
       amount: Number(amount),
       paymentMethod,
@@ -256,7 +261,8 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
       recipientName: finalRecipientName,
       recipientBankDetails,
       processedBy: req.user.userId,
-      notes
+      notes,
+      idempotencyKey
     };
 
     const { account: updatedAccount, payout } = await propertyAccountService.createOwnerPayout(propertyId, payoutData);

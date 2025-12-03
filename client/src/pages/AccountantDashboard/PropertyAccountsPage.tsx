@@ -30,10 +30,22 @@ const PropertyAccountsPage: React.FC = () => {
     loadAccounts();
   }, []);
 
+  const uniqueAccounts = useMemo(() => {
+    const seen = new Set<string>();
+    return accounts.filter(acc => {
+      const idPart = acc.propertyId || acc._id;
+      if (!idPart) return true;
+      const key = `${String(idPart)}:${String(acc.ledgerType || '')}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [accounts]);
+
   const filteredAccounts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return accounts;
-    return accounts.filter(acc => {
+    if (!q) return uniqueAccounts;
+    return uniqueAccounts.filter(acc => {
       const hay = [
         acc.propertyName,
         acc.propertyAddress,
@@ -44,7 +56,7 @@ const PropertyAccountsPage: React.FC = () => {
       ].map(v => String(v ?? '')?.toLowerCase()).join(' ');
       return hay.includes(q);
     });
-  }, [accounts, searchQuery]);
+  }, [uniqueAccounts, searchQuery]);
 
   const handleAccountClick = (acc: PropertyAccount) => {
     const isSale = acc.ledgerType === 'sale';

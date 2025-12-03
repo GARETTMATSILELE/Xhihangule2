@@ -31,6 +31,9 @@ const TransactionSchema = new mongoose_1.Schema({
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Payment'
     },
+    idempotencyKey: {
+        type: String
+    },
     description: {
         type: String,
         required: true
@@ -92,6 +95,9 @@ const OwnerPayoutSchema = new mongoose_1.Schema({
         type: String,
         required: true,
         // uniqueness is enforced via a compound index on the parent schema
+    },
+    idempotencyKey: {
+        type: String
     },
     status: {
         type: String,
@@ -201,6 +207,21 @@ PropertyAccountSchema.index({ runningBalance: 1 });
 PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, sparse: true });
 // Ensure each paymentId is only recorded once per property ledger
 PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+// Optional idempotency unique guards for transactions and payouts when a key is provided
+PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1, 'transactions.idempotencyKey': 1 }, {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+        'transactions.idempotencyKey': { $exists: true, $type: 'string' }
+    }
+});
+PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1, 'ownerPayouts.idempotencyKey': 1 }, {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+        'ownerPayouts.idempotencyKey': { $exists: true, $type: 'string' }
+    }
+});
 // Guard helper to detect illegal update operators/paths that would mutate history
 function isIllegalLedgerMutation(update, rootArrays) {
     const illegalSetters = ['$set', '$unset', '$inc'];

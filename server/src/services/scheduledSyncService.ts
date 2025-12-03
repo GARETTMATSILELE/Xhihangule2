@@ -2,6 +2,9 @@ import { CronJob } from 'cron';
 import DatabaseSyncService from './databaseSyncService';
 import SyncFailure from '../models/SyncFailure';
 import { logger } from '../utils/logger';
+import { Payment } from '../models/Payment';
+import PropertyAccount from '../models/PropertyAccount';
+import propertyAccountService, { reconcilePropertyLedgerDuplicates } from './propertyAccountService';
 
 export interface SyncSchedule {
   name: string;
@@ -51,6 +54,16 @@ export class ScheduledSyncService {
       name: 'hourly_sync',
       cronExpression: '0 * * * *',
       description: 'Hourly synchronization of payments and properties',
+      enabled: true,
+      runCount: 0,
+      averageDuration: 0
+    });
+
+    // Frequent ledger reconciliation (keep small and cheap)
+    this.addSyncSchedule({
+      name: 'ledger_reconciliation',
+      cronExpression: '*/5 * * * *',
+      description: 'Re-post recent payments and dedupe property ledgers',
       enabled: true,
       runCount: 0,
       averageDuration: 0
@@ -133,7 +146,7 @@ export class ScheduledSyncService {
       job.start();
 
       // Calculate next run time
-              schedule.nextRun = job.nextDate().toJSDate();
+      schedule.nextRun = job.nextDate().toJSDate();
       
       logger.info(`Started sync job: ${schedule.name} - Next run: ${schedule.nextRun}`);
       
@@ -203,6 +216,9 @@ export class ScheduledSyncService {
           break;
         case 'hourly_sync':
           await this.executeHourlySync();
+          break;
+        case 'ledger_reconciliation':
+          await this.executeLedgerReconciliation();
           break;
         case 'weekly_consistency_check':
           await this.executeWeeklyConsistencyCheck();
@@ -328,6 +344,38 @@ export class ScheduledSyncService {
     await this.syncRecentChanges(oneHourAgo);
     
     logger.info('Hourly synchronization completed');
+  }
+
+  /**
+   * Execute ledger reconciliation
+   */
+  private async executeLedgerReconciliation(): Promise<void> {
+    const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    try {
+      // 1) Re-post recent completed payments (idempotent, guarded by unique indexes)
+      const recentPayments = await Payment.find({ status: 'completed', paymentDate: { $gte: since } }).select('_id');
+      for (const p of recentPayments) {
+        try {
+          await propertyAccountService.recordIncomeFromPayment(String((p as any)._id));
+        } catch (e) {
+          try { await (await import('./ledgerEventService')).default.enqueueOwnerIncomeEvent(String((p as any)._id)); } catch {}
+          logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e as any)?.message || e);
+        }
+      }
+
+      // 2) Dedupe any property accounts updated recently
+      const recentAccounts = await PropertyAccount.find({ lastUpdated: { $gte: since } }).select('_id propertyId ledgerType');
+      for (const acct of recentAccounts) {
+        try {
+          await reconcilePropertyLedgerDuplicates(String((acct as any).propertyId), (acct as any).ledgerType);
+        } catch (e) {
+          logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String((acct as any)._id), err: (e as any)?.message || e });
+        }
+      }
+    } catch (err) {
+      logger.error('Ledger reconciliation job failed:', err);
+      throw err;
+    }
   }
 
   /**

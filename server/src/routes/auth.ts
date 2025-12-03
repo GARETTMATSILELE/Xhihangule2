@@ -11,9 +11,17 @@ router.post('/refresh-token', refreshToken);
 router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
 
-// Logout route (clear refresh token cookie)
+// Logout route (clear refresh cookies)
 router.post('/logout', (_req, res) => {
-  res.clearCookie('refreshToken');
+  const prod = process.env.NODE_ENV === 'production';
+  const base: any = {
+    path: '/',
+    sameSite: prod ? 'strict' : 'lax',
+    secure: prod,
+    ...(prod ? { domain: '.xhihangule.com' } : {})
+  };
+  try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
+  try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
   res.json({
     status: 'success',
     message: 'Logged out successfully'

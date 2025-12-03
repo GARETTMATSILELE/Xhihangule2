@@ -247,6 +247,9 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
         // Set refresh token as HttpOnly cookie
         res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
          }));
+        // Set a non-HttpOnly CSRF token cookie for refresh protection
+        const signupCsrf = crypto_1.default.randomBytes(32).toString('hex');
+        res.cookie('refreshCsrf', signupCsrf, Object.assign(Object.assign({ httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
         res.status(201).json({
             user: {
                 _id: savedUser._id,
@@ -257,8 +260,7 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                 companyId: savedUser.companyId
             },
             company: companyData,
-            token,
-            refreshToken
+            token
         });
     }
     catch (error) {
@@ -327,6 +329,9 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
         });
         res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
          }));
+        // Also set a non-HttpOnly CSRF token cookie for refresh endpoint
+        const loginCsrf = crypto_1.default.randomBytes(32).toString('hex');
+        res.cookie('refreshCsrf', loginCsrf, Object.assign(Object.assign({ httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
         console.log('Refresh token cookie set successfully');
         res.json({
             user: {
@@ -366,8 +371,7 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
                 createdAt: company.createdAt,
                 updatedAt: company.updatedAt
             } : null,
-            token,
-            refreshToken
+            token
         });
     }
     catch (error) {
@@ -451,8 +455,17 @@ const resetPassword = (req, res, next) => __awaiter(void 0, void 0, void 0, func
 exports.resetPassword = resetPassword;
 // Logout
 const logout = (req, res) => {
-    // Clear refresh token cookie
-    res.clearCookie('refreshToken');
+    // Clear refresh token + CSRF cookies with correct options
+    const prod = process.env.NODE_ENV === 'production';
+    const base = Object.assign({ path: '/', sameSite: prod ? 'strict' : 'lax', secure: prod }, (prod ? { domain: '.xhihangule.com' } : {}));
+    try {
+        res.clearCookie('refreshToken', Object.assign(Object.assign({}, base), { httpOnly: true }));
+    }
+    catch (_a) { }
+    try {
+        res.clearCookie('refreshCsrf', Object.assign(Object.assign({}, base), { httpOnly: false }));
+    }
+    catch (_b) { }
     res.json({ message: 'Logged out successfully' });
 };
 exports.logout = logout;
@@ -496,7 +509,7 @@ const getCurrentUser = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
 exports.getCurrentUser = getCurrentUser;
 // Refresh token
 const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         console.log('Refresh token request received');
         // Get refresh token from cookie
@@ -505,6 +518,12 @@ const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
             console.log('No refresh token found in cookies');
             throw new errorHandler_1.AppError('No refresh token available', 401);
         }
+        // Double-submit cookie CSRF protection
+        const csrfHeader = req.headers['x-refresh-csrf'] || req.get('x-refresh-csrf');
+        const csrfCookie = (_b = req.cookies) === null || _b === void 0 ? void 0 : _b.refreshCsrf;
+        if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
+            throw new errorHandler_1.AppError('CSRF token missing or invalid', 403, 'CSRF_MISMATCH');
+        }
         console.log('Refresh token found, attempting to refresh...');
         // Use auth service to refresh token
         const { token: newAccessToken, refreshToken: newRefreshToken } = yield authService.refreshToken(refreshToken);
@@ -512,9 +531,11 @@ const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
         // Set new refresh token as HttpOnly cookie
         res.cookie('refreshToken', newRefreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
          }));
+        // Rotate CSRF cookie
+        const rotatedCsrf = crypto_1.default.randomBytes(32).toString('hex');
+        res.cookie('refreshCsrf', rotatedCsrf, Object.assign(Object.assign({ httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
         res.json({
-            token: newAccessToken,
-            refreshToken: newRefreshToken
+            token: newAccessToken
         });
     }
     catch (error) {
