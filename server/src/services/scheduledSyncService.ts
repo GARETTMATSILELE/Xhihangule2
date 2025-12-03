@@ -418,38 +418,48 @@ export class ScheduledSyncService {
       // 4) Dedupe company accounts updated recently (keep earliest for each paymentId)
       try {
         const { CompanyAccount } = await import('../models/CompanyAccount');
-        const companyAccounts = await CompanyAccount.find({ lastUpdated: { $gte: since } }).select('_id companyId transactions');
-        for (const ca of companyAccounts as any[]) {
-          const grouped: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
-          for (const t of (ca.transactions || [])) {
-            const pid = t?.paymentId ? String(t.paymentId) : '';
-            if (!pid) continue;
-            if (!grouped[pid]) grouped[pid] = [];
-            grouped[pid].push({ _id: (t as any)._id, date: new Date(t.date) });
-          }
-          const toRemove: any[] = [];
-          for (const pid of Object.keys(grouped)) {
-            const list = grouped[pid];
-            if (list.length <= 1) continue;
-            const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-            toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
-          }
-          if (toRemove.length > 0) {
-            await CompanyAccount.updateOne(
-              { _id: ca._id },
-              { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } }
-            );
-            // Recalculate totals
-            const fresh = await CompanyAccount.findById(ca._id) as any;
-            if (fresh) {
-              const list = (fresh.transactions || []);
-              const income = list.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
-              const expenses = list.filter((t: any) => t.type !== 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
-              await CompanyAccount.updateOne(
-                { _id: fresh._id },
-                { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } }
-              );
+        const cursor = CompanyAccount.find(
+          { lastUpdated: { $gte: since } },
+        )
+          .select('_id companyId transactions.paymentId transactions.date transactions._id transactions.type transactions.amount')
+          .lean()
+          .cursor();
+
+        for await (const ca of cursor as any as AsyncIterable<any>) {
+          try {
+            const grouped: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
+            const txs = Array.isArray(ca.transactions) ? ca.transactions : [];
+            for (const t of txs) {
+              const pid = t?.paymentId ? String(t.paymentId) : '';
+              if (!pid) continue;
+              (grouped[pid] ||= []).push({ _id: (t as any)._id, date: new Date(t.date) });
             }
+            const toRemove: any[] = [];
+            for (const pid of Object.keys(grouped)) {
+              const list = grouped[pid];
+              if (list.length <= 1) continue;
+              const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
+              toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+            }
+            if (toRemove.length > 0) {
+              await CompanyAccount.updateOne(
+                { _id: ca._id },
+                { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } }
+              );
+              // Recalculate totals using a lean fetch of the updated doc
+              const fresh = await CompanyAccount.findById(ca._id).select('_id transactions').lean() as any;
+              if (fresh) {
+                const list = Array.isArray(fresh.transactions) ? fresh.transactions : [];
+                const income = list.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+                const expenses = list.filter((t: any) => t.type !== 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+                await CompanyAccount.updateOne(
+                  { _id: fresh._id },
+                  { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } }
+                );
+              }
+            }
+          } catch (docErr) {
+            logger.warn('Reconciliation: company ledger dedupe failed for account', { accountId: String(ca?._id || ''), err: (docErr as any)?.message || docErr });
           }
         }
       } catch (dedupeErr) {

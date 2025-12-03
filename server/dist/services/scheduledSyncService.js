@@ -41,6 +41,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -351,7 +358,8 @@ class ScheduledSyncService {
      */
     executeLedgerReconciliation() {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c;
+            var _a, e_1, _b, _c;
+            var _d, _e, _f;
             const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
             try {
                 // 1) Re-post recent completed payments (idempotent, guarded by unique indexes)
@@ -364,7 +372,7 @@ class ScheduledSyncService {
                         try {
                             yield (yield Promise.resolve().then(() => __importStar(require('./ledgerEventService')))).default.enqueueOwnerIncomeEvent(String(p._id));
                         }
-                        catch (_d) { }
+                        catch (_g) { }
                         logger_1.logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e === null || e === void 0 ? void 0 : e.message) || e);
                     }
                 }
@@ -383,7 +391,7 @@ class ScheduledSyncService {
                         const txDoc = {
                             type: 'income',
                             source: desiredSource,
-                            amount: Number(((_a = p.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare) || 0),
+                            amount: Number(((_d = p.commissionDetails) === null || _d === void 0 ? void 0 : _d.agencyShare) || 0),
                             date: p.paymentDate || new Date(),
                             currency: p.currency || 'USD',
                             paymentMethod: p.paymentMethod,
@@ -396,7 +404,7 @@ class ScheduledSyncService {
                         yield CompanyAccount.updateOne({ companyId: p.companyId }, { $setOnInsert: { companyId: p.companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
                         yield CompanyAccount.updateOne({ companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id } } } }, {
                             $push: { transactions: txDoc },
-                            $inc: { totalIncome: Number(((_b = p.commissionDetails) === null || _b === void 0 ? void 0 : _b.agencyShare) || 0), runningBalance: Number(((_c = p.commissionDetails) === null || _c === void 0 ? void 0 : _c.agencyShare) || 0) },
+                            $inc: { totalIncome: Number(((_e = p.commissionDetails) === null || _e === void 0 ? void 0 : _e.agencyShare) || 0), runningBalance: Number(((_f = p.commissionDetails) === null || _f === void 0 ? void 0 : _f.agencyShare) || 0) },
                             $set: { lastUpdated: new Date() }
                         });
                     }
@@ -417,36 +425,55 @@ class ScheduledSyncService {
                 // 4) Dedupe company accounts updated recently (keep earliest for each paymentId)
                 try {
                     const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
-                    const companyAccounts = yield CompanyAccount.find({ lastUpdated: { $gte: since } }).select('_id companyId transactions');
-                    for (const ca of companyAccounts) {
-                        const grouped = Object.create(null);
-                        for (const t of (ca.transactions || [])) {
-                            const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
-                            if (!pid)
-                                continue;
-                            if (!grouped[pid])
-                                grouped[pid] = [];
-                            grouped[pid].push({ _id: t._id, date: new Date(t.date) });
-                        }
-                        const toRemove = [];
-                        for (const pid of Object.keys(grouped)) {
-                            const list = grouped[pid];
-                            if (list.length <= 1)
-                                continue;
-                            const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-                            toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
-                        }
-                        if (toRemove.length > 0) {
-                            yield CompanyAccount.updateOne({ _id: ca._id }, { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } });
-                            // Recalculate totals
-                            const fresh = yield CompanyAccount.findById(ca._id);
-                            if (fresh) {
-                                const list = (fresh.transactions || []);
-                                const income = list.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                const expenses = list.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
+                    const cursor = CompanyAccount.find({ lastUpdated: { $gte: since } })
+                        .select('_id companyId transactions.paymentId transactions.date transactions._id transactions.type transactions.amount')
+                        .lean()
+                        .cursor();
+                    try {
+                        for (var _h = true, _j = __asyncValues(cursor), _k; _k = yield _j.next(), _a = _k.done, !_a; _h = true) {
+                            _c = _k.value;
+                            _h = false;
+                            const ca = _c;
+                            try {
+                                const grouped = Object.create(null);
+                                const txs = Array.isArray(ca.transactions) ? ca.transactions : [];
+                                for (const t of txs) {
+                                    const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
+                                    if (!pid)
+                                        continue;
+                                    (grouped[pid] || (grouped[pid] = [])).push({ _id: t._id, date: new Date(t.date) });
+                                }
+                                const toRemove = [];
+                                for (const pid of Object.keys(grouped)) {
+                                    const list = grouped[pid];
+                                    if (list.length <= 1)
+                                        continue;
+                                    const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
+                                    toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+                                }
+                                if (toRemove.length > 0) {
+                                    yield CompanyAccount.updateOne({ _id: ca._id }, { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } });
+                                    // Recalculate totals using a lean fetch of the updated doc
+                                    const fresh = yield CompanyAccount.findById(ca._id).select('_id transactions').lean();
+                                    if (fresh) {
+                                        const list = Array.isArray(fresh.transactions) ? fresh.transactions : [];
+                                        const income = list.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                        const expenses = list.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                        yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
+                                    }
+                                }
+                            }
+                            catch (docErr) {
+                                logger_1.logger.warn('Reconciliation: company ledger dedupe failed for account', { accountId: String((ca === null || ca === void 0 ? void 0 : ca._id) || ''), err: (docErr === null || docErr === void 0 ? void 0 : docErr.message) || docErr });
                             }
                         }
+                    }
+                    catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                    finally {
+                        try {
+                            if (!_h && !_a && (_b = _j.return)) yield _b.call(_j);
+                        }
+                        finally { if (e_1) throw e_1.error; }
                     }
                 }
                 catch (dedupeErr) {
