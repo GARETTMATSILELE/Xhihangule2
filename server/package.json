@@ -9,6 +9,8 @@
     "build": "tsc",
     "reconcile:dry": "npm run build && node dist/scripts/reconcile.js --dry-run",
     "reconcile:apply": "npm run build && node dist/scripts/reconcile.js --apply",
+    "ledger:maintain": "npm run build && node dist/scripts/ledgerMaintenance.js",
+    "ledger:backfill-keys": "npm run build && node dist/scripts/backfillIdempotencyKeys.js",
     "test": "jest"
   },
   "keywords": [],

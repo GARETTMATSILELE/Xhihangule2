@@ -26,8 +26,8 @@ export const getPropertyAccount = async (req: Request, res: Response) => {
     }
 
     console.log('Calling propertyAccountService.getPropertyAccount...');
-    // Ensure an account exists (create if missing), respecting the requested ledger
-    const account = await propertyAccountService.getOrCreatePropertyAccount(propertyId, ledger as any);
+    // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
+    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
     
     res.json({
       success: true,
@@ -237,6 +237,10 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
 export const addExpense = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
+    const ledger = (String(req.query?.ledger || '').toLowerCase() === 'sale' ? 'sale' : (String(req.query?.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined)) as
+      | 'rental'
+      | 'sale'
+      | undefined;
     const { 
       amount, 
       date, 
@@ -277,12 +281,17 @@ export const addExpense = async (req: Request, res: Response) => {
       idempotencyKey
     };
 
-    const account = await propertyAccountService.addExpense(propertyId, expenseData);
+    const account = await propertyAccountService.addExpense(propertyId, expenseData, ledger);
+    // Echo back idempotency key for client-side caching (header and body)
+    if (idempotencyKey) {
+      try { res.setHeader('Idempotency-Key', idempotencyKey); } catch {}
+    }
     
     res.json({
       success: true,
       message: 'Expense added successfully',
-      data: account
+      data: account,
+      idempotencyKey: idempotencyKey || undefined
     });
   } catch (error) {
     logger.error('Error in addExpense:', error);
@@ -307,6 +316,10 @@ export const addExpense = async (req: Request, res: Response) => {
 export const createOwnerPayout = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
+    const ledger = (String(req.query?.ledger || '').toLowerCase() === 'sale' ? 'sale' : (String(req.query?.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined)) as
+      | 'rental'
+      | 'sale'
+      | undefined;
     const { 
       amount,
       paymentMethod, 
@@ -334,7 +347,7 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
 
     // Get the property account to access owner information
     console.log('Getting property account for propertyId:', propertyId);
-    const account = await propertyAccountService.getPropertyAccount(propertyId);
+    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger);
     console.log('Property account retrieved:', {
       accountId: account._id,
       ownerId: account.ownerId,
@@ -374,12 +387,17 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
       idempotencyKey
     };
 
-    const { account: updatedAccount, payout } = await propertyAccountService.createOwnerPayout(propertyId, payoutData);
+    const { account: updatedAccount, payout } = await propertyAccountService.createOwnerPayout(propertyId, payoutData, ledger);
+    // Echo back generated/used idempotency key
+    if ((payout as any)?.idempotencyKey) {
+      try { res.setHeader('Idempotency-Key', String((payout as any).idempotencyKey)); } catch {}
+    }
     
     res.json({
       success: true,
       message: 'Owner payout created successfully',
-      data: { account: updatedAccount, payout }
+      data: { account: updatedAccount, payout },
+      idempotencyKey: (payout as any)?.idempotencyKey
     });
   } catch (error) {
     logger.error('Error in createOwnerPayout:', error);

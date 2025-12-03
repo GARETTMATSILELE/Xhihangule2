@@ -340,7 +340,8 @@ const DatabaseSyncDashboard: React.FC = () => {
     try {
       setConsistencyLoading(true);
       setConsistencyError(null);
-      const res = await api.get('/sync/consistency');
+      // Use a bounded lookback to avoid long-running checks in production
+      const res = await api.get('/sync/consistency', { params: { lookbackDays: 14 } });
       setConsistency((res as any)?.data?.data || null);
       setConsistencyDialogOpen(true);
     } catch (e: any) {

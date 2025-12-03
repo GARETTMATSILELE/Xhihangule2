@@ -555,57 +555,26 @@ class DatabaseSyncService extends events_1.EventEmitter {
     syncPropertyToAccounting(property) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                // Use application schema (with ledgerType)
-                const PropertyAccount = (yield Promise.resolve().then(() => __importStar(require('../models/PropertyAccount')))).default;
-                // Maintain the base rental ledger account as the canonical metadata carrier
-                let propertyAccount = yield PropertyAccount.findOne({ propertyId: property._id, ledgerType: 'rental' });
-                if (propertyAccount) {
-                    // Update existing account
-                    propertyAccount.propertyName = property.name;
-                    propertyAccount.propertyAddress = property.address;
-                    propertyAccount.ownerId = property.ownerId;
-                    propertyAccount.isActive = property.isActive !== false;
-                    propertyAccount.lastUpdated = new Date();
-                    if (property.ownerId) {
-                        const owner = yield User_1.User.findById(property.ownerId);
-                        if (owner) {
-                            propertyAccount.ownerName = `${owner.firstName} ${owner.lastName}`;
-                        }
+                // Always go through the service's idempotent entrypoint
+                const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(property._id.toString(), 'rental');
+                // Update metadata on the canonical rental ledger
+                const updates = {
+                    propertyName: property.name,
+                    propertyAddress: property.address,
+                    ownerId: property.ownerId,
+                    isActive: property.isActive !== false,
+                    lastUpdated: new Date()
+                };
+                if (property.ownerId) {
+                    const owner = yield User_1.User.findById(property.ownerId);
+                    if (owner) {
+                        updates.ownerName = `${owner.firstName} ${owner.lastName}`;
                     }
-                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                        yield propertyAccount.save();
-                    }));
-                    logger_1.logger.info(`Updated property account for property ${property._id}`);
                 }
-                else {
-                    // Create new account if it doesn't exist
-                    let ownerName = 'Unknown Owner';
-                    if (property.ownerId) {
-                        const owner = yield User_1.User.findById(property.ownerId);
-                        if (owner) {
-                            ownerName = `${owner.firstName} ${owner.lastName}`;
-                        }
-                    }
-                    const newAccount = new PropertyAccount({
-                        propertyId: property._id,
-                        ledgerType: 'rental',
-                        propertyName: property.name,
-                        propertyAddress: property.address,
-                        ownerId: property.ownerId,
-                        ownerName,
-                        transactions: [],
-                        ownerPayouts: [],
-                        runningBalance: 0,
-                        totalIncome: 0,
-                        totalExpenses: 0,
-                        totalOwnerPayouts: 0,
-                        isActive: property.isActive !== false
-                    });
-                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                        yield newAccount.save();
-                    }));
-                    logger_1.logger.info(`Created property account for property ${property._id}`);
-                }
+                yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                    yield (yield Promise.resolve().then(() => __importStar(require('../models/PropertyAccount')))).default.updateOne({ _id: account._id }, { $set: updates });
+                }));
+                logger_1.logger.info(`Ensured/updated property account for property ${property._id}`);
                 this.recordSyncSuccess();
             }
             catch (error) {
@@ -676,11 +645,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
     removePropertyFromAccounting(propertyId) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                // Do not delete immutable ledgers; archive/deactivate instead
                 const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
                 yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                    yield PropertyAccount.findOneAndDelete({ propertyId }, { maxTimeMS: 5000 });
+                    yield PropertyAccount.updateMany({ propertyId }, { $set: { isActive: false, isArchived: true, lastUpdated: new Date() } }, { maxTimeMS: 5000 });
                 }));
-                logger_1.logger.info(`Removed property account for property ${propertyId}`);
+                logger_1.logger.info(`Archived/deactivated property account(s) for property ${propertyId}`);
                 this.recordSyncSuccess();
             }
             catch (error) {
@@ -1055,11 +1025,40 @@ class DatabaseSyncService extends events_1.EventEmitter {
     /**
      * Validate data consistency between databases
      */
-    validateDataConsistency() {
+    validateDataConsistency(options) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
+            var _a, _b;
             try {
                 const inconsistencies = [];
+                // Resolve execution parameters with safe bounds
+                const resolvedConcurrency = Math.max(1, Math.min(50, Number((options === null || options === void 0 ? void 0 : options.concurrency) || process.env.SYNC_VALIDATION_CONCURRENCY || 8)));
+                const resolvedLookbackDays = Math.max(1, Math.min(365, Number((_b = (_a = options === null || options === void 0 ? void 0 : options.lookbackDays) !== null && _a !== void 0 ? _a : process.env.SYNC_VALIDATION_LOOKBACK_DAYS) !== null && _b !== void 0 ? _b : 30)));
+                // Simple concurrency runner
+                const runWithConcurrency = (items, worker, concurrency) => __awaiter(this, void 0, void 0, function* () {
+                    let index = 0;
+                    const total = items.length;
+                    const workers = [];
+                    for (let i = 0; i < Math.min(concurrency, total); i++) {
+                        workers.push((() => __awaiter(this, void 0, void 0, function* () {
+                            while (true) {
+                                let currentIndex;
+                                // Fetch next index
+                                if (index >= total)
+                                    break;
+                                currentIndex = index;
+                                index += 1;
+                                try {
+                                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                    yield worker(items[currentIndex], currentIndex);
+                                }
+                                catch (e) {
+                                    // Individual item errors are recorded by the worker; continue
+                                }
+                            }
+                        }))());
+                    }
+                    yield Promise.allSettled(workers);
+                });
                 // Check if database connections are available
                 if (!database_1.accountingConnection || !database_1.mainConnection) {
                     logger_1.logger.warn('Database connections not available for consistency check');
@@ -1075,11 +1074,13 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 try {
                     // Check property accounts consistency
                     const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                    const propertyAccounts = yield PropertyAccount.find({});
-                    for (const account of propertyAccounts) {
+                    const propertyAccounts = yield PropertyAccount.find({})
+                        .select('_id propertyId ownerId')
+                        .lean();
+                    yield runWithConcurrency(propertyAccounts, (account) => __awaiter(this, void 0, void 0, function* () {
                         try {
                             // Check if property still exists
-                            const property = yield Property_1.Property.findById(account.propertyId);
+                            const property = yield Property_1.Property.findById(account.propertyId).select('_id').lean();
                             if (!property) {
                                 inconsistencies.push({
                                     type: 'orphaned_property_account',
@@ -1089,7 +1090,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                             }
                             // Check if owner still exists
                             if (account.ownerId) {
-                                const owner = yield User_1.User.findById(account.ownerId);
+                                const owner = yield User_1.User.findById(account.ownerId).select('_id').lean();
                                 if (!owner) {
                                     inconsistencies.push({
                                         type: 'orphaned_owner_reference',
@@ -1107,12 +1108,16 @@ class DatabaseSyncService extends events_1.EventEmitter {
                                 count: 1
                             });
                         }
-                    }
+                    }), resolvedConcurrency);
                     // Check for missing property accounts
-                    const properties = yield Property_1.Property.find({});
-                    for (const property of properties) {
+                    const properties = yield Property_1.Property.find({})
+                        .select('_id')
+                        .lean();
+                    yield runWithConcurrency(properties, (property) => __awaiter(this, void 0, void 0, function* () {
                         try {
-                            const account = yield PropertyAccount.findOne({ propertyId: property._id });
+                            const account = yield PropertyAccount.findOne({ propertyId: property._id })
+                                .select('_id')
+                                .lean();
                             if (!account) {
                                 inconsistencies.push({
                                     type: 'missing_property_account',
@@ -1124,10 +1129,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         catch (propertyError) {
                             logger_1.logger.warn(`Error checking property ${property._id}:`, propertyError);
                         }
-                    }
+                    }), resolvedConcurrency);
                     // Cross-check payments vs ledgers (lookback window to bound workload)
-                    const lookbackDays = Number(process.env.SYNC_VALIDATION_LOOKBACK_DAYS || 30);
-                    const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+                    const since = new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
                     const payments = yield Payment_1.Payment.find({
                         status: 'completed',
                         paymentType: { $in: ['rental', 'sale'] },
@@ -1135,17 +1139,22 @@ class DatabaseSyncService extends events_1.EventEmitter {
                             { paymentDate: { $gte: since } },
                             { updatedAt: { $gte: since } }
                         ]
-                    }).select('_id companyId propertyId paymentType commissionDetails').lean();
+                    })
+                        .select('_id companyId paymentType commissionDetails paymentDate currency paymentMethod referenceNumber processedBy notes')
+                        .lean();
                     // Helper to safely import CompanyAccount on demand
                     const getCompanyAccountModel = () => __awaiter(this, void 0, void 0, function* () {
                         const mod = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
                         return mod.CompanyAccount;
                     });
-                    for (const p of payments) {
+                    yield runWithConcurrency(payments, (p) => __awaiter(this, void 0, void 0, function* () {
+                        var _a;
                         // Property/development ledger presence
                         const propHasPosting = yield PropertyAccount.findOne({
                             'transactions.paymentId': p._id
-                        }).select('_id').lean();
+                        })
+                            .select('_id')
+                            .lean();
                         if (!propHasPosting) {
                             inconsistencies.push({
                                 type: 'missing_property_ledger_income',
@@ -1160,7 +1169,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
                             const companyHasPosting = yield CompanyAccount.findOne({
                                 companyId: p.companyId,
                                 'transactions.paymentId': p._id
-                            }).select('_id').lean();
+                            })
+                                .select('_id')
+                                .lean();
                             if (!companyHasPosting) {
                                 inconsistencies.push({
                                     type: 'missing_company_commission',
@@ -1169,10 +1180,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
                                 });
                             }
                         }
-                    }
+                    }), resolvedConcurrency);
                     // Detect duplicate postings in recent ledgers (property)
                     const recentAccounts = yield PropertyAccount.find({ lastUpdated: { $gte: since } })
-                        .select('_id propertyId ledgerType transactions').lean();
+                        .select('_id propertyId ledgerType transactions')
+                        .lean();
                     for (const acc of recentAccounts) {
                         const counts = Object.create(null);
                         for (const t of acc.transactions || []) {

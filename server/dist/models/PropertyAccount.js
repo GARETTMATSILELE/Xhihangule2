@@ -190,6 +190,11 @@ const PropertyAccountSchema = new mongoose_1.Schema({
         type: Boolean,
         default: true
     },
+    // Soft-archive flag to keep immutable history while excluding from uniqueness and queries
+    isArchived: {
+        type: Boolean,
+        default: false
+    },
     lastUpdated: {
         type: Date,
         default: Date.now
@@ -198,9 +203,12 @@ const PropertyAccountSchema = new mongoose_1.Schema({
     timestamps: true
 });
 // Indexes for better query performance
-PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1 }, { unique: true });
+// Enforce uniqueness only for non-archived ledgers (partial index)
+PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true } } });
 // Accelerate list queries that filter by propertyId and sort by lastUpdated
 PropertyAccountSchema.index({ propertyId: 1, lastUpdated: -1 });
+// Speed up lookups by embedded transaction paymentId
+PropertyAccountSchema.index({ 'transactions.paymentId': 1 });
 PropertyAccountSchema.index({ ownerId: 1 });
 PropertyAccountSchema.index({ 'transactions.date': -1 });
 PropertyAccountSchema.index({ 'ownerPayouts.date': -1 });
@@ -230,12 +238,19 @@ function isIllegalLedgerMutation(update, rootArrays) {
     const illegalRemovers = ['$pull', '$pullAll', '$pop'];
     const allowedAppends = ['$push', '$addToSet'];
     const startsWithAny = (k, prefixes) => prefixes.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
+    // Allow-list: status transitions on ownerPayouts via positional operator are permitted
+    const isAllowedSetPath = (path) => {
+        // Allow ownerPayouts.$.status and ownerPayouts.$.updatedAt (including array filter variants like $[elem])
+        return /^ownerPayouts\.\$(?:\[[^\]]+\])?\.(status|updatedAt)$/.test(path);
+    };
     // Block setters on nested transaction/payout fields
     for (const op of illegalSetters) {
         const payload = update[op];
         if (!payload || typeof payload !== 'object')
             continue;
         for (const path of Object.keys(payload)) {
+            if (isAllowedSetPath(path))
+                continue;
             if (startsWithAny(path, rootArrays))
                 return true;
         }

@@ -126,7 +126,7 @@ export const connectDatabase = async (): Promise<void> => {
       }
     }
 
-    // Migrate accounting PropertyAccount ownerPayouts.referenceNumber unique index to compound index
+    // Migrate accounting PropertyAccount legacy indexes (drop-only; creation is handled by model/service)
     try {
       // Initialize secondary/accounting connection lazily
       // Ensure accounting connection is established (createConnection is sync; .asPromise ensures ready)
@@ -154,25 +154,8 @@ export const connectDatabase = async (): Promise<void> => {
         }
       }
 
-      // Create compound unique index if missing
-      const hasCompound = idx.find((i: any) => i.name === 'propertyId_1_ownerPayouts.referenceNumber_1');
-      if (!hasCompound) {
-        console.log('Creating compound unique index on propertyaccounts: { propertyId: 1, ownerPayouts.referenceNumber: 1 }');
-        await acct.createIndex(
-          { propertyId: 1 as any, 'ownerPayouts.referenceNumber': 1 as any },
-          { name: 'propertyId_1_ownerPayouts.referenceNumber_1', unique: true, sparse: true }
-        );
-      }
-
-      // Ensure unique index for transactions.paymentId to guarantee idempotency
-      const hasTxnPaymentIdx = idx.find((i: any) => i.name === 'transactions.paymentId_1');
-      if (!hasTxnPaymentIdx) {
-        console.log('Creating unique sparse index on propertyaccounts.transactions.paymentId');
-        await acct.createIndex(
-          { 'transactions.paymentId': 1 as any },
-          { name: 'transactions.paymentId_1', unique: true, sparse: true }
-        );
-      }
+      // Creation of correct compound indexes is handled centrally in PropertyAccountService.ensureLedgerIndexes
+      // We explicitly avoid creating simple/sparse legacy indexes here to prevent conflicts.
     } catch (acctIdxErr: any) {
       if (acctIdxErr && acctIdxErr.code === 26) {
         console.log('Accounting propertyaccounts collection not found; skipping compound index migration');

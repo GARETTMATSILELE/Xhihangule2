@@ -48,6 +48,9 @@ import { initializeSocket } from './config/socket';
 import { initializeSyncServices } from './scripts/startSyncServices';
 import reportRoutes from './routes/reportRoutes';
 import publicReportRoutes from './routes/publicReportRoutes';
+import { initializePropertyAccountIndexes } from './services/propertyAccountService';
+import SystemSetting from './models/SystemSetting';
+import { runPropertyLedgerMaintenance } from './services/propertyAccountService';
 
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
@@ -120,7 +123,19 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Idempotency-Key',
+    'idempotency-key'
+  ],
+  exposedHeaders: [
+    'Idempotency-Key'
+  ],
+  optionsSuccessStatus: 204
 }));
 
 // Add cookie-parser middleware
@@ -316,8 +331,52 @@ connectDatabase()
     console.log('Connected to MongoDB');
 
     try {
+      // Ensure critical property account indexes are in place at startup
+      try {
+        await initializePropertyAccountIndexes();
+        console.log('Property account indexes ensured');
+      } catch (idxErr) {
+        console.warn('Failed to ensure property account indexes:', idxErr);
+      }
+
       await initializeSyncServices();
       console.log('Database synchronization services initialized');
+
+      // One-time ledger maintenance at boot (production only)
+      if (process.env.NODE_ENV === 'production') {
+        (async () => {
+          const maintenanceKey = 'ledger_maintenance_v1';
+          try {
+            // Create run record if not present
+            await SystemSetting.updateOne(
+              { key: maintenanceKey, startedAt: { $exists: false } },
+              { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } },
+              { upsert: true }
+            );
+            const record = await SystemSetting.findOne({ key: maintenanceKey }).lean();
+            if (record && record.completedAt) {
+              console.log('Startup ledger maintenance already completed previously - skipping.');
+              return;
+            }
+            console.log('Starting startup ledger maintenance (one-time) across all companies...');
+            const result = await runPropertyLedgerMaintenance({});
+            await SystemSetting.updateOne(
+              { key: maintenanceKey },
+              { $set: { completedAt: new Date(), value: result, lastError: undefined } }
+            );
+            console.log('Startup ledger maintenance completed.');
+          } catch (e: any) {
+            console.error('Startup ledger maintenance failed:', e?.message || e);
+            try {
+              await SystemSetting.updateOne(
+                { key: maintenanceKey },
+                { $set: { lastError: e?.message || String(e) } },
+                { upsert: true }
+              );
+            } catch {}
+          }
+        })().catch(() => {});
+      }
     } catch (error) {
       console.error('Failed to initialize sync services:', error);
     }

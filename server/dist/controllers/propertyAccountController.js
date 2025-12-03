@@ -34,8 +34,8 @@ const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, funct
             return res.status(400).json({ message: 'Property ID is required' });
         }
         console.log('Calling propertyAccountService.getPropertyAccount...');
-        // Ensure an account exists (create if missing), respecting the requested ledger
-        const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(propertyId, ledger);
+        // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
         res.json({
             success: true,
             data: account
@@ -233,9 +233,10 @@ exports.getPropertyTransactions = getPropertyTransactions;
  * Add expense to property account
  */
 const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d;
     try {
         const { propertyId } = req.params;
+        const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
         const { amount, date, description, category, recipientId, recipientType, notes } = req.body;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
@@ -246,10 +247,10 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!description) {
             return res.status(400).json({ message: 'Description is required' });
         }
-        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+        if (!((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
-        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
+        const idempotencyKey = req.headers['idempotency-key'] || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.idempotencyKey) || undefined;
         const expenseData = {
             amount: Number(amount),
             date: date ? new Date(date) : new Date(),
@@ -261,11 +262,19 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             notes,
             idempotencyKey
         };
-        const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData);
+        const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData, ledger);
+        // Echo back idempotency key for client-side caching (header and body)
+        if (idempotencyKey) {
+            try {
+                res.setHeader('Idempotency-Key', idempotencyKey);
+            }
+            catch (_e) { }
+        }
         res.json({
             success: true,
             message: 'Expense added successfully',
-            data: account
+            data: account,
+            idempotencyKey: idempotencyKey || undefined
         });
     }
     catch (error) {
@@ -287,9 +296,10 @@ exports.addExpense = addExpense;
  * Create owner payout
  */
 const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d;
     try {
         const { propertyId } = req.params;
+        const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
         const { amount, paymentMethod, recipientId, recipientName, recipientBankDetails, notes } = req.body;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
@@ -300,12 +310,12 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!paymentMethod) {
             return res.status(400).json({ message: 'Payment method is required' });
         }
-        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+        if (!((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
         // Get the property account to access owner information
         console.log('Getting property account for propertyId:', propertyId);
-        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
         console.log('Property account retrieved:', {
             accountId: account._id,
             ownerId: account.ownerId,
@@ -328,7 +338,7 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!finalRecipientName) {
             return res.status(400).json({ message: 'Recipient name is required' });
         }
-        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
+        const idempotencyKey = req.headers['idempotency-key'] || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.idempotencyKey) || undefined;
         const payoutData = {
             amount: Number(amount),
             paymentMethod,
@@ -339,11 +349,19 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
             notes,
             idempotencyKey
         };
-        const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData);
+        const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData, ledger);
+        // Echo back generated/used idempotency key
+        if (payout === null || payout === void 0 ? void 0 : payout.idempotencyKey) {
+            try {
+                res.setHeader('Idempotency-Key', String(payout.idempotencyKey));
+            }
+            catch (_e) { }
+        }
         res.json({
             success: true,
             message: 'Owner payout created successfully',
-            data: { account: updatedAccount, payout }
+            data: { account: updatedAccount, payout },
+            idempotencyKey: payout === null || payout === void 0 ? void 0 : payout.idempotencyKey
         });
     }
     catch (error) {

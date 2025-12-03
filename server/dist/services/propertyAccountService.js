@@ -16,6 +16,8 @@ exports.PropertyAccountService = void 0;
 exports.migrateSalesLedgerForCompany = migrateSalesLedgerForCompany;
 exports.reconcilePropertyLedgerDuplicates = reconcilePropertyLedgerDuplicates;
 exports.ensureDevelopmentLedgersAndBackfillPayments = ensureDevelopmentLedgersAndBackfillPayments;
+exports.initializePropertyAccountIndexes = initializePropertyAccountIndexes;
+exports.runPropertyLedgerMaintenance = runPropertyLedgerMaintenance;
 const mongoose_1 = __importDefault(require("mongoose"));
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const Payment_1 = require("../models/Payment");
@@ -26,6 +28,7 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
+const uuid_1 = require("uuid");
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise = null;
 class PropertyAccountService {
@@ -285,22 +288,43 @@ class PropertyAccountService {
                                 console.warn('Could not drop legacy ownerPayout index:', (dropErr === null || dropErr === void 0 ? void 0 : dropErr.message) || dropErr);
                             }
                         }
-                        const hasCompound = indexes.some((idx) => idx.name === 'propertyId_1_ledgerType_1' && idx.unique === true);
-                        if (!hasCompound) {
+                        // Ensure unique compound index exists and is partial on non-archived docs
+                        const compound = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1');
+                        const compoundIsGood = compound &&
+                            compound.unique === true &&
+                            compound.partialFilterExpression &&
+                            compound.partialFilterExpression.isArchived &&
+                            compound.partialFilterExpression.isArchived.$ne === true;
+                        if (!compoundIsGood) {
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true });
-                                console.log('Created compound unique index propertyId_1_ledgerType_1 on PropertyAccount.');
+                                if (compound) {
+                                    yield PropertyAccount_1.default.collection.dropIndex('propertyId_1_ledgerType_1');
+                                    console.log('Dropped existing compound index propertyId_1_ledgerType_1 to recreate as partial unique.');
+                                }
+                            }
+                            catch (dropErr) {
+                                console.warn('Could not drop compound index:', (dropErr === null || dropErr === void 0 ? void 0 : dropErr.message) || dropErr);
+                            }
+                            try {
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true } } });
+                                console.log('Created partial unique compound index propertyId_1_ledgerType_1 on PropertyAccount.');
                             }
                             catch (createErr) {
-                                console.warn('Could not create compound index:', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
+                                console.warn('Could not create partial compound index:', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
                             }
                         }
-                        // Ensure owner payouts unique index includes ledgerType and is sparse
-                        const hasOwnerPayoutCompound = indexes.some((idx) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1' && idx.unique === true);
-                        if (!hasOwnerPayoutCompound) {
+                        // Ensure owner payouts unique index includes ledgerType and uses partial filter (no sparse)
+                        const opIdx = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1');
+                        const opGood = opIdx && opIdx.unique === true && opIdx.partialFilterExpression && opIdx.partialFilterExpression.isArchived && opIdx.partialFilterExpression.isArchived.$ne === true && opIdx.partialFilterExpression['ownerPayouts.referenceNumber'];
+                        if (!opGood) {
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, sparse: true });
-                                console.log('Created compound unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
+                                if (opIdx)
+                                    yield PropertyAccount_1.default.collection.dropIndex('propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1');
+                            }
+                            catch (_a) { }
+                            try {
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true }, 'ownerPayouts.referenceNumber': { $exists: true, $type: 'string' } } });
+                                console.log('Created partial unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
                             }
                             catch (createErr) {
                                 console.warn('Could not create owner payout compound index:', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
@@ -317,11 +341,17 @@ class PropertyAccountService {
                                 console.warn('Could not drop legacy transactions.paymentId index:', (dropErr === null || dropErr === void 0 ? void 0 : dropErr.message) || dropErr);
                             }
                         }
-                        const hasTxCompound = indexes.some((idx) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1' && idx.unique === true);
-                        if (!hasTxCompound) {
+                        const txIdx = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1');
+                        const txGood = txIdx && txIdx.unique === true && txIdx.partialFilterExpression && txIdx.partialFilterExpression.isArchived && txIdx.partialFilterExpression.isArchived.$ne === true && txIdx.partialFilterExpression['transactions.paymentId'];
+                        if (!txGood) {
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
-                                console.log('Created compound unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
+                                if (txIdx)
+                                    yield PropertyAccount_1.default.collection.dropIndex('propertyId_1_ledgerType_1_transactions.paymentId_1');
+                            }
+                            catch (_b) { }
+                            try {
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true }, 'transactions.paymentId': { $exists: true } } });
+                                console.log('Created partial unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
                             }
                             catch (createErr) {
                                 console.warn('Could not create transactions compound index:', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
@@ -550,13 +580,17 @@ class PropertyAccountService {
     /**
      * Add expense to property account
      */
-    addExpense(propertyId, expenseData) {
+    addExpense(propertyId, expenseData, ledgerType) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 if (expenseData.amount <= 0) {
                     throw new errorHandler_1.AppError('Expense amount must be greater than 0', 400);
                 }
-                const account = yield this.getOrCreatePropertyAccount(propertyId);
+                // Ensure idempotency for all expense creations (generate if missing)
+                const idKey = (expenseData.idempotencyKey && expenseData.idempotencyKey.trim().length > 0)
+                    ? expenseData.idempotencyKey.trim()
+                    : `expense:${(0, uuid_1.v4)()}`;
+                const account = yield this.getOrCreatePropertyAccount(propertyId, ledgerType || 'rental');
                 if (account.runningBalance < expenseData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this expense', 400);
                 }
@@ -572,38 +606,36 @@ class PropertyAccountService {
                     processedBy: new mongoose_1.default.Types.ObjectId(expenseData.processedBy),
                     notes: expenseData.notes,
                     referenceNumber: `EXP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    idempotencyKey: expenseData.idempotencyKey,
+                    idempotencyKey: idKey,
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
-                if (expenseData.idempotencyKey && expenseData.idempotencyKey.trim().length > 0) {
-                    yield PropertyAccount_1.default.updateOne({ _id: account._id, 'transactions.idempotencyKey': { $ne: expenseData.idempotencyKey } }, { $push: { transactions: expenseTransaction }, $set: { lastUpdated: new Date() } });
+                // Atomic, guarded append using idempotencyKey and balance check.
+                const previousLastUpdated = account.lastUpdated ? new Date(account.lastUpdated) : undefined;
+                let res = yield PropertyAccount_1.default.updateOne(Object.assign({ _id: account._id, runningBalance: { $gte: expenseData.amount }, 'transactions.idempotencyKey': { $ne: idKey } }, (previousLastUpdated ? { lastUpdated: previousLastUpdated } : {})), {
+                    $push: { transactions: expenseTransaction },
+                    $set: { lastUpdated: new Date() }
+                });
+                if ((res === null || res === void 0 ? void 0 : res.modifiedCount) === 0) {
+                    // Retry once with refreshed state
                     const fresh = yield PropertyAccount_1.default.findById(account._id);
-                    if (fresh)
+                    if (fresh) {
                         yield this.recalculateBalance(fresh);
-                    logger_1.logger.info(`Added expense (idempotent) of ${expenseData.amount} to property ${propertyId}`);
-                    return (yield this.getPropertyAccount(propertyId));
-                }
-                account.transactions.push(expenseTransaction);
-                try {
-                    yield account.save();
-                }
-                catch (e) {
-                    if (e && (e.code === 11000 || ((e === null || e === void 0 ? void 0 : e.message) || '').includes('E11000'))) {
-                        // Duplicate by index – fetch fresh state to avoid returning in-memory unpersisted changes
-                        logger_1.logger.warn('Duplicate expense prevented by unique index/idempotency guard; returning fresh account');
-                        const fresh = yield PropertyAccount_1.default.findById(account._id);
-                        if (fresh) {
-                            yield this.recalculateBalance(fresh);
-                            return fresh;
-                        }
-                    }
-                    else {
-                        throw e;
+                        res = yield PropertyAccount_1.default.updateOne({
+                            _id: fresh._id,
+                            runningBalance: { $gte: expenseData.amount },
+                            'transactions.idempotencyKey': { $ne: idKey }
+                        }, {
+                            $push: { transactions: expenseTransaction },
+                            $set: { lastUpdated: new Date() }
+                        });
                     }
                 }
-                logger_1.logger.info(`Added expense of ${expenseData.amount} to property ${propertyId}`);
-                return account;
+                const reloaded = yield PropertyAccount_1.default.findById(account._id);
+                if (reloaded)
+                    yield this.recalculateBalance(reloaded);
+                logger_1.logger.info(`Added expense (idempotent, guarded) of ${expenseData.amount} to property ${propertyId}`);
+                return (yield this.getPropertyAccount(propertyId));
             }
             catch (error) {
                 logger_1.logger.error('Error adding expense:', error);
@@ -614,13 +646,17 @@ class PropertyAccountService {
     /**
      * Create owner payout
      */
-    createOwnerPayout(propertyId, payoutData) {
+    createOwnerPayout(propertyId, payoutData, ledgerType) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 if (payoutData.amount <= 0) {
                     throw new errorHandler_1.AppError('Payout amount must be greater than 0', 400);
                 }
-                const account = yield this.getPropertyAccount(propertyId);
+                // Ensure idempotency for payout creation (generate if missing)
+                const idKey = (payoutData.idempotencyKey && payoutData.idempotencyKey.trim().length > 0)
+                    ? payoutData.idempotencyKey.trim()
+                    : `payout:${(0, uuid_1.v4)()}`;
+                const account = yield this.getPropertyAccount(propertyId, ledgerType);
                 if (account.runningBalance < payoutData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this payout', 400);
                 }
@@ -630,7 +666,7 @@ class PropertyAccountService {
                     date: new Date(),
                     paymentMethod: payoutData.paymentMethod,
                     referenceNumber,
-                    idempotencyKey: payoutData.idempotencyKey,
+                    idempotencyKey: idKey,
                     status: 'pending',
                     processedBy: new mongoose_1.default.Types.ObjectId(payoutData.processedBy),
                     recipientId: new mongoose_1.default.Types.ObjectId(payoutData.recipientId),
@@ -640,35 +676,12 @@ class PropertyAccountService {
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
-                if (payoutData.idempotencyKey && payoutData.idempotencyKey.trim().length > 0) {
-                    yield PropertyAccount_1.default.updateOne({ _id: account._id, 'ownerPayouts.idempotencyKey': { $ne: payoutData.idempotencyKey } }, { $push: { ownerPayouts: payout }, $set: { lastUpdated: new Date() } });
-                    const fresh = yield PropertyAccount_1.default.findById(account._id);
-                    if (fresh)
-                        yield this.recalculateBalance(fresh);
-                    logger_1.logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
-                    return { account: (yield this.getPropertyAccount(propertyId)), payout };
-                }
-                account.ownerPayouts.push(payout);
-                try {
-                    yield account.save();
-                }
-                catch (e) {
-                    if (e && (e.code === 11000 || ((e === null || e === void 0 ? void 0 : e.message) || '').includes('E11000'))) {
-                        logger_1.logger.warn('Duplicate owner payout prevented by unique index/idempotency guard; returning fresh persisted state');
-                        const fresh = yield PropertyAccount_1.default.findById(account._id);
-                        if (fresh) {
-                            yield this.recalculateBalance(fresh);
-                            // Try to locate the persisted payout by unique referenceNumber
-                            const persisted = (fresh.ownerPayouts || []).find((op) => op.referenceNumber === referenceNumber);
-                            return { account: fresh, payout: persisted };
-                        }
-                    }
-                    else {
-                        throw e;
-                    }
-                }
-                logger_1.logger.info(`Created owner payout of ${payoutData.amount} for property ${propertyId}`);
-                return { account, payout };
+                yield PropertyAccount_1.default.updateOne({ _id: account._id, 'ownerPayouts.idempotencyKey': { $ne: idKey } }, { $push: { ownerPayouts: payout }, $set: { lastUpdated: new Date() } });
+                const fresh = yield PropertyAccount_1.default.findById(account._id);
+                if (fresh)
+                    yield this.recalculateBalance(fresh);
+                logger_1.logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
+                return { account: (yield this.getPropertyAccount(propertyId)), payout };
             }
             catch (error) {
                 logger_1.logger.error('Error creating owner payout:', error);
@@ -701,18 +714,39 @@ class PropertyAccountService {
                 if (!targetAccount || !targetPayout) {
                     throw new errorHandler_1.AppError('Payout not found', 404);
                 }
-                // If changing from pending to completed, check balance on the specific ledger
+                // Atomic status transition
+                const now = new Date();
                 if (targetPayout.status === 'pending' && status === 'completed') {
                     if (targetAccount.runningBalance < targetPayout.amount) {
                         throw new errorHandler_1.AppError('Insufficient balance to complete payout', 400);
                     }
+                    const res = yield PropertyAccount_1.default.updateOne({
+                        _id: targetAccount._id,
+                        runningBalance: { $gte: targetPayout.amount },
+                        ownerPayouts: { $elemMatch: { _id: new mongoose_1.default.Types.ObjectId(payoutId), status: 'pending' } }
+                    }, {
+                        $set: { 'ownerPayouts.$.status': 'completed', 'ownerPayouts.$.updatedAt': now, lastUpdated: now }
+                    });
+                    if ((res === null || res === void 0 ? void 0 : res.modifiedCount) === 0) {
+                        throw new errorHandler_1.AppError('Unable to complete payout due to insufficient balance or concurrent update', 409);
+                    }
                 }
-                targetPayout.status = status;
-                targetPayout.updatedAt = new Date();
-                // Save the account (this will trigger pre-save middleware to recalculate balance)
-                yield targetAccount.save();
+                else {
+                    const res = yield PropertyAccount_1.default.updateOne({
+                        _id: targetAccount._id,
+                        ownerPayouts: { $elemMatch: { _id: new mongoose_1.default.Types.ObjectId(payoutId) } }
+                    }, {
+                        $set: { 'ownerPayouts.$.status': status, 'ownerPayouts.$.updatedAt': now, lastUpdated: now }
+                    });
+                    if ((res === null || res === void 0 ? void 0 : res.modifiedCount) === 0) {
+                        throw new errorHandler_1.AppError('Payout status update conflict', 409);
+                    }
+                }
+                const fresh = yield PropertyAccount_1.default.findById(targetAccount._id);
+                if (fresh)
+                    yield this.recalculateBalance(fresh);
                 logger_1.logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId} on ledger ${String(targetAccount.ledgerType || 'unknown')}`);
-                return targetAccount;
+                return (yield this.getPropertyAccount(propertyId, targetAccount.ledgerType));
             }
             catch (error) {
                 logger_1.logger.error('Error updating payout status:', error);
@@ -727,16 +761,47 @@ class PropertyAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, _b, _c, _d, _e, _f;
             try {
+                // Ensure indexes are healthy and up-to-date (partial unique with archive support)
+                yield this.ensureLedgerIndexes();
                 const pid = new mongoose_1.default.Types.ObjectId(propertyId);
-                // Prefer exact ledgerType; fall back to legacy records without ledgerType
+                // Prefer exact ledgerType; consider legacy records without ledgerType as candidates as well.
                 const effectiveLedger = ledgerType || (yield this.inferLedgerTypeForProperty(propertyId));
-                let account = yield PropertyAccount_1.default.findOne({ propertyId: pid, ledgerType: effectiveLedger });
-                if (!account) {
-                    account = (yield PropertyAccount_1.default.findOne({ propertyId: pid, $or: [{ ledgerType: effectiveLedger }, { ledgerType: { $exists: false } }, { ledgerType: null }] }));
-                }
-                if (!account) {
-                    // Create the account if missing, then proceed (enables seamless backfill below)
+                const candidates = yield PropertyAccount_1.default.find({
+                    propertyId: pid,
+                    isArchived: { $ne: true },
+                    $or: [{ ledgerType: effectiveLedger }, { ledgerType: { $exists: false } }, { ledgerType: null }]
+                });
+                let account = null;
+                if (!candidates || candidates.length === 0) {
+                    // Create if missing
                     account = (yield this.getOrCreatePropertyAccount(propertyId, effectiveLedger));
+                }
+                else if (candidates.length === 1) {
+                    account = candidates[0];
+                }
+                else {
+                    // Multiple ledgers found (duplicates/legacy). Pick the most complete deterministically.
+                    const score = (acc) => {
+                        const txCount = Array.isArray(acc.transactions) ? acc.transactions.length : 0;
+                        const payoutCount = Array.isArray(acc.ownerPayouts) ? acc.ownerPayouts.length : 0;
+                        const income = Number(acc.totalIncome || 0);
+                        const updated = acc.lastUpdated ? new Date(acc.lastUpdated).getTime() : 0;
+                        return { txCount, payoutCount, income, updated };
+                    };
+                    // Prefer legacy (missing/null ledgerType) as authoritative if present
+                    const prefer = candidates.filter(c => c.ledgerType == null);
+                    const pool = prefer.length > 0 ? prefer : candidates;
+                    let best = pool[0];
+                    for (const c of pool.slice(1)) {
+                        const a = score(best);
+                        const b = score(c);
+                        const aScore = a.txCount + a.payoutCount;
+                        const bScore = b.txCount + b.payoutCount;
+                        if (bScore > aScore || (bScore === aScore && (b.income > a.income || (b.income === a.income && b.updated > a.updated)))) {
+                            best = c;
+                        }
+                    }
+                    account = best;
                 }
                 if (!account)
                     throw new errorHandler_1.AppError('Property account not found', 404);
@@ -879,17 +944,9 @@ class PropertyAccountService {
                 catch (_a) { }
                 const allIds = [...propertyIds, ...developmentIds, ...unitIds];
                 let accounts = yield PropertyAccount_1.default.find({
-                    propertyId: { $in: allIds }
+                    propertyId: { $in: allIds },
+                    isArchived: { $ne: true }
                 }).sort({ lastUpdated: -1 });
-                // Opportunistic deduplication: merge duplicates by (propertyId, ledgerType)
-                // Treat missing/null ledgerType as 'rental' for legacy documents
-                const changed = yield this.mergeDuplicateAccounts(accounts);
-                if (changed) {
-                    // Reload after cleanup to return the canonical set
-                    accounts = yield PropertyAccount_1.default.find({
-                        propertyId: { $in: allIds }
-                    }).sort({ lastUpdated: -1 });
-                }
                 return accounts;
             }
             catch (error) {
@@ -1001,9 +1058,9 @@ class PropertyAccountService {
             for (const group of groups) {
                 if (group.items.length <= 1)
                     continue;
-                // Choose keeper: prefer with explicit ledgerType set (not null), then by most entries, then latest lastUpdated
-                const withExplicitLedger = group.items.filter(i => i.ledgerType === 'sale' || i.ledgerType === 'rental');
-                const candidates = withExplicitLedger.length > 0 ? withExplicitLedger : group.items;
+                // Choose keeper: prefer legacy (missing/null ledgerType), then by most entries, then latest lastUpdated
+                const legacy = group.items.filter(i => i.ledgerType == null);
+                const candidates = legacy.length > 0 ? legacy : group.items;
                 const pickScore = (i) => {
                     const count = (Array.isArray(i.transactions) ? i.transactions.length : 0) + (Array.isArray(i.ownerPayouts) ? i.ownerPayouts.length : 0);
                     const updated = i.lastUpdated ? new Date(i.lastUpdated).getTime() : 0;
@@ -1084,17 +1141,17 @@ class PropertyAccountService {
                 catch (e) {
                     console.warn('Keeper save failed during account dedupe:', (e === null || e === void 0 ? void 0 : e.message) || e);
                 }
-                // Delete duplicates from DB
+                // Archive duplicates instead of deleting (to respect immutable ledger policy and avoid unique conflicts)
                 try {
                     const ids = toMergeAndDelete.map(d => d._id);
                     if (ids.length > 0) {
-                        yield PropertyAccount_1.default.deleteMany({ _id: { $in: ids } });
+                        yield PropertyAccount_1.default.updateMany({ _id: { $in: ids } }, { $set: { isArchived: true, lastUpdated: new Date() } });
                     }
                     anyChanged = true;
-                    logger_1.logger.info(`Merged and removed ${ids.length} duplicate account(s) for key ${group.key}`);
+                    logger_1.logger.info(`Merged and archived ${ids.length} duplicate account(s) for key ${group.key}`);
                 }
                 catch (e) {
-                    console.warn('Failed to delete duplicates during account dedupe:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                    console.warn('Failed to archive duplicates during account dedupe:', (e === null || e === void 0 ? void 0 : e.message) || e);
                 }
             }
             return anyChanged;
@@ -1368,5 +1425,67 @@ function ensureDevelopmentLedgersAndBackfillPayments(opts) {
     return __awaiter(this, void 0, void 0, function* () {
         const service = PropertyAccountService.getInstance();
         return service.ensureDevelopmentLedgersAndBackfillPayments(opts);
+    });
+}
+// Initialize/upgrade property account indexes at startup
+function initializePropertyAccountIndexes() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const svc = PropertyAccountService.getInstance();
+        if (typeof svc.ensureLedgerIndexes === 'function') {
+            yield svc.ensureLedgerIndexes();
+        }
+    });
+}
+// Orchestrated maintenance: normalize legacy types, merge duplicates (keeping legacy), reconcile duplicate tx, recalc
+function runPropertyLedgerMaintenance(options) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const service = PropertyAccountService.getInstance();
+        yield initializePropertyAccountIndexes();
+        const migrated = yield service.migrateLegacyLedgerTypesForCompany((options === null || options === void 0 ? void 0 : options.companyId) || undefined, { dryRun: Boolean(options === null || options === void 0 ? void 0 : options.dryRun) });
+        let groupsChanged = false;
+        if (!(options === null || options === void 0 ? void 0 : options.dryRun)) {
+            // Scope accounts by company if provided (via Properties/Developments/Units)
+            let accountFilter = {};
+            if (options === null || options === void 0 ? void 0 : options.companyId) {
+                const [props, devs] = yield Promise.all([
+                    Property_1.Property.find({ companyId: options.companyId }).select('_id'),
+                    Development_1.Development.find({ companyId: options.companyId }).select('_id')
+                ]);
+                const devIds = devs.map((d) => d._id);
+                let unitIds = [];
+                try {
+                    unitIds = yield DevelopmentUnit_1.DevelopmentUnit.find({ developmentId: { $in: devIds } }).distinct('_id');
+                }
+                catch (_a) { }
+                const ids = [...props.map(p => p._id), ...devIds, ...unitIds];
+                accountFilter.propertyId = { $in: ids };
+            }
+            const accounts = yield PropertyAccount_1.default.find(Object.assign(Object.assign({}, accountFilter), { isArchived: { $ne: true } }));
+            // Use internal merge with legacy preference
+            const svcAny = service;
+            if (typeof svcAny.mergeDuplicateAccounts === 'function') {
+                groupsChanged = yield svcAny.mergeDuplicateAccounts(accounts);
+            }
+            // Reconcile duplicate income transactions per account
+            const propertyIds = Array.from(new Set(accounts.map(a => String(a.propertyId))));
+            let removals = 0;
+            for (const pid of propertyIds) {
+                try {
+                    const res = yield reconcilePropertyLedgerDuplicates(pid);
+                    removals += res.removed || 0;
+                }
+                catch (_b) { }
+            }
+            return {
+                migrated,
+                deduped: { groupsChanged },
+                reconciled: { accountsProcessed: propertyIds.length, removals }
+            };
+        }
+        return {
+            migrated,
+            deduped: { groupsChanged: false },
+            reconciled: { accountsProcessed: 0, removals: 0 }
+        };
     });
 }

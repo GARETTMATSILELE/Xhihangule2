@@ -269,7 +269,11 @@ const PropertyAccountDetailPage: React.FC = () => {
     setSuccess(null);
     
     try {
-      const updatedAccount = await propertyAccountService.addExpense(propertyId, expenseData);
+      const updatedAccount = await propertyAccountService.addExpense(
+        propertyId,
+        expenseData,
+        (account?.ledgerType as 'rental' | 'sale' | undefined)
+      );
       setAccount(updatedAccount);
       setExpenseDialogOpen(false);
       setExpenseData({
@@ -295,7 +299,11 @@ const PropertyAccountDetailPage: React.FC = () => {
     setSuccess(null);
     
     try {
-      const result = await propertyAccountService.createOwnerPayout(propertyId, payoutData);
+      const result = await propertyAccountService.createOwnerPayout(
+        propertyId,
+        payoutData,
+        (account?.ledgerType as 'rental' | 'sale' | undefined)
+      );
       setAccount(result.account);
       setPayoutDialogOpen(false);
       setPayoutData({

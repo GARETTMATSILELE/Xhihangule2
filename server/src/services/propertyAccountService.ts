@@ -9,6 +9,7 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
+import { v4 as uuidv4 } from 'uuid';
 
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise: Promise<void> | null = null;
@@ -256,24 +257,44 @@ export class PropertyAccountService {
               console.warn('Could not drop legacy ownerPayout index:', dropErr?.message || dropErr);
             }
           }
-          const hasCompound = indexes.some((idx: any) => idx.name === 'propertyId_1_ledgerType_1' && idx.unique === true);
-          if (!hasCompound) {
+          // Ensure unique compound index exists and is partial on non-archived docs
+          const compound = indexes.find((idx: any) => idx.name === 'propertyId_1_ledgerType_1');
+          const compoundIsGood =
+            compound &&
+            compound.unique === true &&
+            compound.partialFilterExpression &&
+            compound.partialFilterExpression.isArchived &&
+            compound.partialFilterExpression.isArchived.$ne === true;
+          if (!compoundIsGood) {
             try {
-              await PropertyAccount.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true });
-              console.log('Created compound unique index propertyId_1_ledgerType_1 on PropertyAccount.');
+              if (compound) {
+                await PropertyAccount.collection.dropIndex('propertyId_1_ledgerType_1');
+                console.log('Dropped existing compound index propertyId_1_ledgerType_1 to recreate as partial unique.');
+              }
+            } catch (dropErr: any) {
+              console.warn('Could not drop compound index:', dropErr?.message || dropErr);
+            }
+            try {
+              await PropertyAccount.collection.createIndex(
+                { propertyId: 1, ledgerType: 1 },
+                { unique: true, partialFilterExpression: { isArchived: { $ne: true } } }
+              );
+              console.log('Created partial unique compound index propertyId_1_ledgerType_1 on PropertyAccount.');
             } catch (createErr: any) {
-              console.warn('Could not create compound index:', createErr?.message || createErr);
+              console.warn('Could not create partial compound index:', createErr?.message || createErr);
             }
           }
-          // Ensure owner payouts unique index includes ledgerType and is sparse
-          const hasOwnerPayoutCompound = indexes.some((idx: any) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1' && idx.unique === true);
-          if (!hasOwnerPayoutCompound) {
+          // Ensure owner payouts unique index includes ledgerType and uses partial filter (no sparse)
+          const opIdx = indexes.find((idx: any) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1');
+          const opGood = opIdx && opIdx.unique === true && opIdx.partialFilterExpression && opIdx.partialFilterExpression.isArchived && opIdx.partialFilterExpression.isArchived.$ne === true && opIdx.partialFilterExpression['ownerPayouts.referenceNumber'];
+          if (!opGood) {
+            try { if (opIdx) await PropertyAccount.collection.dropIndex('propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1'); } catch {}
             try {
               await PropertyAccount.collection.createIndex(
                 { propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 },
-                { unique: true, sparse: true }
+                { unique: true, partialFilterExpression: { isArchived: { $ne: true }, 'ownerPayouts.referenceNumber': { $exists: true, $type: 'string' } } }
               );
-              console.log('Created compound unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
+              console.log('Created partial unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
             } catch (createErr: any) {
               console.warn('Could not create owner payout compound index:', createErr?.message || createErr);
             }
@@ -288,14 +309,16 @@ export class PropertyAccountService {
               console.warn('Could not drop legacy transactions.paymentId index:', dropErr?.message || dropErr);
             }
           }
-          const hasTxCompound = indexes.some((idx: any) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1' && idx.unique === true);
-          if (!hasTxCompound) {
+          const txIdx = indexes.find((idx: any) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1');
+          const txGood = txIdx && txIdx.unique === true && txIdx.partialFilterExpression && txIdx.partialFilterExpression.isArchived && txIdx.partialFilterExpression.isArchived.$ne === true && txIdx.partialFilterExpression['transactions.paymentId'];
+          if (!txGood) {
+            try { if (txIdx) await PropertyAccount.collection.dropIndex('propertyId_1_ledgerType_1_transactions.paymentId_1'); } catch {}
             try {
               await PropertyAccount.collection.createIndex(
                 { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
-                { unique: true, sparse: true }
+                { unique: true, partialFilterExpression: { isArchived: { $ne: true }, 'transactions.paymentId': { $exists: true } } }
               );
-              console.log('Created compound unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
+              console.log('Created partial unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
             } catch (createErr: any) {
               console.warn('Could not create transactions compound index:', createErr?.message || createErr);
             }
@@ -552,14 +575,20 @@ export class PropertyAccountService {
       processedBy: string;
       notes?: string;
       idempotencyKey?: string;
-    }
+    },
+    ledgerType?: 'rental' | 'sale'
   ): Promise<IPropertyAccount> {
     try {
       if (expenseData.amount <= 0) {
         throw new AppError('Expense amount must be greater than 0', 400);
       }
 
-      const account = await this.getOrCreatePropertyAccount(propertyId);
+      // Ensure idempotency for all expense creations (generate if missing)
+      const idKey = (expenseData.idempotencyKey && expenseData.idempotencyKey.trim().length > 0)
+        ? expenseData.idempotencyKey.trim()
+        : `expense:${uuidv4()}`;
+
+      const account = await this.getOrCreatePropertyAccount(propertyId, ledgerType || 'rental');
 
       if (account.runningBalance < expenseData.amount) {
         throw new AppError('Insufficient balance for this expense', 400);
@@ -577,41 +606,47 @@ export class PropertyAccountService {
         processedBy: new mongoose.Types.ObjectId(expenseData.processedBy),
         notes: expenseData.notes,
         referenceNumber: `EXP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        idempotencyKey: expenseData.idempotencyKey,
+        idempotencyKey: idKey,
         createdAt: new Date(),
         updatedAt: new Date()
       };
 
-      if (expenseData.idempotencyKey && expenseData.idempotencyKey.trim().length > 0) {
-        await PropertyAccount.updateOne(
-          { _id: (account as any)._id, 'transactions.idempotencyKey': { $ne: expenseData.idempotencyKey } },
-          { $push: { transactions: expenseTransaction }, $set: { lastUpdated: new Date() } }
-        );
+      // Atomic, guarded append using idempotencyKey and balance check.
+      const previousLastUpdated = account.lastUpdated ? new Date(account.lastUpdated) : undefined as any;
+      let res = await PropertyAccount.updateOne(
+        { 
+          _id: (account as any)._id,
+          runningBalance: { $gte: expenseData.amount },
+          'transactions.idempotencyKey': { $ne: idKey },
+          ...(previousLastUpdated ? { lastUpdated: previousLastUpdated } : {})
+        },
+        { 
+          $push: { transactions: expenseTransaction },
+          $set: { lastUpdated: new Date() }
+        }
+      );
+      if ((res as any)?.modifiedCount === 0) {
+        // Retry once with refreshed state
         const fresh = await PropertyAccount.findById((account as any)._id) as any;
-        if (fresh) await this.recalculateBalance(fresh as any);
-        logger.info(`Added expense (idempotent) of ${expenseData.amount} to property ${propertyId}`);
-        return (await this.getPropertyAccount(propertyId)) as any;
-      }
-
-      account.transactions.push(expenseTransaction);
-      try {
-        await account.save();
-      } catch (e: any) {
-        if (e && (e.code === 11000 || (e?.message || '').includes('E11000'))) {
-          // Duplicate by index – fetch fresh state to avoid returning in-memory unpersisted changes
-          logger.warn('Duplicate expense prevented by unique index/idempotency guard; returning fresh account');
-          const fresh = await PropertyAccount.findById((account as any)._id) as any;
-          if (fresh) {
-            await this.recalculateBalance(fresh as any);
-            return fresh as any;
-          }
-        } else {
-          throw e;
+        if (fresh) {
+          await this.recalculateBalance(fresh as any);
+          res = await PropertyAccount.updateOne(
+            { 
+              _id: (fresh as any)._id,
+              runningBalance: { $gte: expenseData.amount },
+              'transactions.idempotencyKey': { $ne: idKey }
+            },
+            { 
+              $push: { transactions: expenseTransaction },
+              $set: { lastUpdated: new Date() }
+            }
+          );
         }
       }
-
-      logger.info(`Added expense of ${expenseData.amount} to property ${propertyId}`);
-      return account;
+      const reloaded = await PropertyAccount.findById((account as any)._id) as any;
+      if (reloaded) await this.recalculateBalance(reloaded as any);
+      logger.info(`Added expense (idempotent, guarded) of ${expenseData.amount} to property ${propertyId}`);
+      return (await this.getPropertyAccount(propertyId)) as any;
     } catch (error) {
       logger.error('Error adding expense:', error);
       throw error;
@@ -636,14 +671,20 @@ export class PropertyAccountService {
       processedBy: string;
       notes?: string;
       idempotencyKey?: string;
-    }
+    },
+    ledgerType?: 'rental' | 'sale'
   ): Promise<{ account: IPropertyAccount; payout: any }> {
     try {
       if (payoutData.amount <= 0) {
         throw new AppError('Payout amount must be greater than 0', 400);
       }
 
-      const account = await this.getPropertyAccount(propertyId);
+      // Ensure idempotency for payout creation (generate if missing)
+      const idKey = (payoutData.idempotencyKey && payoutData.idempotencyKey.trim().length > 0)
+        ? payoutData.idempotencyKey.trim()
+        : `payout:${uuidv4()}`;
+
+      const account = await this.getPropertyAccount(propertyId, ledgerType);
 
       if (account.runningBalance < payoutData.amount) {
         throw new AppError('Insufficient balance for this payout', 400);
@@ -656,7 +697,7 @@ export class PropertyAccountService {
         date: new Date(),
         paymentMethod: payoutData.paymentMethod,
         referenceNumber,
-        idempotencyKey: payoutData.idempotencyKey,
+        idempotencyKey: idKey,
         status: 'pending',
         processedBy: new mongoose.Types.ObjectId(payoutData.processedBy),
         recipientId: new mongoose.Types.ObjectId(payoutData.recipientId),
@@ -667,37 +708,14 @@ export class PropertyAccountService {
         updatedAt: new Date()
       };
 
-      if (payoutData.idempotencyKey && payoutData.idempotencyKey.trim().length > 0) {
-        await PropertyAccount.updateOne(
-          { _id: (account as any)._id, 'ownerPayouts.idempotencyKey': { $ne: payoutData.idempotencyKey } },
-          { $push: { ownerPayouts: payout }, $set: { lastUpdated: new Date() } }
-        );
-        const fresh = await PropertyAccount.findById((account as any)._id) as any;
-        if (fresh) await this.recalculateBalance(fresh as any);
-        logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
-        return { account: (await this.getPropertyAccount(propertyId)) as any, payout };
-      }
-
-      account.ownerPayouts.push(payout);
-      try {
-        await account.save();
-      } catch (e: any) {
-        if (e && (e.code === 11000 || (e?.message || '').includes('E11000'))) {
-          logger.warn('Duplicate owner payout prevented by unique index/idempotency guard; returning fresh persisted state');
-          const fresh = await PropertyAccount.findById((account as any)._id) as any;
-          if (fresh) {
-            await this.recalculateBalance(fresh as any);
-            // Try to locate the persisted payout by unique referenceNumber
-            const persisted = (fresh.ownerPayouts || []).find((op: any) => op.referenceNumber === referenceNumber);
-            return { account: fresh as any, payout: persisted };
-          }
-        } else {
-          throw e;
-        }
-      }
-
-      logger.info(`Created owner payout of ${payoutData.amount} for property ${propertyId}`);
-      return { account, payout };
+      await PropertyAccount.updateOne(
+        { _id: (account as any)._id, 'ownerPayouts.idempotencyKey': { $ne: idKey } },
+        { $push: { ownerPayouts: payout }, $set: { lastUpdated: new Date() } }
+      );
+      const fresh = await PropertyAccount.findById((account as any)._id) as any;
+      if (fresh) await this.recalculateBalance(fresh as any);
+      logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
+      return { account: (await this.getPropertyAccount(propertyId)) as any, payout };
     } catch (error) {
       logger.error('Error creating owner payout:', error);
       throw error;
@@ -736,22 +754,45 @@ export class PropertyAccountService {
         throw new AppError('Payout not found', 404);
       }
 
-      // If changing from pending to completed, check balance on the specific ledger
+      // Atomic status transition
+      const now = new Date();
       if (targetPayout.status === 'pending' && status === 'completed') {
         if (targetAccount.runningBalance < targetPayout.amount) {
           throw new AppError('Insufficient balance to complete payout', 400);
         }
+        const res = await PropertyAccount.updateOne(
+          { 
+            _id: (targetAccount as any)._id,
+            runningBalance: { $gte: targetPayout.amount },
+            ownerPayouts: { $elemMatch: { _id: new mongoose.Types.ObjectId(payoutId), status: 'pending' } }
+          },
+          { 
+            $set: { 'ownerPayouts.$.status': 'completed', 'ownerPayouts.$.updatedAt': now, lastUpdated: now }
+          }
+        );
+        if ((res as any)?.modifiedCount === 0) {
+          throw new AppError('Unable to complete payout due to insufficient balance or concurrent update', 409);
+        }
+      } else {
+        const res = await PropertyAccount.updateOne(
+          { 
+            _id: (targetAccount as any)._id,
+            ownerPayouts: { $elemMatch: { _id: new mongoose.Types.ObjectId(payoutId) } }
+          },
+          { 
+            $set: { 'ownerPayouts.$.status': status, 'ownerPayouts.$.updatedAt': now, lastUpdated: now }
+          }
+        );
+        if ((res as any)?.modifiedCount === 0) {
+          throw new AppError('Payout status update conflict', 409);
+        }
       }
-
-      targetPayout.status = status;
-      targetPayout.updatedAt = new Date();
-      
-      // Save the account (this will trigger pre-save middleware to recalculate balance)
-      await targetAccount.save();
+      const fresh = await PropertyAccount.findById((targetAccount as any)._id) as any;
+      if (fresh) await this.recalculateBalance(fresh as any);
 
       logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId} on ledger ${String((targetAccount as any).ledgerType || 'unknown')}`);
       
-      return targetAccount;
+      return (await this.getPropertyAccount(propertyId, (targetAccount as any).ledgerType)) as any;
     } catch (error) {
       logger.error('Error updating payout status:', error);
       throw error;
@@ -763,16 +804,46 @@ export class PropertyAccountService {
    */
   async getPropertyAccount(propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<IPropertyAccount> {
     try {
+      // Ensure indexes are healthy and up-to-date (partial unique with archive support)
+      await this.ensureLedgerIndexes();
       const pid = new mongoose.Types.ObjectId(propertyId);
-      // Prefer exact ledgerType; fall back to legacy records without ledgerType
+      // Prefer exact ledgerType; consider legacy records without ledgerType as candidates as well.
       const effectiveLedger: 'rental' | 'sale' = ledgerType || await this.inferLedgerTypeForProperty(propertyId);
-      let account: IPropertyAccount | null = await PropertyAccount.findOne({ propertyId: pid, ledgerType: effectiveLedger }) as any;
-      if (!account) {
-        account = await PropertyAccount.findOne({ propertyId: pid, $or: [{ ledgerType: effectiveLedger }, { ledgerType: { $exists: false } }, { ledgerType: null as any }] }) as any;
-      }
-      if (!account) {
-        // Create the account if missing, then proceed (enables seamless backfill below)
+      const candidates = await PropertyAccount.find({
+        propertyId: pid,
+        isArchived: { $ne: true },
+        $or: [{ ledgerType: effectiveLedger }, { ledgerType: { $exists: false } }, { ledgerType: null as any }]
+      }) as any as IPropertyAccount[];
+
+      let account: IPropertyAccount | null = null;
+      if (!candidates || candidates.length === 0) {
+        // Create if missing
         account = (await this.getOrCreatePropertyAccount(propertyId, effectiveLedger)) as IPropertyAccount;
+      } else if (candidates.length === 1) {
+        account = candidates[0];
+      } else {
+        // Multiple ledgers found (duplicates/legacy). Pick the most complete deterministically.
+        const score = (acc: IPropertyAccount) => {
+          const txCount = Array.isArray(acc.transactions) ? acc.transactions.length : 0;
+          const payoutCount = Array.isArray(acc.ownerPayouts) ? acc.ownerPayouts.length : 0;
+          const income = Number((acc as any).totalIncome || 0);
+          const updated = acc.lastUpdated ? new Date(acc.lastUpdated).getTime() : 0;
+          return { txCount, payoutCount, income, updated };
+        };
+        // Prefer legacy (missing/null ledgerType) as authoritative if present
+        const prefer = candidates.filter(c => (c as any).ledgerType == null);
+        const pool = prefer.length > 0 ? prefer : candidates;
+        let best = pool[0];
+        for (const c of pool.slice(1)) {
+          const a = score(best);
+          const b = score(c);
+          const aScore = a.txCount + a.payoutCount;
+          const bScore = b.txCount + b.payoutCount;
+          if (bScore > aScore || (bScore === aScore && (b.income > a.income || (b.income === a.income && b.updated > a.updated)))) {
+            best = c;
+          }
+        }
+        account = best;
       }
       if (!account) throw new AppError('Property account not found', 404);
       
@@ -917,18 +988,9 @@ export class PropertyAccountService {
       const allIds = [...propertyIds, ...developmentIds, ...unitIds];
 
       let accounts = await PropertyAccount.find({
-        propertyId: { $in: allIds }
+        propertyId: { $in: allIds },
+        isArchived: { $ne: true }
       }).sort({ lastUpdated: -1 });
-
-      // Opportunistic deduplication: merge duplicates by (propertyId, ledgerType)
-      // Treat missing/null ledgerType as 'rental' for legacy documents
-      const changed = await this.mergeDuplicateAccounts(accounts as unknown as IPropertyAccount[]);
-      if (changed) {
-        // Reload after cleanup to return the canonical set
-        accounts = await PropertyAccount.find({
-          propertyId: { $in: allIds }
-        }).sort({ lastUpdated: -1 });
-      }
 
       return accounts as unknown as IPropertyAccount[];
     } catch (error) {
@@ -1052,9 +1114,9 @@ export class PropertyAccountService {
 
     for (const group of groups) {
       if (group.items.length <= 1) continue;
-      // Choose keeper: prefer with explicit ledgerType set (not null), then by most entries, then latest lastUpdated
-      const withExplicitLedger = group.items.filter(i => (i as any).ledgerType === 'sale' || (i as any).ledgerType === 'rental');
-      const candidates = withExplicitLedger.length > 0 ? withExplicitLedger : group.items;
+      // Choose keeper: prefer legacy (missing/null ledgerType), then by most entries, then latest lastUpdated
+      const legacy = group.items.filter(i => (i as any).ledgerType == null);
+      const candidates = legacy.length > 0 ? legacy : group.items;
       const pickScore = (i: IPropertyAccount) => {
         const count = (Array.isArray(i.transactions) ? i.transactions.length : 0) + (Array.isArray(i.ownerPayouts) ? i.ownerPayouts.length : 0);
         const updated = i.lastUpdated ? new Date(i.lastUpdated).getTime() : 0;
@@ -1138,16 +1200,19 @@ export class PropertyAccountService {
         console.warn('Keeper save failed during account dedupe:', (e as any)?.message || e);
       }
 
-      // Delete duplicates from DB
+      // Archive duplicates instead of deleting (to respect immutable ledger policy and avoid unique conflicts)
       try {
         const ids = toMergeAndDelete.map(d => d._id);
         if (ids.length > 0) {
-          await PropertyAccount.deleteMany({ _id: { $in: ids } });
+          await PropertyAccount.updateMany(
+            { _id: { $in: ids } },
+            { $set: { isArchived: true, lastUpdated: new Date() } }
+          );
         }
         anyChanged = true;
-        logger.info(`Merged and removed ${ids.length} duplicate account(s) for key ${group.key}`);
+        logger.info(`Merged and archived ${ids.length} duplicate account(s) for key ${group.key}`);
       } catch (e) {
-        console.warn('Failed to delete duplicates during account dedupe:', (e as any)?.message || e);
+        console.warn('Failed to archive duplicates during account dedupe:', (e as any)?.message || e);
       }
     }
     return anyChanged;
@@ -1446,4 +1511,66 @@ export async function ensureDevelopmentLedgersAndBackfillPayments(
 }> {
   const service = PropertyAccountService.getInstance();
   return service.ensureDevelopmentLedgersAndBackfillPayments(opts);
+}
+
+// Initialize/upgrade property account indexes at startup
+export async function initializePropertyAccountIndexes(): Promise<void> {
+  const svc = PropertyAccountService.getInstance() as any;
+  if (typeof svc.ensureLedgerIndexes === 'function') {
+    await svc.ensureLedgerIndexes();
+  }
+}
+
+// Orchestrated maintenance: normalize legacy types, merge duplicates (keeping legacy), reconcile duplicate tx, recalc
+export async function runPropertyLedgerMaintenance(options?: { companyId?: string; dryRun?: boolean; limit?: number }): Promise<{
+  migrated: { examined: number; updated: number; merged: number; skipped: number; errors: number };
+  deduped: { groupsChanged: boolean };
+  reconciled: { accountsProcessed: number; removals: number };
+}> {
+  const service = PropertyAccountService.getInstance();
+  await initializePropertyAccountIndexes();
+  const migrated = await service.migrateLegacyLedgerTypesForCompany(options?.companyId || undefined, { dryRun: Boolean(options?.dryRun) });
+  let groupsChanged = false;
+  if (!options?.dryRun) {
+    // Scope accounts by company if provided (via Properties/Developments/Units)
+    let accountFilter: any = {};
+    if (options?.companyId) {
+      const [props, devs] = await Promise.all([
+        Property.find({ companyId: options.companyId }).select('_id'),
+        Development.find({ companyId: options.companyId }).select('_id')
+      ]);
+      const devIds = devs.map((d: any) => d._id);
+      let unitIds: any[] = [];
+      try {
+        unitIds = await DevelopmentUnit.find({ developmentId: { $in: devIds } }).distinct('_id');
+      } catch {}
+      const ids = [...props.map(p => p._id), ...devIds, ...unitIds];
+      accountFilter.propertyId = { $in: ids };
+    }
+    const accounts = await PropertyAccount.find({ ...accountFilter, isArchived: { $ne: true } });
+    // Use internal merge with legacy preference
+    const svcAny = service as any;
+    if (typeof svcAny.mergeDuplicateAccounts === 'function') {
+      groupsChanged = await svcAny.mergeDuplicateAccounts(accounts);
+    }
+    // Reconcile duplicate income transactions per account
+    const propertyIds = Array.from(new Set(accounts.map(a => String((a as any).propertyId))));
+    let removals = 0;
+    for (const pid of propertyIds) {
+      try {
+        const res = await reconcilePropertyLedgerDuplicates(pid);
+        removals += res.removed || 0;
+      } catch {}
+    }
+    return {
+      migrated,
+      deduped: { groupsChanged },
+      reconciled: { accountsProcessed: propertyIds.length, removals }
+    };
+  }
+  return {
+    migrated,
+    deduped: { groupsChanged: false },
+    reconciled: { accountsProcessed: 0, removals: 0 }
+  };
 }

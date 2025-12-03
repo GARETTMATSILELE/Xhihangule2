@@ -1,5 +1,20 @@
 import api from '../api';
 import { formatCurrency as formatCurrencyUtil } from '../utils/money';
+// Prefer Web Crypto API when available; fall back to a simple random string
+function generateId(): string {
+  try {
+    // @ts-ignore
+    if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') {
+      // @ts-ignore
+      return (crypto as any).randomUUID();
+    }
+  } catch {}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 
 function humanizeAccountError(error: any): string {
   const status = error?.response?.status;
@@ -202,9 +217,14 @@ class PropertyAccountService {
   /**
    * Add expense to property account
    */
-  async addExpense(propertyId: string, expenseData: ExpenseData): Promise<PropertyAccount> {
+  async addExpense(propertyId: string, expenseData: ExpenseData, ledger?: 'rental' | 'sale'): Promise<PropertyAccount> {
     try {
-      const response = await api.post(`/accountants/property-accounts/${propertyId}/expense`, expenseData);
+      const key = `expense:${generateId()}`;
+      const response = await api.post(
+        `/accountants/property-accounts/${propertyId}/expense`,
+        { ...expenseData },
+        { params: ledger ? { ledger } : {}, headers: { 'Idempotency-Key': key } }
+      );
       return response.data.data;
     } catch (error) {
       console.error('Error adding expense:', error);
@@ -215,9 +235,18 @@ class PropertyAccountService {
   /**
    * Create owner payout
    */
-  async createOwnerPayout(propertyId: string, payoutData: PayoutData): Promise<{ account: PropertyAccount; payout: OwnerPayout }> {
+  async createOwnerPayout(
+    propertyId: string,
+    payoutData: PayoutData,
+    ledger?: 'rental' | 'sale'
+  ): Promise<{ account: PropertyAccount; payout: OwnerPayout }> {
     try {
-      const response = await api.post(`/accountants/property-accounts/${propertyId}/payout`, payoutData);
+      const key = `payout:${generateId()}`;
+      const response = await api.post(
+        `/accountants/property-accounts/${propertyId}/payout`,
+        { ...payoutData },
+        { params: ledger ? { ledger } : {}, headers: { 'Idempotency-Key': key } }
+      );
       return response.data.data;
     } catch (error) {
       console.error('Error creating owner payout:', error);

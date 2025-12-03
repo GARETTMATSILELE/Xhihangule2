@@ -537,62 +537,29 @@ export class DatabaseSyncService extends EventEmitter {
    */
   private async syncPropertyToAccounting(property: any): Promise<void> {
     try {
-      // Use application schema (with ledgerType)
-      const PropertyAccount = (await import('../models/PropertyAccount')).default as any;
-      
-      // Maintain the base rental ledger account as the canonical metadata carrier
-      let propertyAccount = await PropertyAccount.findOne({ propertyId: property._id, ledgerType: 'rental' });
-      
-      if (propertyAccount) {
-        // Update existing account
-        propertyAccount.propertyName = property.name;
-        propertyAccount.propertyAddress = property.address;
-        propertyAccount.ownerId = property.ownerId;
-        propertyAccount.isActive = property.isActive !== false;
-        propertyAccount.lastUpdated = new Date();
-
-        if (property.ownerId) {
-          const owner = await User.findById(property.ownerId);
-          if (owner) {
-            propertyAccount.ownerName = `${owner.firstName} ${owner.lastName}`;
-          }
+      // Always go through the service's idempotent entrypoint
+      const account = await propertyAccountService.getOrCreatePropertyAccount(property._id.toString(), 'rental');
+      // Update metadata on the canonical rental ledger
+      const updates: any = {
+        propertyName: property.name,
+        propertyAddress: property.address,
+        ownerId: property.ownerId,
+        isActive: property.isActive !== false,
+        lastUpdated: new Date()
+      };
+      if (property.ownerId) {
+        const owner = await User.findById(property.ownerId);
+        if (owner) {
+          updates.ownerName = `${owner.firstName} ${owner.lastName}`;
         }
-
-        await this.db.executeWithRetry(async () => {
-          await propertyAccount.save();
-        });
-        logger.info(`Updated property account for property ${property._id}`);
-      } else {
-        // Create new account if it doesn't exist
-        let ownerName = 'Unknown Owner';
-        if (property.ownerId) {
-          const owner = await User.findById(property.ownerId);
-          if (owner) {
-            ownerName = `${owner.firstName} ${owner.lastName}`;
-          }
-        }
-
-        const newAccount = new PropertyAccount({
-          propertyId: property._id,
-          ledgerType: 'rental',
-          propertyName: property.name,
-          propertyAddress: property.address,
-          ownerId: property.ownerId,
-          ownerName,
-          transactions: [],
-          ownerPayouts: [],
-          runningBalance: 0,
-          totalIncome: 0,
-          totalExpenses: 0,
-          totalOwnerPayouts: 0,
-          isActive: property.isActive !== false
-        });
-
-        await this.db.executeWithRetry(async () => {
-          await newAccount.save();
-        });
-        logger.info(`Created property account for property ${property._id}`);
       }
+      await this.db.executeWithRetry(async () => {
+        await (await import('../models/PropertyAccount')).default.updateOne(
+          { _id: (account as any)._id },
+          { $set: updates }
+        );
+      });
+      logger.info(`Ensured/updated property account for property ${property._id}`);
       
       this.recordSyncSuccess();
 
@@ -677,12 +644,16 @@ export class DatabaseSyncService extends EventEmitter {
    */
   private async removePropertyFromAccounting(propertyId: string): Promise<void> {
     try {
+      // Do not delete immutable ledgers; archive/deactivate instead
       const PropertyAccount = accountingConnection.model('PropertyAccount');
-      
       await this.db.executeWithRetry(async () => {
-        await PropertyAccount.findOneAndDelete({ propertyId }, { maxTimeMS: 5000 } as any);
+        await PropertyAccount.updateMany(
+          { propertyId },
+          { $set: { isActive: false, isArchived: true, lastUpdated: new Date() } },
+          { maxTimeMS: 5000 } as any
+        );
       });
-      logger.info(`Removed property account for property ${propertyId}`);
+      logger.info(`Archived/deactivated property account(s) for property ${propertyId}`);
       
       this.recordSyncSuccess();
 
@@ -1073,12 +1044,60 @@ export class DatabaseSyncService extends EventEmitter {
   /**
    * Validate data consistency between databases
    */
-  public async validateDataConsistency(): Promise<{
+  public async validateDataConsistency(options?: {
+    lookbackDays?: number;
+    concurrency?: number;
+  }): Promise<{
     isConsistent: boolean;
     inconsistencies: Array<{ type: string; description: string; count: number }>;
   }> {
     try {
       const inconsistencies: Array<{ type: string; description: string; count: number }> = [];
+      // Resolve execution parameters with safe bounds
+      const resolvedConcurrency = Math.max(
+        1,
+        Math.min(
+          50,
+          Number(options?.concurrency || process.env.SYNC_VALIDATION_CONCURRENCY || 8)
+        )
+      );
+      const resolvedLookbackDays = Math.max(
+        1,
+        Math.min(
+          365,
+          Number(options?.lookbackDays ?? process.env.SYNC_VALIDATION_LOOKBACK_DAYS ?? 30)
+        )
+      );
+      // Simple concurrency runner
+      const runWithConcurrency = async <T>(
+        items: T[],
+        worker: (item: T, index: number) => Promise<void>,
+        concurrency: number
+      ): Promise<void> => {
+        let index = 0;
+        const total = items.length;
+        const workers: Array<Promise<void>> = [];
+        for (let i = 0; i < Math.min(concurrency, total); i++) {
+          workers.push(
+            (async () => {
+              while (true) {
+                let currentIndex: number;
+                // Fetch next index
+                if (index >= total) break;
+                currentIndex = index;
+                index += 1;
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                  await worker(items[currentIndex]!, currentIndex);
+                } catch (e) {
+                  // Individual item errors are recorded by the worker; continue
+                }
+              }
+            })()
+          );
+        }
+        await Promise.allSettled(workers);
+      };
 
       // Check if database connections are available
       if (!accountingConnection || !mainConnection) {
@@ -1096,69 +1115,97 @@ export class DatabaseSyncService extends EventEmitter {
       try {
         // Check property accounts consistency
         const PropertyAccount = accountingConnection.model('PropertyAccount');
-        const propertyAccounts = await PropertyAccount.find({});
-        
-        for (const account of propertyAccounts) {
-          try {
-            // Check if property still exists
-            const property = await Property.findById(account.propertyId);
-            if (!property) {
-              inconsistencies.push({
-                type: 'orphaned_property_account',
-                description: `Property account exists but property ${account.propertyId} not found`,
-                count: 1
-              });
-            }
-
-            // Check if owner still exists
-            if (account.ownerId) {
-              const owner = await User.findById(account.ownerId);
-              if (!owner) {
+        const propertyAccounts: Array<{
+          _id: any;
+          propertyId: any;
+          ownerId?: any;
+        }> = await PropertyAccount.find({})
+          .select('_id propertyId ownerId')
+          .lean();
+        await runWithConcurrency(
+          propertyAccounts,
+          async (account) => {
+            try {
+              // Check if property still exists
+              const property = await Property.findById(account.propertyId).select('_id').lean();
+              if (!property) {
                 inconsistencies.push({
-                  type: 'orphaned_owner_reference',
-                  description: `Property account references non-existent owner ${account.ownerId}`,
+                  type: 'orphaned_property_account',
+                  description: `Property account exists but property ${account.propertyId} not found`,
                   count: 1
                 });
               }
-            }
-          } catch (accountError) {
-            logger.warn(`Error checking account ${account._id}:`, accountError);
-            inconsistencies.push({
-              type: 'account_check_error',
-              description: `Error checking account ${account._id}`,
-              count: 1
-            });
-          }
-        }
-
-        // Check for missing property accounts
-        const properties = await Property.find({});
-        for (const property of properties) {
-          try {
-            const account = await PropertyAccount.findOne({ propertyId: property._id });
-            if (!account) {
+              // Check if owner still exists
+              if (account.ownerId) {
+                const owner = await User.findById(account.ownerId).select('_id').lean();
+                if (!owner) {
+                  inconsistencies.push({
+                    type: 'orphaned_owner_reference',
+                    description: `Property account references non-existent owner ${account.ownerId}`,
+                    count: 1
+                  });
+                }
+              }
+            } catch (accountError) {
+              logger.warn(`Error checking account ${account._id}:`, accountError);
               inconsistencies.push({
-                type: 'missing_property_account',
-                description: `Property ${property._id} exists but no accounting record found`,
+                type: 'account_check_error',
+                description: `Error checking account ${account._id}`,
                 count: 1
               });
             }
-          } catch (propertyError) {
-            logger.warn(`Error checking property ${property._id}:`, propertyError);
-          }
-        }
+          },
+          resolvedConcurrency
+        );
+
+        // Check for missing property accounts
+        const properties: Array<{ _id: any }> = await Property.find({})
+          .select('_id')
+          .lean();
+        await runWithConcurrency(
+          properties,
+          async (property) => {
+            try {
+              const account = await PropertyAccount.findOne({ propertyId: property._id })
+                .select('_id')
+                .lean();
+              if (!account) {
+                inconsistencies.push({
+                  type: 'missing_property_account',
+                  description: `Property ${property._id} exists but no accounting record found`,
+                  count: 1
+                });
+              }
+            } catch (propertyError) {
+              logger.warn(`Error checking property ${property._id}:`, propertyError);
+            }
+          },
+          resolvedConcurrency
+        );
 
         // Cross-check payments vs ledgers (lookback window to bound workload)
-        const lookbackDays = Number(process.env.SYNC_VALIDATION_LOOKBACK_DAYS || 30);
-        const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
-        const payments = await Payment.find({
+        const since = new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
+        const payments: Array<{
+          _id: any;
+          companyId?: any;
+          paymentType?: string;
+          commissionDetails?: { agencyShare?: number };
+          paymentDate?: Date;
+          currency?: string;
+          paymentMethod?: string;
+          referenceNumber?: string;
+          processedBy?: any;
+          notes?: string;
+        }> = await Payment.find({
           status: 'completed',
           paymentType: { $in: ['rental', 'sale'] },
           $or: [
             { paymentDate: { $gte: since } },
             { updatedAt: { $gte: since } }
           ]
-        }).select('_id companyId propertyId paymentType commissionDetails').lean();
+        })
+          .select('_id companyId paymentType commissionDetails paymentDate currency paymentMethod referenceNumber processedBy notes')
+          .lean();
 
         // Helper to safely import CompanyAccount on demand
         const getCompanyAccountModel = async () => {
@@ -1166,40 +1213,48 @@ export class DatabaseSyncService extends EventEmitter {
           return mod.CompanyAccount;
         };
 
-        for (const p of payments) {
-          // Property/development ledger presence
-          const propHasPosting = await PropertyAccount.findOne({
-            'transactions.paymentId': p._id
-          }).select('_id').lean();
-          if (!propHasPosting) {
-            inconsistencies.push({
-              type: 'missing_property_ledger_income',
-              description: `Payment ${String(p._id)} not posted to any property/development ledger`,
-              count: 1
-            });
-          }
-
-          // Company commission presence (only when agencyShare > 0 and companyId present)
-          const agencyShare = Number((p as any)?.commissionDetails?.agencyShare || 0);
-          if (agencyShare > 0 && (p as any)?.companyId) {
-            const CompanyAccount = await getCompanyAccountModel();
-            const companyHasPosting = await CompanyAccount.findOne({
-              companyId: (p as any).companyId,
+        await runWithConcurrency(
+          payments,
+          async (p) => {
+            // Property/development ledger presence
+            const propHasPosting = await PropertyAccount.findOne({
               'transactions.paymentId': p._id
-            }).select('_id').lean();
-            if (!companyHasPosting) {
+            })
+              .select('_id')
+              .lean();
+            if (!propHasPosting) {
               inconsistencies.push({
-                type: 'missing_company_commission',
-                description: `Payment ${String(p._id)} commission not posted to company account`,
+                type: 'missing_property_ledger_income',
+                description: `Payment ${String(p._id)} not posted to any property/development ledger`,
                 count: 1
               });
             }
-          }
-        }
+            // Company commission presence (only when agencyShare > 0 and companyId present)
+            const agencyShare = Number(p?.commissionDetails?.agencyShare || 0);
+            if (agencyShare > 0 && p?.companyId) {
+              const CompanyAccount = await getCompanyAccountModel();
+              const companyHasPosting = await CompanyAccount.findOne({
+                companyId: p.companyId,
+                'transactions.paymentId': p._id
+              })
+                .select('_id')
+                .lean();
+              if (!companyHasPosting) {
+                inconsistencies.push({
+                  type: 'missing_company_commission',
+                  description: `Payment ${String(p._id)} commission not posted to company account`,
+                  count: 1
+                });
+              }
+            }
+          },
+          resolvedConcurrency
+        );
 
         // Detect duplicate postings in recent ledgers (property)
         const recentAccounts = await PropertyAccount.find({ lastUpdated: { $gte: since } })
-          .select('_id propertyId ledgerType transactions').lean();
+          .select('_id propertyId ledgerType transactions')
+          .lean();
         for (const acc of recentAccounts) {
           const counts: Record<string, number> = Object.create(null);
           for (const t of (acc as any).transactions || []) {

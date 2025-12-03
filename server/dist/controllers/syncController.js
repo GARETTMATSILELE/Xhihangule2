@@ -200,9 +200,21 @@ exports.getSyncStats = getSyncStats;
  * Validate data consistency between databases
  */
 const validateDataConsistency = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
         const syncService = databaseSyncService_1.default.getInstance();
-        const consistency = yield syncService.validateDataConsistency();
+        const lookbackDaysRaw = Number(((_a = req.query) === null || _a === void 0 ? void 0 : _a.lookbackDays) || '');
+        const concurrencyRaw = Number(((_b = req.query) === null || _b === void 0 ? void 0 : _b.concurrency) || '');
+        const lookbackDays = Number.isFinite(lookbackDaysRaw) && lookbackDaysRaw > 0 && lookbackDaysRaw <= 365
+            ? lookbackDaysRaw
+            : undefined;
+        const concurrency = Number.isFinite(concurrencyRaw) && concurrencyRaw > 0 && concurrencyRaw <= 50
+            ? concurrencyRaw
+            : undefined;
+        const consistency = yield syncService.validateDataConsistency({
+            lookbackDays,
+            concurrency
+        });
         res.json({
             success: true,
             data: consistency,

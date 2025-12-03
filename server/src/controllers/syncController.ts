@@ -203,7 +203,20 @@ export const getSyncStats = async (req: Request, res: Response) => {
 export const validateDataConsistency = async (req: Request, res: Response) => {
   try {
     const syncService = DatabaseSyncService.getInstance();
-    const consistency = await syncService.validateDataConsistency();
+    const lookbackDaysRaw = Number((req.query?.lookbackDays as string) || '');
+    const concurrencyRaw = Number((req.query?.concurrency as string) || '');
+    const lookbackDays =
+      Number.isFinite(lookbackDaysRaw) && lookbackDaysRaw > 0 && lookbackDaysRaw <= 365
+        ? lookbackDaysRaw
+        : undefined;
+    const concurrency =
+      Number.isFinite(concurrencyRaw) && concurrencyRaw > 0 && concurrencyRaw <= 50
+        ? concurrencyRaw
+        : undefined;
+    const consistency = await syncService.validateDataConsistency({
+      lookbackDays,
+      concurrency
+    });
     
     res.json({
       success: true,

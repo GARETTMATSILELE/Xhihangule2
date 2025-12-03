@@ -95,6 +95,9 @@ const socket_1 = require("./config/socket");
 const startSyncServices_1 = require("./scripts/startSyncServices");
 const reportRoutes_1 = __importDefault(require("./routes/reportRoutes"));
 const publicReportRoutes_1 = __importDefault(require("./routes/publicReportRoutes"));
+const propertyAccountService_1 = require("./services/propertyAccountService");
+const SystemSetting_1 = __importDefault(require("./models/SystemSetting"));
+const propertyAccountService_2 = require("./services/propertyAccountService");
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 dotenv_1.default.config({ path: ENV_PATH });
@@ -163,7 +166,19 @@ app.use((0, cors_1.default)({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'Accept',
+        'Origin',
+        'Idempotency-Key',
+        'idempotency-key'
+    ],
+    exposedHeaders: [
+        'Idempotency-Key'
+    ],
+    optionsSuccessStatus: 204
 }));
 // Add cookie-parser middleware
 app.use((0, cookie_parser_1.default)());
@@ -333,8 +348,42 @@ httpServer.listen(PORT, () => {
     .then(() => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Connected to MongoDB');
     try {
+        // Ensure critical property account indexes are in place at startup
+        try {
+            yield (0, propertyAccountService_1.initializePropertyAccountIndexes)();
+            console.log('Property account indexes ensured');
+        }
+        catch (idxErr) {
+            console.warn('Failed to ensure property account indexes:', idxErr);
+        }
         yield (0, startSyncServices_1.initializeSyncServices)();
         console.log('Database synchronization services initialized');
+        // One-time ledger maintenance at boot (production only)
+        if (process.env.NODE_ENV === 'production') {
+            (() => __awaiter(void 0, void 0, void 0, function* () {
+                const maintenanceKey = 'ledger_maintenance_v1';
+                try {
+                    // Create run record if not present
+                    yield SystemSetting_1.default.updateOne({ key: maintenanceKey, startedAt: { $exists: false } }, { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } }, { upsert: true });
+                    const record = yield SystemSetting_1.default.findOne({ key: maintenanceKey }).lean();
+                    if (record && record.completedAt) {
+                        console.log('Startup ledger maintenance already completed previously - skipping.');
+                        return;
+                    }
+                    console.log('Starting startup ledger maintenance (one-time) across all companies...');
+                    const result = yield (0, propertyAccountService_2.runPropertyLedgerMaintenance)({});
+                    yield SystemSetting_1.default.updateOne({ key: maintenanceKey }, { $set: { completedAt: new Date(), value: result, lastError: undefined } });
+                    console.log('Startup ledger maintenance completed.');
+                }
+                catch (e) {
+                    console.error('Startup ledger maintenance failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                    try {
+                        yield SystemSetting_1.default.updateOne({ key: maintenanceKey }, { $set: { lastError: (e === null || e === void 0 ? void 0 : e.message) || String(e) } }, { upsert: true });
+                    }
+                    catch (_a) { }
+                }
+            }))().catch(() => { });
+        }
     }
     catch (error) {
         console.error('Failed to initialize sync services:', error);
