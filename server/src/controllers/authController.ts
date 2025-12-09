@@ -467,6 +467,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     }
 
     user.password = password;
+    (user as any).passwordChangedAt = new Date();
     user.resetPasswordToken = undefined as any;
     user.resetPasswordExpires = undefined as any;
     await user.save();

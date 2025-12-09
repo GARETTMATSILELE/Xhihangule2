@@ -110,7 +110,7 @@ export class AuthService {
     try {
       console.log('AuthService: Starting token refresh');
       
-      const decoded = jwt.verify(refreshToken, JWT_CONFIG.REFRESH_SECRET) as { userId: string; type?: string };
+      const decoded = jwt.verify(refreshToken, JWT_CONFIG.REFRESH_SECRET) as { userId: string; type?: string; iat?: number };
       console.log('AuthService: Token decoded successfully, userId:', decoded.userId);
       
       const userResult = await this.getUserById(decoded.userId);
@@ -126,6 +126,18 @@ export class AuthService {
       if (type === 'user' && !(user as IUser).isActive) {
         console.log('AuthService: User is inactive');
         throw new Error('Account is inactive');
+      }
+
+      // Invalidate refresh token if password changed after token was issued
+      try {
+        const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
+        const pwdChangedAt: Date | undefined = (user as any).passwordChangedAt;
+        if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
+          console.log('AuthService: Rejecting refresh token due to password change after token issuance');
+          throw new Error('Refresh token invalid due to password change');
+        }
+      } catch (cmpErr) {
+        throw cmpErr;
       }
 
       const newToken = this.generateAccessToken(user, type);
@@ -152,7 +164,7 @@ export class AuthService {
     await this.initialize();
 
     try {
-      const decoded = jwt.verify(token, JWT_CONFIG.SECRET) as { userId: string; type?: string };
+      const decoded = jwt.verify(token, JWT_CONFIG.SECRET) as { userId: string; type?: string; iat?: number };
       console.log('AuthService: Token decoded:', decoded);
       
       const userResult = await this.getUserById(decoded.userId);
@@ -161,6 +173,18 @@ export class AuthService {
       }
 
       const { user, type } = userResult;
+
+      // Invalidate access token if password changed after token was issued
+      try {
+        const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
+        const pwdChangedAt: Date | undefined = (user as any).passwordChangedAt;
+        if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
+          console.log('AuthService: Rejecting access token due to password change after token issuance');
+          throw new Error('Access token invalid due to password change');
+        }
+      } catch (cmpErr) {
+        throw cmpErr;
+      }
 
       console.log('AuthService: User found in database:', {
         userId: user._id,

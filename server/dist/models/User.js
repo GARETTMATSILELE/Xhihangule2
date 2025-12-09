@@ -102,6 +102,10 @@ const userSchema = new mongoose_1.Schema({
     resetPasswordExpires: {
         type: Date,
         required: false
+    },
+    passwordChangedAt: {
+        type: Date,
+        required: false
     }
 }, {
     timestamps: true

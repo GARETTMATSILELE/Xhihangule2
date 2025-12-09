@@ -124,6 +124,18 @@ class AuthService {
                     console.log('AuthService: User is inactive');
                     throw new Error('Account is inactive');
                 }
+                // Invalidate refresh token if password changed after token was issued
+                try {
+                    const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
+                    const pwdChangedAt = user.passwordChangedAt;
+                    if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
+                        console.log('AuthService: Rejecting refresh token due to password change after token issuance');
+                        throw new Error('Refresh token invalid due to password change');
+                    }
+                }
+                catch (cmpErr) {
+                    throw cmpErr;
+                }
                 const newToken = this.generateAccessToken(user, type);
                 const newRefreshToken = this.generateRefreshToken(user, type);
                 console.log('AuthService: New tokens generated successfully');
@@ -155,6 +167,18 @@ class AuthService {
                     throw new Error('User not found');
                 }
                 const { user, type } = userResult;
+                // Invalidate access token if password changed after token was issued
+                try {
+                    const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
+                    const pwdChangedAt = user.passwordChangedAt;
+                    if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
+                        console.log('AuthService: Rejecting access token due to password change after token issuance');
+                        throw new Error('Access token invalid due to password change');
+                    }
+                }
+                catch (cmpErr) {
+                    throw cmpErr;
+                }
                 console.log('AuthService: User found in database:', {
                     userId: user._id,
                     role: type === 'user' ? user.role : 'owner',

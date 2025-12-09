@@ -169,6 +169,22 @@ const fileLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// Additional rate limits for password reset flow
+const forgotLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many password reset requests, please try again later.' }
+});
+const resetLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many reset attempts, please try again later.' }
+});
+
 // Debug middleware only in development
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
@@ -200,6 +216,8 @@ app.use('/api/charts', chartRoutes);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
 app.use('/api/auth/refresh-token', refreshLimiter);
+app.use('/api/auth/forgot-password', forgotLimiter);
+app.use('/api/auth/reset-password', resetLimiter);
 app.use('/api/files/upload', fileLimiter);
 
 app.use('/api/auth', authRoutes);

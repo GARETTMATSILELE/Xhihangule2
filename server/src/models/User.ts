@@ -15,6 +15,7 @@ export interface IUser extends Document {
   lastLogin?: Date;
   resetPasswordToken?: string;
   resetPasswordExpires?: Date;
+  passwordChangedAt?: Date;
   // Running totals for accounting and commissions
   commission?: number;
   balance?: number;
@@ -77,6 +78,10 @@ const userSchema = new Schema<IUser>({
     index: true
   },
   resetPasswordExpires: {
+    type: Date,
+    required: false
+  },
+  passwordChangedAt: {
     type: Date,
     required: false
   }

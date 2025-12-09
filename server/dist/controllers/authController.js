@@ -443,6 +443,7 @@ const resetPassword = (req, res, next) => __awaiter(void 0, void 0, void 0, func
             throw new errorHandler_1.AppError('Invalid or expired reset token', 400, 'INVALID_TOKEN');
         }
         user.password = password;
+        user.passwordChangedAt = new Date();
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
         yield user.save();
