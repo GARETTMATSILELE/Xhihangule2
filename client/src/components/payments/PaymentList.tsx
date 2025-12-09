@@ -26,6 +26,7 @@ import {
   Dialog,
   DialogContent,
 } from '@mui/material';
+import Autocomplete from '@mui/material/Autocomplete';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -87,6 +88,68 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
   const [onlyDeposits, setOnlyDeposits] = useState<boolean>(false);
   const [allSalesPayments, setAllSalesPayments] = useState<Payment[] | null>(null);
 
+  type PropertyFilterOption = {
+    id: string; // propertyId or manual:<address>
+    idKind: 'propertyId' | 'manualAddress';
+    label: string; // address (preferred) or fallback
+  };
+
+  // Build property-address filter options from the payments currently displayed.
+  // Fallback to provided properties list if payments are empty.
+  const propertyFilterOptions: PropertyFilterOption[] = useMemo(() => {
+    const map = new Map<string, PropertyFilterOption>();
+    const addOption = (id: string, idKind: 'propertyId' | 'manualAddress', label: string | null | undefined) => {
+      const cleanLabel = (label || '').toString().trim();
+      if (!cleanLabel) return;
+      const key = `${idKind}:${id}`;
+      if (!map.has(key)) {
+        map.set(key, { id, idKind, label: cleanLabel });
+      }
+    };
+    const extractAddressFromPayment = (p: any): string | null => {
+      const manual = p?.manualPropertyAddress;
+      if (manual && typeof manual === 'string' && manual.trim()) return manual.trim();
+      const propRef = (p as any).property ?? (p as any).propertyId;
+      if (propRef && typeof propRef === 'object') {
+        const addr = (propRef as any).address || (propRef as any).propertyAddress;
+        if (addr && typeof addr === 'string' && addr.trim()) return addr.trim();
+      }
+      const propId = String((propRef && (propRef as any)._id) || propRef || '');
+      if (propId) {
+        const found = properties.find(x => String((x as any)._id) === propId);
+        const addr = (found as any)?.address || (found as any)?.propertyAddress || (found as any)?.name;
+        if (addr && typeof addr === 'string' && addr.trim()) return addr.trim();
+      }
+      return null;
+    };
+    // Prefer deriving from current payments shown
+    (payments || []).forEach((p: any) => {
+      const propRef = (p as any).property ?? (p as any).propertyId;
+      const propId = String((propRef && (propRef as any)._id) || propRef || '');
+      const addr = extractAddressFromPayment(p);
+      if (addr && propId) {
+        addOption(propId, 'propertyId', addr);
+      } else if (addr) {
+        addOption(`manual:${addr}`, 'manualAddress', addr);
+      } else if (propId) {
+        // No address; fall back to property name if we can find it
+        const found = properties.find(x => String((x as any)._id) === propId);
+        const fallback = (found as any)?.name || 'Unknown Property';
+        addOption(propId, 'propertyId', fallback);
+      }
+    });
+    // Fallback to provided properties if we still have no options
+    if (map.size === 0 && Array.isArray(properties) && properties.length) {
+      properties.forEach((prop: any) => {
+        const id = String(prop?._id || '');
+        if (!id) return;
+        const addr = prop?.address || prop?.propertyAddress || prop?.name;
+        addOption(id, 'propertyId', addr || 'Unknown Property');
+      });
+    }
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [payments, properties]);
+
   // Load all sales payments once to compute outstanding balances for installments
   React.useEffect(() => {
     let cancelled = false;
@@ -147,22 +210,55 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
 
   const computeOutstanding = useCallback((payment: Payment): number | null => {
     try {
-      if (!payment || (payment as any).paymentType !== 'sale') return null;
-      // Parse total sale price from notes
-      const text = String((payment as any).notes || '');
-      const match = text.match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
-      const total = match && match[1] ? Number(match[1].replace(/,/g, '')) : null;
-      if (!total || !allSalesPayments) return null;
-      const groupKey = (p: any) => (p.saleId ? String(p.saleId) : (p.referenceNumber || p.manualPropertyAddress || ''));
-      const key = groupKey(payment as any);
-      if (!key) return null;
-      const related = (allSalesPayments as any[]).filter(p => (p as any).paymentType === 'sale').filter(p => groupKey(p) === key);
-      const paidToDate = related.reduce((s, p: any) => s + (p.amount || 0), 0);
-      return Math.max(0, total - paidToDate);
+      if (!payment) return null;
+      // Prefer server-provided outstanding if available
+      const serverOutstanding = (payment as any).outstanding;
+      if (typeof serverOutstanding === 'number' && Number.isFinite(serverOutstanding)) {
+        return serverOutstanding;
+      }
+      const type = (payment as any).paymentType || (payment as any).type;
+      // Sales: outstanding = total sale price - paidToDate across related sales payments
+      if (type === 'sale') {
+        const text = String((payment as any).notes || '');
+        const match = text.match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+        const total = match && match[1] ? Number(match[1].replace(/,/g, '')) : null;
+        if (!total || !allSalesPayments) return null;
+        const groupKey = (p: any) => (p.saleId ? String(p.saleId) : (p.referenceNumber || p.manualPropertyAddress || ''));
+        const key = groupKey(payment as any);
+        if (!key) return null;
+        const related = (allSalesPayments as any[]).filter(p => (p as any).paymentType === 'sale').filter(p => groupKey(p) === key);
+        const paidToDate = related.reduce((s, p: any) => s + (p.amount || 0), 0);
+        return Math.max(0, total - paidToDate);
+      }
+      // Rentals: outstanding = property rent - amount paid for rent (exclude deposit)
+      if (type === 'rental' || type === 'introduction' || type === 'management') {
+        let rentAmount: number | null = null;
+        // Prefer rent from populated property on the payment
+        const propRef = (payment as any).property || (payment as any).propertyId;
+        if (propRef && typeof propRef === 'object' && typeof (propRef as any).rent === 'number') {
+          rentAmount = Number((propRef as any).rent);
+        }
+        // Fallback to lookup from provided properties list
+        if (rentAmount == null && propRef) {
+          const idStr = String((propRef as any)?._id || (propRef as any)?.id || propRef);
+          const prop = properties.find(p => String(p._id) === idStr);
+          if (prop && typeof (prop as any).rent === 'number') {
+            rentAmount = Number((prop as any).rent);
+          }
+        }
+        // Last resort: any explicit rentUsed field present on the payment
+        if (rentAmount == null && typeof (payment as any).rentUsed === 'number') {
+          rentAmount = Number((payment as any).rentUsed);
+        }
+        if (rentAmount == null || !Number.isFinite(rentAmount)) return null;
+        const rentPaidOnly = Number((payment as any).amount || 0);
+        return Math.max(0, rentAmount - rentPaidOnly);
+      }
+      return null;
     } catch {
       return null;
     }
-  }, [allSalesPayments]);
+  }, [allSalesPayments, properties]);
 
   const getTypeColor = useCallback((type: string | undefined) => {
     switch (type) {
@@ -443,25 +539,53 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
           </FormControl>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Property</InputLabel>
-            <Select
-              value={filters.propertyId || ''}
-              onChange={(e) => {
-                if (e.target.value !== filters.propertyId) {
-                  handleFilterChange('propertyId', e.target.value);
-                }
-              }}
-              label="Property"
-            >
-              <MenuItem value="">All Properties</MenuItem>
-              {properties.map(property => (
-                <MenuItem key={property._id} value={property._id}>
-                  {property.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Autocomplete
+            options={propertyFilterOptions}
+            getOptionLabel={(option) => (option as PropertyFilterOption)?.label || ''}
+            value={(() => {
+              // Prefer propertyId selection
+              if (filters.propertyId) {
+                const opt = propertyFilterOptions.find(o => o.idKind === 'propertyId' && String(o.id) === String(filters.propertyId));
+                if (opt) return opt;
+              }
+              // Fallback to search selection when it matches a manual-address option
+              const searchVal = (filters as any)?.search;
+              if (searchVal && typeof searchVal === 'string') {
+                const s = searchVal.trim();
+                const opt = propertyFilterOptions.find(o => o.label === s || (o.idKind === 'manualAddress' && o.id === `manual:${s}`));
+                if (opt) return opt;
+              }
+              return null;
+            })()}
+            onChange={(_e, newValue) => {
+              if (!onFilterChange) return;
+              if (!newValue) {
+                onFilterChange({ ...filters, propertyId: undefined, search: undefined });
+                return;
+              }
+              const opt = newValue as PropertyFilterOption;
+              if (opt.idKind === 'propertyId') {
+                onFilterChange({ ...filters, propertyId: String(opt.id), search: undefined });
+              } else {
+                // Manual address: filter via search term
+                onFilterChange({ ...filters, propertyId: undefined, search: opt.label });
+              }
+            }}
+            isOptionEqualToValue={(option, value) =>
+              (option as PropertyFilterOption).id === (value as PropertyFilterOption).id &&
+              (option as PropertyFilterOption).idKind === (value as PropertyFilterOption).idKind
+            }
+            clearOnEscape
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Property Address"
+                size="small"
+                placeholder="Type address to search properties"
+                fullWidth
+              />
+            )}
+          />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <FormControl fullWidth size="small">

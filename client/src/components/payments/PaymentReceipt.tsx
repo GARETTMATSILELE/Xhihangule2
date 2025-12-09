@@ -64,9 +64,20 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     return parsedTotalSale;
   }, [serverTotal, saleTotal, parsedTotalSale]);
   const preferredCurrency = useMemo(() => (saleCurrency || currency), [saleCurrency, currency]);
-  const rentAmount = useMemo(() => Number(receipt?.amount || 0), [receipt?.amount]);
+  const rentAmount = useMemo(() => {
+    if (typeof receipt?.rentAmount === 'number') return Number(receipt.rentAmount);
+    if (receipt?.property && typeof receipt.property.rent === 'number') return Number(receipt.property.rent);
+    if (typeof receipt?.rentUsed === 'number') return Number(receipt.rentUsed);
+    return Number(receipt?.amount || 0);
+  }, [receipt?.rentAmount, receipt?.property, receipt?.rentUsed, receipt?.amount]);
   const depositAmount = useMemo(() => Number(receipt?.depositAmount || 0), [receipt?.depositAmount]);
-  const totalPaid = useMemo(() => rentAmount + depositAmount, [rentAmount, depositAmount]);
+  const totalPaid = useMemo(() => Number(receipt?.amount || 0) + depositAmount, [receipt?.amount, depositAmount]);
+  const rentalOutstanding = useMemo(() => {
+    const isSalePayment = (receipt?.paymentType || receipt?.type) === 'sale';
+    if (isSalePayment) return null;
+    const rentPaidOnly = Number(receipt?.amount || 0);
+    return Math.max(0, (rentAmount || 0) - rentPaidOnly);
+  }, [receipt?.paymentType, receipt?.type, receipt?.amount, rentAmount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,9 +137,12 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 <div class="detail-row"><span class="label">Paid To Date:</span><span class="value">${preferredCurrency} ${(paidToDate || 0).toLocaleString()}</span></div>
                 <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${preferredCurrency} ${((preferredTotalSale || 0) - (paidToDate || 0) > 0 ? ((preferredTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
               ` : '';
+      const rentPaidOnly = Number(receipt.amount || 0);
+      const rentalOutstandingLocal = Math.max(0, (rentAmount || 0) - rentPaidOnly);
       const depositBreakdownHtml = `
                 <div class="detail-row"><span class="label">Rent Amount:</span><span class="value">$${(rentAmount || 0).toFixed(2)}</span></div>
                 ${depositAmount > 0 ? `<div class="detail-row"><span class="label">Deposit Amount:</span><span class="value">$${(depositAmount || 0).toFixed(2)}</span></div>` : ''}
+                <div class="detail-row"><span class="label">Outstanding:</span><span class="value">$${(rentalOutstandingLocal || 0).toFixed(2)}</span></div>
                 <div class="detail-row"><span class="label">Total Paid:</span><span class="value">$${(totalPaid || 0).toFixed(2)}</span></div>
               `;
       printWindow.document.write(`
@@ -454,6 +468,14 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
             <Typography variant="subtitle2" color="textSecondary">Deposit Amount</Typography>
             <Typography variant="body1">
               ${depositAmount.toFixed(2)}
+            </Typography>
+          </Grid>
+        )}
+        {rentalOutstanding != null && (
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2" color="textSecondary">Outstanding</Typography>
+            <Typography variant="body1">
+              ${rentalOutstanding.toFixed(2)}
             </Typography>
           </Grid>
         )}

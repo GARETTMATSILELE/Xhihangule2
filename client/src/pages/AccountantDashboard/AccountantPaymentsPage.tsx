@@ -200,7 +200,12 @@ const AccountantPaymentsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         const [propertiesResult, tenantsResult, paymentsPage] = await Promise.allSettled([
-          propertyService.getProperties(),
+          // Use lightweight, paginated, public-filtered search for speed
+          propertyService.searchPublicProperties({
+            limit: 200,
+            page: 1,
+            fields: 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+          }),
           tenantService.getAll(),
           paymentService.getPaymentsPage({ page, limit, includeProvisional: 'true' } as any)
         ]);
@@ -209,6 +214,26 @@ const AccountantPaymentsPage: React.FC = () => {
         let tenants: Tenant[] = [];
         if (propertiesResult.status === 'fulfilled') {
           properties = Array.isArray(propertiesResult.value) ? propertiesResult.value : [];
+          // If the primary fetch returns empty, try broader public fetch, then user-scoped fetch
+          if (!properties.length) {
+            try {
+              const pub = await propertyService.getPublicProperties();
+              if (Array.isArray(pub) && pub.length) {
+                properties = pub;
+              }
+            } catch {}
+            if (!properties.length) {
+              try {
+                const uid = user?._id as any;
+                const cid = user?.companyId as any;
+                const role = user?.role as any;
+                const userScoped = await propertyService.getPropertiesForUser(uid, cid, role);
+                if (Array.isArray(userScoped) && userScoped.length) {
+                  properties = userScoped;
+                }
+              } catch {}
+            }
+          }
         } else {
           // Fallback to public properties filtered by current user/company
           try {
@@ -374,6 +399,7 @@ const AccountantPaymentsPage: React.FC = () => {
         <PaymentList
           payments={payments}
           totalCount={totalCount}
+          disableOutstandingFetch={true}
           onEdit={(payment) => {
             setSelectedPayment(payment);
             setShowForm(true);

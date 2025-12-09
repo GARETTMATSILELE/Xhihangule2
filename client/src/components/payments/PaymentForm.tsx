@@ -70,6 +70,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [useManualTenant, setUseManualTenant] = useState(false);
   const [manualPropertyAddress, setManualPropertyAddress] = useState('');
   const [manualTenantName, setManualTenantName] = useState('');
+  // Remote property search state (server-side, fast autocomplete)
+  const [propertySearchOpen, setPropertySearchOpen] = useState(false);
+  const [propertySearchText, setPropertySearchText] = useState('');
+  const [remotePropertyOptions, setRemotePropertyOptions] = useState<Property[]>([]);
+  const [remotePropertyLoading, setRemotePropertyLoading] = useState(false);
+  const remoteSearchTimerRef = useRef<number | null>(null);
+  const remoteRequestSeqRef = useRef(0);
   
   const [formData, setFormData] = useState<PaymentFormData>(() => ({
     paymentType: initialData?.paymentType || 'rental',
@@ -153,7 +160,11 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         // Authenticated-only data access for security
         try {
           if (!propsList.length) {
-            propsList = await propertyService.getProperties();
+            propsList = await propertyService.searchPublicProperties({
+              limit: 20,
+              page: 1,
+              fields: 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+            });
           }
         } catch {}
         try {
@@ -183,6 +194,61 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [properties?.length, tenants?.length]);
+
+  // Debounced server-side search for properties (fast, queries DB)
+  useEffect(() => {
+    let cancelled = false;
+    // Only query when dropdown is opened; prefetch on open with current text
+    if (!propertySearchOpen) {
+      setRemotePropertyLoading(false);
+      setRemotePropertyOptions([]);
+      return;
+    }
+    if (remoteSearchTimerRef.current) {
+      window.clearTimeout(remoteSearchTimerRef.current);
+    }
+    const reqId = ++remoteRequestSeqRef.current;
+    setRemotePropertyLoading(true);
+    // Small debounce to avoid flooding server while typing
+    remoteSearchTimerRef.current = window.setTimeout(async () => {
+      try {
+        // Ask for lightweight projection so responses are tiny and fast
+        const fields = 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType';
+        const list = await propertyService.searchPublicProperties({
+          q: propertySearchText || undefined,
+          limit: 20,
+          page: 1,
+          fields
+        });
+        if (cancelled || reqId !== remoteRequestSeqRef.current) return;
+        // For rental payments, prefer non-sale properties
+        const filtered = Array.isArray(list)
+          ? list.filter((p: any) => {
+              if (formData.paymentType === 'rental') {
+                return String((p as any).rentalType || '') !== 'sale';
+              }
+              return true;
+            })
+          : [];
+        setRemotePropertyOptions(filtered);
+      } catch {
+        if (!cancelled || reqId !== remoteRequestSeqRef.current) {
+          // ignore if cancelled or stale; otherwise clear options
+          setRemotePropertyOptions([]);
+        }
+      } finally {
+        if (!cancelled && reqId === remoteRequestSeqRef.current) {
+          setRemotePropertyLoading(false);
+        }
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      if (remoteSearchTimerRef.current) {
+        window.clearTimeout(remoteSearchTimerRef.current);
+      }
+    };
+  }, [propertySearchOpen, propertySearchText, formData.paymentType, propertyService]);
 
   // Update formData when advance payment changes
   useEffect(() => {
@@ -582,11 +648,33 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <Grid item xs={12}>
               <Autocomplete
-                options={filteredPropertiesForDropdown}
+                open={propertySearchOpen}
+                onOpen={() => setPropertySearchOpen(true)}
+                onClose={() => setPropertySearchOpen(false)}
+                openOnFocus
+                options={remotePropertyOptions}
+                loading={remotePropertyLoading}
                 getOptionLabel={(option: Property) => `${option.name} - ${option.address}`}
-                value={filteredPropertiesForDropdown.find((p) => String(p._id) === String(formData.propertyId)) || null}
+                // Ensure the selected value is found even if not in current options (fallback to internal)
+                value={
+                  (remotePropertyOptions.find((p) => String(p._id) === String(formData.propertyId))
+                    || filteredPropertiesForDropdown.find((p) => String(p._id) === String(formData.propertyId))
+                  ) || null
+                }
                 isOptionEqualToValue={(option, value) => String(option._id) === String(value._id)}
+                // Disable client-side filtering; server already filtered
                 filterOptions={(options) => options}
+                loadingText="Searching..."
+                noOptionsText={propertySearchText ? 'No matching properties' : 'Type to search properties'}
+                onInputChange={(_e, value, reason) => {
+                  if (reason === 'input') {
+                    setPropertySearchText(value);
+                  }
+                  // When clearing input, keep dropdown open with first page
+                  if (reason === 'clear') {
+                    setPropertySearchText('');
+                  }
+                }}
                 onChange={(_, newValue: Property | null) => {
                   const newPropertyId = newValue ? String(newValue._id) : '';
                   const newPropertyType = newValue?.type === 'commercial' ? 'commercial' : 'residential';
@@ -623,7 +711,21 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                   }));
                 }}
                 renderInput={(params) => (
-                  <TextField {...params} label="Property" required />
+                  <TextField
+                    {...params}
+                    label="Property"
+                    required
+                    placeholder="Type to search properties"
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {remotePropertyLoading ? <CircularProgress color="inherit" size={18} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                  />
                 )}
                 disabled={loadingData}
                 fullWidth

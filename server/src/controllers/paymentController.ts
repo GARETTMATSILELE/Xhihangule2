@@ -123,6 +123,72 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
 
     if (!paginate) {
       const payments = await base.exec();
+      // Annotate outstanding for sales payments in-memory
+      try {
+        const companyId = (req.user as any).companyId;
+        const saleIdKeys = new Set<string>();
+        const refKeys = new Set<string>();
+        const manualAddrKeys = new Set<string>();
+        for (const it of payments as any[]) {
+          if (it?.saleId) {
+            saleIdKeys.add(String(it.saleId));
+          } else {
+            if (it?.referenceNumber) refKeys.add(String(it.referenceNumber));
+            if (it?.manualPropertyAddress) manualAddrKeys.add(String(it.manualPropertyAddress));
+          }
+        }
+        const paidBySaleId: Record<string, number> = {};
+        if (saleIdKeys.size > 0) {
+          const agg = await Payment.aggregate([
+            { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), paymentType: 'sale', status: 'completed', saleId: { $in: Array.from(saleIdKeys).map(id => new mongoose.Types.ObjectId(String(id))) } } },
+            { $group: { _id: '$saleId', totalPaid: { $sum: '$amount' } } }
+          ]);
+          for (const row of agg) {
+            paidBySaleId[String(row._id)] = Number(row.totalPaid || 0);
+          }
+        }
+        const paidByLoose: Record<string, number> = {};
+        if (refKeys.size > 0 || manualAddrKeys.size > 0) {
+          const or: any[] = [];
+          if (refKeys.size > 0) or.push({ referenceNumber: { $in: Array.from(refKeys) } });
+          if (manualAddrKeys.size > 0) or.push({ manualPropertyAddress: { $in: Array.from(manualAddrKeys) } });
+          const related = await Payment.find({
+            companyId,
+            paymentType: 'sale',
+            status: 'completed',
+            $or: or
+          }).select('referenceNumber manualPropertyAddress amount').lean();
+          for (const p of related as any[]) {
+            const key = p.referenceNumber || p.manualPropertyAddress || '';
+            if (!key) continue;
+            paidByLoose[key] = (paidByLoose[key] || 0) + Number(p.amount || 0);
+          }
+        }
+        const parseTotalSale = (notes: string | undefined): number | null => {
+          if (!notes) return null;
+          const m = String(notes).match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+          if (m && m[1]) {
+            const n = Number(m[1].replace(/,/g, ''));
+            return Number.isFinite(n) ? n : null;
+          }
+          return null;
+        };
+        for (const it of payments as any[]) {
+          const totalSale = parseTotalSale(it?.notes);
+          if (totalSale != null) {
+            let paidToDate = 0;
+            if (it?.saleId) {
+              paidToDate = paidBySaleId[String(it.saleId)] || 0;
+            } else {
+              const key = it?.referenceNumber || it?.manualPropertyAddress || '';
+              paidToDate = paidByLoose[key] || 0;
+            }
+            (it as any).outstanding = Math.max(0, totalSale - paidToDate);
+          }
+        }
+      } catch (calcErr) {
+        console.warn('Failed to compute outstanding for sales payments:', (calcErr as any)?.message || calcErr);
+      }
       return res.json(payments);
     }
 
@@ -130,6 +196,72 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
       base.skip(skip).limit(limit).exec(),
       Payment.countDocuments(query)
     ]);
+    // Compute outstanding per page
+    try {
+      const companyId = (req.user as any).companyId;
+      const saleIdKeys = new Set<string>();
+      const refKeys = new Set<string>();
+      const manualAddrKeys = new Set<string>();
+      for (const it of items as any[]) {
+        if (it?.saleId) {
+          saleIdKeys.add(String(it.saleId));
+        } else {
+          if (it?.referenceNumber) refKeys.add(String(it.referenceNumber));
+          if (it?.manualPropertyAddress) manualAddrKeys.add(String(it.manualPropertyAddress));
+        }
+      }
+      const paidBySaleId: Record<string, number> = {};
+      if (saleIdKeys.size > 0) {
+        const agg = await Payment.aggregate([
+          { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), paymentType: 'sale', status: 'completed', saleId: { $in: Array.from(saleIdKeys).map(id => new mongoose.Types.ObjectId(String(id))) } } },
+          { $group: { _id: '$saleId', totalPaid: { $sum: '$amount' } } }
+        ]);
+        for (const row of agg) {
+          paidBySaleId[String(row._id)] = Number(row.totalPaid || 0);
+        }
+      }
+      const paidByLoose: Record<string, number> = {};
+      if (refKeys.size > 0 || manualAddrKeys.size > 0) {
+        const or: any[] = [];
+        if (refKeys.size > 0) or.push({ referenceNumber: { $in: Array.from(refKeys) } });
+        if (manualAddrKeys.size > 0) or.push({ manualPropertyAddress: { $in: Array.from(manualAddrKeys) } });
+        const related = await Payment.find({
+          companyId,
+          paymentType: 'sale',
+          status: 'completed',
+          $or: or
+        }).select('referenceNumber manualPropertyAddress amount').lean();
+        for (const p of related as any[]) {
+          const key = p.referenceNumber || p.manualPropertyAddress || '';
+          if (!key) continue;
+          paidByLoose[key] = (paidByLoose[key] || 0) + Number(p.amount || 0);
+        }
+      }
+      const parseTotalSale = (notes: string | undefined): number | null => {
+        if (!notes) return null;
+        const m = String(notes).match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+        if (m && m[1]) {
+          const n = Number(m[1].replace(/,/g, ''));
+          return Number.isFinite(n) ? n : null;
+        }
+        return null;
+      };
+      for (const it of items as any[]) {
+        const totalSale = parseTotalSale(it?.notes);
+        if (totalSale != null) {
+          let paidToDate = 0;
+          if (it?.saleId) {
+            paidToDate = paidBySaleId[String(it.saleId)] || 0;
+          } else {
+            const key = it?.referenceNumber || it?.manualPropertyAddress || '';
+            paidToDate = paidByLoose[key] || 0;
+          }
+          (it as any).outstanding = Math.max(0, totalSale - paidToDate);
+        }
+      }
+    } catch (calcErr) {
+      console.warn('Failed to compute outstanding for paginated sales payments:', (calcErr as any)?.message || calcErr);
+    }
     return res.json({
       items,
       total,
@@ -1305,13 +1437,101 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     if (paginate) {
       const [items, total] = await Promise.all([
         baseQuery
-          .select('paymentDate paymentType propertyId amount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear')
-          .populate('propertyId', 'name address')
+          .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear notes rentUsed')
+          .populate('propertyId', 'name address rent')
           .lean()
           .skip((page - 1) * limit)
           .limit(limit),
         Payment.countDocuments(query),
       ]);
+      // Compute outstanding amounts for current page
+      try {
+        const companyId = (req.user as any).companyId;
+        // Prepare sales grouping keys
+        const saleIdKeys = new Set<string>();
+        const refKeys = new Set<string>();
+        const manualAddrKeys = new Set<string>();
+        for (const it of items as any[]) {
+          const type = it?.paymentType;
+          if (type === 'sale') {
+            if (it?.saleId) {
+              saleIdKeys.add(String(it.saleId));
+            } else {
+              if (it?.referenceNumber) refKeys.add(String(it.referenceNumber));
+              if (it?.manualPropertyAddress) manualAddrKeys.add(String(it.manualPropertyAddress));
+            }
+          }
+        }
+        // Sales paid-to-date by saleId
+        const paidBySaleId: Record<string, number> = {};
+        if (saleIdKeys.size > 0) {
+          const agg = await Payment.aggregate([
+            { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), paymentType: 'sale', status: 'completed', saleId: { $in: Array.from(saleIdKeys).map(id => new mongoose.Types.ObjectId(String(id))) } } },
+            { $group: { _id: '$saleId', totalPaid: { $sum: '$amount' } } }
+          ]);
+          for (const row of agg) {
+            paidBySaleId[String(row._id)] = Number(row.totalPaid || 0);
+          }
+        }
+        // Sales paid-to-date by referenceNumber/manualPropertyAddress (loose grouping)
+        const paidByLoose: Record<string, number> = {};
+        if (refKeys.size > 0 || manualAddrKeys.size > 0) {
+          const or: any[] = [];
+          if (refKeys.size > 0) or.push({ referenceNumber: { $in: Array.from(refKeys) } });
+          if (manualAddrKeys.size > 0) or.push({ manualPropertyAddress: { $in: Array.from(manualAddrKeys) } });
+          const related = await Payment.find({
+            companyId,
+            paymentType: 'sale',
+            status: 'completed',
+            $or: or
+          }).select('referenceNumber manualPropertyAddress amount').lean();
+          for (const p of related as any[]) {
+            const key = p.referenceNumber || p.manualPropertyAddress || '';
+            if (!key) continue;
+            paidByLoose[key] = (paidByLoose[key] || 0) + Number(p.amount || 0);
+          }
+        }
+        // Helper to parse total sale price
+        const parseTotalSale = (notes: string | undefined): number | null => {
+          if (!notes) return null;
+          const m = String(notes).match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+          if (m && m[1]) {
+            const n = Number(m[1].replace(/,/g, ''));
+            return Number.isFinite(n) ? n : null;
+          }
+          return null;
+        };
+        for (const it of items as any[]) {
+          try {
+            const type = it?.paymentType;
+            if (type === 'sale') {
+              const totalSale = parseTotalSale(it?.notes);
+              if (totalSale != null) {
+                let paidToDate = 0;
+                if (it?.saleId) {
+                  paidToDate = paidBySaleId[String(it.saleId)] || 0;
+                } else {
+                  const key = it?.referenceNumber || it?.manualPropertyAddress || '';
+                  paidToDate = paidByLoose[key] || 0;
+                }
+                (it as any).outstanding = Math.max(0, totalSale - paidToDate);
+              }
+            } else if (type === 'rental' || type === 'introduction' || type === 'management') {
+              const rentUsed = typeof it?.rentUsed === 'number' ? Number(it.rentUsed) : null;
+              const rentFromProp = (it?.propertyId && typeof (it.propertyId as any).rent === 'number') ? Number((it.propertyId as any).rent) : null;
+              const rentAmount = (rentUsed != null ? rentUsed : (rentFromProp != null ? rentFromProp : null));
+              if (rentAmount != null && Number.isFinite(rentAmount)) {
+                const rentPaidOnly = Number(it?.amount || 0);
+                (it as any).outstanding = Math.max(0, rentAmount - rentPaidOnly);
+              }
+            }
+          } catch {
+            // best-effort; skip item if any error
+          }
+        }
+      } catch (calcErr) {
+        console.warn('Failed to compute outstanding for payments page:', (calcErr as any)?.message || calcErr);
+      }
       const pages = Math.max(1, Math.ceil(total / limit));
       return res.json({ items, total, page, pages });
     }
@@ -1756,7 +1976,7 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
     console.log('Payment receipt download query:', query);
 
     const payment = await Payment.findOne(query)
-      .populate('propertyId', 'name address')
+      .populate('propertyId', 'name address rent')
       .populate('tenantId', 'firstName lastName email')
       .populate('agentId', 'firstName lastName')
       .populate('processedBy', 'firstName lastName');
@@ -1777,6 +1997,14 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
         'name address phone email website registrationNumber tinNumber vatNumber logo description'
       );
     }
+
+    // Determine rent amount to display on receipt: prefer explicit rentUsed, then property's rent
+    const rentAmountForDisplay = typeof (payment as any).rentUsed === 'number'
+      ? Number((payment as any).rentUsed)
+      : Number(((payment as any).propertyId as any)?.rent || 0);
+
+    const rentPaidOnly = Number(payment.amount || 0);
+    const rentalOutstanding = Math.max(0, Number(rentAmountForDisplay || 0) - rentPaidOnly);
 
     // Generate HTML receipt with logo
     const htmlReceipt = `
@@ -1848,13 +2076,17 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
               </div>
               <div class="detail-row">
                 <span class="label">Rent Amount:</span>
-                <span class="value">$${(Number(payment.amount || 0)).toFixed(2)}</span>
+                <span class="value">$${(Number(rentAmountForDisplay || 0)).toFixed(2)}</span>
               </div>
               ${(payment.depositAmount && Number(payment.depositAmount) > 0) ? `
               <div class="detail-row">
                 <span class="label">Deposit Amount:</span>
                 <span class="value">$${(Number(payment.depositAmount || 0)).toFixed(2)}</span>
               </div>` : ''}
+              <div class="detail-row">
+                <span class="label">Outstanding:</span>
+                <span class="value">$${(Number(rentalOutstanding || 0)).toFixed(2)}</span>
+              </div>
               <div class="detail-row">
                 <span class="label">Total Paid:</span>
                 <span class="value">$${(Number(payment.amount || 0) + Number(payment.depositAmount || 0)).toFixed(2)}</span>
@@ -1949,7 +2181,7 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
     console.log('Payment receipt query:', query);
 
     const payment = await Payment.findOne(query)
-      .populate('propertyId', 'name address')
+      .populate('propertyId', 'name address rent')
       .populate('tenantId', 'firstName lastName email')
       .populate('agentId', 'firstName lastName')
       .populate('processedBy', 'firstName lastName');
@@ -2001,6 +2233,30 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       levyPeriodMonth: (payment as any).levyPeriodMonth,
       levyPeriodYear: (payment as any).levyPeriodYear
     };
+
+    // Include rent amount for rentals: prefer explicit rentUsed, then property's rent
+    try {
+      const rentAmountForDisplay = typeof (payment as any).rentUsed === 'number'
+        ? Number((payment as any).rentUsed)
+        : Number(((payment as any).propertyId as any)?.rent || 0);
+      if (Number.isFinite(rentAmountForDisplay)) {
+        (receipt as any).rentAmount = rentAmountForDisplay;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Include rental outstanding (rent - amount paid for rent; deposit excluded)
+    try {
+      const rentAmountForDisplay = typeof (receipt as any).rentAmount === 'number'
+        ? Number((receipt as any).rentAmount)
+        : 0;
+      const rentPaidOnly = Number(payment.amount || 0);
+      const rentalOutstanding = Math.max(0, rentAmountForDisplay - rentPaidOnly);
+      (receipt as any).rentalOutstanding = rentalOutstanding;
+    } catch {
+      // ignore
+    }
 
     // Generate a deterministic unique receipt code for sale payments
     if ((payment as any).paymentType === 'sale') {
