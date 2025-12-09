@@ -657,9 +657,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                 getOptionLabel={(option: Property) => `${option.name} - ${option.address}`}
                 // Ensure the selected value is found even if not in current options (fallback to internal)
                 value={
-                  (remotePropertyOptions.find((p) => String(p._id) === String(formData.propertyId))
-                    || filteredPropertiesForDropdown.find((p) => String(p._id) === String(formData.propertyId))
-                  ) || null
+                  remotePropertyOptions.find((p) => String(p._id) === String(formData.propertyId))
+                  || internalProperties.find((p) => String(p._id) === String(formData.propertyId))
+                  || filteredPropertiesForDropdown.find((p) => String(p._id) === String(formData.propertyId))
+                  || null
                 }
                 isOptionEqualToValue={(option, value) => String(option._id) === String(value._id)}
                 // Disable client-side filtering; server already filtered
@@ -679,6 +680,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                   const newPropertyId = newValue ? String(newValue._id) : '';
                   const newPropertyType = newValue?.type === 'commercial' ? 'commercial' : 'residential';
                   const newRent = newValue?.rent ?? null;
+                  // Ensure the selected property persists in local list so it remains visible after closing
+                  if (newValue) {
+                    setInternalProperties(prev => {
+                      const exists = prev.some(p => String(p._id) === String(newValue._id));
+                      return exists ? prev : [newValue, ...prev];
+                    });
+                  }
                   // Find tenant linked to this property (prefer Active)
                   let autoTenantId = '';
                   let autoAgentId = '';
