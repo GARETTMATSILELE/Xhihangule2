@@ -147,6 +147,7 @@ if (process.env.NODE_ENV === 'production') {
                 defaultSrc: ["'self'"],
                 scriptSrc: [
                     "'self'",
+                    "'unsafe-inline'",
                     "https://www.paypal.com",
                     "https://*.paypal.com",
                     "https://*.paypalobjects.com"
