@@ -101,7 +101,12 @@ if (process.env.NODE_ENV === 'production') {
       useDefaults: true,
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "https://www.paypal.com",
+          "https://*.paypal.com",
+          "https://*.paypalobjects.com"
+        ],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: [
           "'self'",
@@ -111,11 +116,34 @@ if (process.env.NODE_ENV === 'production') {
           "https://images.unsplash.com",
           "https://*.unsplash.com",
           // Some extensions or libraries may load small PNGs from gstatic
-          "https://fonts.gstatic.com"
+          "https://fonts.gstatic.com",
+          // PayPal assets
+          "https://www.paypal.com",
+          "https://*.paypal.com",
+          "https://*.paypalobjects.com"
         ],
         fontSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", ...allowedOrigins],
-        frameSrc: ["'self'", "blob:", "data:", "about:"],
+        connectSrc: [
+          "'self'",
+          ...allowedOrigins,
+          // PayPal APIs (live and sandbox)
+          "https://api-m.paypal.com",
+          "https://api-m.sandbox.paypal.com",
+          // PayPal domains used by SDK
+          "https://www.paypal.com",
+          "https://*.paypal.com",
+          "https://*.paypalobjects.com"
+        ],
+        frameSrc: [
+          "'self'",
+          "blob:",
+          "data:",
+          "about:",
+          // PayPal checkout frames
+          "https://www.paypal.com",
+          "https://*.paypal.com",
+          "https://*.paypalobjects.com"
+        ],
         objectSrc: ["'none'"]
       }
     },
