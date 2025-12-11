@@ -165,13 +165,22 @@ const getTopAgentsForMonth = (req, res) => __awaiter(void 0, void 0, void 0, fun
             if (!u)
                 continue;
             const roles = Array.isArray(u.roles) && u.roles.length ? u.roles.map((r) => String(r)) : [String(u.role || 'agent')];
-            const isSales = roles.includes('sales');
+            const hasSales = roles.includes('sales');
+            const hasAgent = roles.includes('agent');
             const displayName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || agentId;
-            const payload = { agentId, name: displayName, email: u.email, role: isSales ? 'sales' : 'agent', total: Number(row.total || 0) };
-            if (isSales)
-                sales.push(payload);
-            else
-                rental.push(payload);
+            const base = { agentId, name: displayName, email: u.email, total: Number(row.total || 0) };
+            // If user has sales role, include in sales
+            if (hasSales) {
+                sales.push(Object.assign(Object.assign({}, base), { role: 'sales' }));
+            }
+            // If user has agent role, include in rental
+            if (hasAgent) {
+                rental.push(Object.assign(Object.assign({}, base), { role: 'agent' }));
+            }
+            // Fallback: if neither explicitly present (shouldn't happen due to query), treat as rental
+            if (!hasSales && !hasAgent) {
+                rental.push(Object.assign(Object.assign({}, base), { role: 'agent' }));
+            }
         }
         const topSales = sales[0] || null;
         const topRental = rental[0] || null;

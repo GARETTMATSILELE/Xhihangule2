@@ -64,7 +64,7 @@ const BillingUpgradePage: React.FC = () => {
         agentAccounts: true,
         propertyAccounts: true
       },
-      pricingUSD: { monthly: 100, yearly: 1000 }
+      pricingUSD: { monthly: 10, yearly: 120 }
     },
     SME: {
       propertyLimit: 25,
@@ -73,7 +73,7 @@ const BillingUpgradePage: React.FC = () => {
         agentAccounts: true,
         propertyAccounts: true
       },
-      pricingUSD: { monthly: 300, yearly: 3000 }
+      pricingUSD: { monthly: 300, yearly: 3600 }
     },
     ENTERPRISE: {
       propertyLimit: null,
@@ -82,7 +82,7 @@ const BillingUpgradePage: React.FC = () => {
         agentAccounts: true,
         propertyAccounts: true
       },
-      pricingUSD: { monthly: 600, yearly: 6000 }
+      pricingUSD: { monthly: 600, yearly: 7200 }
     }
   };
 
@@ -196,7 +196,7 @@ const BillingUpgradePage: React.FC = () => {
           sx={{ bgcolor: 'grey.100', borderRadius: 9999, p: 0.5 }}
         >
           <ToggleButton value="monthly" sx={{ px: 3, border: 0, borderRadius: 9999 }}>Monthly</ToggleButton>
-          <ToggleButton value="yearly" sx={{ px: 3, border: 0, borderRadius: 9999 }}>Yearly (2 months free)</ToggleButton>
+          <ToggleButton value="yearly" sx={{ px: 3, border: 0, borderRadius: 9999 }}>Yearly</ToggleButton>
         </ToggleButtonGroup>
       </Box>
 

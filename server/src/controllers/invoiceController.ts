@@ -162,3 +162,42 @@ export const getInvoices = async (req: Request, res: Response) => {
     });
   }
 }; 
+
+export const updateInvoiceStatus = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params as { id: string };
+    const { status } = req.body as { status?: 'paid' | 'unpaid' | 'overdue' };
+
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      throw new AppError('Invalid invoice ID', 400);
+    }
+
+    const allowedStatuses = ['paid', 'unpaid', 'overdue'] as const;
+    if (!status || !allowedStatuses.includes(status as any)) {
+      throw new AppError('Invalid status. Allowed: paid, unpaid, overdue', 400);
+    }
+
+    const companyId = new mongoose.Types.ObjectId(req.user.companyId);
+    const updated = await Invoice.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(id), companyId },
+      { $set: { status } },
+      { new: true }
+    );
+
+    if (!updated) {
+      throw new AppError('Invoice not found', 404);
+    }
+
+    res.json(updated);
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error updating invoice status:', error);
+    res.status(500).json({ message: 'Error updating invoice status', error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+};

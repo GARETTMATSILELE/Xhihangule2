@@ -282,20 +282,35 @@ const WrittenInvoicesPage: React.FC = () => {
                     {new Date(inv.dueDate).toLocaleDateString()}
                   </td>
                   <td style={{ borderBottom: '1px solid #eee', padding: '8px' }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      backgroundColor: 
-                        inv.status === 'paid' ? '#e8f5e8' :
-                        inv.status === 'overdue' ? '#ffeaea' : '#fff3e0',
-                      color: 
-                        inv.status === 'paid' ? '#2e7d32' :
-                        inv.status === 'overdue' ? '#d32f2f' : '#f57c00'
-                    }}>
-                      {inv.status.toUpperCase()}
-                    </span>
+                    <FormControl size="small" sx={{ minWidth: 140 }}>
+                      <Select
+                        value={inv.status}
+                        onChange={async (e) => {
+                          const nextStatus = e.target.value as 'paid' | 'unpaid' | 'overdue';
+                          try {
+                            const updated = await apiService.updateInvoiceStatus(inv._id, nextStatus);
+                            setInvoices((prev) => prev.map((i) => (i._id === inv._id ? updated : i)));
+                            // If the invoice is currently open in print preview, keep it in sync
+                            setSelectedInvoice((sel: any) => (sel && sel._id === inv._id ? updated : sel));
+                          } catch (err) {
+                            alert('Failed to update status');
+                          }
+                        }}
+                        sx={{
+                          backgroundColor:
+                            inv.status === 'paid' ? '#e8f5e8' :
+                            inv.status === 'overdue' ? '#ffeaea' : '#fff3e0',
+                          color:
+                            inv.status === 'paid' ? '#2e7d32' :
+                            inv.status === 'overdue' ? '#d32f2f' : '#f57c00',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        <MenuItem value="paid">Paid</MenuItem>
+                        <MenuItem value="unpaid">Unpaid</MenuItem>
+                        <MenuItem value="overdue">Overdue</MenuItem>
+                      </Select>
+                    </FormControl>
                   </td>
                   <td style={{ borderBottom: '1px solid #eee', padding: '8px' }}>
                     <Tooltip title="Print Tax Invoice">

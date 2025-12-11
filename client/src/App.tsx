@@ -17,6 +17,7 @@ import { salesOwnerTheme } from './themes/salesOwnerTheme';
 
 const LandingPage = lazyWithRetry(() => import('./pages/LandingPage'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
+const SystemAdminDashboard = lazyWithRetry(() => import('./pages/SystemAdminDashboard'));
 // Ensure correct case to match actual folder name on disk (windows is case-insensitive)
 const CompanySetup = lazyWithRetry(() => import('./pages/admin/CompanySetup'));
 const Login = lazyWithRetry(() => import('./components/Login'));
@@ -33,6 +34,7 @@ const AgentDashboard = lazyWithRetry(() => import('./pages/AgentDashboard'));
 const AccountantDashboard = lazyWithRetry(() => import('./pages/AccountantDashboard'));
 const SalesDashboard = lazyWithRetry(() => import('./pages/SalesDashboard'));
 const BillingSetup = lazyWithRetry(() => import('./pages/Billing/BillingSetup'));
+const PaypalCheckout = lazyWithRetry(() => import('./pages/Checkout/PaypalCheckout'));
 const SalesLeadsPage = lazyWithRetry(() => import('./pages/SalesDashboard/LeadsPage'));
 const SalesViewingsPage = lazyWithRetry(() => import('./pages/SalesDashboard/ViewingsPage'));
 const SalesBuyersPage = lazyWithRetry(() => import('./pages/SalesDashboard/BuyersPage'));
@@ -113,6 +115,9 @@ const App: React.FC = () => {
               <Route path="/admin-signup" element={<AdminSignup />} />
               <Route path="/billing/setup" element={<BillingSetup />} />
               <Route path="/billing/upgrade" element={<BillingSetup />} />
+              <Route path="/checkout/paypal" element={<PaypalCheckout />} />
+              {/* System Admin (Global) */}
+              <Route path="/system-admin/*" element={<SystemAdminDashboard />} />
               {/* Admin Dashboard Routes - Protected with authentication */}
               <Route path="/admin-dashboard/*" element={
                 <PropertyProvider>

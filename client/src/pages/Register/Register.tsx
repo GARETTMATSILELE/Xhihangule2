@@ -51,8 +51,10 @@ const Register: React.FC = () => {
     }
 
     try {
-      await signup(formData.email, formData.password, formData.name, undefined, formData.plan);
-      navigate('/login', { state: { message: 'Registration successful! Please log in.' } });
+      await signup(formData.email, formData.password, formData.name, undefined, formData.plan, { skipNavigate: true });
+      navigate(`/checkout/paypal?plan=${encodeURIComponent(formData.plan)}&cycle=monthly`, {
+        state: { message: 'Account created. Please complete payment to activate your subscription.' }
+      });
     } catch (err: any) {
       setError(err.message || 'An error occurred during registration');
     }
@@ -144,7 +146,7 @@ const Register: React.FC = () => {
               variant="contained"
               sx={{ mt: 3, mb: 2 }}
             >
-              Register
+              Proceed to Checkout
             </Button>
             <Grid container justifyContent="flex-end">
               <Grid item>

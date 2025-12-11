@@ -1,7 +1,7 @@
 import { Request } from 'express';
 import { Document, Types } from 'mongoose';
 
-export type UserRole = 'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea';
+export type UserRole = 'admin' | 'agent' | 'accountant' | 'owner' | 'sales' | 'principal' | 'prea' | 'system_admin';
 
 export interface IUser {
   _id: string;

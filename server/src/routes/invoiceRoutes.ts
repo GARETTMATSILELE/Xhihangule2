@@ -1,7 +1,7 @@
 import express from 'express';
 import { authWithCompany } from '../middleware/auth';
 import { isAccountant } from '../middleware/roles';
-import { createInvoice, getInvoices } from '../controllers/invoiceController';
+import { createInvoice, getInvoices, updateInvoiceStatus } from '../controllers/invoiceController';
 
 const router = express.Router();
 
@@ -11,5 +11,6 @@ router.use(authWithCompany);
 // Invoice routes - require accountant role
 router.post('/', isAccountant, createInvoice);
 router.get('/', isAccountant, getInvoices);
+router.put('/:id/status', isAccountant, updateInvoiceStatus);
 
 export default router; 

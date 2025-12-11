@@ -172,10 +172,23 @@ export const getTopAgentsForMonth = async (req: Request, res: Response) => {
       const u = userById[agentId];
       if (!u) continue;
       const roles: string[] = Array.isArray(u.roles) && u.roles.length ? u.roles.map((r: any) => String(r)) : [String(u.role || 'agent')];
-      const isSales = roles.includes('sales');
+      const hasSales = roles.includes('sales');
+      const hasAgent = roles.includes('agent');
       const displayName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || agentId;
-      const payload = { agentId, name: displayName, email: u.email, role: isSales ? 'sales' : 'agent', total: Number(row.total || 0) };
-      if (isSales) sales.push(payload); else rental.push(payload);
+      const base = { agentId, name: displayName, email: u.email, total: Number(row.total || 0) };
+
+      // If user has sales role, include in sales
+      if (hasSales) {
+        sales.push({ ...base, role: 'sales' });
+      }
+      // If user has agent role, include in rental
+      if (hasAgent) {
+        rental.push({ ...base, role: 'agent' });
+      }
+      // Fallback: if neither explicitly present (shouldn't happen due to query), treat as rental
+      if (!hasSales && !hasAgent) {
+        rental.push({ ...base, role: 'agent' });
+      }
     }
 
     const topSales = sales[0] || null;

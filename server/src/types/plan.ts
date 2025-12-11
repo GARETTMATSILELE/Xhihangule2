@@ -20,7 +20,7 @@ export const PLAN_CONFIG: Record<Plan, PlanConfig> = {
       agentAccounts: true,
       propertyAccounts: true
     },
-    pricingUSD: { monthly: 100, yearly: 1000 }
+    pricingUSD: { monthly: 100, yearly: 1200 }
   },
   SME: {
     propertyLimit: 25,
@@ -29,7 +29,7 @@ export const PLAN_CONFIG: Record<Plan, PlanConfig> = {
       agentAccounts: true,
       propertyAccounts: true
     },
-    pricingUSD: { monthly: 300, yearly: 3000 }
+    pricingUSD: { monthly: 300, yearly: 3600 }
   },
   ENTERPRISE: {
     propertyLimit: null,
@@ -38,7 +38,7 @@ export const PLAN_CONFIG: Record<Plan, PlanConfig> = {
       agentAccounts: true,
       propertyAccounts: true
     },
-    pricingUSD: { monthly: 600, yearly: 6000 }
+    pricingUSD: { monthly: 600, yearly: 7200 }
   }
 };
 

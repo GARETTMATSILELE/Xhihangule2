@@ -23,7 +23,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getInvoices = exports.createInvoice = void 0;
+exports.updateInvoiceStatus = exports.getInvoices = exports.createInvoice = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Invoice_1 = require("../models/Invoice");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -156,3 +156,34 @@ const getInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.getInvoices = getInvoices;
+const updateInvoiceStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        if (!id || !mongoose_1.default.Types.ObjectId.isValid(id)) {
+            throw new errorHandler_1.AppError('Invalid invoice ID', 400);
+        }
+        const allowedStatuses = ['paid', 'unpaid', 'overdue'];
+        if (!status || !allowedStatuses.includes(status)) {
+            throw new errorHandler_1.AppError('Invalid status. Allowed: paid, unpaid, overdue', 400);
+        }
+        const companyId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
+        const updated = yield Invoice_1.Invoice.findOneAndUpdate({ _id: new mongoose_1.default.Types.ObjectId(id), companyId }, { $set: { status } }, { new: true });
+        if (!updated) {
+            throw new errorHandler_1.AppError('Invoice not found', 404);
+        }
+        res.json(updated);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error('Error updating invoice status:', error);
+        res.status(500).json({ message: 'Error updating invoice status', error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+});
+exports.updateInvoiceStatus = updateInvoiceStatus;

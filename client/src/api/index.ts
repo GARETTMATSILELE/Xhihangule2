@@ -294,6 +294,10 @@ export const apiService = {
   getInvoices: async () => {
     const res = await apiInstance.get('/invoices');
     return res.data;
+  },
+  updateInvoiceStatus: async (id: string, status: 'paid' | 'unpaid' | 'overdue') => {
+    const res = await apiInstance.put(`/invoices/${id}/status`, { status });
+    return res.data;
   }
 };
 

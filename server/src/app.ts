@@ -34,6 +34,7 @@ import valuationRoutes from './routes/valuationRoutes';
 import developmentRoutes from './routes/developmentRoutes';
 import developmentUnitRoutes from './routes/developmentUnitRoutes';
 import maintenanceRoutes from './routes/maintenanceRoutes';
+import paypalRoutes from './routes/paypalRoutes';
 
 import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
@@ -153,6 +154,7 @@ app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/paypal', paypalRoutes);
 
 // Error handling
 app.use(errorHandler);

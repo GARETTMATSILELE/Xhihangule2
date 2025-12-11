@@ -51,12 +51,12 @@ const userSchema = new Schema<IUser>({
   },
   role: {
     type: String,
-    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'] as UserRole[],
+    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
     default: 'agent'
   },
   roles: {
     type: [String],
-    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'] as UserRole[],
+    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
     required: false,
     default: undefined
   },

@@ -65,10 +65,12 @@ export const validateRegistrationForm = (data: SignUpData): string[] => {
   return errors;
 };
 
-export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant' | 'sales' | 'principal' | 'prea';
+export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant' | 'sales' | 'principal' | 'prea' | 'system_admin';
 
 export const getDashboardPath = (role: UserRole): string => {
   switch (role) {
+    case 'system_admin':
+      return '/system-admin';
     case 'admin':
       return '/admin-dashboard';
     case 'principal':

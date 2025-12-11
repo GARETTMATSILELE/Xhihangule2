@@ -172,13 +172,13 @@ const LandingPage: React.FC = () => {
 
   const prices = useMemo(() => {
     // Base monthly USD prices
-    const monthly = { INDIVIDUAL: 100, SME: 300, ENTERPRISE: 600 } as const;
+    const monthly = { INDIVIDUAL: 10, SME: 300, ENTERPRISE: 600 } as const;
     if (cycle === 'monthly') return monthly;
-    // Yearly shows discount (2 months off)
+    // Yearly totals (12 months)
     return {
-      INDIVIDUAL: monthly.INDIVIDUAL * 10,
-      SME: monthly.SME * 10,
-      ENTERPRISE: monthly.ENTERPRISE * 10
+      INDIVIDUAL: monthly.INDIVIDUAL * 12,
+      SME: monthly.SME * 12,
+      ENTERPRISE: monthly.ENTERPRISE * 12
     } as const;
   }, [cycle]);
 

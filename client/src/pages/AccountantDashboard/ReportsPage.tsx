@@ -45,6 +45,11 @@ const ReportsPage: React.FC = () => {
   const [buyerFilter, setBuyerFilter] = useState<string>('');
   const [sellerFilter, setSellerFilter] = useState<string>('');
   const [partySearch, setPartySearch] = useState<string>('');
+  // Recent sale transactions month/year filters
+  const [salesTxYear, setSalesTxYear] = useState<number>(now.getFullYear());
+  const [salesTxMonth, setSalesTxMonth] = useState<number>(now.getMonth() + 1); // 1-12
+  // Recent sale transactions display limit
+  const [salesTxLimit, setSalesTxLimit] = useState<number>(25);
 
   // Top Agents card: independent month/year filters and data
   const [topYear, setTopYear] = useState<number>(now.getFullYear());
@@ -99,16 +104,14 @@ const ReportsPage: React.FC = () => {
         setLoading(true);
         setError(null);
         // Use same source as dashboard cards for consistency
-        const [all, accounts, summary, tx, deposits, saleOnly] = await Promise.all([
+        const [all, accounts, summary, tx, deposits] = await Promise.all([
           paymentService.getPayments(),
           propertyAccountService.getCompanyPropertyAccounts().catch(() => []),
           companyAccountService.getSummary().catch(() => null),
           companyAccountService.getTransactions().catch(() => null),
-          paymentService.getCompanyDepositSummaries().catch(() => []),
-          paymentService.getPayments({ paymentType: 'sale', status: 'completed', startDate: new Date(from), endDate: new Date(to) }).catch(() => [])
+          paymentService.getCompanyDepositSummaries().catch(() => [])
         ]);
         setPayments(Array.isArray(all) ? all : []);
-        setSalePayments(Array.isArray(saleOnly) ? saleOnly : []);
         try {
           const totals = (accounts as any[]).reduce((acc: any, a: any) => {
             acc.totalIncome += Number(a.totalIncome || 0);
@@ -128,6 +131,29 @@ const ReportsPage: React.FC = () => {
     };
     load();
   }, [from, to]);
+
+  // Load sale payments for the selected month/year (independent of the global from/to filters)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const start = new Date(salesTxYear, salesTxMonth - 1, 1);
+        const end = new Date(salesTxYear, salesTxMonth, 0, 23, 59, 59, 999);
+        const saleOnly = await paymentService.getPayments({
+          paymentType: 'sale',
+          status: 'completed',
+          startDate: start,
+          endDate: end
+        }).catch(() => []);
+        if (!cancelled) {
+          setSalePayments(Array.isArray(saleOnly) ? saleOnly : []);
+        }
+      } catch {
+        if (!cancelled) setSalePayments([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [salesTxYear, salesTxMonth]);
 
   // Load agents once to resolve owner/collaborator names in commission splits
   useEffect(() => {
@@ -310,9 +336,8 @@ const ReportsPage: React.FC = () => {
 
   // Recent sale transactions (completed) with commission breakdown
   const recentSaleTransactions = useMemo(() => {
-    const start = new Date(from);
-    const end = new Date(to);
-    end.setHours(23, 59, 59, 999);
+    const start = new Date(salesTxYear, salesTxMonth - 1, 1);
+    const end = new Date(salesTxYear, salesTxMonth, 0, 23, 59, 59, 999);
     const startMs = start.getTime();
     const endMs = end.getTime();
     const rows = (salePayments || [])
@@ -406,9 +431,9 @@ const ReportsPage: React.FC = () => {
         };
       })
       .sort((a: any,b: any)=> (b.ts || 0) - (a.ts || 0))
-      .slice(0, 5);
+      .slice(0, salesTxLimit);
     return rows;
-  }, [payments, from, to, agentsById, saleAgentId, buyerFilter, sellerFilter]);
+  }, [salePayments, salesTxYear, salesTxMonth, salesTxLimit, agentsById, saleAgentId, buyerFilter, sellerFilter]);
 
   function printDisbursementReport(t: any) {
     try {
@@ -1157,6 +1182,37 @@ const ReportsPage: React.FC = () => {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Recent sale transactions</h2>
             <div className="flex items-center gap-2">
+              <label className="text-sm">Month</label>
+              <select
+                className="border rounded px-2 py-1"
+                value={salesTxMonth}
+                onChange={(e) => setSalesTxMonth(Number(e.target.value))}
+              >
+                {[
+                  { v: 1, l: 'Jan' }, { v: 2, l: 'Feb' }, { v: 3, l: 'Mar' }, { v: 4, l: 'Apr' },
+                  { v: 5, l: 'May' }, { v: 6, l: 'Jun' }, { v: 7, l: 'Jul' }, { v: 8, l: 'Aug' },
+                  { v: 9, l: 'Sep' }, { v: 10, l: 'Oct' }, { v: 11, l: 'Nov' }, { v: 12, l: 'Dec' }
+                ].map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+              </select>
+              <label className="text-sm">Year</label>
+              <select
+                className="border rounded px-2 py-1"
+                value={salesTxYear}
+                onChange={(e) => setSalesTxYear(Number(e.target.value))}
+              >
+                {Array.from({ length: 10 }).map((_, i) => {
+                  const y = new Date().getFullYear() - i;
+                  return <option key={y} value={y}>{y}</option>;
+                })}
+              </select>
+              <label className="text-sm">Show</label>
+              <select
+                className="border rounded px-2 py-1"
+                value={salesTxLimit}
+                onChange={(e) => setSalesTxLimit(Number(e.target.value))}
+              >
+                {[5, 10, 25, 50].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
               <label className="text-sm">Buyer</label>
               <input value={buyerFilter} onChange={(e)=>setBuyerFilter(e.target.value)} placeholder="Search buyer" className="border rounded px-2 py-1" />
               <label className="text-sm">Seller</label>

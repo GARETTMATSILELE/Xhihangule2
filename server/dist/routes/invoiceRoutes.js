@@ -13,4 +13,5 @@ router.use(auth_1.authWithCompany);
 // Invoice routes - require accountant role
 router.post('/', roles_1.isAccountant, invoiceController_1.createInvoice);
 router.get('/', roles_1.isAccountant, invoiceController_1.getInvoices);
+router.put('/:id/status', roles_1.isAccountant, invoiceController_1.updateInvoiceStatus);
 exports.default = router;

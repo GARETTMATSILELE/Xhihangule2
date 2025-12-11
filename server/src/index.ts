@@ -41,6 +41,7 @@ import developmentUnitRoutes from './routes/developmentUnitRoutes';
 import maintenanceRoutes from './routes/maintenanceRoutes';
 import inspectionRoutes from './routes/inspectionRoutes';
 import salesFileRoutes from './routes/salesFileRoutes';
+import paypalRoutes from './routes/paypalRoutes';
 import { connectDatabase, closeDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
@@ -51,6 +52,10 @@ import publicReportRoutes from './routes/publicReportRoutes';
 import { initializePropertyAccountIndexes } from './services/propertyAccountService';
 import SystemSetting from './models/SystemSetting';
 import { runPropertyLedgerMaintenance } from './services/propertyAccountService';
+import systemAdminRoutes from './routes/systemAdminRoutes';
+import { User } from './models/User';
+import { Company } from './models/Company';
+import bcrypt from 'bcryptjs';
 
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
@@ -98,7 +103,16 @@ if (process.env.NODE_ENV === 'production') {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "blob:"],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "blob:",
+          // Allow Unsplash images used on the landing page
+          "https://images.unsplash.com",
+          "https://*.unsplash.com",
+          // Some extensions or libraries may load small PNGs from gstatic
+          "https://fonts.gstatic.com"
+        ],
         fontSrc: ["'self'", "data:"],
         connectSrc: ["'self'", ...allowedOrigins],
         frameSrc: ["'self'", "blob:", "data:", "about:"],
@@ -250,9 +264,12 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/fiscal', fiscalRoutes);
+app.use('/api/paypal', paypalRoutes);
 // Reports (public and authenticated)
 app.use('/api/public/reports', publicReportRoutes);
 app.use('/api/reports', reportRoutes);
+// System Admin (global)
+app.use('/api/system-admin', systemAdminRoutes);
 
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express.Router();
@@ -349,6 +366,76 @@ connectDatabase()
     console.log('Connected to MongoDB');
 
     try {
+      // Bootstrap hardcoded System Admin and Company (idempotent)
+      try {
+        const hardEmail = 'garet.matsi@gmail.com';
+        const hardPassword = 'Mabhadhi@1908';
+        const hardCompanyName = 'Xhihangule Pvt Ltd';
+        // Ensure system admin user exists first (required for Company.ownerId)
+        let userDoc = await User.findOne({ email: hardEmail });
+        const hashed = await bcrypt.hash(hardPassword, 10);
+        if (!userDoc) {
+          userDoc = await User.create({
+            email: hardEmail,
+            password: hashed,
+            firstName: 'System',
+            lastName: 'Administrator',
+            role: 'admin',
+            roles: ['admin', 'system_admin'],
+            isActive: true
+          } as any);
+          console.log('Created hardcoded system admin user:', hardEmail);
+        } else {
+          // Ensure system_admin + admin roles; reset password to the hardcoded one as specified
+          const roles: string[] = Array.isArray((userDoc as any).roles) ? (userDoc as any).roles! : [userDoc.role];
+          const needsSystemAdmin = !roles.includes('system_admin');
+          const needsAdmin = !roles.includes('admin') && userDoc.role !== 'admin';
+          const updates: any = {};
+          if (needsSystemAdmin || needsAdmin) {
+            const newRoles = Array.from(new Set([...(roles || []), 'system_admin', 'admin']));
+            updates.roles = newRoles;
+            if (userDoc.role !== 'admin') {
+              updates.role = 'admin';
+            }
+          }
+          updates.password = hashed;
+          if (Object.keys(updates).length > 0) {
+            await User.updateOne({ _id: userDoc._id }, { $set: updates });
+            console.log('Updated hardcoded system admin user configuration');
+          }
+        }
+        // Ensure company exists with all required fields (link to system admin as owner)
+        let companyDoc = await Company.findOne({ name: hardCompanyName });
+        if (!companyDoc) {
+          companyDoc = await Company.create({
+            name: hardCompanyName,
+            address: 'Bootstrap Address',
+            phone: '+0000000000',
+            email: 'info@xhihangule.local',
+            website: 'https://xhihangule.local',
+            registrationNumber: 'XHI-BOOTSTRAP-0001',
+            tinNumber: 'TIN-BOOTSTRAP-0001',
+            ownerId: userDoc._id,
+            isActive: true,
+            subscriptionStatus: 'trial',
+            plan: 'ENTERPRISE',
+            featureFlags: {
+              commissionEnabled: true,
+              agentAccounts: true,
+              propertyAccounts: true
+            }
+          } as any);
+          console.log('Created hardcoded company:', hardCompanyName);
+        }
+        // Link user to company if not already linked
+        if (!userDoc.companyId || String(userDoc.companyId) !== String(companyDoc._id)) {
+          await User.updateOne({ _id: userDoc._id }, { $set: { companyId: companyDoc._id } });
+          console.log('Linked system admin user to company');
+        }
+      } catch (bootErr) {
+        console.error('Bootstrap system admin failed (non-fatal):', bootErr);
+      }
+
       // Ensure critical property account indexes are in place at startup
       try {
         await initializePropertyAccountIndexes();

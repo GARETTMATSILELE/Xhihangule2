@@ -57,6 +57,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
   const serverTotal = typeof receipt?.totalSalePrice === 'number' ? receipt.totalSalePrice : null;
   const serverPaidToDate = typeof receipt?.paidToDate === 'number' ? receipt.paidToDate : null;
   const serverOutstanding = typeof receipt?.outstanding === 'number' ? receipt.outstanding : null;
+  const serverRentalOutstanding = typeof receipt?.rentalOutstanding === 'number' ? Number(receipt.rentalOutstanding) : null;
 
   const preferredTotalSale = useMemo(() => {
     if (serverTotal != null) return serverTotal;
@@ -75,9 +76,10 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
   const rentalOutstanding = useMemo(() => {
     const isSalePayment = (receipt?.paymentType || receipt?.type) === 'sale';
     if (isSalePayment) return null;
+    if (serverRentalOutstanding != null) return serverRentalOutstanding;
     const rentPaidOnly = Number(receipt?.amount || 0);
     return Math.max(0, (rentAmount || 0) - rentPaidOnly);
-  }, [receipt?.paymentType, receipt?.type, receipt?.amount, rentAmount]);
+  }, [receipt?.paymentType, receipt?.type, receipt?.amount, rentAmount, serverRentalOutstanding]);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,10 +140,12 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${preferredCurrency} ${((preferredTotalSale || 0) - (paidToDate || 0) > 0 ? ((preferredTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
               ` : '';
       const rentPaidOnly = Number(receipt.amount || 0);
-      const rentalOutstandingLocal = Math.max(0, (rentAmount || 0) - rentPaidOnly);
+      const rentalOutstandingLocal = (serverRentalOutstanding != null ? serverRentalOutstanding : Math.max(0, (rentAmount || 0) - rentPaidOnly));
+      const paidToDateRental = typeof receipt?.paidToDate === 'number' ? Number(receipt.paidToDate) : null;
       const depositBreakdownHtml = `
                 <div class="detail-row"><span class="label">Rent Amount:</span><span class="value">$${(rentAmount || 0).toFixed(2)}</span></div>
                 ${depositAmount > 0 ? `<div class="detail-row"><span class="label">Deposit Amount:</span><span class="value">$${(depositAmount || 0).toFixed(2)}</span></div>` : ''}
+                ${paidToDateRental != null ? `<div class="detail-row"><span class="label">Paid To Date:</span><span class="value">$${(paidToDateRental || 0).toFixed(2)}</span></div>` : ''}
                 <div class="detail-row"><span class="label">Outstanding:</span><span class="value">$${(rentalOutstandingLocal || 0).toFixed(2)}</span></div>
                 <div class="detail-row"><span class="label">Total Paid:</span><span class="value">$${(totalPaid || 0).toFixed(2)}</span></div>
               `;

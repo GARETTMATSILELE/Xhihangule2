@@ -31,7 +31,14 @@ interface AuthContextType {
   error: string | null;
   login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
-  signup: (email: string, password: string, name: string, company?: CreateCompany, plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE') => Promise<void>;
+  signup: (
+    email: string,
+    password: string,
+    name: string,
+    company?: CreateCompany,
+    plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
+    options?: { skipNavigate?: boolean }
+  ) => Promise<void>;
   clearError: () => void;
   refreshUser: () => Promise<void>;
   impersonate: (userId: string) => Promise<void>;
@@ -437,7 +444,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (email: string, password: string, name: string, company?: CreateCompany, plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE') => {
+  const signup = async (
+    email: string,
+    password: string,
+    name: string,
+    company?: CreateCompany,
+    plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
+    options?: { skipNavigate?: boolean }
+  ) => {
     try {
       setError(null);
       setLoading(true);
@@ -473,12 +487,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAuthenticated(true);
 
       // After signup, route admins without a company to setup; otherwise go to role dashboard
-      const isAdmin = userData.role === 'admin';
-      if (isAdmin && !userData.companyId) {
-        navigate('/admin/company-setup');
-      } else {
-        const path = getDashboardPath(userData.role);
-        navigate(path);
+      if (!options?.skipNavigate) {
+        const isAdmin = userData.role === 'admin';
+        if (isAdmin && !userData.companyId) {
+          navigate('/admin/company-setup');
+        } else {
+          const path = getDashboardPath(userData.role);
+          navigate(path);
+        }
       }
     } catch (err: any) {
       const message = err.response?.data?.message || 'Signup failed';

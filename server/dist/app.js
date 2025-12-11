@@ -38,6 +38,7 @@ const valuationRoutes_1 = __importDefault(require("./routes/valuationRoutes"));
 const developmentRoutes_1 = __importDefault(require("./routes/developmentRoutes"));
 const developmentUnitRoutes_1 = __importDefault(require("./routes/developmentUnitRoutes"));
 const maintenanceRoutes_1 = __importDefault(require("./routes/maintenanceRoutes"));
+const paypalRoutes_1 = __importDefault(require("./routes/paypalRoutes"));
 const levyPaymentRoutes_1 = __importDefault(require("./routes/levyPaymentRoutes"));
 const municipalPaymentRoutes_1 = __importDefault(require("./routes/municipalPaymentRoutes"));
 const paymentRequestRoutes_1 = __importDefault(require("./routes/paymentRequestRoutes"));
@@ -138,6 +139,7 @@ app.use('/api/levy-payments', levyPaymentRoutes_1.default);
 app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
 app.use('/api/notifications', notificationRoutes_1.default);
+app.use('/api/paypal', paypalRoutes_1.default);
 // Error handling
 app.use(errorHandler_1.errorHandler);
 exports.default = app;
