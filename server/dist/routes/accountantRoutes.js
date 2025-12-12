@@ -137,6 +137,8 @@ router.post('/property-accounts/sync', roles_1.canViewCommissions, propertyAccou
 router.post('/property-accounts/developments/ensure-ledgers', roles_1.canViewCommissions, propertyAccountController_1.ensureDevelopmentLedgers);
 // Maintenance: remove duplicate income transactions for a property ledger (idempotent)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', roles_1.canViewCommissions, propertyAccountController_1.reconcilePropertyDuplicates);
+// Maintenance: clean-merge legacy + new ledgers for a specific property, then reconcile
+router.post('/property-accounts/:propertyId/merge-duplicates', roles_1.canViewCommissions, propertyAccountController_1.mergePropertyAccountDuplicatesForProperty);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.canViewCommissions, propertyAccountController_1.getAcknowledgementDocument);
 // Company account routes

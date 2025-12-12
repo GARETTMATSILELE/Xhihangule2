@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { Property } from '../models/Property';
 import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
@@ -695,6 +696,50 @@ export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
     return res.json({ success: true, message: 'Development ledgers ensured and payments backfilled', data: result });
   } catch (error) {
     logger.error('Error in ensureDevelopmentLedgers:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+/**
+ * Merge duplicate ledgers for a single property (clean merge of legacy + new),
+ * then reconcile duplicate income transactions. Keeps one active ledger and
+ * archives the rest to preserve history.
+ */
+export const mergePropertyAccountDuplicatesForProperty = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    if (!propertyId) {
+      return res.status(400).json({ success: false, message: 'Property ID is required' });
+    }
+    const pid = new mongoose.Types.ObjectId(propertyId);
+    // Load all non-archived ledgers for this property (covers legacy/null, rental, sale)
+    const accounts = await PropertyAccount.find({ propertyId: pid, isArchived: { $ne: true } });
+    const service: any = propertyAccountService as any;
+    if (typeof service.mergeDuplicateAccounts !== 'function') {
+      return res.status(500).json({ success: false, message: 'Merge operation not available' });
+    }
+    const groupsChanged = await service.mergeDuplicateAccounts(accounts);
+    // Reconcile duplicate income transactions on both potential ledgers
+    let rentalRecon: any = null;
+    let saleRecon: any = null;
+    try { rentalRecon = await reconcilePropertyLedgerDuplicates(propertyId, 'rental' as any); } catch {}
+    try { saleRecon = await reconcilePropertyLedgerDuplicates(propertyId, 'sale' as any); } catch {}
+    return res.json({
+      success: true,
+      message: 'Property ledgers merged and reconciled (if applicable)',
+      data: {
+        merged: groupsChanged,
+        reconciled: {
+          rental: rentalRecon,
+          sale: saleRecon
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error in mergePropertyAccountDuplicatesForProperty:', error);
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }

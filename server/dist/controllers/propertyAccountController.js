@@ -12,7 +12,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
+exports.mergePropertyAccountDuplicatesForProperty = exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const Property_1 = require("../models/Property");
 const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
@@ -640,3 +641,54 @@ const ensureDevelopmentLedgers = (req, res) => __awaiter(void 0, void 0, void 0,
     }
 });
 exports.ensureDevelopmentLedgers = ensureDevelopmentLedgers;
+/**
+ * Merge duplicate ledgers for a single property (clean merge of legacy + new),
+ * then reconcile duplicate income transactions. Keeps one active ledger and
+ * archives the rest to preserve history.
+ */
+const mergePropertyAccountDuplicatesForProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { propertyId } = req.params;
+        if (!propertyId) {
+            return res.status(400).json({ success: false, message: 'Property ID is required' });
+        }
+        const pid = new mongoose_1.default.Types.ObjectId(propertyId);
+        // Load all non-archived ledgers for this property (covers legacy/null, rental, sale)
+        const accounts = yield PropertyAccount_1.default.find({ propertyId: pid, isArchived: { $ne: true } });
+        const service = propertyAccountService_1.default;
+        if (typeof service.mergeDuplicateAccounts !== 'function') {
+            return res.status(500).json({ success: false, message: 'Merge operation not available' });
+        }
+        const groupsChanged = yield service.mergeDuplicateAccounts(accounts);
+        // Reconcile duplicate income transactions on both potential ledgers
+        let rentalRecon = null;
+        let saleRecon = null;
+        try {
+            rentalRecon = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId, 'rental');
+        }
+        catch (_a) { }
+        try {
+            saleRecon = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId, 'sale');
+        }
+        catch (_b) { }
+        return res.json({
+            success: true,
+            message: 'Property ledgers merged and reconciled (if applicable)',
+            data: {
+                merged: groupsChanged,
+                reconciled: {
+                    rental: rentalRecon,
+                    sale: saleRecon
+                }
+            }
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in mergePropertyAccountDuplicatesForProperty:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+exports.mergePropertyAccountDuplicatesForProperty = mergePropertyAccountDuplicatesForProperty;

@@ -1,5 +1,6 @@
 import { RetryOptions } from '../types/database';
 import api from '../api/axios';
+import publicApi from '../api/publicApi';
 
 export class DatabaseService {
   private static instance: DatabaseService;
@@ -10,7 +11,7 @@ export class DatabaseService {
   private readonly HEALTH_CHECK_INTERVAL: number = 30000; // 30 seconds
   private readonly INITIAL_RETRY_DELAY: number = 1000; // 1 second
   private readonly MAX_RETRY_DELAY: number = 30000; // 30 seconds
-  private readonly HEALTH_CHECK_TIMEOUT: number = 5000; // 5 seconds
+  private readonly HEALTH_CHECK_TIMEOUT: number = 8000; // 8 seconds
 
   private constructor() {
     this.startConnectionCheck();
@@ -28,12 +29,13 @@ export class DatabaseService {
       console.log('Checking database connection...');
 
       // Prefer a fast readiness probe; on failure/timeout, fall back to liveness
-      const tryReady = () => api.get('/health/ready', {
-        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 4000),
+      // Use the public API instance (no credentials) to avoid unnecessary preflights/cookies
+      const tryReady = () => publicApi.get('/health/ready', {
+        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 7000),
         validateStatus: (status) => status < 500
       });
-      const tryLive = () => api.get('/health/live', {
-        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 2000),
+      const tryLive = () => publicApi.get('/health/live', {
+        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 5000),
         validateStatus: (status) => status < 500
       });
 

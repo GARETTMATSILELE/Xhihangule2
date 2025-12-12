@@ -34,7 +34,8 @@ import {
   reconcilePropertyDuplicates,
   getCompanyPropertyAccounts,
   ensureDevelopmentLedgers,
-  migrateLegacyLedgerTypes
+  migrateLegacyLedgerTypes,
+  mergePropertyAccountDuplicatesForProperty
 } from '../controllers/propertyAccountController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
 import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
@@ -173,6 +174,8 @@ router.post('/property-accounts/sync', canViewCommissions, syncPropertyAccounts)
 router.post('/property-accounts/developments/ensure-ledgers', canViewCommissions, ensureDevelopmentLedgers);
 // Maintenance: remove duplicate income transactions for a property ledger (idempotent)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', canViewCommissions, reconcilePropertyDuplicates);
+// Maintenance: clean-merge legacy + new ledgers for a specific property, then reconcile
+router.post('/property-accounts/:propertyId/merge-duplicates', canViewCommissions, mergePropertyAccountDuplicatesForProperty);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', canViewCommissions, getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', canViewCommissions, getAcknowledgementDocument);
 

@@ -2,18 +2,28 @@ import axios from 'axios';
 
 // Default API URL with sensible defaults for dev and production
 const isBrowser = typeof window !== 'undefined';
-const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
-const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
-const API_URL = import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
+const isLocalDev =
+  isBrowser &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+  (window.location.port === '3000' || window.location.port === '5173');
+const DEFAULT_API_URL = isLocalDev
+  ? 'http://localhost:5000/api'
+  : isBrowser
+    ? `${window.location.origin}/api`
+    : 'http://localhost:5000/api';
+const API_URL =
+  (typeof window !== 'undefined' && (window as any).__API_BASE__) ||
+  import.meta.env?.VITE_API_URL ||
+  DEFAULT_API_URL;
 
 // Create a public axios instance for unauthenticated requests
 // This instance does NOT have the request interceptor that adds Authorization headers
 const publicApi = axios.create({
   baseURL: API_URL,
   headers: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
   },
-  withCredentials: false // This ensures cookies are NOT sent with requests
+  withCredentials: false, // This ensures cookies are NOT sent with requests
 });
 
 // Request interceptor for logging (no auth headers)
@@ -22,9 +32,9 @@ publicApi.interceptors.request.use(
     console.log('Public API Request Interceptor:', {
       url: config.url,
       method: config.method,
-      currentHeaders: config.headers
+      currentHeaders: config.headers,
     });
-    
+
     return config;
   },
   (error) => {
@@ -41,10 +51,10 @@ publicApi.interceptors.response.use(
       status: error.response?.status,
       statusText: error.response?.statusText,
       data: error.response?.data,
-      url: error.config?.url
+      url: error.config?.url,
     });
     return Promise.reject(error);
   }
 );
 
-export default publicApi; 
+export default publicApi;
