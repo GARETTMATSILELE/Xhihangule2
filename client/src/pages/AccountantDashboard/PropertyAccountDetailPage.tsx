@@ -1285,6 +1285,34 @@ const PropertyAccountDetailPage: React.FC = () => {
                   >
                     Print Statement
                   </Button>
+                  <Button
+                    variant="contained"
+                    color="warning"
+                    fullWidth
+                    disabled={submitting}
+                    onClick={async () => {
+                      if (!propertyId) return;
+                      setSubmitting(true);
+                      setSubmitError(null);
+                      setSuccess(null);
+                      try {
+                        const result = await propertyAccountService.mergeDuplicatesForProperty(propertyId);
+                        // Refresh account after merge
+                        const refreshed = await propertyAccountService.getPropertyAccount(
+                          propertyId,
+                          (account?.ledgerType as 'rental' | 'sale' | undefined)
+                        );
+                        setAccount(refreshed);
+                        setSuccess(result?.merged ? 'Ledgers merged successfully.' : 'No merge needed; already unified.');
+                      } catch (err: any) {
+                        setSubmitError(err?.response?.data?.message || err?.message || 'Failed to merge ledgers');
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    }}
+                  >
+                    Merge Legacy + New Ledgers
+                  </Button>
                 </Box>
               </CardContent>
             </Card>

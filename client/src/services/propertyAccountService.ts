@@ -319,6 +319,20 @@ class PropertyAccountService {
   }
 
   /**
+   * Merge legacy and new ledgers for a specific property into a single active ledger.
+   * Returns merge/reconciliation summary.
+   */
+  async mergeDuplicatesForProperty(propertyId: string): Promise<{ merged: boolean; reconciled: any }> {
+    try {
+      const response = await api.post(`/accountants/property-accounts/${propertyId}/merge-duplicates`, {});
+      return response.data?.data || { merged: false, reconciled: null };
+    } catch (error) {
+      console.error('Error merging property ledgers:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Calculate running balance for transactions
    */
   calculateRunningBalance(transactions: Transaction[]): { transactions: Transaction[]; finalBalance: number } {
