@@ -229,6 +229,24 @@ export async function captureOrder(req: Request, res: Response) {
 	}
 }
 
+export async function getStatus(req: Request, res: Response) {
+	try {
+		const base = getApiBase();
+		const resolvedEnv = getPaypalEnv();
+		const creds = getPaypalCredentials();
+		return res.json({
+			status: isPaypalConfigured() ? 'ok' : 'disabled',
+			env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+			apiBase: base,
+			hasClientId: Boolean(creds.clientId),
+			hasClientSecret: Boolean(creds.clientSecret),
+			clientIdPrefix: creds.clientId ? String(creds.clientId).slice(0, 6) : null
+		});
+	} catch (e: any) {
+		return res.status(500).json({ status: 'error', message: e?.message || 'Failed to read PayPal status' });
+	}
+}
+
 
 
 

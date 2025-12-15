@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createOrder = createOrder;
 exports.captureOrder = captureOrder;
+exports.getStatus = getStatus;
 const axios_1 = __importDefault(require("axios"));
 const LIVE_API_BASE = 'https://api-m.paypal.com';
 const SANDBOX_API_BASE = 'https://api-m.sandbox.paypal.com';
@@ -234,6 +235,26 @@ function captureOrder(req, res) {
             catch (_c) { }
             const message = extractPaypalErrorMessage(err);
             return res.status(500).json({ status: 'error', message });
+        }
+    });
+}
+function getStatus(req, res) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const base = getApiBase();
+            const resolvedEnv = getPaypalEnv();
+            const creds = getPaypalCredentials();
+            return res.json({
+                status: isPaypalConfigured() ? 'ok' : 'disabled',
+                env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+                apiBase: base,
+                hasClientId: Boolean(creds.clientId),
+                hasClientSecret: Boolean(creds.clientSecret),
+                clientIdPrefix: creds.clientId ? String(creds.clientId).slice(0, 6) : null
+            });
+        }
+        catch (e) {
+            return res.status(500).json({ status: 'error', message: (e === null || e === void 0 ? void 0 : e.message) || 'Failed to read PayPal status' });
         }
     });
 }
