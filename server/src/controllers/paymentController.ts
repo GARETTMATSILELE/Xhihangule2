@@ -462,7 +462,7 @@ export const createPayment = async (req: Request, res: Response) => {
       propertyType: 'residential', // Default value
       propertyId: lease.propertyId,
       tenantId: lease.tenantId,
-      agentId: lease.tenantId, // Use tenant ID as agent ID since lease doesn't have agentId
+      agentId: property.agentId, // Use property's assigned agent as the primary agent for rental notifications
       processedBy: lease.tenantId, // Use tenant ID as processedBy since no agent ID
       depositAmount: 0, // Default value
       rentalPeriodMonth,
@@ -536,6 +536,37 @@ export const createPayment = async (req: Request, res: Response) => {
     if (property.currentArrears !== undefined) {
       const arrears = property.currentArrears - amount;
       await Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
+    }
+
+    // Notify the primary agent (and split participants) for completed rental payments
+    try {
+      const recipientIds = new Set<string>();
+      if (payment.agentId) recipientIds.add(String(payment.agentId));
+      const split = ((payment as any).commissionDetails || {})?.agentSplit || {};
+      if (split.ownerUserId) recipientIds.add(String(split.ownerUserId));
+      if (split.collaboratorUserId) recipientIds.add(String(split.collaboratorUserId));
+      const docs = Array.from(recipientIds).map((uid) => ({
+        companyId: String((req.user as any).companyId),
+        userId: new mongoose.Types.ObjectId(uid),
+        title: 'Rental payment recorded',
+        message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+        link: '/sales-dashboard/notifications',
+        payload: { paymentId: payment._id, paymentType: payment.paymentType }
+      }));
+      if (docs.length) {
+        const saved = await Notification.insertMany(docs);
+        try {
+          const { getIo } = await import('../config/socket');
+          const io = getIo();
+          if (io) {
+            for (const n of saved) {
+              io.to(`user-${String((n as any).userId)}`).emit('newNotification', n);
+            }
+          }
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('Non-fatal: failed to create agent notification for rental payment', e);
     }
 
     res.status(201).json({
@@ -964,6 +995,39 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       console.warn('Non-fatal: failed to create agent notification for payment', e);
     }
 
+    // Notify the primary agent (and split participants) when a completed rental payment is created
+    try {
+      if (!payment.isProvisional && (payment as any).paymentType === 'rental') {
+        const recipientIds = new Set<string>();
+        if (payment.agentId) recipientIds.add(String(payment.agentId));
+        const split = ((payment as any).commissionDetails || (req.body as any).commissionDetails || {})?.agentSplit || {};
+        if (split.ownerUserId) recipientIds.add(String(split.ownerUserId));
+        if (split.collaboratorUserId) recipientIds.add(String(split.collaboratorUserId));
+        const docs = Array.from(recipientIds).map((uid) => ({
+          companyId: String((req.user as any).companyId),
+          userId: new mongoose.Types.ObjectId(uid),
+          title: 'Rental payment recorded',
+          message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+          link: '/sales-dashboard/notifications',
+          payload: { paymentId: payment._id, paymentType: payment.paymentType }
+        }));
+        if (docs.length) {
+          const saved = await Notification.insertMany(docs);
+          try {
+            const { getIo } = await import('../config/socket');
+            const io = getIo();
+            if (io) {
+              for (const n of saved) {
+                io.to(`user-${String((n as any).userId)}`).emit('newNotification', n);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Non-fatal: failed to create agent notification for rental payment', e);
+    }
+
     return { payment };
   };
 
@@ -1290,15 +1354,15 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       const split = ((finalCommissionDetails as any)?.agentSplit) || {};
       if (split.ownerUserId) recipientIds.add(String(split.ownerUserId));
       if (split.collaboratorUserId) recipientIds.add(String(split.collaboratorUserId));
-      const docs = Array.from(recipientIds).map((uid) => ({
-        companyId: String((user as any).companyId),
-        userId: new mongoose.Types.ObjectId(uid),
-        title: 'Sale payment recorded',
-        message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
-        link: '/sales-dashboard/notifications',
-        payload: { paymentId: payment._id, paymentType: payment.paymentType }
-      }));
-      if (docs.length) {
+      if (recipientIds.size > 0) {
+        const docs = Array.from(recipientIds).map((uid) => ({
+          companyId: String((user as any).companyId),
+          userId: new mongoose.Types.ObjectId(uid),
+          title: 'Sale payment recorded',
+          message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+          link: '/sales-dashboard/notifications',
+          payload: { paymentId: payment._id, paymentType: payment.paymentType }
+        }));
         const saved = await Notification.insertMany(docs);
         try {
           const { getIo } = await import('../config/socket');
@@ -1311,7 +1375,7 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
         } catch {}
       }
     } catch (e) {
-      console.warn('Non-fatal: failed to create agent notification for sale payment', e);
+      console.warn('Non-fatal: failed to create agent/split notifications for sale payment', e);
     }
 
     return res.status(201).json({ message: 'Sales payment processed successfully', payment });

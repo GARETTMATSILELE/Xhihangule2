@@ -371,6 +371,7 @@ exports.getPayment = getPayment;
 const commissionService_1 = require("../services/commissionService");
 // Create a new payment (for lease-based payments)
 const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -499,7 +500,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             propertyType: 'residential', // Default value
             propertyId: lease.propertyId,
             tenantId: lease.tenantId,
-            agentId: lease.tenantId, // Use tenant ID as agent ID since lease doesn't have agentId
+            agentId: property.agentId, // Use property's assigned agent as the primary agent for rental notifications
             processedBy: lease.tenantId, // Use tenant ID as processedBy since no agent ID
             depositAmount: 0, // Default value
             rentalPeriodMonth,
@@ -555,13 +556,48 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_a) { }
+            catch (_b) { }
             console.warn('Non-fatal: property account record failed (lease-based create), enqueued for retry', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
         // Update property arrears after payment
         if (property.currentArrears !== undefined) {
             const arrears = property.currentArrears - amount;
             yield Property_1.Property.findByIdAndUpdate(property._id, { currentArrears: arrears < 0 ? 0 : arrears });
+        }
+        // Notify the primary agent (and split participants) for completed rental payments
+        try {
+            const recipientIds = new Set();
+            if (payment.agentId)
+                recipientIds.add(String(payment.agentId));
+            const split = ((_a = (payment.commissionDetails || {})) === null || _a === void 0 ? void 0 : _a.agentSplit) || {};
+            if (split.ownerUserId)
+                recipientIds.add(String(split.ownerUserId));
+            if (split.collaboratorUserId)
+                recipientIds.add(String(split.collaboratorUserId));
+            const docs = Array.from(recipientIds).map((uid) => ({
+                companyId: String(req.user.companyId),
+                userId: new mongoose_1.default.Types.ObjectId(uid),
+                title: 'Rental payment recorded',
+                message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+                link: '/sales-dashboard/notifications',
+                payload: { paymentId: payment._id, paymentType: payment.paymentType }
+            }));
+            if (docs.length) {
+                const saved = yield Notification_1.Notification.insertMany(docs);
+                try {
+                    const { getIo } = yield Promise.resolve().then(() => __importStar(require('../config/socket')));
+                    const io = getIo();
+                    if (io) {
+                        for (const n of saved) {
+                            io.to(`user-${String(n.userId)}`).emit('newNotification', n);
+                        }
+                    }
+                }
+                catch (_c) { }
+            }
+        }
+        catch (e) {
+            console.warn('Non-fatal: failed to create agent notification for rental payment', e);
         }
         res.status(201).json({
             message: 'Payment processed successfully',
@@ -593,7 +629,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     catch (_) { }
     // Helper to perform the actual create logic, with optional transaction session
     const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
-        var _a;
+        var _a, _b;
         const { paymentType, propertyType, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, manualPropertyAddress, manualTenantName, } = req.body;
         // Extract optional advance fields
         const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = req.body;
@@ -709,7 +745,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                                 const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
                                 oneMonthRent = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
                             }
-                            catch (_b) { }
+                            catch (_c) { }
                         }
                         const commissionable = oneMonthRent > 0 ? Math.min(Math.max(0, amountNum), oneMonthRent) : Math.max(0, amountNum);
                         if (commissionable > 0) {
@@ -767,7 +803,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                         const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
                         rentBaseline = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
                     }
-                    catch (_c) { }
+                    catch (_d) { }
                 }
                 if (rentBaseline > 0) {
                     const expectedCents = Math.round(rentBaseline * 100) * Number(advanceMonthsPaid);
@@ -905,7 +941,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_d) { }
+            catch (_e) { }
             console.error('Failed to record income in property account, enqueued for retry:', error);
         }
         // Notify the primary agent (and split participants) when a completed sale payment is created
@@ -938,12 +974,49 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             }
                         }
                     }
-                    catch (_e) { }
+                    catch (_f) { }
                 }
             }
         }
         catch (e) {
             console.warn('Non-fatal: failed to create agent notification for payment', e);
+        }
+        // Notify the primary agent (and split participants) when a completed rental payment is created
+        try {
+            if (!payment.isProvisional && payment.paymentType === 'rental') {
+                const recipientIds = new Set();
+                if (payment.agentId)
+                    recipientIds.add(String(payment.agentId));
+                const split = ((_b = (payment.commissionDetails || req.body.commissionDetails || {})) === null || _b === void 0 ? void 0 : _b.agentSplit) || {};
+                if (split.ownerUserId)
+                    recipientIds.add(String(split.ownerUserId));
+                if (split.collaboratorUserId)
+                    recipientIds.add(String(split.collaboratorUserId));
+                const docs = Array.from(recipientIds).map((uid) => ({
+                    companyId: String(req.user.companyId),
+                    userId: new mongoose_1.default.Types.ObjectId(uid),
+                    title: 'Rental payment recorded',
+                    message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+                    link: '/sales-dashboard/notifications',
+                    payload: { paymentId: payment._id, paymentType: payment.paymentType }
+                }));
+                if (docs.length) {
+                    const saved = yield Notification_1.Notification.insertMany(docs);
+                    try {
+                        const { getIo } = yield Promise.resolve().then(() => __importStar(require('../config/socket')));
+                        const io = getIo();
+                        if (io) {
+                            for (const n of saved) {
+                                io.to(`user-${String(n.userId)}`).emit('newNotification', n);
+                            }
+                        }
+                    }
+                    catch (_g) { }
+                }
+            }
+        }
+        catch (e) {
+            console.warn('Non-fatal: failed to create agent notification for rental payment', e);
         }
         return { payment };
     });
@@ -1255,15 +1328,15 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                 recipientIds.add(String(split.ownerUserId));
             if (split.collaboratorUserId)
                 recipientIds.add(String(split.collaboratorUserId));
-            const docs = Array.from(recipientIds).map((uid) => ({
-                companyId: String(user.companyId),
-                userId: new mongoose_1.default.Types.ObjectId(uid),
-                title: 'Sale payment recorded',
-                message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
-                link: '/sales-dashboard/notifications',
-                payload: { paymentId: payment._id, paymentType: payment.paymentType }
-            }));
-            if (docs.length) {
+            if (recipientIds.size > 0) {
+                const docs = Array.from(recipientIds).map((uid) => ({
+                    companyId: String(user.companyId),
+                    userId: new mongoose_1.default.Types.ObjectId(uid),
+                    title: 'Sale payment recorded',
+                    message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
+                    link: '/sales-dashboard/notifications',
+                    payload: { paymentId: payment._id, paymentType: payment.paymentType }
+                }));
                 const saved = yield Notification_1.Notification.insertMany(docs);
                 try {
                     const { getIo } = yield Promise.resolve().then(() => __importStar(require('../config/socket')));
@@ -1278,7 +1351,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             }
         }
         catch (e) {
-            console.warn('Non-fatal: failed to create agent notification for sale payment', e);
+            console.warn('Non-fatal: failed to create agent/split notifications for sale payment', e);
         }
         return res.status(201).json({ message: 'Sales payment processed successfully', payment });
     }
