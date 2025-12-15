@@ -58,7 +58,9 @@ import { Company } from './models/Company';
 import bcrypt from 'bcryptjs';
 
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
-const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
+const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
+// Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
+const ENV_PATH = path.resolve(__dirname, '..', ENV_FILE);
 dotenv.config({ path: ENV_PATH });
 
 const app = express();

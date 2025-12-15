@@ -144,7 +144,7 @@ const PropertyAccountSchema = new mongoose_1.Schema({
     ledgerType: {
         type: String,
         enum: ['rental', 'sale'],
-        default: 'rental'
+        required: true
     },
     propertyName: {
         type: String

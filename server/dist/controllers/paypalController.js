@@ -23,10 +23,39 @@ function getApiBase() {
     if (explicit)
         return explicit;
     const env = (process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || '').toLowerCase();
-    // Only use sandbox if explicitly requested; otherwise force live
+    // Prefer sandbox by default in non-production if not explicitly set
     if (env === 'sandbox')
         return SANDBOX_API_BASE;
+    if (env === 'live' || env === 'production')
+        return LIVE_API_BASE;
+    if ((process.env.NODE_ENV || '').toLowerCase() !== 'production')
+        return SANDBOX_API_BASE;
     return LIVE_API_BASE;
+}
+function getPaypalEnv() {
+    const base = getApiBase();
+    if (base.includes('sandbox.paypal.com'))
+        return 'sandbox';
+    const env = (process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || '').toLowerCase();
+    if (env === 'sandbox')
+        return 'sandbox';
+    if (env === 'live' || env === 'production')
+        return 'live';
+    // Default to sandbox in non-production
+    if ((process.env.NODE_ENV || '').toLowerCase() !== 'production')
+        return 'sandbox';
+    return 'live';
+}
+function getPaypalCredentials() {
+    const env = getPaypalEnv();
+    if (env === 'live') {
+        const clientId = process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
+        const clientSecret = process.env.PAYPAL_LIVE_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
+        return { clientId, clientSecret, env };
+    }
+    const clientId = process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_SANDBOX_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
+    return { clientId, clientSecret, env };
 }
 function extractPaypalErrorMessage(error) {
     var _a, _b, _c, _d, _e, _f;
@@ -52,16 +81,26 @@ function extractPaypalErrorMessage(error) {
         return data;
     return (error === null || error === void 0 ? void 0 : error.message) || 'Failed to communicate with PayPal';
 }
+function isPaypalConfigured() {
+    const { clientId, clientSecret } = getPaypalCredentials();
+    return Boolean(clientId && clientSecret);
+}
 function assertEnv() {
-    if (!process.env.PAYPAL_CLIENT_ID || !process.env.PAYPAL_CLIENT_SECRET) {
-        throw new Error('Missing PAYPAL_CLIENT_ID or PAYPAL_CLIENT_SECRET');
+    const { clientId, clientSecret, env } = getPaypalCredentials();
+    if (!clientId || !clientSecret) {
+        throw new Error(`Missing PayPal credentials for ${env}. Set ` +
+            (env === 'live'
+                ? 'PAYPAL_LIVE_CLIENT_ID and PAYPAL_LIVE_CLIENT_SECRET (or PAYPAL_CLIENT_ID/SECRET)'
+                : 'PAYPAL_SANDBOX_CLIENT_ID and PAYPAL_SANDBOX_CLIENT_SECRET (or PAYPAL_CLIENT_ID/SECRET)') +
+            '.');
     }
 }
 function generateAccessToken() {
     return __awaiter(this, void 0, void 0, function* () {
         assertEnv();
         const base = getApiBase();
-        const auth = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64');
+        const { clientId, clientSecret } = getPaypalCredentials();
+        const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
         const resp = yield axios_1.default.post(`${base}/v1/oauth2/token`, 'grant_type=client_credentials', {
             headers: {
                 Authorization: `Basic ${auth}`,
@@ -90,6 +129,13 @@ function createOrder(req, res) {
             const { plan, cycle } = req.body || {};
             if (!plan || !cycle || !['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan) || !['monthly', 'yearly'].includes(cycle)) {
                 return res.status(400).json({ status: 'error', message: 'Invalid plan or cycle' });
+            }
+            // Return a clear, non-500 response when credentials are not configured
+            if (!isPaypalConfigured()) {
+                return res.status(503).json({
+                    status: 'disabled',
+                    message: 'PayPal is not configured on the server. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET, and use PAYPAL_ENV=sandbox for development.'
+                });
             }
             const accessToken = yield generateAccessToken();
             const base = getApiBase();
@@ -120,12 +166,17 @@ function createOrder(req, res) {
         catch (err) {
             try {
                 const baseForLog = getApiBase();
+                const resolvedEnv = getPaypalEnv();
+                const usingLiveVars = Boolean(process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_LIVE_CLIENT_SECRET);
+                const usingSandboxVars = Boolean(process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_SANDBOX_CLIENT_SECRET);
                 // eslint-disable-next-line no-console
                 console.error('PayPal createOrder failed', {
                     apiBase: baseForLog,
-                    env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || '',
-                    hasClientId: Boolean(process.env.PAYPAL_CLIENT_ID),
-                    hasClientSecret: Boolean(process.env.PAYPAL_CLIENT_SECRET),
+                    env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+                    hasClientId: Boolean(getPaypalCredentials().clientId),
+                    hasClientSecret: Boolean(getPaypalCredentials().clientSecret),
+                    usingLiveVars,
+                    usingSandboxVars,
                     status: (_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.status,
                     data: (_b = err === null || err === void 0 ? void 0 : err.response) === null || _b === void 0 ? void 0 : _b.data
                 });
@@ -144,6 +195,13 @@ function captureOrder(req, res) {
             if (!orderID) {
                 return res.status(400).json({ status: 'error', message: 'orderID is required' });
             }
+            // Return a clear, non-500 response when credentials are not configured
+            if (!isPaypalConfigured()) {
+                return res.status(503).json({
+                    status: 'disabled',
+                    message: 'PayPal is not configured on the server. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET, and use PAYPAL_ENV=sandbox for development.'
+                });
+            }
             const accessToken = yield generateAccessToken();
             const base = getApiBase();
             const resp = yield axios_1.default.post(`${base}/v2/checkout/orders/${orderID}/capture`, {}, {
@@ -158,12 +216,17 @@ function captureOrder(req, res) {
         catch (err) {
             try {
                 const baseForLog = getApiBase();
+                const resolvedEnv = getPaypalEnv();
+                const usingLiveVars = Boolean(process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_LIVE_CLIENT_SECRET);
+                const usingSandboxVars = Boolean(process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_SANDBOX_CLIENT_SECRET);
                 // eslint-disable-next-line no-console
                 console.error('PayPal captureOrder failed', {
                     apiBase: baseForLog,
-                    env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || '',
-                    hasClientId: Boolean(process.env.PAYPAL_CLIENT_ID),
-                    hasClientSecret: Boolean(process.env.PAYPAL_CLIENT_SECRET),
+                    env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+                    hasClientId: Boolean(getPaypalCredentials().clientId),
+                    hasClientSecret: Boolean(getPaypalCredentials().clientSecret),
+                    usingLiveVars,
+                    usingSandboxVars,
                     status: (_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.status,
                     data: (_b = err === null || err === void 0 ? void 0 : err.response) === null || _b === void 0 ? void 0 : _b.data
                 });

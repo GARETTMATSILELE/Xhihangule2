@@ -25,34 +25,34 @@ export class PropertyAccountService {
   }
 
   /**
-   * Infer ledger type for a property using the property's agent's role.
-   * - If agent roles include 'sales' → 'sale'
-   * - Else if roles include 'agent' → 'rental'
-   * - Fallback to property.rentalType ('sale' => 'sale') else 'rental'
+   * Infer ledger type strictly from the entity itself.
+   * - Property.rentalType:
+   *   - 'introduction' | 'management' → 'rental'
+   *   - 'sale' → 'sale'
+   * - Development or DevelopmentUnit id → 'sale'
+   * Throws if the type cannot be determined. No defaults.
    */
   private async inferLedgerTypeForProperty(propertyId: string): Promise<'rental' | 'sale'> {
-    try {
-      const property = await Property.findById(propertyId).lean();
-      const rawAgentId = (property as any)?.agentId;
-      if (rawAgentId) {
-        const agent = await User.findById(rawAgentId).lean();
-        const roles: string[] = Array.isArray((agent as any)?.roles)
-          ? ((agent as any).roles as string[])
-          : (((agent as any)?.role && typeof (agent as any).role === 'string') ? [String((agent as any).role)] : []);
-        if (roles.includes('sales')) return 'sale';
-        if (roles.includes('agent')) return 'rental';
-      }
-      if ((property as any)?.rentalType === 'sale') return 'sale';
-      return 'rental';
-    } catch {
-      return 'rental';
+    // Try as Property first
+    const property = await Property.findById(propertyId).lean();
+    if (property) {
+      const rt = String((property as any)?.rentalType || '').toLowerCase();
+      if (rt === 'introduction' || rt === 'management') return 'rental';
+      if (rt === 'sale') return 'sale';
+      throw new AppError('Unable to determine ledger type: property.rentalType must be introduction, management, or sale', 400);
     }
+    // If not a Property, allow Development/DevelopmentUnit ids as sales ledgers
+    const dev = await Development.findById(propertyId).select('_id').lean();
+    if (dev) return 'sale';
+    const unit = await DevelopmentUnit.findById(propertyId).select('_id').lean();
+    if (unit) return 'sale';
+    throw new AppError('Unable to determine ledger type: entity not found', 404);
   }
 
   /**
    * Get or create property account
    */
-  async getOrCreatePropertyAccount(propertyId: string, ledgerType: 'rental' | 'sale' = 'rental'): Promise<IPropertyAccount> {
+  async getOrCreatePropertyAccount(propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<IPropertyAccount> {
     try {
       // Ensure indexes support multi-ledger before any creates
       await this.ensureLedgerIndexes();
@@ -60,7 +60,7 @@ export class PropertyAccountService {
       console.log('Converting to ObjectId:', new mongoose.Types.ObjectId(propertyId));
 
       // If caller passed no explicit ledgerType, infer it
-      const effectiveLedger: 'rental' | 'sale' = ledgerType || await this.inferLedgerTypeForProperty(propertyId);
+      const effectiveLedger: 'rental' | 'sale' = ledgerType ?? await this.inferLedgerTypeForProperty(propertyId);
 
       let account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
       console.log('Database query result:', account ? 'Found account' : 'No account found');
@@ -588,7 +588,7 @@ export class PropertyAccountService {
         ? expenseData.idempotencyKey.trim()
         : `expense:${uuidv4()}`;
 
-      const account = await this.getOrCreatePropertyAccount(propertyId, ledgerType || 'rental');
+      const account = await this.getOrCreatePropertyAccount(propertyId, ledgerType);
 
       if (account.runningBalance < expenseData.amount) {
         throw new AppError('Insufficient balance for this expense', 400);

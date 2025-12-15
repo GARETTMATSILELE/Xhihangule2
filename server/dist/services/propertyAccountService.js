@@ -23,7 +23,6 @@ const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const Payment_1 = require("../models/Payment");
 const Property_1 = require("../models/Property");
 const PropertyOwner_1 = require("../models/PropertyOwner");
-const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
 const Development_1 = require("../models/Development");
@@ -39,40 +38,40 @@ class PropertyAccountService {
         return PropertyAccountService.instance;
     }
     /**
-     * Infer ledger type for a property using the property's agent's role.
-     * - If agent roles include 'sales' → 'sale'
-     * - Else if roles include 'agent' → 'rental'
-     * - Fallback to property.rentalType ('sale' => 'sale') else 'rental'
+     * Infer ledger type strictly from the entity itself.
+     * - Property.rentalType:
+     *   - 'introduction' | 'management' → 'rental'
+     *   - 'sale' → 'sale'
+     * - Development or DevelopmentUnit id → 'sale'
+     * Throws if the type cannot be determined. No defaults.
      */
     inferLedgerTypeForProperty(propertyId) {
         return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const property = yield Property_1.Property.findById(propertyId).lean();
-                const rawAgentId = property === null || property === void 0 ? void 0 : property.agentId;
-                if (rawAgentId) {
-                    const agent = yield User_1.User.findById(rawAgentId).lean();
-                    const roles = Array.isArray(agent === null || agent === void 0 ? void 0 : agent.roles)
-                        ? agent.roles
-                        : (((agent === null || agent === void 0 ? void 0 : agent.role) && typeof agent.role === 'string') ? [String(agent.role)] : []);
-                    if (roles.includes('sales'))
-                        return 'sale';
-                    if (roles.includes('agent'))
-                        return 'rental';
-                }
-                if ((property === null || property === void 0 ? void 0 : property.rentalType) === 'sale')
+            // Try as Property first
+            const property = yield Property_1.Property.findById(propertyId).lean();
+            if (property) {
+                const rt = String((property === null || property === void 0 ? void 0 : property.rentalType) || '').toLowerCase();
+                if (rt === 'introduction' || rt === 'management')
+                    return 'rental';
+                if (rt === 'sale')
                     return 'sale';
-                return 'rental';
+                throw new errorHandler_1.AppError('Unable to determine ledger type: property.rentalType must be introduction, management, or sale', 400);
             }
-            catch (_a) {
-                return 'rental';
-            }
+            // If not a Property, allow Development/DevelopmentUnit ids as sales ledgers
+            const dev = yield Development_1.Development.findById(propertyId).select('_id').lean();
+            if (dev)
+                return 'sale';
+            const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(propertyId).select('_id').lean();
+            if (unit)
+                return 'sale';
+            throw new errorHandler_1.AppError('Unable to determine ledger type: entity not found', 404);
         });
     }
     /**
      * Get or create property account
      */
-    getOrCreatePropertyAccount(propertyId_1) {
-        return __awaiter(this, arguments, void 0, function* (propertyId, ledgerType = 'rental') {
+    getOrCreatePropertyAccount(propertyId, ledgerType) {
+        return __awaiter(this, void 0, void 0, function* () {
             var _a, _b, _c, _d, _e, _f;
             try {
                 // Ensure indexes support multi-ledger before any creates
@@ -80,7 +79,7 @@ class PropertyAccountService {
                 console.log('getOrCreatePropertyAccount called with propertyId:', propertyId);
                 console.log('Converting to ObjectId:', new mongoose_1.default.Types.ObjectId(propertyId));
                 // If caller passed no explicit ledgerType, infer it
-                const effectiveLedger = ledgerType || (yield this.inferLedgerTypeForProperty(propertyId));
+                const effectiveLedger = ledgerType !== null && ledgerType !== void 0 ? ledgerType : yield this.inferLedgerTypeForProperty(propertyId);
                 let account = yield PropertyAccount_1.default.findOne({ propertyId: new mongoose_1.default.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
                 console.log('Database query result:', account ? 'Found account' : 'No account found');
                 // If a legacy ledger (without ledgerType) also exists for this property, prefer it when it appears more complete.
@@ -590,7 +589,7 @@ class PropertyAccountService {
                 const idKey = (expenseData.idempotencyKey && expenseData.idempotencyKey.trim().length > 0)
                     ? expenseData.idempotencyKey.trim()
                     : `expense:${(0, uuid_1.v4)()}`;
-                const account = yield this.getOrCreatePropertyAccount(propertyId, ledgerType || 'rental');
+                const account = yield this.getOrCreatePropertyAccount(propertyId, ledgerType);
                 if (account.runningBalance < expenseData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this expense', 400);
                 }

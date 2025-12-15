@@ -51,7 +51,7 @@ export interface OwnerPayout {
 
 export interface IPropertyAccount extends Document {
   propertyId: Types.ObjectId;
-  ledgerType?: 'rental' | 'sale';
+  ledgerType: 'rental' | 'sale';
   propertyName?: string;
   propertyAddress?: string;
   ownerId?: Types.ObjectId;
@@ -207,7 +207,7 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
   ledgerType: {
     type: String,
     enum: ['rental', 'sale'],
-    default: 'rental'
+    required: true
   },
   propertyName: { 
     type: String 

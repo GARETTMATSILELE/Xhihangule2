@@ -104,7 +104,9 @@ const User_1 = require("./models/User");
 const Company_1 = require("./models/Company");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
-const ENV_PATH = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
+const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
+// Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
+const ENV_PATH = path_1.default.resolve(__dirname, '..', ENV_FILE);
 dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
 // Trust proxy (so req.protocol reflects https behind reverse proxies)
