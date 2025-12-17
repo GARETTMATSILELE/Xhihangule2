@@ -4,6 +4,7 @@ const express_1 = require("express");
 const paypalController_1 = require("../controllers/paypalController");
 const router = (0, express_1.Router)();
 router.get('/status', paypalController_1.getStatus);
+router.get('/client-config', paypalController_1.getClientConfig);
 router.post('/create-order', paypalController_1.createOrder);
 router.post('/capture-order', paypalController_1.captureOrder);
 exports.default = router;

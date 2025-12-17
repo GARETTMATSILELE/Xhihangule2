@@ -29,28 +29,50 @@ const PaypalCheckout: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const clientId = (
-    // Prefer Vite-style env if available
-    ((typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_PAYPAL_CLIENT_ID) as string | undefined) ||
-    // CRA fallback (DefinePlugin inlines this at build-time)
-    (process.env.REACT_APP_PAYPAL_CLIENT_ID as unknown as string | undefined)
-  );
+  const [fetchedClientId, setFetchedClientId] = useState<string | null>(null);
+  const [fetchingId, setFetchingId] = useState<boolean>(false);
+  const effectiveClientId = (fetchedClientId || '').trim();
   const amount = PRICES[plan][cycle].toFixed(2);
 
   useEffect(() => {
-    if (!clientId) {
-      setMessage({ type: 'error', text: 'PayPal client ID not configured. Please set VITE_PAYPAL_CLIENT_ID or REACT_APP_PAYPAL_CLIENT_ID.' });
-    }
-  }, [clientId]);
+    let cancelled = false;
+    // Fetch exactly once on mount; skip if we've already set fetchedClientId (even to '')
+    if (fetchedClientId !== null) return;
+    setFetchingId(true);
+    (async () => {
+      try {
+        const resp = await api.get('/paypal/client-config', { timeout: 7000 });
+        if (!cancelled) {
+          const serverId = resp.data?.clientId || '';
+          setFetchedClientId(serverId);
+          if (!serverId) {
+            setMessage({ type: 'error', text: 'PayPal client ID not available from server.' });
+          }
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          const msg =
+            e?.code === 'ECONNABORTED'
+              ? 'Timed out contacting server for PayPal configuration.'
+              : (e?.response?.data?.message || e?.message || 'Failed to load PayPal configuration.');
+          setMessage({ type: 'error', text: msg });
+          setFetchedClientId(''); // mark as attempted to prevent infinite retries
+        }
+      } finally {
+        if (!cancelled) setFetchingId(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fetchedClientId]);
 
   const initialOptions = useMemo(
     () => ({
-      clientId: (clientId || '').trim(),
+      clientId: effectiveClientId,
       currency: 'USD',
       intent: 'capture',
       components: 'buttons'
     }),
-    [clientId]
+    [effectiveClientId]
   );
 
   return (
@@ -71,8 +93,12 @@ const PaypalCheckout: React.FC = () => {
           <Alert severity={message.type} sx={{ mb: 2 }}>{message.text}</Alert>
         )}
 
-        {!clientId ? (
-          <Alert severity="error">PayPal is not available. Contact support.</Alert>
+        {!effectiveClientId ? (
+          fetchingId ? (
+            <Alert severity="info">Preparing PayPal checkout...</Alert>
+          ) : (
+            <Alert severity="error">PayPal is not available. Contact support.</Alert>
+          )
         ) : (
           <PayPalScriptProvider options={initialOptions}>
             <Box sx={{ mb: 2 }}>
@@ -114,7 +140,7 @@ const PaypalCheckout: React.FC = () => {
                   setLoading(false);
                 }}
                 disabled={loading}
-                forceReRender={[amount, plan, cycle]}
+                forceReRender={[amount, plan, cycle, effectiveClientId]}
               />
             </Box>
           </PayPalScriptProvider>

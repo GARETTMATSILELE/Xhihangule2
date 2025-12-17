@@ -1,5 +1,8 @@
 import axios from 'axios';
 import { Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
 
 type Plan = 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
 type Cycle = 'monthly' | 'yearly';
@@ -8,37 +11,72 @@ type PaypalEnv = 'live' | 'sandbox';
 const LIVE_API_BASE = 'https://api-m.paypal.com';
 const SANDBOX_API_BASE = 'https://api-m.sandbox.paypal.com';
 
+// Load PayPal configuration ONLY from server/.env.production at runtime.
+// This ensures production keys are consistently sourced from the same file,
+// independent of how the main process environment was initialized.
+let paypalEnvFileCache: Record<string, string> | null = null;
+function loadPaypalEnvFile(): Record<string, string> {
+	if (paypalEnvFileCache) return paypalEnvFileCache;
+	try {
+		// Resolve to server/.env.production regardless of build output location
+		// - When running from dist/controllers: __dirname -> server/dist/controllers → ../../.env.production => server/.env.production
+		// - When running from src/controllers (dev/ts-node): __dirname -> server/src/controllers → ../../.env.production => server/.env.production
+		const envPath = path.resolve(__dirname, '..', '..', '.env.production');
+		if (fs.existsSync(envPath)) {
+			const content = fs.readFileSync(envPath, 'utf8');
+			paypalEnvFileCache = dotenv.parse(content);
+		} else {
+			// Optional fallback: look in CWD as a last resort
+			const altPath = path.resolve(process.cwd(), '.env.production');
+			if (fs.existsSync(altPath)) {
+				const content = fs.readFileSync(altPath, 'utf8');
+				paypalEnvFileCache = dotenv.parse(content);
+			} else {
+				// eslint-disable-next-line no-console
+				console.warn('PayPal configuration file not found at:', envPath, 'or', altPath);
+				paypalEnvFileCache = {};
+			}
+		}
+	} catch (e) {
+		// eslint-disable-next-line no-console
+		console.warn('Failed to load PayPal .env.production:', (e as any)?.message || e);
+		paypalEnvFileCache = {};
+	}
+	return paypalEnvFileCache;
+}
+
+function readPaypalVar(name: string): string | undefined {
+	const vars = loadPaypalEnvFile();
+	const value = vars[name];
+	return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 function getApiBase(): string {
-	const explicit = process.env.PAYPAL_API_BASE?.trim();
+	// Prefer explicit override from .env.production
+	const explicit = readPaypalVar('PAYPAL_API_BASE')?.trim();
 	if (explicit) return explicit;
-	const env = (process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || '').toLowerCase();
-	// Prefer sandbox by default in non-production if not explicitly set
+	// Always derive PayPal env from .env.production (default to 'live' if absent)
+	const env = (readPaypalVar('PAYPAL_ENV') || readPaypalVar('PAYPAL_MODE') || 'live').toLowerCase();
 	if (env === 'sandbox') return SANDBOX_API_BASE;
-	if (env === 'live' || env === 'production') return LIVE_API_BASE;
-	if ((process.env.NODE_ENV || '').toLowerCase() !== 'production') return SANDBOX_API_BASE;
 	return LIVE_API_BASE;
 }
 
 function getPaypalEnv(): PaypalEnv {
 	const base = getApiBase();
 	if (base.includes('sandbox.paypal.com')) return 'sandbox';
-	const env = (process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || '').toLowerCase();
-	if (env === 'sandbox') return 'sandbox';
-	if (env === 'live' || env === 'production') return 'live';
-	// Default to sandbox in non-production
-	if ((process.env.NODE_ENV || '').toLowerCase() !== 'production') return 'sandbox';
-	return 'live';
+	const env = (readPaypalVar('PAYPAL_ENV') || readPaypalVar('PAYPAL_MODE') || 'live').toLowerCase();
+	return env === 'sandbox' ? 'sandbox' : 'live';
 }
 
 function getPaypalCredentials(): { clientId?: string; clientSecret?: string; env: PaypalEnv } {
 	const env = getPaypalEnv();
 	if (env === 'live') {
-		const clientId = process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
-		const clientSecret = process.env.PAYPAL_LIVE_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
+		const clientId = readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_ID');
+		const clientSecret = readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_SECRET');
 		return { clientId, clientSecret, env };
 	}
-	const clientId = process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
-	const clientSecret = process.env.PAYPAL_SANDBOX_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
+	const clientId = readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_ID');
+	const clientSecret = readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_SECRET');
 	return { clientId, clientSecret, env };
 }
 
@@ -159,12 +197,12 @@ export async function createOrder(req: Request, res: Response) {
 		try {
 			const baseForLog = getApiBase();
 			const resolvedEnv = getPaypalEnv();
-			const usingLiveVars = Boolean(process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_LIVE_CLIENT_SECRET);
-			const usingSandboxVars = Boolean(process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_SANDBOX_CLIENT_SECRET);
+			const usingLiveVars = Boolean(readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_SECRET'));
+			const usingSandboxVars = Boolean(readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET'));
 			// eslint-disable-next-line no-console
 			console.error('PayPal createOrder failed', {
 				apiBase: baseForLog,
-				env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+				env: resolvedEnv,
 				hasClientId: Boolean(getPaypalCredentials().clientId),
 				hasClientSecret: Boolean(getPaypalCredentials().clientSecret),
 				usingLiveVars,
@@ -209,12 +247,12 @@ export async function captureOrder(req: Request, res: Response) {
 		try {
 			const baseForLog = getApiBase();
 			const resolvedEnv = getPaypalEnv();
-			const usingLiveVars = Boolean(process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_LIVE_CLIENT_SECRET);
-			const usingSandboxVars = Boolean(process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_SANDBOX_CLIENT_SECRET);
+			const usingLiveVars = Boolean(readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_SECRET'));
+			const usingSandboxVars = Boolean(readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET'));
 			// eslint-disable-next-line no-console
 			console.error('PayPal captureOrder failed', {
 				apiBase: baseForLog,
-				env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+				env: resolvedEnv,
 				hasClientId: Boolean(getPaypalCredentials().clientId),
 				hasClientSecret: Boolean(getPaypalCredentials().clientSecret),
 				usingLiveVars,
@@ -236,7 +274,7 @@ export async function getStatus(req: Request, res: Response) {
 		const creds = getPaypalCredentials();
 		return res.json({
 			status: isPaypalConfigured() ? 'ok' : 'disabled',
-			env: process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || resolvedEnv,
+			env: resolvedEnv,
 			apiBase: base,
 			hasClientId: Boolean(creds.clientId),
 			hasClientSecret: Boolean(creds.clientSecret),
@@ -244,6 +282,25 @@ export async function getStatus(req: Request, res: Response) {
 		});
 	} catch (e: any) {
 		return res.status(500).json({ status: 'error', message: e?.message || 'Failed to read PayPal status' });
+	}
+}
+
+export async function getClientConfig(_req: Request, res: Response) {
+	try {
+		const resolvedEnv = getPaypalEnv();
+		const creds = getPaypalCredentials();
+		if (!creds.clientId) {
+			return res.status(503).json({
+				status: 'disabled',
+				message: 'PayPal client ID not configured on server.'
+			});
+		}
+		return res.json({
+			env: resolvedEnv,
+			clientId: creds.clientId
+		});
+	} catch (e: any) {
+		return res.status(500).json({ status: 'error', message: e?.message || 'Failed to read PayPal client config' });
 	}
 }
 
