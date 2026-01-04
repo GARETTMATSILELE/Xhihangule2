@@ -4,8 +4,8 @@ Use this guide to enable real password reset emails via Mailtrap Email Sending u
 
 ### 1) Verify a sending domain in Mailtrap
 - In Mailtrap, go to Email Sending → Domains → Add domain.
-- Follow the DNS steps to verify the domain you will send from (e.g., `xhihangule.com`).
-- Once verified, ensure the From address you plan to use belongs to that domain (e.g., `no-reply@xhihangule.com`).  
+- Follow the DNS steps to verify the domain you will send from (e.g., `mantisafrica.com`).
+- Once verified, ensure the From address you plan to use belongs to that domain (e.g., `no-reply@mantisafrica.com`).  
 
 ### 2) Get your SMTP credentials
 - Mailtrap Email Sending (live):  
@@ -21,8 +21,8 @@ Create or update your production environment file (for example `.env.production`
 
 ```env
 # Core app URLs
-APP_BASE_URL=https://www.xhihangule.com
-CLIENT_URL=https://www.xhihangule.com
+APP_BASE_URL=https://www.mantisafrica.com
+CLIENT_URL=https://www.mantisafrica.com
 
 # Mailtrap Email Sending (SMTP)
 SMTP_HOST=live.smtp.mailtrap.io
@@ -32,12 +32,12 @@ SMTP_PASS=<YOUR_API_TOKEN>
 
 # From header (used for SMTP and to build sender for API fallbacks)
 # Must be a verified sender under your Mailtrap sending domain
-SMTP_FROM="Xhihangule <no-reply@xhihangule.com>"
+SMTP_FROM="Mantis Africa <no-reply@mantisafrica.com>"
 
 # Optional: Mailtrap Send API (fallback if SMTP unavailable)
 MAILTRAP_API_TOKEN=<YOUR_API_TOKEN>
-MAILTRAP_FROM_EMAIL=no-reply@xhihangule.com
-MAILTRAP_FROM_NAME=Xhihangule
+MAILTRAP_FROM_EMAIL=no-reply@mantisafrica.com
+MAILTRAP_FROM_NAME=Mantis Africa
 
 # Optional brand selection (if you operate multiple brands)
 # BRAND_ACTIVE=XHI

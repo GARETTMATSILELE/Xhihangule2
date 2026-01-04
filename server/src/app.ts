@@ -54,8 +54,8 @@ const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     const allowedOrigins = [
       process.env.CLIENT_URL,
-      'https://www.xhihangule.com',
-      'https://xhihangule.com',
+      'https://www.mantisafrica.com',
+      'https://mantisafrica.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'http://localhost:5173', // Vite default port

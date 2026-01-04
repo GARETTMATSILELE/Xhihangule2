@@ -61,13 +61,18 @@ function loadPaypalEnvFile() {
 }
 function readPaypalVar(name) {
     const vars = loadPaypalEnvFile();
-    const value = vars[name];
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
+    const valueFromFile = vars[name];
+    if (typeof valueFromFile === 'string' && valueFromFile.length > 0) {
+        return valueFromFile;
+    }
+    // Fallback to process.env so production can use platform env vars if the file isn't present
+    const valueFromEnv = process.env[name];
+    return typeof valueFromEnv === 'string' && valueFromEnv.length > 0 ? valueFromEnv : undefined;
 }
 function getApiBase() {
     var _a;
-    // Prefer explicit override from .env.production
-    const explicit = (_a = readPaypalVar('PAYPAL_API_BASE')) === null || _a === void 0 ? void 0 : _a.trim();
+    // Prefer explicit override from .env.production or process.env
+    const explicit = (_a = (readPaypalVar('PAYPAL_API_BASE') || process.env.PAYPAL_API_BASE)) === null || _a === void 0 ? void 0 : _a.trim();
     if (explicit)
         return explicit;
     // Always derive PayPal env from .env.production (default to 'live' if absent)
@@ -80,18 +85,18 @@ function getPaypalEnv() {
     const base = getApiBase();
     if (base.includes('sandbox.paypal.com'))
         return 'sandbox';
-    const env = (readPaypalVar('PAYPAL_ENV') || readPaypalVar('PAYPAL_MODE') || 'live').toLowerCase();
+    const env = (readPaypalVar('PAYPAL_ENV') || readPaypalVar('PAYPAL_MODE') || process.env.PAYPAL_ENV || process.env.PAYPAL_MODE || 'live').toLowerCase();
     return env === 'sandbox' ? 'sandbox' : 'live';
 }
 function getPaypalCredentials() {
     const env = getPaypalEnv();
     if (env === 'live') {
-        const clientId = readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_ID');
-        const clientSecret = readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_SECRET');
+        const clientId = readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_ID') || process.env.PAYPAL_LIVE_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
+        const clientSecret = readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_SECRET') || process.env.PAYPAL_LIVE_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
         return { clientId, clientSecret, env };
     }
-    const clientId = readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_ID');
-    const clientSecret = readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_SECRET');
+    const clientId = readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_ID') || process.env.PAYPAL_SANDBOX_CLIENT_ID || process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_SECRET') || process.env.PAYPAL_SANDBOX_CLIENT_SECRET || process.env.PAYPAL_CLIENT_SECRET;
     return { clientId, clientSecret, env };
 }
 function extractPaypalErrorMessage(error) {

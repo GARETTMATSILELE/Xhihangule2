@@ -13,6 +13,22 @@ import { SubscriptionService } from '../services/subscriptionService';
 const authService = AuthService.getInstance();
 const subscriptionService = SubscriptionService.getInstance();
 
+// Compute cookie domain for production based on env. Prefer explicit COOKIE_DOMAIN.
+// Falls back to deriving from CLIENT_URL or APP_BASE_URL. Returns value suitable for cookie 'domain'.
+function getCookieDomain(): string | undefined {
+  const explicit = (process.env.COOKIE_DOMAIN || '').trim();
+  if (explicit) return explicit;
+  const fromUrl = (process.env.CLIENT_URL || process.env.APP_BASE_URL || '').trim();
+  if (!fromUrl) return undefined;
+  try {
+    const hostname = new URL(fromUrl).hostname;
+    // Use leading dot for cross-subdomain
+    return hostname.startsWith('www.') ? `.${hostname.slice(4)}` : `.${hostname}`;
+  } catch {
+    return undefined;
+  }
+}
+
 // Signup with company details
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -231,12 +247,13 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
     });
 
     // Set refresh token as HttpOnly cookie
+    const cookieDomain = getCookieDomain();
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
-      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     // Set a non-HttpOnly CSRF token cookie for refresh protection
@@ -246,7 +263,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
-      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
@@ -330,12 +347,13 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       environment: process.env.NODE_ENV
     });
     
+    const cookieDomain = getCookieDomain();
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
-      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
@@ -346,7 +364,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
-      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
@@ -482,11 +500,12 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 export const logout = (req: Request, res: Response) => {
   // Clear refresh token + CSRF cookies with correct options
   const prod = process.env.NODE_ENV === 'production';
+  const d = getCookieDomain();
   const base: any = {
     path: '/',
     sameSite: prod ? 'strict' : 'lax',
     secure: prod,
-    ...(prod ? { domain: '.xhihangule.com' } : {})
+    ...(prod && d ? { domain: d } : {})
   };
   try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
   try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
@@ -576,12 +595,13 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
     console.log('Token refresh successful');
 
     // Set new refresh token as HttpOnly cookie
+    const cookieDomain = getCookieDomain();
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
-      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
@@ -592,7 +612,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
       path: '/',
-      ...(process.env.NODE_ENV === 'production' ? { domain: '.xhihangule.com' } : {}),
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
