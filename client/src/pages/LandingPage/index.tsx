@@ -190,8 +190,63 @@ const LandingPage: React.FC = () => {
           bgcolor: 'primary.main',
           color: 'primary.contrastText',
           py: 8,
+          position: 'relative',
         }}
       >
+        {/* Top-left Logo */}
+        <Box
+          component={RouterLink}
+          to="/"
+          sx={{
+            position: 'absolute',
+            top: { xs: 12, md: 16 },
+            left: { xs: 12, md: 16 },
+            display: 'inline-flex',
+            alignItems: 'center',
+            textDecoration: 'none',
+          }}
+          aria-label="Mantis Africa Home"
+        >
+          <Box
+            component="img"
+            src="/mantis logo.png"
+            alt="Mantis Africa"
+            sx={{
+              height: { xs: 112, md: 144 },
+              display: 'block',
+            }}
+          />
+        </Box>
+        {/* Top-right CTAs */}
+        <Box
+          sx={{
+            position: 'absolute',
+            top: { xs: 12, md: 16 },
+            right: { xs: 12, md: 16 },
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+          }}
+        >
+          <Button
+            component={RouterLink}
+            to="/login"
+            variant="outlined"
+            color="inherit"
+            size="medium"
+          >
+            Login
+          </Button>
+          <Button
+            component={RouterLink}
+            to="/admin-signup"
+            variant="contained"
+            color="secondary"
+            size="medium"
+          >
+            Start Free Trial
+          </Button>
+        </Box>
         <Container maxWidth="lg">
           <Grid container spacing={4} alignItems="center">
             <Grid item xs={12} md={6}>
@@ -204,27 +259,6 @@ const LandingPage: React.FC = () => {
               <Typography variant="h6" paragraph sx={{ color: 'common.white', fontWeight: 600 }}>
                 🎉 Start your 14-day free trial today - No credit card required!
               </Typography>
-              <Box sx={{ mt: 4 }}>
-                <Button
-                  component={RouterLink}
-                  to="/admin-signup"
-                  variant="contained"
-                  color="secondary"
-                  size="large"
-                  sx={{ mr: 2 }}
-                >
-                  Start Free Trial
-                </Button>
-                <Button
-                  component={RouterLink}
-                  to="/login"
-                  variant="outlined"
-                  color="inherit"
-                  size="large"
-                >
-                  Login
-                </Button>
-              </Box>
             </Grid>
             <Grid item xs={12} md={6}>
               <Box
