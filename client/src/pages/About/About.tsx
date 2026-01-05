@@ -4,9 +4,9 @@ import './About.css';
 const About: React.FC = () => {
   return (
     <div className="about">
-      <h1>About Xhihangule2</h1>
+      <h1>About Mantis Africa</h1>
       <p>
-        Welcome to Xhihangule2, a modern property management application designed to help you
+        Welcome to Mantis Africa, a modern property management application designed to help you
         manage your properties efficiently and effectively.
       </p>
       <div className="features">

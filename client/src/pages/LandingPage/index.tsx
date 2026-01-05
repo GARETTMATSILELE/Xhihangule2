@@ -196,7 +196,7 @@ const LandingPage: React.FC = () => {
           <Grid container spacing={4} alignItems="center">
             <Grid item xs={12} md={6}>
               <Typography variant="h2" component="h1" gutterBottom>
-                Welcome to Xhihangule
+                Welcome to Mantis Africa
               </Typography>
               <Typography variant="h5" paragraph>
                 Your all-in-one solution for property management
@@ -230,7 +230,7 @@ const LandingPage: React.FC = () => {
               <Box
                 component="img"
                 src="/hero-laptop.png"
-                alt="Xhihangule agent dashboard on a laptop"
+                alt="Mantis Africa agent dashboard on a laptop"
                 sx={{
                   width: '100%',
                   maxWidth: 460,
@@ -474,7 +474,7 @@ const LandingPage: React.FC = () => {
             Ready to Get Started?
           </Typography>
           <Typography variant="h6" align="center" paragraph>
-            Join thousands of businesses already using Xhihangule
+            Join thousands of businesses already using Mantis Africa
           </Typography>
           <Box sx={{ mt: 4, textAlign: 'center' }}>
             <Button
@@ -552,7 +552,7 @@ const LandingPage: React.FC = () => {
           </Grid>
           <Box sx={{ mt: 4 }}>
             <Typography variant="body2" color="text.secondary" align="center">
-              © {new Date().getFullYear()} Xhihangule. All rights reserved.
+              © {new Date().getFullYear()} Mantis Africa. All rights reserved.
             </Typography>
           </Box>
         </Container>

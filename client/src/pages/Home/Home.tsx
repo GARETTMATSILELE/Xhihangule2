@@ -4,7 +4,7 @@ import './Home.css';
 const Home: React.FC = () => {
   return (
     <div className="home">
-      <h1>Welcome to Xhihangule2</h1>
+      <h1>Welcome to Mantis Africa</h1>
       <p>This is your starting point for building something amazing!</p>
       <div className="features">
         <div className="feature-card">
