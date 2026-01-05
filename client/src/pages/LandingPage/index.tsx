@@ -5,6 +5,8 @@ import {
   Box,
   Button,
   Container,
+  Menu,
+  MenuItem,
   Typography,
   Grid,
   Card,
@@ -42,6 +44,33 @@ const LandingPage: React.FC = () => {
     | 'DASHBOARDS';
 
   const [active, setActive] = useState<FeatureKey>('ACCOUNTING');
+  const [featuresAnchorEl, setFeaturesAnchorEl] = useState<null | HTMLElement>(null);
+  const [pricingAnchorEl, setPricingAnchorEl] = useState<null | HTMLElement>(null);
+
+  const scrollToId = (id: string) => {
+    if (typeof window === 'undefined') return;
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const openFeaturesMenu = (e: React.MouseEvent<HTMLElement>) => setFeaturesAnchorEl(e.currentTarget);
+  const closeFeaturesMenu = () => setFeaturesAnchorEl(null);
+  const openPricingMenu = (e: React.MouseEvent<HTMLElement>) => setPricingAnchorEl(e.currentTarget);
+  const closePricingMenu = () => setPricingAnchorEl(null);
+
+  const handleSelectFeature = (key: FeatureKey) => {
+    setActive(key);
+    closeFeaturesMenu();
+    // Scroll to features section
+    setTimeout(() => scrollToId('features-section'), 0);
+  };
+
+  const handleSelectPricing = (id: 'free' | 'individual' | 'sme' | 'enterprise') => {
+    closePricingMenu();
+    scrollToId(`pricing-${id}`);
+  };
 
   const featureTabs: { key: FeatureKey; label: string; title: string; description: string; bullets: string[]; cta: string; image: string; }[] = [
     {
@@ -189,10 +218,129 @@ const LandingPage: React.FC = () => {
         sx={{
           bgcolor: 'primary.main',
           color: 'primary.contrastText',
-          py: 8,
+          pt: { xs: 20, md: 22 },
+          pb: 8,
           position: 'relative',
         }}
       >
+        {/* Top-center Nav (text-only) */}
+        <Box
+          sx={{
+            position: 'absolute',
+            top: { xs: 16, md: 16 },
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: { xs: 'none', md: 'flex' },
+            alignItems: 'center',
+            gap: 2,
+          }}
+        >
+          <Button
+            variant="text"
+            color="inherit"
+            onClick={openFeaturesMenu}
+            aria-haspopup="true"
+            aria-controls="features-menu"
+            sx={{ textTransform: 'none', fontWeight: 600, fontStyle: 'normal' }}
+          >
+            Features
+          </Button>
+          <Menu
+            id="features-menu"
+            anchorEl={featuresAnchorEl}
+            open={Boolean(featuresAnchorEl)}
+            onClose={closeFeaturesMenu}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+            PaperProps={{
+              sx: {
+                backgroundColor: 'transparent',
+                boxShadow: 'none',
+                color: 'primary.contrastText',
+              }
+            }}
+            MenuListProps={{
+              sx: { p: 0 }
+            }}
+          >
+            {featureTabs.map((t) => (
+              <MenuItem
+                key={t.key}
+                onClick={() => handleSelectFeature(t.key)}
+                sx={{
+                  color: 'primary.contrastText',
+                  backgroundColor: 'transparent',
+                  fontStyle: 'normal',
+                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' }
+                }}
+              >
+                {t.label}
+              </MenuItem>
+            ))}
+          </Menu>
+
+          <Button
+            variant="text"
+            color="inherit"
+            onClick={openPricingMenu}
+            aria-haspopup="true"
+            aria-controls="pricing-menu"
+            sx={{ textTransform: 'none', fontWeight: 600, fontStyle: 'normal' }}
+          >
+            Pricing
+          </Button>
+          <Menu
+            id="pricing-menu"
+            anchorEl={pricingAnchorEl}
+            open={Boolean(pricingAnchorEl)}
+            onClose={closePricingMenu}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+            PaperProps={{
+              sx: {
+                backgroundColor: 'transparent',
+                boxShadow: 'none',
+                color: 'primary.contrastText',
+              }
+            }}
+            MenuListProps={{
+              sx: { p: 0 }
+            }}
+          >
+            <MenuItem
+              onClick={() => handleSelectPricing('free')}
+              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
+            >
+              Free Trial
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleSelectPricing('individual')}
+              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
+            >
+              Individual
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleSelectPricing('sme')}
+              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
+            >
+              SME
+            </MenuItem>
+            <MenuItem
+              onClick={() => handleSelectPricing('enterprise')}
+              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
+            >
+              Enterprise
+            </MenuItem>
+          </Menu>
+          <Button
+            variant="text"
+            color="inherit"
+            onClick={() => scrollToId('contact-section')}
+            sx={{ textTransform: 'none', fontWeight: 600, fontStyle: 'normal' }}
+          >
+            Contact Us
+          </Button>
+        </Box>
         {/* Top-left Logo */}
         <Box
           component={RouterLink}
@@ -281,7 +429,7 @@ const LandingPage: React.FC = () => {
       </Box>
 
       {/* Features Section */}
-      <Container maxWidth="lg" sx={{ py: 8 }}>
+      <Container id="features-section" maxWidth="lg" sx={{ py: 8 }}>
         <Typography variant="overline" align="center" display="block" gutterBottom color="primary">
           FEATURES
         </Typography>
@@ -352,7 +500,7 @@ const LandingPage: React.FC = () => {
       </Container>
 
       {/* Packages/Pricing Section */}
-      <Container maxWidth="lg" sx={{ py: 8 }}>
+      <Container id="pricing-section" maxWidth="lg" sx={{ py: 8 }}>
         <Typography variant="overline" align="center" display="block" gutterBottom color="primary">
           PRICING
         </Typography>
@@ -373,7 +521,7 @@ const LandingPage: React.FC = () => {
 
         <Grid container spacing={3}>
           {/* Free Trial Card */}
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={4} id="pricing-free">
             <Card elevation={0} sx={{ border: '2px solid', borderColor: 'success.main', borderRadius: 3, position: 'relative' }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
@@ -406,7 +554,7 @@ const LandingPage: React.FC = () => {
           </Grid>
 
           {/* Individual */}
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={4} id="pricing-individual">
             <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
               <CardContent sx={{ p: 3 }}>
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -438,7 +586,7 @@ const LandingPage: React.FC = () => {
           </Grid>
 
           {/* SME - highlighted */}
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={4} id="pricing-sme">
             <Card sx={{ borderRadius: 3, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
@@ -468,7 +616,7 @@ const LandingPage: React.FC = () => {
           </Grid>
 
           {/* Enterprise */}
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={4} id="pricing-enterprise">
             <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
               <CardContent sx={{ p: 3 }}>
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -535,7 +683,7 @@ const LandingPage: React.FC = () => {
       </Box>
 
       {/* Footer */}
-      <Box component="footer" sx={{ bgcolor: 'background.paper', py: 6 }}>
+      <Box id="contact-section" component="footer" sx={{ bgcolor: 'background.paper', py: 6 }}>
         <Container maxWidth="lg">
           <Grid container spacing={4} justifyContent="center">
             <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
