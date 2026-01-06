@@ -126,6 +126,26 @@ if (process.env.NODE_ENV === 'production') {
         process.exit(1);
     }
 }
+// Optional canonical host redirect (configure via env to enable)
+const CANONICAL_HOST = process.env.CANONICAL_HOST;
+const REDIRECT_FROM_HOSTS = (process.env.REDIRECT_FROM_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+if (CANONICAL_HOST && REDIRECT_FROM_HOSTS.length > 0) {
+    app.use((req, res, next) => {
+        const hostHeader = req.headers.host || '';
+        const currentHost = String(hostHeader).split(':')[0];
+        if (currentHost && REDIRECT_FROM_HOSTS.includes(currentHost)) {
+            if (req.method === 'GET' || req.method === 'HEAD') {
+                const target = `${req.protocol}://${CANONICAL_HOST}${req.originalUrl}`;
+                return res.redirect(301, target);
+            }
+            // Do not redirect non-idempotent API requests to avoid breaking clients
+        }
+        return next();
+    });
+}
 // Middleware
 const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -136,8 +156,8 @@ const allowedOrigins = [
     'http://localhost:5173', // Vite default port
     'http://localhost:3000', // Create React App default port
     // Production defaults (ensure both apex and www are allowed if env not configured)
-    'https://xhihangule.com',
-    'https://www.xhihangule.com',
+    'https://mantisafrica.com',
+    'https://www.mantisafrica.com',
     ...allowedOriginsFromEnv
 ];
 // Security headers (production)

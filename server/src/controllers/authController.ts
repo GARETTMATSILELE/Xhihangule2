@@ -7,7 +7,7 @@ import { Company } from '../models/Company';
 import { AppError } from '../middleware/errorHandler';
 import { SignUpData, UserRole } from '../types/auth';
 import { AuthService } from '../services/authService';
-import { sendMail } from '../services/emailService';
+import { sendMail, getActiveBrandKey, getEnvByBrand } from '../services/emailService';
 import { SubscriptionService } from '../services/subscriptionService';
 
 const authService = AuthService.getInstance();
@@ -445,7 +445,8 @@ export const requestPasswordReset = async (req: Request, res: Response, next: Ne
     user.resetPasswordExpires = new Date(Date.now() + 1000 * 60 * 15); // 15 minutes
     await user.save();
 
-    const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const brand = getActiveBrandKey();
+    const baseUrl = getEnvByBrand('APP_BASE_URL', brand) || `${req.protocol}://${req.get('host')}`;
     const resetUrl = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(user.email)}`;
 
     await sendMail({

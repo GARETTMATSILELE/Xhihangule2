@@ -9,6 +9,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getActiveBrandKey = getActiveBrandKey;
+exports.getEnvByBrand = getEnvByBrand;
 exports.sendMail = sendMail;
 // Optional mailer: avoid hard dependency on nodemailer at build time
 // If nodemailer isn't installed or configured, we fallback to console logging
@@ -269,8 +271,10 @@ function sendMail(params) {
             return;
         }
         try {
+            const fromParsed = parseFromHeaderForBrand();
+            const fromHeader = fromParsed.name ? `${fromParsed.name} <${fromParsed.email}>` : fromParsed.email;
             yield tx.sendMail({
-                from: getEnvByBrand('SMTP_FROM', getActiveBrandKey()) || getEnvByBrand('SMTP_USER', getActiveBrandKey()),
+                from: fromHeader,
                 to: params.to,
                 subject: params.subject,
                 text: params.text,

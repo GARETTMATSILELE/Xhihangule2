@@ -17,7 +17,7 @@ interface SendMailParams {
 
 let transporter: any | null = null;
 
-function getActiveBrandKey(): 'XHI' | 'MANTIS' {
+export function getActiveBrandKey(): 'XHI' | 'MANTIS' {
   const forced = (process.env.BRAND_ACTIVE || '').toUpperCase();
   if (forced === 'MANTIS') return 'MANTIS';
   if (forced === 'XHI') return 'XHI';
@@ -32,7 +32,7 @@ function getActiveBrandKey(): 'XHI' | 'MANTIS' {
   return 'XHI';
 }
 
-function getEnvByBrand(base: string, brand: 'XHI' | 'MANTIS'): string | undefined {
+export function getEnvByBrand(base: string, brand: 'XHI' | 'MANTIS'): string | undefined {
   const byBrand = process.env[`${base}_${brand}`];
   return byBrand !== undefined ? byBrand : process.env[base];
 }
@@ -251,8 +251,10 @@ export async function sendMail(params: SendMailParams): Promise<void> {
     return;
   }
   try {
+    const fromParsed = parseFromHeaderForBrand();
+    const fromHeader = fromParsed.name ? `${fromParsed.name} <${fromParsed.email}>` : fromParsed.email;
     await tx.sendMail({
-      from: getEnvByBrand('SMTP_FROM', getActiveBrandKey()) || getEnvByBrand('SMTP_USER', getActiveBrandKey()),
+      from: fromHeader,
       to: params.to,
       subject: params.subject,
       text: params.text,
