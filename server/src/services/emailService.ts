@@ -21,15 +21,8 @@ export function getActiveBrandKey(): 'XHI' | 'MANTIS' {
   const forced = (process.env.BRAND_ACTIVE || '').toUpperCase();
   if (forced === 'MANTIS') return 'MANTIS';
   if (forced === 'XHI') return 'XHI';
-  const cutoff = process.env.BRAND_CUTOFF_ISO;
-  if (cutoff) {
-    const now = new Date();
-    const cut = new Date(cutoff);
-    if (!isNaN(cut.getTime()) && now >= cut) {
-      return 'MANTIS';
-    }
-  }
-  return 'XHI';
+  // Default to MANTIS when not explicitly set
+  return 'MANTIS';
 }
 
 export function getEnvByBrand(base: string, brand: 'XHI' | 'MANTIS'): string | undefined {

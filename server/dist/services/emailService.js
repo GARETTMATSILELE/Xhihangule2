@@ -29,15 +29,8 @@ function getActiveBrandKey() {
         return 'MANTIS';
     if (forced === 'XHI')
         return 'XHI';
-    const cutoff = process.env.BRAND_CUTOFF_ISO;
-    if (cutoff) {
-        const now = new Date();
-        const cut = new Date(cutoff);
-        if (!isNaN(cut.getTime()) && now >= cut) {
-            return 'MANTIS';
-        }
-    }
-    return 'XHI';
+    // Default to MANTIS when not explicitly set
+    return 'MANTIS';
 }
 function getEnvByBrand(base, brand) {
     const byBrand = process.env[`${base}_${brand}`];

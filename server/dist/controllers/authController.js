@@ -426,8 +426,11 @@ const requestPasswordReset = (req, res, next) => __awaiter(void 0, void 0, void 
         user.resetPasswordToken = tokenHash;
         user.resetPasswordExpires = new Date(Date.now() + 1000 * 60 * 15); // 15 minutes
         yield user.save();
-        const brand = (0, emailService_1.getActiveBrandKey)();
-        const baseUrl = (0, emailService_1.getEnvByBrand)('APP_BASE_URL', brand) || `${req.protocol}://${req.get('host')}`;
+        // Always use the MANTIS base URL for password reset links
+        const baseUrl = (0, emailService_1.getEnvByBrand)('APP_BASE_URL', 'MANTIS') ||
+            process.env.APP_BASE_URL_MANTIS ||
+            process.env.APP_BASE_URL ||
+            'https://www.mantisafrica.com';
         const resetUrl = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(user.email)}`;
         yield (0, emailService_1.sendMail)({
             to: user.email,
