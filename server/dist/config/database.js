@@ -30,8 +30,10 @@ const getEffectiveUri = (envValue, localFallback) => {
 };
 const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
 const ACCOUNTING_DB_URI = getEffectiveUri(process.env.ACCOUNTING_DB_URI, LOCAL_ACCOUNTING_URI);
-exports.mainConnection = mongoose_1.default.createConnection(MONGODB_URI);
-exports.accountingConnection = mongoose_1.default.createConnection(ACCOUNTING_DB_URI);
+// Create connections without opening immediately to avoid crashing when DB is down.
+// We'll open these inside connectDatabase() within try/catch.
+exports.mainConnection = mongoose_1.default.createConnection();
+exports.accountingConnection = mongoose_1.default.createConnection();
 // Connection options
 const connectionOptions = {
     useNewUrlParser: true,
@@ -108,8 +110,21 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
             circuitBreakerState.isOpen = false;
             circuitBreakerState.failureCount = 0;
         });
-        // Connect to MongoDB
+        // Connect default mongoose connection (primary)
         yield mongoose_1.default.connect(MONGODB_URI, connectionOptions);
+        // Open named connections (non-fatal if they fail; they will retry on next start)
+        try {
+            yield exports.mainConnection.openUri(MONGODB_URI, connectionOptions);
+        }
+        catch (e) {
+            console.error('Failed to open mainConnection (non-fatal):', (e === null || e === void 0 ? void 0 : e.message) || e);
+        }
+        try {
+            yield exports.accountingConnection.openUri(ACCOUNTING_DB_URI, connectionOptions);
+        }
+        catch (e) {
+            console.error('Failed to open accountingConnection (non-fatal):', (e === null || e === void 0 ? void 0 : e.message) || e);
+        }
         // Create indexes only if they don't exist
         try {
             yield (0, indexes_1.createIndexes)();

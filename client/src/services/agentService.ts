@@ -3,6 +3,7 @@ import { Property, PropertyFormData } from '../types/property';
 import { TenantFormData } from '../types/tenant';
 import { LeaseFormData } from '../types/lease';
 import { PaymentFormData } from '../types/payment';
+import { buildPaymentIdempotencyKey } from './paymentService';
 
 export const agentService = {
   // Get properties managed by the agent
@@ -83,7 +84,11 @@ export const agentService = {
     if (!paymentData.ownerId && userId) {
       paymentData.ownerId = userId;
     }
-    const response = await api.post('/agents/payments', paymentData);
+    const idempotencyKey = (paymentData as any)?.idempotencyKey || buildPaymentIdempotencyKey(paymentData, 'agent');
+    const body = { ...paymentData, idempotencyKey };
+    const response = await api.post('/agents/payments', body, {
+      headers: { 'Idempotency-Key': idempotencyKey }
+    });
     return response.data;
   },
 

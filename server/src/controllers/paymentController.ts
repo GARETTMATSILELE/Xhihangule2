@@ -835,10 +835,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
             },
             { $group: { _id: null, total: { $sum: '$amount' } } }
           ]);
-          const rentBaseline = typeof rentUsed === 'number' ? rentUsed : (() => {
-            const fallback = 0;
-            return fallback;
-          })();
+          // Determine monthly rent baseline for single-month enforcement
+          let rentBaseline = typeof rentUsed === 'number' ? rentUsed : 0;
+          if (!rentBaseline) {
+            try {
+              const prop = await Property.findById(propertyObjectId).select('rent').lean();
+              rentBaseline = Number((prop as any)?.rent || 0);
+            } catch {}
+          }
           const rentCents = Math.round((rentBaseline || 0) * 100);
           const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
           const remainingCents = rentCents - alreadyPaidCents;

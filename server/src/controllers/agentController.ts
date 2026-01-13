@@ -675,6 +675,8 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       advancePeriodStart,
       advancePeriodEnd,
     } = req.body;
+    // Accept idempotency key from header or body
+    const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
 
     // Validate required fields
     if (!propertyId || !tenantId || !amount || !paymentDate || !paymentMethod) {
@@ -694,6 +696,61 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     const tenant = await Tenant.findOne({ _id: new mongoose.Types.ObjectId(tenantId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
     if (!tenant) {
       return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
+    }
+
+    // Short-circuit for duplicate submissions using idempotency key
+    if (idempotencyKey) {
+      const existing = await Payment.findOne({
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        idempotencyKey: String(idempotencyKey)
+      }).lean();
+      if (existing) {
+        return res.status(200).json({
+          status: 'success',
+          data: existing,
+          message: 'Payment processed successfully'
+        });
+      }
+    }
+
+    // Prevent double-paying the same rental month; allow partials up to remaining
+    if ((paymentType || 'rental') === 'rental' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
+      const rent = (property as any)?.rent || 0;
+      if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+        if (rent > 0) {
+          const expectedAmount = rent * advanceMonthsPaid;
+          if (Number(amount) !== expectedAmount) {
+            return res.status(400).json({
+              status: 'error',
+              message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+            });
+          }
+        }
+      } else if (rent > 0) {
+        const periodFilter: any = {
+          companyId: new mongoose.Types.ObjectId(req.user.companyId),
+          paymentType: 'rental',
+          tenantId: new mongoose.Types.ObjectId(tenantId),
+          propertyId: new mongoose.Types.ObjectId(propertyId),
+          rentalPeriodYear,
+          rentalPeriodMonth,
+          status: { $in: ['pending', 'completed'] }
+        };
+        const [agg] = await Payment.aggregate([
+          { $match: periodFilter },
+          { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+        const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
+        const rentCents = Math.round((rent || 0) * 100);
+        const remainingCents = rentCents - alreadyPaidCents;
+        if (remainingCents <= 0) {
+          return res.status(409).json({ status: 'error', message: 'This month is fully paid.' });
+        }
+        const amountCents = Math.round((Number(amount) || 0) * 100);
+        if (amountCents > remainingCents) {
+          return res.status(400).json({ status: 'error', message: `Only ${(remainingCents/100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+        }
+      }
     }
 
     // Calculate commission based on property's commission percentage and company-specific splits
@@ -727,6 +784,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       advanceMonthsPaid: advanceMonthsPaid || 1,
       advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
       advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
+      idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined
     });
 
     await payment.save();

@@ -511,7 +511,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       if (formData.paymentType === 'rental' && remainingForPeriod !== null && !isAdvance) {
         const amount = Number(dataToSubmit.amount || 0);
         if (remainingForPeriod <= 0) {
-          setError('This month is fully paid. Change rental month.');
+          setError('This month is fully paid.');
           return;
         }
         if (amount > remainingForPeriod) {
@@ -884,10 +884,21 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               helperText={
                 depositOnly
                   ? 'Deposit-only mode: rent amount will be set to 0'
-                  : (isAdvance ? `Total for ${advanceMonths} months` : 'Enter the amount the client is actually paying')
+                  : (isAdvance
+                      ? `Total for ${advanceMonths} months`
+                      : `Enter the amount the client is actually paying${(formData.paymentType === 'rental' && remainingForPeriod !== null) ? ` · Remaining this month: $${Number(remainingForPeriod).toFixed(2)}` : ''}`)
               }
             />
           </Grid>
+          {formData.paymentType === 'rental' && !isAdvance && remainingForPeriod !== null && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color={remainingForPeriod <= 0 ? 'error' : 'textSecondary'}>
+                {remainingForPeriod <= 0
+                  ? 'This month is fully paid. Change rental month or record a different period.'
+                  : `Remaining for ${new Date(0, Number(formData.rentalPeriodMonth) - 1).toLocaleString('default', { month: 'long' })} ${formData.rentalPeriodYear}: $${Number(remainingForPeriod).toFixed(2)}`}
+              </Typography>
+            </Grid>
+          )}
 
           {formData.paymentType !== 'levy' && formData.paymentType !== 'municipal' && (
             <Grid item xs={12}>
@@ -1072,7 +1083,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               <Button
                 type="submit"
                 variant="contained"
-                disabled={loading}
+                disabled={
+                  loading ||
+                  (formData.paymentType === 'rental' && !isAdvance && remainingForPeriod !== null && remainingForPeriod <= 0)
+                }
                 startIcon={loading ? <CircularProgress size={20} /> : null}
               >
                 {loading ? 'Saving...' : 'Save Payment'}

@@ -499,6 +499,8 @@ const PaymentsPage: React.FC = () => {
       console.error('Error saving payment:', err);
       if (err.response?.status === 401) {
         redirectToLogin('Session expired. Please log in.');
+      } else if (err.response?.status === 409) {
+        setError('This month is fully paid.');
       } else {
         setError(err.response?.data?.message || 'Failed to save payment. Please try again.');
       }

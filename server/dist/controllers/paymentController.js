@@ -831,10 +831,15 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                         },
                         { $group: { _id: null, total: { $sum: '$amount' } } }
                     ]);
-                    const rentBaseline = typeof rentUsed === 'number' ? rentUsed : (() => {
-                        const fallback = 0;
-                        return fallback;
-                    })();
+                    // Determine monthly rent baseline for single-month enforcement
+                    let rentBaseline = typeof rentUsed === 'number' ? rentUsed : 0;
+                    if (!rentBaseline) {
+                        try {
+                            const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
+                            rentBaseline = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
+                        }
+                        catch (_e) { }
+                    }
                     const rentCents = Math.round((rentBaseline || 0) * 100);
                     const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
                     const remainingCents = rentCents - alreadyPaidCents;
@@ -941,7 +946,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_e) { }
+            catch (_f) { }
             console.error('Failed to record income in property account, enqueued for retry:', error);
         }
         // Notify the primary agent (and split participants) when a completed sale payment is created
@@ -974,7 +979,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             }
                         }
                     }
-                    catch (_f) { }
+                    catch (_g) { }
                 }
             }
         }
@@ -1011,7 +1016,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             }
                         }
                     }
-                    catch (_g) { }
+                    catch (_h) { }
                 }
             }
         }

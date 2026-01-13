@@ -3,6 +3,40 @@ import publicApi from '../api/publicApi';
 import { Payment, PaymentFormData, PaymentFilter } from '../types/payment';
 import { DatabaseService } from './databaseService';
 
+// Exported helper for generating stable idempotency keys across services
+export function buildPaymentIdempotencyKey(data: any, prefix: string = 'pay'): string {
+  try {
+    const companyId = (typeof window !== 'undefined' ? (localStorage.getItem('companyId') || '') : '') || '';
+    const base = JSON.stringify({
+      companyId,
+      paymentType: data?.paymentType || 'rental',
+      propertyType: data?.propertyType || 'residential',
+      propertyId: String(data?.propertyId || ''),
+      tenantId: String(data?.tenantId || ''),
+      agentId: String(data?.agentId || ''),
+      rentalPeriodYear: Number(data?.rentalPeriodYear || 0),
+      rentalPeriodMonth: Number(data?.rentalPeriodMonth || 0),
+      amount: Number(data?.amount || 0),
+      currency: data?.currency || 'USD',
+      saleMode: data?.saleMode || undefined,
+      // For sales, include sale identifiers if present
+      saleId: data?.saleId || undefined,
+      developmentUnitId: data?.developmentUnitId || undefined
+    });
+    // djb2 hash for short deterministic key
+    let hash = 5381;
+    for (let i = 0; i < base.length; i++) {
+      hash = ((hash << 5) + hash) + base.charCodeAt(i);
+      hash = hash & hash;
+    }
+    const suffix = Math.abs(hash).toString(36);
+    return `${prefix}:${suffix}`;
+  } catch {
+    // Fallback: random-ish key per attempt
+    return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 class PaymentService {
   private db: DatabaseService;
   private static instance: PaymentService;
@@ -21,36 +55,7 @@ class PaymentService {
   // Generate a stable idempotency key for payment submissions
   // Uses a deterministic hash of salient fields so user retries/double-clicks are deduped server-side
   private generateIdempotencyKey(data: any, prefix: string = 'pay'): string {
-    try {
-      const companyId = (typeof window !== 'undefined' ? (localStorage.getItem('companyId') || '') : '') || '';
-      const base = JSON.stringify({
-        companyId,
-        paymentType: data?.paymentType || 'rental',
-        propertyType: data?.propertyType || 'residential',
-        propertyId: String(data?.propertyId || ''),
-        tenantId: String(data?.tenantId || ''),
-        agentId: String(data?.agentId || ''),
-        rentalPeriodYear: Number(data?.rentalPeriodYear || 0),
-        rentalPeriodMonth: Number(data?.rentalPeriodMonth || 0),
-        amount: Number(data?.amount || 0),
-        currency: data?.currency || 'USD',
-        saleMode: data?.saleMode || undefined,
-        // For sales, include sale identifiers if present
-        saleId: data?.saleId || undefined,
-        developmentUnitId: data?.developmentUnitId || undefined
-      });
-      // djb2 hash for short deterministic key
-      let hash = 5381;
-      for (let i = 0; i < base.length; i++) {
-        hash = ((hash << 5) + hash) + base.charCodeAt(i);
-        hash = hash & hash;
-      }
-      const suffix = Math.abs(hash).toString(36);
-      return `${prefix}:${suffix}`;
-    } catch {
-      // Fallback: random-ish key per attempt
-      return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
-    }
+    return buildPaymentIdempotencyKey(data, prefix);
   }
 
   private async handleAuthError(error: any): Promise<never> {

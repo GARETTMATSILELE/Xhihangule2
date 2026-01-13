@@ -100,11 +100,12 @@ function getPaypalCredentials() {
     return { clientId, clientSecret, env };
 }
 function extractPaypalErrorMessage(error) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b;
     const status = (_a = error === null || error === void 0 ? void 0 : error.response) === null || _a === void 0 ? void 0 : _a.status;
     const data = (_b = error === null || error === void 0 ? void 0 : error.response) === null || _b === void 0 ? void 0 : _b.data;
     const errorCode = (data === null || data === void 0 ? void 0 : data.name) || (data === null || data === void 0 ? void 0 : data.error);
     const errorDescription = (data === null || data === void 0 ? void 0 : data.message) || (data === null || data === void 0 ? void 0 : data.error_description);
+    const debugId = data === null || data === void 0 ? void 0 : data.debug_id;
     if (errorCode === 'INVALID_CLIENT' || errorCode === 'invalid_client') {
         return 'PayPal authentication failed: invalid client credentials. Check PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET and PAYPAL_ENV.';
     }
@@ -114,11 +115,17 @@ function extractPaypalErrorMessage(error) {
     if (status === 404) {
         return 'PayPal API endpoint not found (404). Verify PAYPAL_API_BASE or PAYPAL_ENV (sandbox vs live).';
     }
-    if (((_d = (_c = data === null || data === void 0 ? void 0 : data.details) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.issue) && ((_f = (_e = data === null || data === void 0 ? void 0 : data.details) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.description)) {
-        return `PayPal error: ${data.details[0].issue} - ${data.details[0].description}`;
+    if (Array.isArray(data === null || data === void 0 ? void 0 : data.details) && data.details.length) {
+        const parts = data.details.map((d) => {
+            const issue = (d === null || d === void 0 ? void 0 : d.issue) || 'ISSUE';
+            const desc = (d === null || d === void 0 ? void 0 : d.description) ? ` - ${d.description}` : '';
+            return `${issue}${desc}`;
+        });
+        const suffix = debugId ? ` (debug_id: ${debugId})` : '';
+        return `PayPal error: ${parts.join('; ')}${suffix}`;
     }
     if (errorDescription)
-        return `PayPal error: ${errorDescription}`;
+        return `PayPal error: ${errorDescription}${debugId ? ` (debug_id: ${debugId})` : ''}`;
     if (typeof data === 'string')
         return data;
     return (error === null || error === void 0 ? void 0 : error.message) || 'Failed to communicate with PayPal';
@@ -166,7 +173,7 @@ function getServerPriceUSD(plan, cycle) {
 }
 function createOrder(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         try {
             const { plan, cycle } = req.body || {};
             if (!plan || !cycle || !['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan) || !['monthly', 'yearly'].includes(cycle)) {
@@ -211,6 +218,14 @@ function createOrder(req, res) {
                 const resolvedEnv = getPaypalEnv();
                 const usingLiveVars = Boolean(readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_SECRET'));
                 const usingSandboxVars = Boolean(readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET'));
+                const rawData = (_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.data;
+                let rawDataString;
+                try {
+                    rawDataString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData, null, 2);
+                }
+                catch (_j) {
+                    rawDataString = undefined;
+                }
                 // eslint-disable-next-line no-console
                 console.error('PayPal createOrder failed', {
                     apiBase: baseForLog,
@@ -219,19 +234,28 @@ function createOrder(req, res) {
                     hasClientSecret: Boolean(getPaypalCredentials().clientSecret),
                     usingLiveVars,
                     usingSandboxVars,
-                    status: (_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.status,
-                    data: (_b = err === null || err === void 0 ? void 0 : err.response) === null || _b === void 0 ? void 0 : _b.data
+                    status: (_b = err === null || err === void 0 ? void 0 : err.response) === null || _b === void 0 ? void 0 : _b.status,
+                    data: (_c = err === null || err === void 0 ? void 0 : err.response) === null || _c === void 0 ? void 0 : _c.data,
+                    debug_id: (_e = (_d = err === null || err === void 0 ? void 0 : err.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.debug_id,
+                    details: (_g = (_f = err === null || err === void 0 ? void 0 : err.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.details,
+                    raw: rawDataString
                 });
             }
-            catch (_c) { }
+            catch (_k) { }
             const message = extractPaypalErrorMessage(err);
+            const statusFromPaypal = (_h = err === null || err === void 0 ? void 0 : err.response) === null || _h === void 0 ? void 0 : _h.status;
+            // Forward meaningful PayPal client errors instead of masking as 500
+            if ([400, 401, 403, 404, 409, 422].includes(Number(statusFromPaypal))) {
+                return res.status(Number(statusFromPaypal)).json({ status: 'error', message });
+            }
+            // Unknown/transport errors -> internal error
             return res.status(500).json({ status: 'error', message });
         }
     });
 }
 function captureOrder(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         try {
             const { orderID } = req.body || {};
             if (!orderID) {
@@ -261,6 +285,14 @@ function captureOrder(req, res) {
                 const resolvedEnv = getPaypalEnv();
                 const usingLiveVars = Boolean(readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_SECRET'));
                 const usingSandboxVars = Boolean(readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET'));
+                const rawData = (_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.data;
+                let rawDataString;
+                try {
+                    rawDataString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData, null, 2);
+                }
+                catch (_j) {
+                    rawDataString = undefined;
+                }
                 // eslint-disable-next-line no-console
                 console.error('PayPal captureOrder failed', {
                     apiBase: baseForLog,
@@ -269,12 +301,19 @@ function captureOrder(req, res) {
                     hasClientSecret: Boolean(getPaypalCredentials().clientSecret),
                     usingLiveVars,
                     usingSandboxVars,
-                    status: (_a = err === null || err === void 0 ? void 0 : err.response) === null || _a === void 0 ? void 0 : _a.status,
-                    data: (_b = err === null || err === void 0 ? void 0 : err.response) === null || _b === void 0 ? void 0 : _b.data
+                    status: (_b = err === null || err === void 0 ? void 0 : err.response) === null || _b === void 0 ? void 0 : _b.status,
+                    data: (_c = err === null || err === void 0 ? void 0 : err.response) === null || _c === void 0 ? void 0 : _c.data,
+                    debug_id: (_e = (_d = err === null || err === void 0 ? void 0 : err.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.debug_id,
+                    details: (_g = (_f = err === null || err === void 0 ? void 0 : err.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.details,
+                    raw: rawDataString
                 });
             }
-            catch (_c) { }
+            catch (_k) { }
             const message = extractPaypalErrorMessage(err);
+            const statusFromPaypal = (_h = err === null || err === void 0 ? void 0 : err.response) === null || _h === void 0 ? void 0 : _h.status;
+            if ([400, 401, 403, 404, 409, 422].includes(Number(statusFromPaypal))) {
+                return res.status(Number(statusFromPaypal)).json({ status: 'error', message });
+            }
             return res.status(500).json({ status: 'error', message });
         }
     });

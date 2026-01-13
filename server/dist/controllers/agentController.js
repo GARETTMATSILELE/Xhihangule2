@@ -635,7 +635,7 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.updateAgentProperty = updateAgentProperty;
 // Create a new payment for the agent
 const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'Authentication required' });
@@ -648,6 +648,8 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             return res.status(403).json({ message: 'Only agents can create payments via this endpoint.' });
         }
         const { propertyId, tenantId, amount, paymentDate, paymentMethod, status, paymentType, propertyType, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
+        // Accept idempotency key from header or body
+        const idempotencyKey = req.headers['idempotency-key'] || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.idempotencyKey) || undefined;
         // Validate required fields
         if (!propertyId || !tenantId || !amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({
@@ -664,6 +666,60 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const tenant = yield Tenant_1.Tenant.findOne({ _id: new mongoose_1.default.Types.ObjectId(tenantId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         if (!tenant) {
             return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
+        }
+        // Short-circuit for duplicate submissions using idempotency key
+        if (idempotencyKey) {
+            const existing = yield Payment_1.Payment.findOne({
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                idempotencyKey: String(idempotencyKey)
+            }).lean();
+            if (existing) {
+                return res.status(200).json({
+                    status: 'success',
+                    data: existing,
+                    message: 'Payment processed successfully'
+                });
+            }
+        }
+        // Prevent double-paying the same rental month; allow partials up to remaining
+        if ((paymentType || 'rental') === 'rental' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
+            const rent = (property === null || property === void 0 ? void 0 : property.rent) || 0;
+            if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+                if (rent > 0) {
+                    const expectedAmount = rent * advanceMonthsPaid;
+                    if (Number(amount) !== expectedAmount) {
+                        return res.status(400).json({
+                            status: 'error',
+                            message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+                        });
+                    }
+                }
+            }
+            else if (rent > 0) {
+                const periodFilter = {
+                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                    paymentType: 'rental',
+                    tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
+                    propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                    rentalPeriodYear,
+                    rentalPeriodMonth,
+                    status: { $in: ['pending', 'completed'] }
+                };
+                const [agg] = yield Payment_1.Payment.aggregate([
+                    { $match: periodFilter },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]);
+                const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                const rentCents = Math.round((rent || 0) * 100);
+                const remainingCents = rentCents - alreadyPaidCents;
+                if (remainingCents <= 0) {
+                    return res.status(409).json({ status: 'error', message: 'This month is fully paid.' });
+                }
+                const amountCents = Math.round((Number(amount) || 0) * 100);
+                if (amountCents > remainingCents) {
+                    return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+                }
+            }
         }
         // Calculate commission based on property's commission percentage and company-specific splits
         const commissionPercentage = Number(property.commission || 0);
@@ -691,6 +747,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             advanceMonthsPaid: advanceMonthsPaid || 1,
             advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
             advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
+            idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined
         });
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
@@ -746,7 +803,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_c) { }
+            catch (_d) { }
             console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
         res.status(201).json({

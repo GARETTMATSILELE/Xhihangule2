@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
-import { Box, Container, Paper, Typography, Alert, CircularProgress, Button } from '@mui/material';
+import { Box, Container, Paper, Typography, Alert, CircularProgress, Button, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import api from '../../api/axios';
 
 type Plan = 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
@@ -28,11 +28,33 @@ const PaypalCheckout: React.FC = () => {
   const { plan, cycle } = useMemo(() => parseParams(location.search), [location.search]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [method, setMethod] = useState<'paypal' | 'paynow'>('paypal');
 
   const [fetchedClientId, setFetchedClientId] = useState<string | null>(null);
   const [fetchingId, setFetchingId] = useState<boolean>(false);
   const effectiveClientId = (fetchedClientId || '').trim();
   const amount = PRICES[plan][cycle].toFixed(2);
+
+  const handlePaynowCheckout = async () => {
+    try {
+      setLoading(true);
+      setMessage(null);
+      const reference = `SUBS-${plan}-${cycle}-${Date.now()}`;
+      const resp = await api.post('/paynow/web/create', {
+        amount: Number(amount),
+        reference
+      });
+      const redirectUrl = resp.data?.redirectUrl;
+      if (!redirectUrl) {
+        throw new Error(resp.data?.message || 'Paynow redirect URL not provided');
+      }
+      window.location.href = redirectUrl;
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to start Paynow checkout.' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -93,57 +115,85 @@ const PaypalCheckout: React.FC = () => {
           <Alert severity={message.type} sx={{ mb: 2 }}>{message.text}</Alert>
         )}
 
-        {!effectiveClientId ? (
-          fetchingId ? (
-            <Alert severity="info">Preparing PayPal checkout...</Alert>
+        <Box sx={{ mb: 2 }}>
+          <ToggleButtonGroup
+            value={method}
+            exclusive
+            onChange={(_, v) => v && setMethod(v)}
+            size="small"
+          >
+            <ToggleButton value="paypal">PayPal</ToggleButton>
+            <ToggleButton value="paynow">Paynow</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
+        {method === 'paypal' ? (
+          !effectiveClientId ? (
+            fetchingId ? (
+              <Alert severity="info">Preparing PayPal checkout...</Alert>
+            ) : (
+              <Alert severity="error">PayPal is not available. Contact support.</Alert>
+            )
           ) : (
-            <Alert severity="error">PayPal is not available. Contact support.</Alert>
+            <PayPalScriptProvider options={initialOptions}>
+              <Box sx={{ mb: 2 }}>
+                <PayPalButtons
+                  style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' }}
+                  createOrder={async () => {
+                    try {
+                      setLoading(true);
+                      const resp = await api.post('/paypal/create-order', { plan, cycle });
+                      return resp.data.id;
+                    } catch (e: any) {
+                      setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to create PayPal order.' });
+                      throw e;
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  onApprove={async (data: any) => {
+                    try {
+                      setLoading(true);
+                      const resp = await api.post('/paypal/capture-order', { orderID: data?.orderID });
+                      setMessage({ type: 'success', text: 'Congratulations! Payment successful. Redirecting to your dashboard...' });
+                      setTimeout(() => {
+                        navigate('/admin-dashboard');
+                      }, 1500);
+                      return resp.data;
+                    } catch (e: any) {
+                      setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to capture payment.' });
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  onError={(err: any) => {
+                    setMessage({ type: 'error', text: err?.message || 'PayPal error occurred.' });
+                    setLoading(false);
+                  }}
+                  onCancel={() => {
+                    setMessage({ type: 'info', text: 'Payment was cancelled.' });
+                    setLoading(false);
+                  }}
+                  disabled={loading}
+                  forceReRender={[amount, plan, cycle, effectiveClientId]}
+                />
+              </Box>
+            </PayPalScriptProvider>
           )
         ) : (
-          <PayPalScriptProvider options={initialOptions}>
-            <Box sx={{ mb: 2 }}>
-              <PayPalButtons
-                style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' }}
-                createOrder={async () => {
-                  try {
-                    setLoading(true);
-                    const resp = await api.post('/paypal/create-order', { plan, cycle });
-                    return resp.data.id;
-                  } catch (e: any) {
-                    setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to create PayPal order.' });
-                    throw e;
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-                onApprove={async (data: any) => {
-                  try {
-                    setLoading(true);
-                    const resp = await api.post('/paypal/capture-order', { orderID: data?.orderID });
-                    setMessage({ type: 'success', text: 'Congratulations! Payment successful. Redirecting to your dashboard...' });
-                    setTimeout(() => {
-                      navigate('/admin-dashboard');
-                    }, 1500);
-                    return resp.data;
-                  } catch (e: any) {
-                    setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to capture payment.' });
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-                onError={(err: any) => {
-                  setMessage({ type: 'error', text: err?.message || 'PayPal error occurred.' });
-                  setLoading(false);
-                }}
-                onCancel={() => {
-                  setMessage({ type: 'info', text: 'Payment was cancelled.' });
-                  setLoading(false);
-                }}
-                disabled={loading}
-                forceReRender={[amount, plan, cycle, effectiveClientId]}
-              />
-            </Box>
-          </PayPalScriptProvider>
+          <Box sx={{ mb: 2 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handlePaynowCheckout}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={20} /> : 'Pay with Paynow'}
+            </Button>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              You will be redirected to Paynow to complete your payment.
+            </Typography>
+          </Box>
         )}
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

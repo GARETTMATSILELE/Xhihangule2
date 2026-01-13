@@ -19,8 +19,10 @@ const getEffectiveUri = (envValue: string | undefined, localFallback: string): s
 const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
 const ACCOUNTING_DB_URI = getEffectiveUri(process.env.ACCOUNTING_DB_URI, LOCAL_ACCOUNTING_URI);
 
-export const mainConnection = mongoose.createConnection(MONGODB_URI);
-export const accountingConnection = mongoose.createConnection(ACCOUNTING_DB_URI);
+// Create connections without opening immediately to avoid crashing when DB is down.
+// We'll open these inside connectDatabase() within try/catch.
+export const mainConnection = mongoose.createConnection();
+export const accountingConnection = mongoose.createConnection();
 
 // Connection options
 const connectionOptions = {
@@ -111,8 +113,19 @@ export const connectDatabase = async (): Promise<void> => {
       circuitBreakerState.failureCount = 0;
     });
 
-    // Connect to MongoDB
+    // Connect default mongoose connection (primary)
     await mongoose.connect(MONGODB_URI, connectionOptions);
+    // Open named connections (non-fatal if they fail; they will retry on next start)
+    try {
+      await mainConnection.openUri(MONGODB_URI, connectionOptions as any);
+    } catch (e) {
+      console.error('Failed to open mainConnection (non-fatal):', (e as any)?.message || e);
+    }
+    try {
+      await accountingConnection.openUri(ACCOUNTING_DB_URI, connectionOptions as any);
+    } catch (e) {
+      console.error('Failed to open accountingConnection (non-fatal):', (e as any)?.message || e);
+    }
     
     // Create indexes only if they don't exist
     try {

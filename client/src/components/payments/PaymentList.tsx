@@ -251,14 +251,56 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
           rentAmount = Number((payment as any).rentUsed);
         }
         if (rentAmount == null || !Number.isFinite(rentAmount)) return null;
-        const rentPaidOnly = Number((payment as any).amount || 0);
-        return Math.max(0, rentAmount - rentPaidOnly);
+
+        // If this is an advance payment (covers multiple months), treat outstanding for this row as zero
+        const months = Number((payment as any).advanceMonthsPaid || 1);
+        if (months > 1) {
+          // The row represents multiple months; per-row outstanding not meaningful
+          return 0;
+        }
+
+        // Aggregate paid-to-date across all payments for same company property/tenant and rental period
+        const getId = (v: any): string => {
+          if (!v) return '';
+          if (typeof v === 'string') return v;
+          if (typeof v === 'object') {
+            if ((v as any)._id) return String((v as any)._id);
+            if ((v as any).id) return String((v as any).id);
+          }
+          return String(v);
+        };
+        const periodMonth = (payment as any).rentalPeriodMonth || (payment as any).levyPeriodMonth;
+        const periodYear = (payment as any).rentalPeriodYear || (payment as any).levyPeriodYear;
+        const propertyId = getId((payment as any).propertyId || (payment as any).property);
+        const tenantId = getId((payment as any).tenantId || (payment as any).tenant);
+        if (!propertyId || !tenantId || !periodMonth || !periodYear) {
+          // Fallback to per-row view if we cannot group reliably
+          const rentPaidOnly = Number((payment as any).amount || 0);
+          return Math.max(0, rentAmount - rentPaidOnly);
+        }
+        const normalizedType = (p: any) => String(p?.paymentType || p?.type || '').toLowerCase();
+        const isSamePeriod = (p: any) => {
+          const pMonth = (p as any).rentalPeriodMonth || (p as any).levyPeriodMonth;
+          const pYear = (p as any).rentalPeriodYear || (p as any).levyPeriodYear;
+          const pProp = getId((p as any).propertyId || (p as any).property);
+          const pTenant = getId((p as any).tenantId || (p as any).tenant);
+          return pMonth === periodMonth && pYear === periodYear && pProp === propertyId && pTenant === tenantId;
+        };
+        const paidToDate = (payments || [])
+          .filter((p: any) => normalizedType(p) === 'rental')
+          .filter(isSamePeriod)
+          .filter((p: any) => {
+            const st = String(p?.status || '').toLowerCase();
+            return st === 'completed' || st === 'pending' || st === 'paid' || st === 'success';
+          })
+          .reduce((sum: number, p: any) => sum + Number(p?.amount || 0), 0);
+        return Math.max(0, rentAmount - paidToDate);
       }
       return null;
     } catch {
       return null;
     }
-  }, [allSalesPayments, properties]);
+  }, [allSalesPayments, properties, payments]);
 
   const getTypeColor = useCallback((type: string | undefined) => {
     switch (type) {

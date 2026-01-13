@@ -156,6 +156,8 @@ const LevyPaymentSchema = new mongoose_1.Schema({
 });
 LevyPaymentSchema.index({ companyId: 1, paymentDate: -1 });
 LevyPaymentSchema.index({ propertyId: 1 });
+// Speed up per-month enforcement queries
+LevyPaymentSchema.index({ companyId: 1, propertyId: 1, levyPeriodYear: 1, levyPeriodMonth: 1 });
 // Enforce immutability of levy payment core fields on bulk updates; allow only status/payout/notes changes
 function isIllegalLevyUpdate(update) {
     const setOps = ['$set', '$unset'];

@@ -52,6 +52,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Lease_1 = require("../models/Lease");
 const Tenant_1 = require("../models/Tenant");
 const Company_1 = require("../models/Company");
+const Property_1 = require("../models/Property");
 const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -125,6 +126,60 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
         }
         catch (_d) { }
+        // Enforce monthly levy top-up-and-lock semantics
+        try {
+            // Load property to determine monthly levy baseline
+            const property = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(propertyId)).select('levyOrMunicipalType levyOrMunicipalAmount').lean();
+            const isLevyProperty = String((property === null || property === void 0 ? void 0 : property.levyOrMunicipalType) || '').toLowerCase() === 'levy';
+            const monthlyLevy = Number((property === null || property === void 0 ? void 0 : property.levyOrMunicipalAmount) || 0);
+            if (isLevyProperty && monthlyLevy > 0) {
+                const monthsToCover = Number(levyPaymentData.advanceMonthsPaid || 1);
+                // If paying multiple months in advance, require exact multiple and skip per-month remaining enforcement (mirrors rentals)
+                if (monthsToCover > 1) {
+                    const expectedCents = Math.round(monthlyLevy * 100) * monthsToCover;
+                    const amountCents = Math.round(Number(amount || 0) * 100);
+                    if (amountCents !== expectedCents) {
+                        return res.status(400).json({
+                            message: `Amount must equal levy (${monthlyLevy}) x months (${monthsToCover}) = ${(expectedCents / 100).toFixed(2)}`
+                        });
+                    }
+                }
+                else {
+                    // Single-month payment: allow partials up to remaining; lock once full
+                    const periodMonth = Number(levyPaymentData.levyPeriodMonth);
+                    const periodYear = Number(levyPaymentData.levyPeriodYear);
+                    if (Number.isFinite(periodMonth) && Number.isFinite(periodYear)) {
+                        const [agg] = yield LevyPayment_1.LevyPayment.aggregate([
+                            {
+                                $match: {
+                                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                                    propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                                    levyPeriodYear: periodYear,
+                                    levyPeriodMonth: periodMonth,
+                                    status: { $in: ['pending', 'completed'] }
+                                }
+                            },
+                            { $group: { _id: null, total: { $sum: '$amount' } } }
+                        ]);
+                        const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                        const levyCents = Math.round(monthlyLevy * 100);
+                        const remainingCents = levyCents - alreadyPaidCents;
+                        if (remainingCents <= 0) {
+                            return res.status(409).json({ message: 'This month is fully paid. Change levy month.' });
+                        }
+                        const amountCents = Math.round((Number(amount) || 0) * 100);
+                        if (amountCents > remainingCents) {
+                            return res.status(400).json({ message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+                        }
+                    }
+                }
+            }
+        }
+        catch (enforceErr) {
+            // Non-fatal: if enforcement check fails unexpectedly, surface a generic error
+            console.error('Levy enforcement check failed:', enforceErr);
+            return res.status(400).json({ message: 'Failed validating levy payment. Please try again.' });
+        }
         const levyPayment = new LevyPayment_1.LevyPayment(levyPaymentData);
         yield levyPayment.save();
         // Populate the created levy payment for response

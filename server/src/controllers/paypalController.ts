@@ -90,6 +90,7 @@ function extractPaypalErrorMessage(error: any): string {
 	const data = error?.response?.data;
 	const errorCode = data?.name || data?.error;
 	const errorDescription = data?.message || data?.error_description;
+	const debugId = data?.debug_id;
 
 	if (errorCode === 'INVALID_CLIENT' || errorCode === 'invalid_client') {
 		return 'PayPal authentication failed: invalid client credentials. Check PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET and PAYPAL_ENV.';
@@ -100,10 +101,16 @@ function extractPaypalErrorMessage(error: any): string {
 	if (status === 404) {
 		return 'PayPal API endpoint not found (404). Verify PAYPAL_API_BASE or PAYPAL_ENV (sandbox vs live).';
 	}
-	if (data?.details?.[0]?.issue && data?.details?.[0]?.description) {
-		return `PayPal error: ${data.details[0].issue} - ${data.details[0].description}`;
+	if (Array.isArray(data?.details) && data.details.length) {
+		const parts = data.details.map((d: any) => {
+			const issue = d?.issue || 'ISSUE';
+			const desc = d?.description ? ` - ${d.description}` : '';
+			return `${issue}${desc}`;
+		});
+		const suffix = debugId ? ` (debug_id: ${debugId})` : '';
+		return `PayPal error: ${parts.join('; ')}${suffix}`;
 	}
-	if (errorDescription) return `PayPal error: ${errorDescription}`;
+	if (errorDescription) return `PayPal error: ${errorDescription}${debugId ? ` (debug_id: ${debugId})` : ''}`;
 	if (typeof data === 'string') return data;
 	return error?.message || 'Failed to communicate with PayPal';
 }
@@ -204,6 +211,13 @@ export async function createOrder(req: Request, res: Response) {
 			const resolvedEnv = getPaypalEnv();
 			const usingLiveVars = Boolean(readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_SECRET'));
 			const usingSandboxVars = Boolean(readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET'));
+			const rawData = err?.response?.data;
+			let rawDataString: string | undefined;
+			try {
+				rawDataString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData, null, 2);
+			} catch {
+				rawDataString = undefined;
+			}
 			// eslint-disable-next-line no-console
 			console.error('PayPal createOrder failed', {
 				apiBase: baseForLog,
@@ -213,11 +227,20 @@ export async function createOrder(req: Request, res: Response) {
 				usingLiveVars,
 				usingSandboxVars,
 				status: err?.response?.status,
-				data: err?.response?.data
+				data: err?.response?.data,
+				debug_id: err?.response?.data?.debug_id,
+				details: err?.response?.data?.details,
+				raw: rawDataString
 			});
 		} catch {}
 
 		const message = extractPaypalErrorMessage(err);
+		const statusFromPaypal = err?.response?.status;
+		// Forward meaningful PayPal client errors instead of masking as 500
+		if ([400, 401, 403, 404, 409, 422].includes(Number(statusFromPaypal))) {
+			return res.status(Number(statusFromPaypal)).json({ status: 'error', message });
+		}
+		// Unknown/transport errors -> internal error
 		return res.status(500).json({ status: 'error', message });
 	}
 }
@@ -254,6 +277,13 @@ export async function captureOrder(req: Request, res: Response) {
 			const resolvedEnv = getPaypalEnv();
 			const usingLiveVars = Boolean(readPaypalVar('PAYPAL_LIVE_CLIENT_ID') || readPaypalVar('PAYPAL_LIVE_CLIENT_SECRET') || readPaypalVar('PAYPAL_CLIENT_ID') || readPaypalVar('PAYPAL_CLIENT_SECRET'));
 			const usingSandboxVars = Boolean(readPaypalVar('PAYPAL_SANDBOX_CLIENT_ID') || readPaypalVar('PAYPAL_SANDBOX_CLIENT_SECRET'));
+			const rawData = err?.response?.data;
+			let rawDataString: string | undefined;
+			try {
+				rawDataString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData, null, 2);
+			} catch {
+				rawDataString = undefined;
+			}
 			// eslint-disable-next-line no-console
 			console.error('PayPal captureOrder failed', {
 				apiBase: baseForLog,
@@ -263,11 +293,18 @@ export async function captureOrder(req: Request, res: Response) {
 				usingLiveVars,
 				usingSandboxVars,
 				status: err?.response?.status,
-				data: err?.response?.data
+				data: err?.response?.data,
+				debug_id: err?.response?.data?.debug_id,
+				details: err?.response?.data?.details,
+				raw: rawDataString
 			});
 		} catch {}
 
 		const message = extractPaypalErrorMessage(err);
+		const statusFromPaypal = err?.response?.status;
+		if ([400, 401, 403, 404, 409, 422].includes(Number(statusFromPaypal))) {
+			return res.status(Number(statusFromPaypal)).json({ status: 'error', message });
+		}
 		return res.status(500).json({ status: 'error', message });
 	}
 }

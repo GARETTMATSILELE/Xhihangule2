@@ -42,6 +42,7 @@ import maintenanceRoutes from './routes/maintenanceRoutes';
 import inspectionRoutes from './routes/inspectionRoutes';
 import salesFileRoutes from './routes/salesFileRoutes';
 import paypalRoutes from './routes/paypalRoutes';
+import paynowRoutes from './routes/paynowRoutes';
 import { connectDatabase, closeDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
@@ -318,6 +319,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/fiscal', fiscalRoutes);
 app.use('/api/paypal', paypalRoutes);
+app.use('/api/paynow', paynowRoutes);
 // Reports (public and authenticated)
 app.use('/api/public/reports', publicReportRoutes);
 app.use('/api/reports', reportRoutes);

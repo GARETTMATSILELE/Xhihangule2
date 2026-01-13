@@ -89,6 +89,7 @@ const maintenanceRoutes_1 = __importDefault(require("./routes/maintenanceRoutes"
 const inspectionRoutes_1 = __importDefault(require("./routes/inspectionRoutes"));
 const salesFileRoutes_1 = __importDefault(require("./routes/salesFileRoutes"));
 const paypalRoutes_1 = __importDefault(require("./routes/paypalRoutes"));
+const paynowRoutes_1 = __importDefault(require("./routes/paynowRoutes"));
 const database_1 = require("./config/database");
 const errorHandler_1 = require("./middleware/errorHandler");
 const http_1 = require("http");
@@ -347,6 +348,7 @@ app.use('/api/billing', billingRoutes_1.default);
 app.use('/api/subscription', subscriptionRoutes_1.default);
 app.use('/api/fiscal', fiscalRoutes_1.default);
 app.use('/api/paypal', paypalRoutes_1.default);
+app.use('/api/paynow', paynowRoutes_1.default);
 // Reports (public and authenticated)
 app.use('/api/public/reports', publicReportRoutes_1.default);
 app.use('/api/reports', reportRoutes_1.default);
