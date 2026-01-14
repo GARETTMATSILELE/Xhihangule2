@@ -3,6 +3,7 @@ import { useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Box, CircularProgress, Typography, Alert, Button } from '@mui/material';
 import { getDashboardPath } from '../utils/registrationUtils';
+import { Helmet } from 'react-helmet-async';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -70,7 +71,14 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
   }
 
   console.log('ProtectedRoute: Access granted');
-  return <>{children}</>;
+  return (
+    <>
+      <Helmet>
+        <meta name="robots" content="noindex,nofollow" />
+      </Helmet>
+      {children}
+    </>
+  );
 };
 
 export default ProtectedRoute; 

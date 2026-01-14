@@ -446,10 +446,9 @@ export const requestPasswordReset = async (req: Request, res: Response, next: Ne
     await user.save();
 
     // Always use the MANTIS base URL for password reset links
+    // Prefer explicit brand var; do NOT fall back to generic APP_BASE_URL (to avoid XHI domain)
     const baseUrl =
-      getEnvByBrand('APP_BASE_URL', 'MANTIS') ||
       process.env.APP_BASE_URL_MANTIS ||
-      process.env.APP_BASE_URL ||
       'https://www.mantisafrica.com';
     const resetUrl = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(user.email)}`;
 

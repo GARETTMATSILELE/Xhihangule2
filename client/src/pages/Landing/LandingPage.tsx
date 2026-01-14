@@ -16,6 +16,7 @@ import {
   Assessment as AssessmentIcon,
 } from '@mui/icons-material';
 import { getDashboardPath, UserRole } from '../../utils/registrationUtils';
+import { Seo } from '../../components/SEO/Seo';
 
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -26,6 +27,10 @@ const LandingPage: React.FC = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+      <Seo
+        title="Property Management Software | Mantis Africa"
+        description="Streamline property management for admins, owners, agents, and accountants with Mantis Africa’s all‑in‑one software."
+      />
       <Container maxWidth="lg">
         <Box sx={{ py: 8 }}>
           <Typography variant="h2" component="h1" gutterBottom align="center">

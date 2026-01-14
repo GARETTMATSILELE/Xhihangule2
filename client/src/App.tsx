@@ -9,6 +9,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/ProtectedRoute';
 import { NotificationProvider } from './components/Layout/Header';
+import Canonical from './components/SEO/Canonical';
 // Eagerly load API module to avoid lazy chunk timeouts for shared api chunk
 import './api';
 import { lazyWithRetry } from './lib/lazyWithRetry';
@@ -105,6 +106,7 @@ const App: React.FC = () => {
         <AuthProvider>
           <NotificationProvider>
             <Suspense fallback={<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}><CircularProgress /></Box>}>
+              <Canonical />
               <Routes>
               {/* Public Routes - No PropertyProvider or CompanyProvider */}
               <Route path="/" element={<LandingPage />} />
