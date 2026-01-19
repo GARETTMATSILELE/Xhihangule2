@@ -103,6 +103,7 @@ const propertyAccountService_2 = require("./services/propertyAccountService");
 const systemAdminRoutes_1 = __importDefault(require("./routes/systemAdminRoutes"));
 // Removed legacy bootstrap imports
 const User_1 = require("./models/User");
+const emailService_1 = require("./services/emailService");
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
@@ -111,6 +112,31 @@ dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
 // Trust proxy (so req.protocol reflects https behind reverse proxies)
 app.set('trust proxy', 1);
+// Perform a one-time SMTP verification at startup (non-blocking)
+(() => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const emailStatus = (0, emailService_1.getEmailConfigStatus)();
+        if (emailStatus.smtpConfigured) {
+            const v = yield (0, emailService_1.verifySmtpConnection)();
+            if (v.verified) {
+                console.log('SMTP verified', { host: emailStatus.smtp.host, port: emailStatus.smtp.port });
+            }
+            else {
+                console.error('SMTP verification failed', {
+                    host: emailStatus.smtp.host,
+                    port: emailStatus.smtp.port,
+                    error: v.error
+                });
+            }
+        }
+        else {
+            console.warn('SMTP not configured; emails will use API providers if set or be logged.');
+        }
+    }
+    catch (e) {
+        console.warn('SMTP verification check failed:', (e === null || e === void 0 ? void 0 : e.message) || String(e));
+    }
+}))().catch(() => { });
 // Fail fast on missing critical environment in production
 if (process.env.NODE_ENV === 'production') {
     const missing = [];

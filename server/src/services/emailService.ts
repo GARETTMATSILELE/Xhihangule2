@@ -115,6 +115,20 @@ export function getEmailConfigStatus(): {
   };
 }
 
+export async function verifySmtpConnection(): Promise<{ configured: boolean; verified: boolean; error?: string }> {
+  const tx = getTransporter();
+  if (!tx) {
+    return { configured: false, verified: false, error: 'SMTP not configured or nodemailer unavailable' };
+  }
+  try {
+    await tx.verify();
+    return { configured: true, verified: true };
+  } catch (err: any) {
+    const message = (err && (err.message || String(err))) || 'Unknown error';
+    return { configured: true, verified: false, error: message };
+  }
+}
+
 async function sendViaMailtrapApi(params: SendMailParams): Promise<boolean> {
   const token = getEnv('MAILTRAP_API_TOKEN');
   if (!token) return false;

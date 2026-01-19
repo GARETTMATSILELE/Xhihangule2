@@ -6,6 +6,7 @@
   "scripts": {
     "start": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd server && npm start",
+    "server:prod": "cd server && npm run start:prod",
     "client": "cd client && npm start",
     "build": "concurrently \"npm run build:server\" \"npm run build:client\"",
     "build:server": "cd server && npm run build",

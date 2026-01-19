@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getEmailConfigStatus = getEmailConfigStatus;
+exports.verifySmtpConnection = verifySmtpConnection;
 exports.sendMail = sendMail;
 // Optional mailer: avoid hard dependency on nodemailer at build time
 // If nodemailer isn't installed or configured, we fallback to console logging
@@ -103,6 +104,22 @@ function getEmailConfigStatus() {
         anyProviderConfigured: smtpConfigured || resend || sendgrid || mailgun || mailtrapApi,
         strict
     };
+}
+function verifySmtpConnection() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const tx = getTransporter();
+        if (!tx) {
+            return { configured: false, verified: false, error: 'SMTP not configured or nodemailer unavailable' };
+        }
+        try {
+            yield tx.verify();
+            return { configured: true, verified: true };
+        }
+        catch (err) {
+            const message = (err && (err.message || String(err))) || 'Unknown error';
+            return { configured: true, verified: false, error: message };
+        }
+    });
 }
 function sendViaMailtrapApi(params) {
     return __awaiter(this, void 0, void 0, function* () {
