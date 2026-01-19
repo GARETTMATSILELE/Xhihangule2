@@ -7,6 +7,7 @@ import StatusPage from './StatusPage';
 import BackupsMaintenancePage from './BackupsMaintenancePage';
 import UsersPage from './UsersPage';
 import SubscriptionManagementPage from './SubscriptionManagementPage';
+import CashSubscriptionsPage from './CashSubscriptionsPage';
 
 const SystemAdminDashboard: React.FC = () => {
   return (
@@ -18,6 +19,7 @@ const SystemAdminDashboard: React.FC = () => {
           <Route path="backups-maintenance" element={<BackupsMaintenancePage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="subscriptions" element={<SubscriptionManagementPage />} />
+          <Route path="cash-subscriptions" element={<CashSubscriptionsPage />} />
           <Route path="*" element={<Navigate to="/system-admin" replace />} />
         </Route>
       </Routes>

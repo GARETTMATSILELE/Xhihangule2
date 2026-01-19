@@ -36,7 +36,7 @@ SMTP_HOST=sandbox.smtp.mailtrap.io
 SMTP_PORT=587
 SMTP_USER=YOUR_MAILTRAP_USERNAME
 SMTP_PASS=YOUR_MAILTRAP_PASSWORD
-SMTP_FROM="Xhihangule <no-reply@xhihangule.local>"
+SMTP_FROM="Mantis Africa <no-reply@mantisafrica.local>"
 ```
 
 Note: This project reads `SMTP_*` variables in `server/src/services/emailService.ts` and uses Nodemailer to send email via Mailtrap.

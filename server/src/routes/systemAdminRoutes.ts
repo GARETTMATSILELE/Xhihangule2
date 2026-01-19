@@ -11,7 +11,11 @@ import {
   ledgerMaintenance,
   fullSync,
   listCompanySubscriptions,
-  manualRenewSubscription
+  manualRenewSubscription,
+  createCashVoucher,
+  listCashVouchers,
+  listSubscriptionBillingPayments,
+  getSubscriptionPaymentReceipt
 } from '../controllers/systemAdminController';
 
 const router = express.Router();
@@ -34,6 +38,10 @@ router.post('/sync/full', fullSync);
 // Subscriptions management
 router.get('/subscriptions/companies', listCompanySubscriptions);
 router.post('/subscriptions/renew', manualRenewSubscription);
+router.post('/subscriptions/vouchers', createCashVoucher);
+router.get('/subscriptions/vouchers', listCashVouchers);
+router.get('/subscriptions/billing-payments', listSubscriptionBillingPayments);
+router.get('/subscriptions/billing-payments/:id/receipt', getSubscriptionPaymentReceipt);
 
 export default router;
 

@@ -1,7 +1,6 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
-import { Box, Container, Paper, Typography, Alert, CircularProgress, Button, ToggleButtonGroup, ToggleButton } from '@mui/material';
+import { Box, Container, Paper, Typography, Alert, CircularProgress, Button, ToggleButtonGroup, ToggleButton, TextField, Stack } from '@mui/material';
 import api from '../../api/axios';
 
 type Plan = 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
@@ -28,11 +27,10 @@ const PaypalCheckout: React.FC = () => {
   const { plan, cycle } = useMemo(() => parseParams(location.search), [location.search]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [method, setMethod] = useState<'paypal' | 'paynow'>('paypal');
+  const [method, setMethod] = useState<'paynow' | 'cash'>('paynow');
+  const [cashCode, setCashCode] = useState('');
+  const [cashPin, setCashPin] = useState('');
 
-  const [fetchedClientId, setFetchedClientId] = useState<string | null>(null);
-  const [fetchingId, setFetchingId] = useState<boolean>(false);
-  const effectiveClientId = (fetchedClientId || '').trim();
   const amount = PRICES[plan][cycle].toFixed(2);
 
   const handlePaynowCheckout = async () => {
@@ -55,47 +53,6 @@ const PaypalCheckout: React.FC = () => {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    // Fetch exactly once on mount; skip if we've already set fetchedClientId (even to '')
-    if (fetchedClientId !== null) return;
-    setFetchingId(true);
-    (async () => {
-      try {
-        const resp = await api.get('/paypal/client-config', { timeout: 7000 });
-        if (!cancelled) {
-          const serverId = resp.data?.clientId || '';
-          setFetchedClientId(serverId);
-          if (!serverId) {
-            setMessage({ type: 'error', text: 'PayPal client ID not available from server.' });
-          }
-        }
-      } catch (e: any) {
-        if (!cancelled) {
-          const msg =
-            e?.code === 'ECONNABORTED'
-              ? 'Timed out contacting server for PayPal configuration.'
-              : (e?.response?.data?.message || e?.message || 'Failed to load PayPal configuration.');
-          setMessage({ type: 'error', text: msg });
-          setFetchedClientId(''); // mark as attempted to prevent infinite retries
-        }
-      } finally {
-        if (!cancelled) setFetchingId(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fetchedClientId]);
-
-  const initialOptions = useMemo(
-    () => ({
-      clientId: effectiveClientId,
-      currency: 'USD',
-      intent: 'capture',
-      components: 'buttons'
-    }),
-    [effectiveClientId]
-  );
 
   return (
     <Container maxWidth="sm" sx={{ py: 6 }}>
@@ -122,65 +79,12 @@ const PaypalCheckout: React.FC = () => {
             onChange={(_, v) => v && setMethod(v)}
             size="small"
           >
-            <ToggleButton value="paypal">PayPal</ToggleButton>
             <ToggleButton value="paynow">Paynow</ToggleButton>
+            <ToggleButton value="cash">Cash Code</ToggleButton>
           </ToggleButtonGroup>
         </Box>
 
-        {method === 'paypal' ? (
-          !effectiveClientId ? (
-            fetchingId ? (
-              <Alert severity="info">Preparing PayPal checkout...</Alert>
-            ) : (
-              <Alert severity="error">PayPal is not available. Contact support.</Alert>
-            )
-          ) : (
-            <PayPalScriptProvider options={initialOptions}>
-              <Box sx={{ mb: 2 }}>
-                <PayPalButtons
-                  style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' }}
-                  createOrder={async () => {
-                    try {
-                      setLoading(true);
-                      const resp = await api.post('/paypal/create-order', { plan, cycle });
-                      return resp.data.id;
-                    } catch (e: any) {
-                      setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to create PayPal order.' });
-                      throw e;
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  onApprove={async (data: any) => {
-                    try {
-                      setLoading(true);
-                      const resp = await api.post('/paypal/capture-order', { orderID: data?.orderID });
-                      setMessage({ type: 'success', text: 'Congratulations! Payment successful. Redirecting to your dashboard...' });
-                      setTimeout(() => {
-                        navigate('/admin-dashboard');
-                      }, 1500);
-                      return resp.data;
-                    } catch (e: any) {
-                      setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to capture payment.' });
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  onError={(err: any) => {
-                    setMessage({ type: 'error', text: err?.message || 'PayPal error occurred.' });
-                    setLoading(false);
-                  }}
-                  onCancel={() => {
-                    setMessage({ type: 'info', text: 'Payment was cancelled.' });
-                    setLoading(false);
-                  }}
-                  disabled={loading}
-                  forceReRender={[amount, plan, cycle, effectiveClientId]}
-                />
-              </Box>
-            </PayPalScriptProvider>
-          )
-        ) : (
+        {method === 'paynow' ? (
           <Box sx={{ mb: 2 }}>
             <Button
               variant="contained"
@@ -188,10 +92,56 @@ const PaypalCheckout: React.FC = () => {
               onClick={handlePaynowCheckout}
               disabled={loading}
             >
-              {loading ? <CircularProgress size={20} /> : 'Pay with Paynow'}
+              {loading ? <CircularProgress size={20} /> : 'Pay with Paynow (Visa/Mastercard)'}
             </Button>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              You will be redirected to Paynow to complete your payment.
+              You will be redirected to Paynow to complete your payment (Visa/Mastercard, mobile wallets).
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ mb: 2 }}>
+            <Stack spacing={1.5} sx={{ mb: 1 }}>
+              <TextField
+                label="Cash Code"
+                value={cashCode}
+                onChange={(e) => setCashCode(e.target.value.toUpperCase())}
+                size="small"
+                placeholder="e.g. CASH-ABCD-1234"
+                disabled={loading}
+              />
+              <TextField
+                label="PIN"
+                value={cashPin}
+                onChange={(e) => setCashPin(e.target.value)}
+                size="small"
+                type="password"
+                placeholder="6-digit PIN"
+                disabled={loading}
+              />
+            </Stack>
+            <Button
+              variant="contained"
+              color="success"
+              disabled={loading || !cashCode || !cashPin}
+              onClick={async () => {
+                try {
+                  setLoading(true);
+                  setMessage(null);
+                  const resp = await api.post('/billing/vouchers/redeem', { code: cashCode.trim(), pin: cashPin.trim() });
+                  setMessage({ type: 'success', text: 'Cash code accepted. Your subscription has been updated. Redirecting…' });
+                  setTimeout(() => navigate('/admin-dashboard'), 1200);
+                  return resp.data;
+                } catch (e: any) {
+                  setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to redeem code.' });
+                } finally {
+                  setLoading(false);
+                }
+              }}
+            >
+              {loading ? <CircularProgress size={20} /> : 'Redeem & Activate'}
+            </Button>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Enter the code and PIN provided by the system administrator after cash payment.
             </Typography>
           </Box>
         )}

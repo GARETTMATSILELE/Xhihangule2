@@ -88,8 +88,8 @@ const developmentUnitRoutes_1 = __importDefault(require("./routes/developmentUni
 const maintenanceRoutes_1 = __importDefault(require("./routes/maintenanceRoutes"));
 const inspectionRoutes_1 = __importDefault(require("./routes/inspectionRoutes"));
 const salesFileRoutes_1 = __importDefault(require("./routes/salesFileRoutes"));
-const paypalRoutes_1 = __importDefault(require("./routes/paypalRoutes"));
 const paynowRoutes_1 = __importDefault(require("./routes/paynowRoutes"));
+const diagnosticsRoutes_1 = __importDefault(require("./routes/diagnosticsRoutes"));
 const database_1 = require("./config/database");
 const errorHandler_1 = require("./middleware/errorHandler");
 const http_1 = require("http");
@@ -101,9 +101,8 @@ const propertyAccountService_1 = require("./services/propertyAccountService");
 const SystemSetting_1 = __importDefault(require("./models/SystemSetting"));
 const propertyAccountService_2 = require("./services/propertyAccountService");
 const systemAdminRoutes_1 = __importDefault(require("./routes/systemAdminRoutes"));
+// Removed legacy bootstrap imports
 const User_1 = require("./models/User");
-const Company_1 = require("./models/Company");
-const bcryptjs_1 = __importDefault(require("bcryptjs"));
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
@@ -347,8 +346,12 @@ app.use('/api/sync', syncRoutes_1.default);
 app.use('/api/billing', billingRoutes_1.default);
 app.use('/api/subscription', subscriptionRoutes_1.default);
 app.use('/api/fiscal', fiscalRoutes_1.default);
-app.use('/api/paypal', paypalRoutes_1.default);
 app.use('/api/paynow', paynowRoutes_1.default);
+// Diagnostics (exposed in non-production by default, or when explicitly enabled)
+const exposeDiagnostics = (String(process.env.EXPOSE_DIAGNOSTICS || '').toLowerCase() === 'true') || process.env.NODE_ENV !== 'production';
+if (exposeDiagnostics) {
+    app.use('/api/diagnostics', diagnosticsRoutes_1.default);
+}
 // Reports (public and authenticated)
 app.use('/api/public/reports', publicReportRoutes_1.default);
 app.use('/api/reports', reportRoutes_1.default);
@@ -435,77 +438,71 @@ httpServer.listen(PORT, () => {
     .then(() => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Connected to MongoDB');
     try {
-        // Bootstrap hardcoded System Admin and Company (idempotent)
+        // Ensure a hard-coded System Admin user exists (requested)
+        // Creates or updates the user with email/password and system_admin role.
+        // Runs in all environments; idempotent.
         try {
-            const hardEmail = 'garet.matsi@gmail.com';
-            const hardPassword = 'Mabhadhi@1908';
-            const hardCompanyName = 'Xhihangule Pvt Ltd';
-            // Ensure system admin user exists first (required for Company.ownerId)
-            let userDoc = yield User_1.User.findOne({ email: hardEmail });
-            const hashed = yield bcryptjs_1.default.hash(hardPassword, 10);
-            if (!userDoc) {
-                userDoc = yield User_1.User.create({
-                    email: hardEmail,
-                    password: hashed,
-                    firstName: 'System',
-                    lastName: 'Administrator',
+            const targetEmail = 'garet.matsi@gmail.com';
+            const targetPassword = 'Moreen@1981';
+            const firstName = 'System';
+            const lastName = 'Admin';
+            let user = yield User_1.User.findOne({ email: targetEmail }).maxTimeMS(5000);
+            if (!user) {
+                user = new User_1.User({
+                    email: targetEmail,
+                    password: targetPassword,
+                    firstName,
+                    lastName,
                     role: 'admin',
                     roles: ['admin', 'system_admin'],
                     isActive: true
                 });
-                console.log('Created hardcoded system admin user:', hardEmail);
+                yield user.save();
+                console.log('Hardcoded system admin user created:', { email: targetEmail, id: user._id });
             }
             else {
-                // Ensure system_admin + admin roles; reset password to the hardcoded one as specified
-                const roles = Array.isArray(userDoc.roles) ? userDoc.roles : [userDoc.role];
-                const needsSystemAdmin = !roles.includes('system_admin');
-                const needsAdmin = !roles.includes('admin') && userDoc.role !== 'admin';
-                const updates = {};
-                if (needsSystemAdmin || needsAdmin) {
-                    const newRoles = Array.from(new Set([...(roles || []), 'system_admin', 'admin']));
-                    updates.roles = newRoles;
-                    if (userDoc.role !== 'admin') {
-                        updates.role = 'admin';
+                let changed = false;
+                // Ensure primary role is admin for compatibility
+                if (user.role !== 'admin') {
+                    user.role = 'admin';
+                    changed = true;
+                }
+                // Ensure roles include system_admin
+                const rolesArr = Array.isArray(user.roles) ? user.roles : [];
+                if (!rolesArr.includes('system_admin')) {
+                    user.roles = Array.from(new Set([...(rolesArr || []), 'admin', 'system_admin']));
+                    changed = true;
+                }
+                // Ensure account is active
+                if (!user.isActive) {
+                    user.isActive = true;
+                    changed = true;
+                }
+                // If password differs, reset to requested one
+                try {
+                    const matches = yield user.comparePassword(targetPassword);
+                    if (!matches) {
+                        user.password = targetPassword;
+                        changed = true;
                     }
                 }
-                updates.password = hashed;
-                if (Object.keys(updates).length > 0) {
-                    yield User_1.User.updateOne({ _id: userDoc._id }, { $set: updates });
-                    console.log('Updated hardcoded system admin user configuration');
+                catch (_a) {
+                    user.password = targetPassword;
+                    changed = true;
+                }
+                if (changed) {
+                    yield user.save();
+                    console.log('Hardcoded system admin user updated:', { email: targetEmail, id: user._id });
+                }
+                else {
+                    console.log('Hardcoded system admin user already up to date:', { email: targetEmail, id: user._id });
                 }
             }
-            // Ensure company exists with all required fields (link to system admin as owner)
-            let companyDoc = yield Company_1.Company.findOne({ name: hardCompanyName });
-            if (!companyDoc) {
-                companyDoc = yield Company_1.Company.create({
-                    name: hardCompanyName,
-                    address: 'Bootstrap Address',
-                    phone: '+0000000000',
-                    email: 'info@xhihangule.local',
-                    website: 'https://xhihangule.local',
-                    registrationNumber: 'XHI-BOOTSTRAP-0001',
-                    tinNumber: 'TIN-BOOTSTRAP-0001',
-                    ownerId: userDoc._id,
-                    isActive: true,
-                    subscriptionStatus: 'trial',
-                    plan: 'ENTERPRISE',
-                    featureFlags: {
-                        commissionEnabled: true,
-                        agentAccounts: true,
-                        propertyAccounts: true
-                    }
-                });
-                console.log('Created hardcoded company:', hardCompanyName);
-            }
-            // Link user to company if not already linked
-            if (!userDoc.companyId || String(userDoc.companyId) !== String(companyDoc._id)) {
-                yield User_1.User.updateOne({ _id: userDoc._id }, { $set: { companyId: companyDoc._id } });
-                console.log('Linked system admin user to company');
-            }
         }
-        catch (bootErr) {
-            console.error('Bootstrap system admin failed (non-fatal):', bootErr);
+        catch (seedErr) {
+            console.error('Failed to ensure hardcoded system admin user:', seedErr);
         }
+        // Removed legacy bootstrap block referencing Xhihangule
         // Ensure critical property account indexes are in place at startup
         try {
             yield (0, propertyAccountService_1.initializePropertyAccountIndexes)();

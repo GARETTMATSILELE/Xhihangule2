@@ -1,5 +1,5 @@
 import express from 'express';
-import { login, signup, getCurrentUser, refreshToken, requestPasswordReset, resetPassword } from '../controllers/authController';
+import { login, signup, getCurrentUser, refreshToken, requestPasswordReset, resetPassword, logout } from '../controllers/authController';
 import { auth } from '../middleware/auth';
 
 const router = express.Router();
@@ -11,22 +11,8 @@ router.post('/refresh-token', refreshToken);
 router.post('/forgot-password', requestPasswordReset);
 router.post('/reset-password', resetPassword);
 
-// Logout route (clear refresh cookies)
-router.post('/logout', (_req, res) => {
-  const prod = process.env.NODE_ENV === 'production';
-  const base: any = {
-    path: '/',
-    sameSite: prod ? 'strict' : 'lax',
-    secure: prod,
-    ...(prod ? { domain: '.xhihangule.com' } : {})
-  };
-  try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
-  try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
-  res.json({
-    status: 'success',
-    message: 'Logged out successfully'
-  });
-});
+// Logout route
+router.post('/logout', logout);
 
 // Test endpoint to verify authentication
 router.get('/test', (req, res) => {

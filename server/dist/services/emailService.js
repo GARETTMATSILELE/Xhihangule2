@@ -9,8 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getActiveBrandKey = getActiveBrandKey;
-exports.getEnvByBrand = getEnvByBrand;
+exports.getEmailConfigStatus = getEmailConfigStatus;
 exports.sendMail = sendMail;
 // Optional mailer: avoid hard dependency on nodemailer at build time
 // If nodemailer isn't installed or configured, we fallback to console logging
@@ -22,29 +21,23 @@ try {
 catch (_a) {
     nodemailer = null;
 }
+const errorHandler_1 = require("../middleware/errorHandler");
 let transporter = null;
-function getActiveBrandKey() {
-    const forced = (process.env.BRAND_ACTIVE || '').toUpperCase();
-    if (forced === 'MANTIS')
-        return 'MANTIS';
-    if (forced === 'XHI')
-        return 'XHI';
-    // Default to MANTIS when not explicitly set
-    return 'MANTIS';
-}
-function getEnvByBrand(base, brand) {
-    const byBrand = process.env[`${base}_${brand}`];
-    return byBrand !== undefined ? byBrand : process.env[base];
+// Single-brand (Mantis) environment reader. Prefers unsuffixed, then *_MANTIS.
+function getEnv(base) {
+    const direct = process.env[base];
+    if (direct !== undefined)
+        return direct;
+    return process.env[`${base}_MANTIS`];
 }
 function getTransporter() {
     if (transporter !== null)
         return transporter;
-    const brand = getActiveBrandKey();
-    const host = getEnvByBrand('SMTP_HOST', brand);
-    const portStr = getEnvByBrand('SMTP_PORT', brand);
+    const host = getEnv('SMTP_HOST');
+    const portStr = getEnv('SMTP_PORT');
     const port = portStr ? Number(portStr) : undefined;
-    const user = getEnvByBrand('SMTP_USER', brand);
-    const pass = getEnvByBrand('SMTP_PASS', brand);
+    const user = getEnv('SMTP_USER');
+    const pass = getEnv('SMTP_PASS');
     if (!host || !port || !user || !pass) {
         // No SMTP configured; fall back to console logging
         return null;
@@ -61,16 +54,15 @@ function getTransporter() {
     });
     return transporter;
 }
-function parseFromHeaderForBrand() {
-    const brand = getActiveBrandKey();
+function parseFromHeader() {
     // Prefer explicit Mailtrap FROM for brand
-    const explicitEmail = getEnvByBrand('MAILTRAP_FROM_EMAIL', brand);
-    const explicitName = getEnvByBrand('MAILTRAP_FROM_NAME', brand);
+    const explicitEmail = getEnv('MAILTRAP_FROM_EMAIL');
+    const explicitName = getEnv('MAILTRAP_FROM_NAME');
     if (explicitEmail) {
         return { email: explicitEmail, name: explicitName || undefined };
     }
     // Parse brand-specific SMTP_FROM like "Name <email@domain>"
-    const fromEnv = getEnvByBrand('SMTP_FROM', brand) || '';
+    const fromEnv = getEnv('SMTP_FROM') || '';
     const match = fromEnv.match(/^(.*)<(.+)>/);
     if (match) {
         const name = String(match[1] || '').trim().replace(/^"|"$/g, '');
@@ -79,20 +71,45 @@ function parseFromHeaderForBrand() {
             return { email, name: name || undefined };
     }
     // Fallbacks
-    const possibleEmail = getEnvByBrand('SMTP_USER', brand);
+    const possibleEmail = getEnv('SMTP_USER');
     if (possibleEmail && possibleEmail.includes('@')) {
         return { email: possibleEmail, name: undefined };
     }
     // Mailtrap demo sender as last resort (works for Send API demos)
     return { email: 'hello@demomailtrap.co', name: 'Mailtrap Test' };
 }
+function getEmailConfigStatus() {
+    const smtpHost = getEnv('SMTP_HOST');
+    const smtpPort = getEnv('SMTP_PORT');
+    const smtpUser = getEnv('SMTP_USER');
+    const smtpPass = getEnv('SMTP_PASS');
+    const smtpConfigured = Boolean(smtpHost && smtpPort && smtpUser && smtpPass);
+    const resend = Boolean(getEnv('RESEND_API_KEY'));
+    const sendgrid = Boolean(getEnv('SENDGRID_API_KEY'));
+    const mailgun = Boolean(getEnv('MAILGUN_API_KEY') && getEnv('MAILGUN_DOMAIN'));
+    const mailtrapApi = Boolean(getEnv('MAILTRAP_API_TOKEN'));
+    const fromParsed = parseFromHeader();
+    const strict = String(process.env.EMAIL_STRICT || process.env.EMAIL_REQUIRE_PROVIDER || '').toLowerCase() === 'true';
+    return {
+        brand: 'MANTIS',
+        from: fromParsed,
+        smtpConfigured,
+        smtp: {
+            host: smtpHost || undefined,
+            port: smtpPort ? Number(smtpPort) : undefined,
+            user: smtpUser || undefined
+        },
+        apiProvidersConfigured: { resend, sendgrid, mailgun, mailtrapApi },
+        anyProviderConfigured: smtpConfigured || resend || sendgrid || mailgun || mailtrapApi,
+        strict
+    };
+}
 function sendViaMailtrapApi(params) {
     return __awaiter(this, void 0, void 0, function* () {
-        const brand = getActiveBrandKey();
-        const token = getEnvByBrand('MAILTRAP_API_TOKEN', brand);
+        const token = getEnv('MAILTRAP_API_TOKEN');
         if (!token)
             return false;
-        const from = parseFromHeaderForBrand();
+        const from = parseFromHeader();
         try {
             const res = yield fetch('https://send.api.mailtrap.io/api/send', {
                 method: 'POST',
@@ -124,11 +141,10 @@ function sendViaMailtrapApi(params) {
 }
 function sendViaResendApi(params) {
     return __awaiter(this, void 0, void 0, function* () {
-        const brand = getActiveBrandKey();
-        const key = getEnvByBrand('RESEND_API_KEY', brand);
+        const key = getEnv('RESEND_API_KEY');
         if (!key)
             return false;
-        const from = parseFromHeaderForBrand();
+        const from = parseFromHeader();
         const fromHeader = from.name ? `${from.name} <${from.email}>` : from.email;
         try {
             const res = yield fetch('https://api.resend.com/emails', {
@@ -160,11 +176,10 @@ function sendViaResendApi(params) {
 }
 function sendViaSendgridApi(params) {
     return __awaiter(this, void 0, void 0, function* () {
-        const brand = getActiveBrandKey();
-        const key = getEnvByBrand('SENDGRID_API_KEY', brand);
+        const key = getEnv('SENDGRID_API_KEY');
         if (!key)
             return false;
-        const from = parseFromHeaderForBrand();
+        const from = parseFromHeader();
         try {
             const res = yield fetch('https://api.sendgrid.com/v3/mail/send', {
                 method: 'POST',
@@ -197,13 +212,12 @@ function sendViaSendgridApi(params) {
 }
 function sendViaMailgunApi(params) {
     return __awaiter(this, void 0, void 0, function* () {
-        const brand = getActiveBrandKey();
-        const key = getEnvByBrand('MAILGUN_API_KEY', brand);
-        const domain = getEnvByBrand('MAILGUN_DOMAIN', brand);
+        const key = getEnv('MAILGUN_API_KEY');
+        const domain = getEnv('MAILGUN_DOMAIN');
         if (!key || !domain)
             return false;
-        const apiBase = getEnvByBrand('MAILGUN_API_BASE', brand) || 'https://api.mailgun.net/v3';
-        const from = parseFromHeaderForBrand();
+        const apiBase = getEnv('MAILGUN_API_BASE') || 'https://api.mailgun.net/v3';
+        const from = parseFromHeader();
         try {
             const body = new URLSearchParams();
             body.set('from', from.name ? `${from.name} <${from.email}>` : from.email);
@@ -254,17 +268,24 @@ function sendMail(params) {
             // Try API-based providers when SMTP isn't configured
             const sentViaApi = yield tryApiFallbacks(params);
             if (!sentViaApi) {
-                console.log('[emailService] SMTP/API not configured. Would send email:', {
-                    to: params.to,
-                    subject: params.subject,
-                    text: params.text,
-                    html: params.html
-                });
+                const strict = String(process.env.EMAIL_STRICT || process.env.EMAIL_REQUIRE_PROVIDER || '').toLowerCase() === 'true';
+                if (strict) {
+                    const status = getEmailConfigStatus();
+                    throw new errorHandler_1.AppError('Email sending is not configured', 500, 'EMAIL_NOT_CONFIGURED', status);
+                }
+                else {
+                    console.log('[emailService] SMTP/API not configured. Would send email:', {
+                        to: params.to,
+                        subject: params.subject,
+                        text: params.text,
+                        html: params.html
+                    });
+                }
             }
             return;
         }
         try {
-            const fromParsed = parseFromHeaderForBrand();
+            const fromParsed = parseFromHeader();
             const fromHeader = fromParsed.name ? `${fromParsed.name} <${fromParsed.email}>` : fromParsed.email;
             yield tx.sendMail({
                 from: fromHeader,

@@ -55,7 +55,7 @@ const getPaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, functio
 });
 exports.getPaymentStatus = getPaymentStatus;
 const redeemVoucher = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     const { code, pin } = req.body;
     if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
         return res.status(401).json({ message: 'Unauthorized' });
@@ -64,6 +64,13 @@ const redeemVoucher = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     const voucher = yield Voucher_1.Voucher.findOne({ code });
     if (!voucher)
         return res.status(404).json({ message: 'Voucher not found' });
+    // If voucher was issued for a specific company, enforce that constraint
+    const intendedCompanyId = ((_b = voucher === null || voucher === void 0 ? void 0 : voucher.metadata) === null || _b === void 0 ? void 0 : _b.intendedCompanyId)
+        ? String(voucher.metadata.intendedCompanyId)
+        : undefined;
+    if (intendedCompanyId && intendedCompanyId !== String(req.user.companyId)) {
+        return res.status(403).json({ message: 'This voucher was not issued to your company' });
+    }
     if (voucher.validFrom && voucher.validFrom > new Date())
         return res.status(400).json({ message: 'Voucher not yet valid' });
     if (voucher.validUntil && voucher.validUntil < new Date())
@@ -91,6 +98,22 @@ const redeemVoucher = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     voucher.redeemedAt = now;
     voucher.redeemedBy = new mongoose_1.default.Types.ObjectId(req.user.companyId);
     yield voucher.save();
+    // Link any matching BillingPayment record (cash/voucher) to this subscription
+    try {
+        yield BillingPayment_1.BillingPayment.updateOne({
+            provider: 'cash',
+            method: 'voucher',
+            providerRef: voucher.code
+        }, {
+            $set: {
+                subscriptionId: subscription === null || subscription === void 0 ? void 0 : subscription._id,
+                status: 'paid'
+            }
+        });
+    }
+    catch (e) {
+        // Non-fatal
+    }
     return res.json({ message: 'Voucher redeemed', subscription });
 });
 exports.redeemVoucher = redeemVoucher;

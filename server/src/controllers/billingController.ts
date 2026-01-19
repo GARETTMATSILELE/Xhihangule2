@@ -45,6 +45,13 @@ export const redeemVoucher = async (req: Request, res: Response) => {
   if (!code || !pin) return res.status(400).json({ message: 'Code and PIN required' });
   const voucher = await Voucher.findOne({ code });
   if (!voucher) return res.status(404).json({ message: 'Voucher not found' });
+  // If voucher was issued for a specific company, enforce that constraint
+  const intendedCompanyId = (voucher as any)?.metadata?.intendedCompanyId
+    ? String((voucher as any).metadata.intendedCompanyId)
+    : undefined;
+  if (intendedCompanyId && intendedCompanyId !== String(req.user.companyId)) {
+    return res.status(403).json({ message: 'This voucher was not issued to your company' });
+  }
   if (voucher.validFrom && voucher.validFrom > new Date()) return res.status(400).json({ message: 'Voucher not yet valid' });
   if (voucher.validUntil && voucher.validUntil < new Date()) return res.status(400).json({ message: 'Voucher expired' });
   if (voucher.redeemedAt) return res.status(400).json({ message: 'Voucher already redeemed' });
@@ -73,6 +80,25 @@ export const redeemVoucher = async (req: Request, res: Response) => {
   voucher.redeemedAt = now;
   voucher.redeemedBy = new mongoose.Types.ObjectId(req.user.companyId);
   await voucher.save();
+
+  // Link any matching BillingPayment record (cash/voucher) to this subscription
+  try {
+    await BillingPayment.updateOne(
+      {
+        provider: 'cash',
+        method: 'voucher',
+        providerRef: voucher.code
+      },
+      {
+        $set: {
+          subscriptionId: subscription?._id,
+          status: 'paid'
+        }
+      }
+    );
+  } catch (e) {
+    // Non-fatal
+  }
 
   return res.json({ message: 'Voucher redeemed', subscription });
 };

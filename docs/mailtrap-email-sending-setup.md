@@ -39,8 +39,7 @@ MAILTRAP_API_TOKEN=<YOUR_API_TOKEN>
 MAILTRAP_FROM_EMAIL=no-reply@mantisafrica.com
 MAILTRAP_FROM_NAME=Mantis Africa
 
-# Optional brand selection (if you operate multiple brands)
-# BRAND_ACTIVE=XHI
+# Single brand: Mantis Africa (multi-brand/XHI is not supported)
 ```
 
 Notes:

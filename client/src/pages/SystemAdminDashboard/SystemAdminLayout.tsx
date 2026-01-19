@@ -130,6 +130,7 @@ const SystemAdminLayout: React.FC = () => {
               <NavButton to="/system-admin/backups-maintenance" label="Backups & Maintenance" />
               <NavButton to="/system-admin/users" label="User Management" />
               <NavButton to="/system-admin/subscriptions" label="Subscription management" />
+              <NavButton to="/system-admin/cash-subscriptions" label="Cash subscriptions" />
             </Stack>
           </Box>
         </Drawer>

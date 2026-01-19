@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -13,13 +15,31 @@ type PaynowEnv = {
 };
 
 function readEnv(): PaynowEnv {
-	return {
+	const env: PaynowEnv = {
 		INTEGRATION_ID: process.env.PAYNOW_INTEGRATION_ID,
 		INTEGRATION_KEY: process.env.PAYNOW_INTEGRATION_KEY,
 		RESULT_URL: process.env.PAYNOW_RESULT_URL,
 		RETURN_URL: process.env.PAYNOW_RETURN_URL,
 		PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL
 	};
+	// Fallback: allow reading from server/config/local.paynow.json in development
+	if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && (process.env.NODE_ENV !== 'production')) {
+		try {
+			const cfgPath = path.resolve(__dirname, '..', '..', 'config', 'local.paynow.json');
+			if (fs.existsSync(cfgPath)) {
+				const raw = fs.readFileSync(cfgPath, 'utf8');
+				const json = JSON.parse(raw);
+				env.INTEGRATION_ID = env.INTEGRATION_ID || json.PAYNOW_INTEGRATION_ID || json.INTEGRATION_ID;
+				env.INTEGRATION_KEY = env.INTEGRATION_KEY || json.PAYNOW_INTEGRATION_KEY || json.INTEGRATION_KEY;
+				env.RESULT_URL = env.RESULT_URL || json.PAYNOW_RESULT_URL || json.RESULT_URL;
+				env.RETURN_URL = env.RETURN_URL || json.PAYNOW_RETURN_URL || json.RETURN_URL;
+				env.PUBLIC_BASE_URL = env.PUBLIC_BASE_URL || json.PUBLIC_BASE_URL;
+			}
+		} catch {
+			// ignore
+		}
+	}
+	return env;
 }
 
 function resolveBaseUrl(req: Request, env: PaynowEnv): string {

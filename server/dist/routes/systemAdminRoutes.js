@@ -21,4 +21,8 @@ router.post('/sync/full', systemAdminController_1.fullSync);
 // Subscriptions management
 router.get('/subscriptions/companies', systemAdminController_1.listCompanySubscriptions);
 router.post('/subscriptions/renew', systemAdminController_1.manualRenewSubscription);
+router.post('/subscriptions/vouchers', systemAdminController_1.createCashVoucher);
+router.get('/subscriptions/vouchers', systemAdminController_1.listCashVouchers);
+router.get('/subscriptions/billing-payments', systemAdminController_1.listSubscriptionBillingPayments);
+router.get('/subscriptions/billing-payments/:id/receipt', systemAdminController_1.getSubscriptionPaymentReceipt);
 exports.default = router;

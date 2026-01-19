@@ -48,7 +48,6 @@ Required
  - MAILTRAP_FROM_NAME=Mantis Africa
 
 Notes
-- If you operate with multiple brands, you can suffix vars with _XHI (and set BRAND_ACTIVE=XHI). The backend will prefer brand-suffixed vars, e.g. SMTP_HOST_XHI.
 - If none of the providers are configured, the server logs a message and does not send email.
 - For correct https links in emails behind a reverse proxy, we set trust proxy and recommend APP_BASE_URL.
  - Provider priority is SMTP → Resend → SendGrid → Mailgun → Mailtrap. If you want to use Mailtrap production sending, avoid setting SMTP/Resend/SendGrid/Mailgun vars so the Mailtrap API is selected.

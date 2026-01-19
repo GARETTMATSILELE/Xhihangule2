@@ -118,6 +118,7 @@ const App: React.FC = () => {
               <Route path="/billing/setup" element={<BillingSetup />} />
               <Route path="/billing/upgrade" element={<BillingSetup />} />
               <Route path="/checkout/paypal" element={<PaypalCheckout />} />
+              <Route path="/checkout" element={<PaypalCheckout />} />
               {/* System Admin (Global) */}
               <Route path="/system-admin/*" element={<SystemAdminDashboard />} />
               {/* Admin Dashboard Routes - Protected with authentication */}

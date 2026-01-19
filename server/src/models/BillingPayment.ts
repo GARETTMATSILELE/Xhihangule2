@@ -13,6 +13,8 @@ export interface IBillingPayment extends Document {
   pollUrl?: string;
   status: 'pending' | 'paid' | 'failed' | 'cancelled';
   rawResponse?: any;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const billingPaymentSchema = new Schema<IBillingPayment>({

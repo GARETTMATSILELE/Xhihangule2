@@ -8,6 +8,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStatus = getStatus;
 exports.createWebPayment = createWebPayment;
@@ -15,17 +18,38 @@ exports.createMobilePayment = createMobilePayment;
 exports.pollTransaction = pollTransaction;
 exports.handleResult = handleResult;
 exports.handleReturn = handleReturn;
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Paynow } = require('paynow');
 function readEnv() {
-    return {
+    const env = {
         INTEGRATION_ID: process.env.PAYNOW_INTEGRATION_ID,
         INTEGRATION_KEY: process.env.PAYNOW_INTEGRATION_KEY,
         RESULT_URL: process.env.PAYNOW_RESULT_URL,
         RETURN_URL: process.env.PAYNOW_RETURN_URL,
         PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL
     };
+    // Fallback: allow reading from server/config/local.paynow.json in development
+    if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && (process.env.NODE_ENV !== 'production')) {
+        try {
+            const cfgPath = path_1.default.resolve(__dirname, '..', '..', 'config', 'local.paynow.json');
+            if (fs_1.default.existsSync(cfgPath)) {
+                const raw = fs_1.default.readFileSync(cfgPath, 'utf8');
+                const json = JSON.parse(raw);
+                env.INTEGRATION_ID = env.INTEGRATION_ID || json.PAYNOW_INTEGRATION_ID || json.INTEGRATION_ID;
+                env.INTEGRATION_KEY = env.INTEGRATION_KEY || json.PAYNOW_INTEGRATION_KEY || json.INTEGRATION_KEY;
+                env.RESULT_URL = env.RESULT_URL || json.PAYNOW_RESULT_URL || json.RESULT_URL;
+                env.RETURN_URL = env.RETURN_URL || json.PAYNOW_RETURN_URL || json.RETURN_URL;
+                env.PUBLIC_BASE_URL = env.PUBLIC_BASE_URL || json.PUBLIC_BASE_URL;
+            }
+        }
+        catch (_a) {
+            // ignore
+        }
+    }
+    return env;
 }
 function resolveBaseUrl(req, env) {
     if (env.PUBLIC_BASE_URL)

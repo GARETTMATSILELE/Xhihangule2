@@ -7,7 +7,7 @@ import { Company } from '../models/Company';
 import { AppError } from '../middleware/errorHandler';
 import { SignUpData, UserRole } from '../types/auth';
 import { AuthService } from '../services/authService';
-import { sendMail, getEnvByBrand } from '../services/emailService';
+import { sendMail } from '../services/emailService';
 import { SubscriptionService } from '../services/subscriptionService';
 
 const authService = AuthService.getInstance();

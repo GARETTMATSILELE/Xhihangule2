@@ -1,1 +1,9 @@
+## Ignore local environment files and secrets
+.env
+.env.*
+!env.example
+
+# Local Paynow config (used in development)
+config/local.paynow.json
+
  

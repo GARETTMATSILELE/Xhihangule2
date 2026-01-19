@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.manualRenewSubscription = exports.listCompanySubscriptions = exports.fullSync = exports.ledgerMaintenance = exports.reconcile = exports.getBackups = exports.runBackup = exports.removeSystemAdmin = exports.addSystemAdmin = exports.listSystemAdmins = exports.getStatus = void 0;
+exports.getSubscriptionPaymentReceipt = exports.listSubscriptionBillingPayments = exports.listCashVouchers = exports.createCashVoucher = exports.manualRenewSubscription = exports.listCompanySubscriptions = exports.fullSync = exports.ledgerMaintenance = exports.reconcile = exports.getBackups = exports.runBackup = exports.removeSystemAdmin = exports.addSystemAdmin = exports.listSystemAdmins = exports.getStatus = void 0;
 const errorHandler_1 = require("../middleware/errorHandler");
 const User_1 = require("../models/User");
 const backupService_1 = require("../services/backupService");
@@ -22,6 +22,11 @@ const databaseSyncService_1 = __importDefault(require("../services/databaseSyncS
 const AdminAuditLog_1 = __importDefault(require("../models/AdminAuditLog"));
 const Company_1 = require("../models/Company");
 const Subscription_1 = require("../models/Subscription");
+const Voucher_1 = require("../models/Voucher");
+const BillingPayment_1 = require("../models/BillingPayment");
+const plan_1 = require("../types/plan");
+const crypto_1 = __importDefault(require("crypto"));
+const mongoose_1 = __importDefault(require("mongoose"));
 function requireSystemAdmin(req) {
     var _a, _b;
     const roles = Array.isArray((_a = req.user) === null || _a === void 0 ? void 0 : _a.roles) ? req.user.roles : (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) ? [req.user.role] : []);
@@ -260,3 +265,139 @@ const manualRenewSubscription = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.manualRenewSubscription = manualRenewSubscription;
+/**
+ * Create a cash voucher (code + PIN) for a company's subscription payment.
+ * Records a BillingPayment (provider=cash, method=voucher, status=paid) and returns the code and PIN.
+ */
+const createCashVoucher = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const { companyId, plan, cycle, amount, validUntil } = req.body || {};
+    if (!companyId)
+        throw new errorHandler_1.AppError('companyId is required', 400);
+    if (!plan || !['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan))
+        throw new errorHandler_1.AppError('Invalid plan', 400);
+    if (!cycle || !['monthly', 'yearly'].includes(cycle))
+        throw new errorHandler_1.AppError('Invalid cycle', 400);
+    const cfg = plan_1.PLAN_CONFIG[plan];
+    const computedAmount = typeof amount === 'number' ? amount :
+        (cfg.pricingUSD ? (cycle === 'monthly' ? cfg.pricingUSD.monthly : cfg.pricingUSD.yearly) : 0);
+    if (!computedAmount || computedAmount <= 0) {
+        throw new errorHandler_1.AppError('Plan pricing not configured', 400);
+    }
+    const code = [
+        'CASH',
+        Math.random().toString(36).slice(2, 6).toUpperCase(),
+        Date.now().toString(36).slice(-4).toUpperCase()
+    ].join('-');
+    const pin = String(Math.floor(100000 + Math.random() * 900000)); // 6-digit PIN
+    const pinHash = crypto_1.default.createHash('sha256').update(pin).digest('hex');
+    const now = new Date();
+    const voucher = yield Voucher_1.Voucher.create({
+        code,
+        pinHash,
+        plan,
+        cycle,
+        amount: computedAmount,
+        validFrom: now,
+        validUntil: validUntil ? new Date(validUntil) : undefined,
+        maxRedemptions: 1,
+        metadata: { intendedCompanyId: companyId, pin }
+    });
+    const payment = yield BillingPayment_1.BillingPayment.create({
+        companyId: new mongoose_1.default.Types.ObjectId(companyId),
+        plan,
+        cycle,
+        amount: computedAmount,
+        currency: 'USD',
+        method: 'voucher',
+        provider: 'cash',
+        providerRef: code,
+        status: 'paid'
+    });
+    const receiptNumber = `SUBR-${payment._id.toString().slice(-6).toUpperCase()}`;
+    res.json({
+        message: 'Cash voucher created',
+        data: {
+            voucherId: voucher._id,
+            paymentId: payment._id,
+            code,
+            pin,
+            plan,
+            cycle,
+            amount: computedAmount,
+            receiptNumber
+        }
+    });
+});
+exports.createCashVoucher = createCashVoucher;
+/**
+ * List cash vouchers (optionally filtered by company).
+ */
+const listCashVouchers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const { companyId, limit } = (req.query || {});
+    const q = {};
+    if (companyId) {
+        q.$or = [
+            { 'metadata.intendedCompanyId': companyId },
+            { redeemedBy: new mongoose_1.default.Types.ObjectId(String(companyId)) }
+        ];
+    }
+    const items = yield Voucher_1.Voucher.find(q).sort({ createdAt: -1 }).limit(Number(limit) || 200).lean();
+    res.json({ data: items });
+});
+exports.listCashVouchers = listCashVouchers;
+/**
+ * List subscription billing payments (cash vouchers and others).
+ */
+const listSubscriptionBillingPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const { companyId, limit, method, provider } = (req.query || {});
+    const q = {};
+    if (companyId)
+        q.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
+    if (method)
+        q.method = String(method);
+    if (provider)
+        q.provider = String(provider);
+    const items = yield BillingPayment_1.BillingPayment.find(q).sort({ createdAt: -1 }).limit(Number(limit) || 200).lean();
+    res.json({ data: items });
+});
+exports.listSubscriptionBillingPayments = listSubscriptionBillingPayments;
+/**
+ * Get a simple JSON receipt for a subscription billing payment.
+ */
+const getSubscriptionPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const { id } = req.params;
+    const payment = yield BillingPayment_1.BillingPayment.findById(id);
+    if (!payment)
+        throw new errorHandler_1.AppError('Payment not found', 404);
+    const company = yield Company_1.Company.findById(payment.companyId).select('name email address phone tinNumber registrationNumber');
+    const receiptNumber = `SUBR-${payment._id.toString().slice(-6).toUpperCase()}`;
+    res.json({
+        data: {
+            receiptNumber,
+            createdAt: payment.createdAt,
+            company: {
+                id: String((company === null || company === void 0 ? void 0 : company._id) || ''),
+                name: (company === null || company === void 0 ? void 0 : company.name) || '',
+                email: (company === null || company === void 0 ? void 0 : company.email) || '',
+                address: (company === null || company === void 0 ? void 0 : company.address) || '',
+                phone: (company === null || company === void 0 ? void 0 : company.phone) || '',
+                registrationNumber: (company === null || company === void 0 ? void 0 : company.registrationNumber) || '',
+                tinNumber: (company === null || company === void 0 ? void 0 : company.tinNumber) || ''
+            },
+            plan: payment.plan,
+            cycle: payment.cycle,
+            amount: payment.amount,
+            currency: payment.currency,
+            method: payment.method,
+            provider: payment.provider,
+            reference: payment.providerRef || '',
+            subscriptionId: payment.subscriptionId ? String(payment.subscriptionId) : undefined,
+            status: payment.status
+        }
+    });
+});
+exports.getSubscriptionPaymentReceipt = getSubscriptionPaymentReceipt;

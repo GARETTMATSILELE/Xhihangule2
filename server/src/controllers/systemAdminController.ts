@@ -10,6 +10,11 @@ import AdminAuditLog from '../models/AdminAuditLog';
 import { Company } from '../models/Company';
 import { Subscription } from '../models/Subscription';
 import { SubscriptionService } from '../services/subscriptionService';
+import { Voucher } from '../models/Voucher';
+import { BillingPayment } from '../models/BillingPayment';
+import { PLAN_CONFIG, Plan } from '../types/plan';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
 
 function requireSystemAdmin(req: Request) {
   const roles: string[] = Array.isArray((req.user as any)?.roles) ? (req.user as any).roles : ((req.user as any)?.role ? [(req.user as any).role] : []);
@@ -232,6 +237,147 @@ export const manualRenewSubscription = async (req: Request, res: Response) => {
     await finishAudit(audit, false, undefined, e?.message || String(e));
     throw e;
   }
+};
+
+/**
+ * Create a cash voucher (code + PIN) for a company's subscription payment.
+ * Records a BillingPayment (provider=cash, method=voucher, status=paid) and returns the code and PIN.
+ */
+export const createCashVoucher = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const { companyId, plan, cycle, amount, validUntil }: {
+    companyId?: string;
+    plan?: Plan;
+    cycle?: 'monthly' | 'yearly';
+    amount?: number;
+    validUntil?: string | Date;
+  } = req.body || {};
+
+  if (!companyId) throw new AppError('companyId is required', 400);
+  if (!plan || !['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) throw new AppError('Invalid plan', 400);
+  if (!cycle || !['monthly','yearly'].includes(cycle)) throw new AppError('Invalid cycle', 400);
+
+  const cfg = PLAN_CONFIG[plan];
+  const computedAmount = typeof amount === 'number' ? amount :
+    (cfg.pricingUSD ? (cycle === 'monthly' ? cfg.pricingUSD.monthly : cfg.pricingUSD.yearly) : 0);
+  if (!computedAmount || computedAmount <= 0) {
+    throw new AppError('Plan pricing not configured', 400);
+  }
+
+  const code = [
+    'CASH',
+    Math.random().toString(36).slice(2, 6).toUpperCase(),
+    Date.now().toString(36).slice(-4).toUpperCase()
+  ].join('-');
+  const pin = String(Math.floor(100000 + Math.random() * 900000)); // 6-digit PIN
+  const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
+  const now = new Date();
+
+  const voucher = await Voucher.create({
+    code,
+    pinHash,
+    plan,
+    cycle,
+    amount: computedAmount,
+    validFrom: now,
+    validUntil: validUntil ? new Date(validUntil) : undefined,
+    maxRedemptions: 1,
+    metadata: { intendedCompanyId: companyId, pin }
+  });
+
+  const payment = await BillingPayment.create({
+    companyId: new mongoose.Types.ObjectId(companyId),
+    plan,
+    cycle,
+    amount: computedAmount,
+    currency: 'USD',
+    method: 'voucher',
+    provider: 'cash',
+    providerRef: code,
+    status: 'paid'
+  });
+
+  const receiptNumber = `SUBR-${payment._id.toString().slice(-6).toUpperCase()}`;
+  res.json({
+    message: 'Cash voucher created',
+    data: {
+      voucherId: voucher._id,
+      paymentId: payment._id,
+      code,
+      pin,
+      plan,
+      cycle,
+      amount: computedAmount,
+      receiptNumber
+    }
+  });
+};
+
+/**
+ * List cash vouchers (optionally filtered by company).
+ */
+export const listCashVouchers = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const { companyId, limit } = (req.query || {}) as any;
+  const q: any = {};
+  if (companyId) {
+    q.$or = [
+      { 'metadata.intendedCompanyId': companyId },
+      { redeemedBy: new mongoose.Types.ObjectId(String(companyId)) }
+    ];
+  }
+  const items = await Voucher.find(q).sort({ createdAt: -1 }).limit(Number(limit) || 200).lean();
+  res.json({ data: items });
+};
+
+/**
+ * List subscription billing payments (cash vouchers and others).
+ */
+export const listSubscriptionBillingPayments = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const { companyId, limit, method, provider } = (req.query || {}) as any;
+  const q: any = {};
+  if (companyId) q.companyId = new mongoose.Types.ObjectId(String(companyId));
+  if (method) q.method = String(method);
+  if (provider) q.provider = String(provider);
+  const items = await BillingPayment.find(q).sort({ createdAt: -1 }).limit(Number(limit) || 200).lean();
+  res.json({ data: items });
+};
+
+/**
+ * Get a simple JSON receipt for a subscription billing payment.
+ */
+export const getSubscriptionPaymentReceipt = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const { id } = req.params;
+  const payment = await BillingPayment.findById(id);
+  if (!payment) throw new AppError('Payment not found', 404);
+  const company = await Company.findById(payment.companyId).select('name email address phone tinNumber registrationNumber');
+  const receiptNumber = `SUBR-${payment._id.toString().slice(-6).toUpperCase()}`;
+  res.json({
+    data: {
+      receiptNumber,
+      createdAt: payment.createdAt,
+      company: {
+        id: String(company?._id || ''),
+        name: company?.name || '',
+        email: company?.email || '',
+        address: company?.address || '',
+        phone: company?.phone || '',
+        registrationNumber: (company as any)?.registrationNumber || '',
+        tinNumber: (company as any)?.tinNumber || ''
+      },
+      plan: payment.plan,
+      cycle: payment.cycle,
+      amount: payment.amount,
+      currency: payment.currency,
+      method: payment.method,
+      provider: payment.provider,
+      reference: payment.providerRef || '',
+      subscriptionId: payment.subscriptionId ? String(payment.subscriptionId) : undefined,
+      status: payment.status
+    }
+  });
 };
 
 
