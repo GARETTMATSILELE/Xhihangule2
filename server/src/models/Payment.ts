@@ -29,6 +29,7 @@ export interface IPayment extends Document {
     preaFee: number;
     agentShare: number;
     agencyShare: number;
+    vatOnCommission?: number;
     ownerAmount: number;
     // Optional breakdown when a collaborator sells in a development
     agentSplit?: {
@@ -190,6 +191,11 @@ const PaymentSchema: Schema = new Schema({
     agencyShare: {
       type: Number,
       required: true,
+    },
+    vatOnCommission: {
+      type: Number,
+      required: false,
+      default: 0,
     },
     ownerAmount: {
       type: Number,

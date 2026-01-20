@@ -19,7 +19,8 @@ exports.COLLECTIONS = {
     VALUATIONS: 'valuations',
     DEVELOPMENTS: 'developments',
     DEVELOPMENT_UNITS: 'developmentunits',
-    INSPECTIONS: 'inspections'
+    INSPECTIONS: 'inspections',
+    VAT_PAYOUTS: 'vatpayouts'
 };
 // Backward-compatible augmentation for new collections
-exports.ensureCollections = Object.assign(Object.assign({}, exports.COLLECTIONS), { INSPECTIONS: exports.COLLECTIONS.INSPECTIONS || 'inspections' });
+exports.ensureCollections = Object.assign(Object.assign({}, exports.COLLECTIONS), { INSPECTIONS: exports.COLLECTIONS.INSPECTIONS || 'inspections', VAT_PAYOUTS: exports.COLLECTIONS.VAT_PAYOUTS || 'vatpayouts' });

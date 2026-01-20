@@ -24,10 +24,12 @@ import {
 import paymentService from '../../services/paymentService';
 import companyAccountService, { CompanyAccountSummary } from '../../services/companyAccountService';
 import { Payment } from '../../types/payment';
+import { useNavigate } from 'react-router-dom';
 
 type Period = 'month_range' | 'year';
 
 const RevenuePage: React.FC = () => {
+  const navigate = useNavigate();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [period, setPeriod] = useState<Period>('month_range');
   const [startMonth, setStartMonth] = useState<string>(new Date().toISOString().slice(0, 7));
@@ -123,6 +125,11 @@ const RevenuePage: React.FC = () => {
     .filter(p => p.paymentType === 'sale')
     .reduce((sum, p) => sum + (p.commissionDetails?.agencyShare || 0), 0), [filtered]);
   const totalCommissionRevenue = rentalsCommissionRevenue + salesCommissionRevenue;
+
+  // VAT collected on commission within period
+  const totalVatCollected = useMemo(() => {
+    return filtered.reduce((s, p) => s + Number(p?.commissionDetails?.vatOnCommission || 0), 0);
+  }, [filtered]);
 
   // Company expenses from company accounts transactions within period
   const expensesForPeriod = useMemo(() => {
@@ -248,9 +255,10 @@ const RevenuePage: React.FC = () => {
       </Box>
 
       <Grid container spacing={2}>
-        {cards.map((c) => (
+        {/* First three standard cards */}
+        {cards.slice(0, 3).map((c) => (
           <Grid item xs={12} sm={6} md={4} key={c.title}>
-            <Card sx={{ cursor: 'pointer', bgcolor: c.color, color: '#fff' }}>
+            <Card sx={{ cursor: 'default', bgcolor: c.color, color: '#fff' }}>
               <CardContent>
                 <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>{c.title}</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>
@@ -260,6 +268,33 @@ const RevenuePage: React.FC = () => {
             </Card>
           </Grid>
         ))}
+        {/* Remaining standard cards */}
+        {cards.slice(3).map((c) => (
+          <Grid item xs={12} sm={6} md={4} key={c.title}>
+            <Card sx={{ cursor: 'default', bgcolor: c.color, color: '#fff' }}>
+              <CardContent>
+                <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>{c.title}</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                  {`$${Number(c.value || 0).toLocaleString()}`}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+        {/* VAT Management card placed beside 'Total Expenses' on md+ screens */}
+        <Grid item xs={12} sm={6} md={4} key="VAT Management">
+          <Card
+            sx={{ cursor: 'pointer', bgcolor: 'warning.main', color: '#1a1a1a' }}
+            onClick={() => navigate('/accountant-dashboard/vat')}
+          >
+            <CardContent>
+              <Typography variant="subtitle2" sx={{ opacity: 0.9, fontWeight: 600 }}>VAT Management</Typography>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                {`$${Number(totalVatCollected || 0).toLocaleString()}`}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       <Grid container spacing={3} sx={{ mt: 1 }}>

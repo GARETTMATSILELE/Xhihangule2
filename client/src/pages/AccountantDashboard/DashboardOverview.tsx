@@ -55,7 +55,6 @@ const DashboardOverview: React.FC = () => {
   const [period, setPeriod] = useState<'month' | 'quarter' | 'year'>('month');
   const [payments, setPayments] = useState<Payment[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
-  const [expensesTotal, setExpensesTotal] = useState<number>(0);
   const [companySummary, setCompanySummary] = useState<{ runningBalance: number; totalIncome: number; totalExpenses: number } | null>(null);
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
@@ -182,26 +181,12 @@ const DashboardOverview: React.FC = () => {
         setInvoices([]);
       }
       try {
-        // Company-level expenses: sum paid payment requests within current month
-        const now = new Date();
-        const start = new Date(now.getFullYear(), now.getMonth(), 1);
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        const pr = await paymentRequestService.getPaymentRequests();
-        const list = Array.isArray(pr?.data) ? pr.data : [];
-        const total = list
-          .filter(r => r.status === 'paid')
-          .filter(r => {
-            const d = new Date(r.processedDate || r.dueDate || r.requestDate);
-            return d >= start && d <= end;
-          })
-          .reduce((s, r) => s + (r.amount || 0), 0);
-        setExpensesTotal(total);
-      } catch {
-        // If summary fails, leave as null; UI defaults to zeros
-      }
-      try {
         const tx = await companyAccountService.getTransactions();
-        setCompanyTransactions(Array.isArray((tx as any)?.transactions) ? (tx as any).transactions : []);
+        setCompanyTransactions(
+          Array.isArray((tx as any)?.transactions)
+            ? (tx as any).transactions
+            : (Array.isArray(tx as any) ? (tx as any) : [])
+        );
       } catch {}
     } catch (err: any) {
       console.error('Error loading deferred dashboard data:', err);
@@ -431,31 +416,34 @@ const DashboardOverview: React.FC = () => {
     });
   }, [invoices, periodStart, periodEnd]);
 
-  const receivablesRental = useMemo(() => {
-    return periodInvoices
-      .filter((i: any) => (i.type === 'rental') && (i.status === 'unpaid' || i.status === 'overdue'))
-      .reduce((s: number, i: any) => s + (i.totalAmount || 0), 0);
-  }, [periodInvoices]);
-
-  const receivablesSales = useMemo(() => {
-    return periodInvoices
-      .filter((i: any) => (i.type === 'sale') && (i.status === 'unpaid' || i.status === 'overdue'))
-      .reduce((s: number, i: any) => s + (i.totalAmount || 0), 0);
-  }, [periodInvoices]);
-
   const invoicesTotal = useMemo(() => {
     return periodInvoices.reduce((s: number, i: any) => s + (i.totalAmount || 0), 0);
   }, [periodInvoices]);
 
-  // Prefer companyaccounts totalExpenses; fall back to payment requests if unavailable
+  // Sum expenses from company accounts transactions within selected period; fallback to summary if no tx available
   const expensesForPeriod = useMemo(() => {
-    if (companySummary && typeof companySummary.totalExpenses === 'number') {
+    const txs = Array.isArray(companyTransactions) ? companyTransactions : [];
+    if (txs.length === 0 && companySummary && typeof companySummary.totalExpenses === 'number') {
       return companySummary.totalExpenses;
     }
-    return expensesTotal;
-  }, [companySummary, expensesTotal]);
+    const total = txs
+      .filter((t: any) => {
+        const d = new Date(t.date || t.postedAt || t.createdAt || t.updatedAt || Date.now());
+        return d >= periodStart && d <= periodEnd;
+      })
+      .reduce((sum: number, t: any) => {
+        const amount = (typeof t.amount === 'number')
+          ? t.amount
+          : (typeof t.debit === 'number' || typeof t.credit === 'number')
+            ? ((t.debit || 0) - (t.credit || 0))
+            : 0;
+        const isExpense = amount < 0 || t.type === 'expense' || t.category === 'expense' || t.direction === 'debit';
+        const expenseAmt = isExpense ? Math.abs(amount || t.amount || t.debit || 0) : 0;
+        return sum + expenseAmt;
+      }, 0);
+    return total;
+  }, [companyTransactions, companySummary, periodStart, periodEnd]);
 
-  const daysInPeriod = useMemo(() => Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24))), [periodStart, periodEnd]);
   // Match RevenuePage computation: revenue equals company share (agencyShare) not gross receipts
   const rentalRevenue = useMemo(() => periodFilteredPayments
     .filter(p => p.paymentType === 'rental')
@@ -465,22 +453,14 @@ const DashboardOverview: React.FC = () => {
     .reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), [periodFilteredPayments]);
   const totalRevenue = useMemo(() => rentalRevenue + salesRevenue, [rentalRevenue, salesRevenue]);
 
-  const totalSalesInPeriod = useMemo(() => periodFilteredPayments.reduce((s, p) => s + p.amount, 0), [periodFilteredPayments]);
-  const avgDailySales = useMemo(() => totalSalesInPeriod / daysInPeriod, [totalSalesInPeriod, daysInPeriod]);
-  const dso = useMemo(() => avgDailySales > 0 ? (receivablesRental + receivablesSales) / avgDailySales : 0, [avgDailySales, receivablesRental, receivablesSales]);
-
   const stats = [
     { title: 'Rental Revenue', value: rentalRevenue, icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' },
     { title: 'Total Revenue', value: totalRevenue, icon: <TrendingUpIcon />, color: 'secondary.main', path: '/accountant-dashboard/revenue' },
     { title: 'Invoices', value: invoicesTotal, icon: <ReceiptIcon />, color: 'info.main', path: '/accountant-dashboard/written-invoices' },
     { title: 'Sales', value: salesRevenue, icon: <TrendingUpIcon />, color: 'primary.main', path: '/accountant-dashboard/sales' },
-    { title: 'Expenses', value: expensesForPeriod, icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/property-accounts' },
-    { title: 'Receivables (Rental)', value: receivablesRental, icon: <PendingActionsIcon />, color: 'warning.main', path: '/accountant-dashboard/revenue' },
-    { title: 'Receivables (Sales)', value: receivablesSales, icon: <PendingActionsIcon />, color: 'warning.main', path: '/accountant-dashboard/revenue' },
+    { title: 'Expenses', value: expensesForPeriod, icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/revenue' },
     { title: 'Outstanding rentals', value: (computedOutstandingRentals ?? 0), icon: <PaymentIcon />, color: 'error.main', path: '' },
-    { title: 'Total Receipts', value: periodFilteredPayments.reduce((s, p) => s + p.amount, 0), icon: <TrendingUpIcon />, color: 'secondary.main', path: '/accountant-dashboard/revenue' },
     { title: 'Outstanding levies', value: (computedOutstandingLevies ?? 0), icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
-    { title: 'Day Sales Outstanding', value: dso, icon: <TrendingUpIcon />, color: 'text.primary', path: '/accountant-dashboard/revenue' },
     { title: 'Bank Revenue', value: periodFilteredPayments.filter(p => p.paymentMethod === 'bank_transfer').reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' }
   ];
 
@@ -534,7 +514,7 @@ const DashboardOverview: React.FC = () => {
                 <Box display="flex" alignItems="center" justifyContent="space-between">
                   <Box>
                     <Typography variant="h4" component="div" sx={{ color: stat.color, fontWeight: 'bold' }}>
-                      {typeof stat.value === 'number' ? (stat.title === 'Day Sales Outstanding' ? Number(stat.value).toFixed(2) : `$${Number(stat.value).toLocaleString()}`) : stat.value}
+                      {typeof stat.value === 'number' ? `$${Number(stat.value).toLocaleString()}` : stat.value}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {stat.title}

@@ -121,7 +121,7 @@ const SettingsPage: React.FC = () => {
     preaPercentOfTotal: 0.03,
     agentPercentOfRemaining: 0.6,
     agencyPercentOfRemaining: 0.4,
-    vatPercentOnCommission: 0.15,
+    vatPercentOnCommission: 0.155,
     // Reporting Settings
     defaultReportPeriod: 'monthly',
     autoGenerateReports: false,
@@ -218,7 +218,7 @@ const SettingsPage: React.FC = () => {
         preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
         agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
         agencyPercentOfRemaining: company.commissionConfig?.agencyPercentOfRemaining ?? 0.4,
-        vatPercentOnCommission: (company as any).commissionConfig?.vatPercentOnCommission ?? 0.15,
+        vatPercentOnCommission: (company as any).commissionConfig?.vatPercentOnCommission ?? 0.155,
         // Receivables cutover and opening balances (do not default if not set)
         receivablesCutoverYear: (company as any)?.receivablesCutover?.year ?? undefined,
         receivablesCutoverMonth: (company as any)?.receivablesCutover?.month ?? undefined,

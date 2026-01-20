@@ -62,6 +62,7 @@ const AgentAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboar
 const AgentAccountDetailPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AgentAccountDetailPage'));
 const WrittenInvoicesPage = lazyWithRetry(() => import('./pages/AccountantDashboard/WrittenInvoicesPage'));
 const LevyPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/LevyPaymentsPage'));
+const VATManagementPage = lazyWithRetry(() => import('./pages/AccountantDashboard/VATManagementPage'));
 const TasksPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TasksPage'));
 const DatabaseSyncDashboard = lazyWithRetry(() => import('./components/admin/DatabaseSyncDashboard'));
 
@@ -318,6 +319,7 @@ const App: React.FC = () => {
                 <Route path="payments" element={<AccountantPaymentsPage />} />
                 <Route path="sales" element={<SalesPaymentsPage />} />
                 <Route path="revenue" element={<RevenuePage />} />
+                <Route path="vat" element={<VATManagementPage />} />
                 <Route path="property-accounts" element={<PropertyAccountsPage />} />
                 <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
                 <Route path="property-accounts/:propertyId/deposits" element={<PropertyDepositLedgerPage />} />

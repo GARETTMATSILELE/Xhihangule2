@@ -1228,11 +1228,11 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     }
 
-    // Apply VAT on commission for sales using company-configured rate (default 15%)
+    // Apply VAT on commission for sales using company-configured rate (default 15.5%)
     {
       const company = await Company.findById(new mongoose.Types.ObjectId(user.companyId)).lean();
-      const configuredVat = Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.15);
-      const vatRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.15));
+      const configuredVat = Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
+      const vatRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
       const commissionBase = Number(((finalCommissionDetails as any)?.totalCommission) || 0);
       const vatOnCommission = Number((commissionBase * vatRate).toFixed(2));
       (finalCommissionDetails as any).vatOnCommission = vatOnCommission;

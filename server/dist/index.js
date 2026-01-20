@@ -97,6 +97,7 @@ const socket_1 = require("./config/socket");
 const startSyncServices_1 = require("./scripts/startSyncServices");
 const reportRoutes_1 = __importDefault(require("./routes/reportRoutes"));
 const publicReportRoutes_1 = __importDefault(require("./routes/publicReportRoutes"));
+const vatRoutes_1 = __importDefault(require("./routes/vatRoutes"));
 const propertyAccountService_1 = require("./services/propertyAccountService");
 const SystemSetting_1 = __importDefault(require("./models/SystemSetting"));
 const propertyAccountService_2 = require("./services/propertyAccountService");
@@ -373,6 +374,7 @@ app.use('/api/billing', billingRoutes_1.default);
 app.use('/api/subscription', subscriptionRoutes_1.default);
 app.use('/api/fiscal', fiscalRoutes_1.default);
 app.use('/api/paynow', paynowRoutes_1.default);
+app.use('/api/vat', vatRoutes_1.default);
 // Diagnostics (exposed in non-production by default, or when explicitly enabled)
 const exposeDiagnostics = (String(process.env.EXPOSE_DIAGNOSTICS || '').toLowerCase() === 'true') || process.env.NODE_ENV !== 'production';
 if (exposeDiagnostics) {

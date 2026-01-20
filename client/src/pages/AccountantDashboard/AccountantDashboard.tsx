@@ -7,6 +7,7 @@ const DashboardOverview = lazy(() => import('./DashboardOverview'));
 const AccountantPaymentsPage = lazy(() => import('./AccountantPaymentsPage'));
 const SalesPaymentsPage = lazy(() => import('./SalesPaymentsPage'));
 const RevenuePage = lazy(() => import('./RevenuePage'));
+const VATManagementPage = lazy(() => import('./VATManagementPage'));
 const LevyPaymentsPage = lazy(() => import('./LevyPaymentsPage'));
 const WrittenInvoicesPage = lazy(() => import('./WrittenInvoicesPage'));
 const PropertyAccountsPage = lazy(() => import('./PropertyAccountsPage'));
@@ -160,6 +161,7 @@ const AccountantDashboard: React.FC = () => {
               <Route path="payments" element={<AccountantPaymentsPage />} />
               <Route path="sales" element={<SalesPaymentsPage />} />
               <Route path="revenue" element={<RevenuePage />} />
+              <Route path="vat" element={<VATManagementPage />} />
               <Route path="levies" element={<LevyPaymentsPage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="property-accounts" element={<PropertyAccountsPage />} />

@@ -84,6 +84,7 @@ export interface PaymentFormData {
     preaFee: number;
     agentShare: number;
     agencyShare: number;
+    vatOnCommission?: number;
     ownerAmount: number;
   };
   processedBy?: string;
@@ -122,6 +123,7 @@ export interface Payment {
     preaFee: number;
     agentShare: number;
     agencyShare: number;
+    vatOnCommission?: number;
     ownerAmount: number;
   };
   status: PaymentStatus;

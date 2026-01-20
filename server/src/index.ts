@@ -51,6 +51,7 @@ import { initializeSocket } from './config/socket';
 import { initializeSyncServices } from './scripts/startSyncServices';
 import reportRoutes from './routes/reportRoutes';
 import publicReportRoutes from './routes/publicReportRoutes';
+import vatRoutes from './routes/vatRoutes';
 import { initializePropertyAccountIndexes } from './services/propertyAccountService';
 import SystemSetting from './models/SystemSetting';
 import { runPropertyLedgerMaintenance } from './services/propertyAccountService';
@@ -343,6 +344,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/fiscal', fiscalRoutes);
 app.use('/api/paynow', paynowRoutes);
+app.use('/api/vat', vatRoutes);
 // Diagnostics (exposed in non-production by default, or when explicitly enabled)
 const exposeDiagnostics = (String(process.env.EXPOSE_DIAGNOSTICS || '').toLowerCase() === 'true') || process.env.NODE_ENV !== 'production';
 if (exposeDiagnostics) {

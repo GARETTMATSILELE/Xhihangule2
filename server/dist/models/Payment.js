@@ -158,6 +158,11 @@ const PaymentSchema = new mongoose_1.Schema({
             type: Number,
             required: true,
         },
+        vatOnCommission: {
+            type: Number,
+            required: false,
+            default: 0,
+        },
         ownerAmount: {
             type: Number,
             required: true,

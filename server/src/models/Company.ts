@@ -186,7 +186,7 @@ const companySchema = new Schema<ICompany>({
       type: Number,
       min: 0,
       max: 1,
-      default: 0.15
+      default: 0.155
     }
   },
   plan: {

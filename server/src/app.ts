@@ -40,6 +40,7 @@ import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
 import paymentRequestRoutes from './routes/paymentRequestRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import vatRoutes from './routes/vatRoutes';
 
 // Load environment variables
 config();
@@ -155,6 +156,7 @@ app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/paypal', paypalRoutes);
+app.use('/api/vat', vatRoutes);
 
 // Error handling
 app.use(errorHandler);

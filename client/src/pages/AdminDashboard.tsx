@@ -423,7 +423,9 @@ const AdminDashboard: React.FC = () => {
         if (!monthlyLevy) continue;
         const paidKeys = paidByProperty[pid] || new Set<string>();
         const missing = new Set<string>();
-        const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+        const leasesForProperty = (leases || [])
+          .filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid)
+          .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
@@ -439,8 +441,8 @@ const AdminDashboard: React.FC = () => {
         }
         total += missing.size * monthlyLevy;
       }
-      const opening = Number((company as any)?.levyReceivableOpeningBalance || 0);
-      return total + opening;
+      // Align with accountant dashboard: do not include opening balances
+      return total;
     } catch { return 0; }
   }, [rentalProperties, leases, levyPayments, company]);
 
@@ -498,7 +500,9 @@ const AdminDashboard: React.FC = () => {
         if (!monthlyRent) continue;
         const paidKeys = paidByProperty[pid] || new Set<string>();
         const missing = new Set<string>();
-        const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+        const leasesForProperty = (leases || [])
+          .filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid)
+          .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
           const start = l?.startDate ? new Date(l.startDate) : null;
           const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
@@ -514,8 +518,8 @@ const AdminDashboard: React.FC = () => {
         }
         total += missing.size * monthlyRent;
       }
-      const opening = Number((company as any)?.rentReceivableOpeningBalance || 0);
-      return total + opening;
+      // Align with accountant dashboard: do not include opening balances
+      return total;
     } catch { return 0; }
   }, [rentalProperties, leases, payments, company]);
 

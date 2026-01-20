@@ -248,14 +248,14 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
 
   const sellerRevenue = useMemo(() => {
     const paid = Number(amountPaid) || 0;
-    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.15)));
+    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
     const vatOnCommission = vatRate * commissionOnPaid;
     return Math.max(0, paid - commissionOnPaid - vatOnCommission);
   }, [amountPaid, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
 
   const ownerAmountForThisPayment = useMemo(() => {
     const paid = Number(amountPaid) || 0;
-    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.15)));
+    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
     const vatOnCommission = vatRate * commissionOnPaid;
     return Math.max(0, paid - commissionOnPaid - vatOnCommission);
   }, [amountPaid, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
@@ -485,7 +485,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
                 <TextField id="preaShare" name="preaShare" fullWidth label="PREA Share" type="number" value={preaShare} onChange={(e) => setPreaShare(Number(e.target.value))} inputProps={{ min: 0, step: '0.01' }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField id="sellerRevenue" name="sellerRevenue" fullWidth label={`Seller Revenue (paid - commission - VAT ${Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.15) * 100).toFixed(2))}% on commission)`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="sellerRevenue" name="sellerRevenue" fullWidth label={`Seller Revenue (paid - commission - VAT ${Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.155) * 100).toFixed(2))}% on commission)`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
                 <TextField id="agencyPercent" name="agencyPercent" fullWidth label="Agency % of Remaining" type="number" value={agencyPercent} onChange={(e) => handleAgencyPercentChange(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
