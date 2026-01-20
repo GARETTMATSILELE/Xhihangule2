@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only --ignore-watch node_modules --ignore-watch dist --watch src src/index.ts",
+    "dev:prod-env": "cross-env ENV_FILE=.env.production ts-node-dev --respawn --transpile-only --ignore-watch node_modules --ignore-watch dist --watch src src/index.ts",
     "build": "tsc",
     "start:prod": "cross-env NODE_ENV=production ENV_FILE=.env.production node dist/index.js",
     "reconcile:dry": "npm run build && node dist/scripts/reconcile.js --dry-run",

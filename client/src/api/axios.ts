@@ -4,7 +4,29 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 const isBrowser = typeof window !== 'undefined';
 const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
 const DEFAULT_API_URL = isLocalDev ? 'http://localhost:5000/api' : (isBrowser ? `${window.location.origin}/api` : 'http://localhost:5000/api');
-const API_URL = (typeof window !== 'undefined' && (window as any).__API_BASE__) || import.meta.env?.VITE_API_URL || DEFAULT_API_URL;
+const rawApiBase =
+  (typeof window !== 'undefined' && (window as any).__API_BASE__) ||
+  // CRA does not use import.meta.env, this will be undefined at runtime there
+  (typeof import.meta !== 'undefined' ? (import.meta as any)?.env?.VITE_API_URL : undefined) ||
+  DEFAULT_API_URL;
+// Ensure base ends with /api for production robustness
+const API_URL = (() => {
+  try {
+    // If rawApiBase already includes '/api' path, return as is
+    if (/\/api(?:\/?$)/.test(String(rawApiBase)) || String(rawApiBase).includes('/api/')) {
+      return String(rawApiBase);
+    }
+    // If rawApiBase looks like an origin or a base without path, append /api
+    const u = new URL(String(rawApiBase), isBrowser ? window.location.origin : 'http://localhost');
+    if (!u.pathname || u.pathname === '/' || u.pathname === '') {
+      u.pathname = '/api';
+      return u.toString().replace(/\/+$/, '');
+    }
+    return String(rawApiBase);
+  } catch {
+    return DEFAULT_API_URL;
+  }
+})();
 
 const api = axios.create({
   baseURL: API_URL,
