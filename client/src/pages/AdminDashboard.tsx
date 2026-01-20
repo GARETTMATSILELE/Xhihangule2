@@ -222,6 +222,30 @@ const AdminDashboard: React.FC = () => {
   const [salesAgents, setSalesAgents] = useState<any[]>([]);
   const [agentStats, setAgentStats] = useState<Record<string, { propertyCount: number; totalCommission: number; monthCommission: number }>>({});
 
+  // Normalize possible id shapes (string, {$oid}, {_id}, embedded doc)
+  function getId(id: any): string {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    if (typeof id === 'object') {
+      if ((id as any).$oid) return String((id as any).$oid);
+      if ((id as any)._id) {
+        const v = (id as any)._id;
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object' && (v as any).$oid) return String((v as any).$oid);
+      }
+      if ((id as any).id) {
+        const v = (id as any).id;
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object' && (v as any).$oid) return String((v as any).$oid);
+      }
+      try {
+        const s = typeof (id as any).toString === 'function' ? (id as any).toString() : '';
+        if (typeof s === 'string' && /^[0-9a-fA-F]{24}$/.test(s)) return s;
+      } catch {}
+    }
+    return '';
+  }
+
   // Update active tab based on current route
   useEffect(() => {
     const path = location.pathname;
@@ -286,7 +310,7 @@ const AdminDashboard: React.FC = () => {
       try {
         const [tpub, lpub, pays, levy] = await Promise.all([
           tenantService.getAllPublic().catch(() => ({ tenants: [] })),
-          leaseService.getAllPublic().catch(() => []),
+          leaseService.getAllPublic(user?.companyId as any).catch(() => []),
           paymentService.getPayments().catch(() => []),
           user?.companyId ? paymentService.getLevyPayments(user.companyId).catch(() => []) : Promise.resolve([])
         ]);
@@ -364,11 +388,16 @@ const AdminDashboard: React.FC = () => {
     return () => { cancelled = true; };
   }, [properties]);
 
-  // Filter out sale/sales properties
-  const rentalProperties = useMemo(() => (properties || []).filter((p: any) => {
-    const rt = (p?.rentalType || '').toString().toLowerCase();
-    return rt !== 'sale' && rt !== 'sales';
-  }), [properties]);
+  // Filter out sale/sales properties and restrict to current user's company
+  const rentalProperties = useMemo(() => {
+    const currentCompanyId = getId((company as any)?._id) || getId((user as any)?.companyId);
+    return (properties || []).filter((p: any) => {
+      const rt = (p?.rentalType || '').toString().toLowerCase();
+      if (rt === 'sale' || rt === 'sales') return false;
+      const pidCompany = getId((p as any).companyId);
+      return currentCompanyId ? (pidCompany === currentCompanyId) : true;
+    });
+  }, [properties, user?.companyId, company]);
 
   const computedOutstandingLevies = useMemo(() => {
     try {
@@ -390,7 +419,7 @@ const AdminDashboard: React.FC = () => {
         const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
         if (!isCompleted) continue;
         const anyP: any = p as any;
-        const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+        const pid = getId(anyP?.propertyId) || getId(anyP?.property);
         if (!pid) continue;
         const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
         const sy = Number(anyP?.advancePeriodStart?.year);
@@ -417,14 +446,14 @@ const AdminDashboard: React.FC = () => {
       };
       for (const prop of rentalProperties || []) {
         if ((prop as any)?.levyOrMunicipalType !== 'levy') continue;
-        const pid = String((prop as any)?._id || (prop as any)?.id || '');
+        const pid = getId((prop as any)._id) || getId((prop as any).id);
         if (!pid) continue;
         const monthlyLevy = Number((prop as any)?.levyOrMunicipalAmount) || 0;
         if (!monthlyLevy) continue;
         const paidKeys = paidByProperty[pid] || new Set<string>();
         const missing = new Set<string>();
         const leasesForProperty = (leases || [])
-          .filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid)
+          .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
           .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
           const start = l?.startDate ? new Date(l.startDate) : null;
@@ -468,7 +497,7 @@ const AdminDashboard: React.FC = () => {
         const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
         if (!isCompleted) continue;
         const anyP: any = p as any;
-        const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+        const pid = getId(anyP?.propertyId) || getId(anyP?.property);
         if (!pid) continue;
         const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
         const sy = Number(anyP?.advancePeriodStart?.year);
@@ -494,14 +523,14 @@ const AdminDashboard: React.FC = () => {
         }
       };
       for (const prop of rentalProperties || []) {
-        const pid = String((prop as any)?._id || (prop as any)?.id || '');
+        const pid = getId((prop as any)._id) || getId((prop as any).id);
         if (!pid) continue;
         const monthlyRent = Number((prop as any)?.rent) || 0;
         if (!monthlyRent) continue;
         const paidKeys = paidByProperty[pid] || new Set<string>();
         const missing = new Set<string>();
         const leasesForProperty = (leases || [])
-          .filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid)
+          .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
           .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
           const start = l?.startDate ? new Date(l.startDate) : null;
