@@ -8,7 +8,11 @@ import {
   ToggleButtonGroup,
   Grid,
   TextField,
-  MenuItem
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
@@ -48,6 +52,9 @@ const SalesPaymentsPage: React.FC = () => {
   const [saleId, setSaleId] = useState<string>('');
   const [commissionDefaults, setCommissionDefaults] = useState<{ commissionPercent?: number; preaPercentOfCommission?: number; agencyPercentRemaining?: number; agentPercentRemaining?: number }>({});
   const [prefill, setPrefill] = useState<{ saleReference?: string; sellerName?: string; totalSalePrice?: number; commission?: { commissionPercent?: number; preaPercentOfCommission?: number; agencyPercentRemaining?: number; agentPercentRemaining?: number } } | undefined>(undefined);
+  // Simple popup dialog for validation/warnings
+  const [warnDialogOpen, setWarnDialogOpen] = useState(false);
+  const [warnDialogMessage, setWarnDialogMessage] = useState<string>('');
 
   // Cache units per development to avoid repeat network calls when toggling
   const unitsCache = React.useRef<Record<string, any[]>>({});
@@ -127,7 +134,7 @@ const SalesPaymentsPage: React.FC = () => {
       if ((developments || []).length > 0) return;
       try {
         const devs = await developmentService.list({
-          fields: '_id,name,address,commissionPercent,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,owner.firstName,owner.lastName,variations.id,variations.label'
+          fields: '_id,name,address,commissionPercent,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,owner.firstName,owner.lastName,variations.id,variations.label,createdBy,collaborators'
         }).catch(() => []);
         if (!isMounted) return;
         setDevelopments(Array.isArray(devs) ? devs : []);
@@ -167,6 +174,21 @@ const SalesPaymentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      // If this payment is linked to a development, ensure the selected agent is the dev owner or a collaborator
+      if (selectedDevId && (data as any)?.agentId) {
+        const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(selectedDevId));
+        const agId = String((data as any).agentId);
+        const createdBy = dev?.createdBy ? String(dev.createdBy) : undefined;
+        const collabs: string[] = Array.isArray(dev?.collaborators) ? (dev!.collaborators as any[]).map((c: any) => String(c)) : [];
+        const isOwner = createdBy && createdBy === agId;
+        const isCollab = collabs.includes(agId);
+        if (!isOwner && !isCollab) {
+          setWarnDialogMessage('Agent is not a development owner or collaborator.');
+          setWarnDialogOpen(true);
+          setLoading(false);
+          return;
+        }
+      }
       const payload: PaymentFormData = { ...data, paymentType: 'sale' } as any;
       if (saleId) (payload as any).saleId = saleId;
       if (selectedDevId) (payload as any).developmentId = selectedDevId;
@@ -184,7 +206,13 @@ const SalesPaymentsPage: React.FC = () => {
       resetFormState();
       setShowForm(false);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create sales payment');
+      const msg = err?.response?.data?.message || '';
+      if (typeof msg === 'string' && msg.toLowerCase().includes('owner or collaborator')) {
+        setWarnDialogMessage('Agent is not a development owner or collaborator.');
+        setWarnDialogOpen(true);
+      } else {
+        setError(msg || 'Failed to create sales payment');
+      }
     } finally {
       setLoading(false);
     }
@@ -200,6 +228,15 @@ const SalesPaymentsPage: React.FC = () => {
           {error}
         </Alert>
       )}
+      <Dialog open={warnDialogOpen} onClose={() => setWarnDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Validation</DialogTitle>
+        <DialogContent>
+          <Typography>{warnDialogMessage || 'Validation error'}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setWarnDialogOpen(false)} variant="contained">OK</Button>
+        </DialogActions>
+      </Dialog>
       {!showForm && (
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <ToggleButtonGroup
@@ -350,6 +387,24 @@ const SalesPaymentsPage: React.FC = () => {
           onSubmit={async (data) => {
             await handleCreatePayment(data);
             setShowForm(false);
+          }}
+          onAgentChange={(newAgentId) => {
+            try {
+              if (!selectedDevId || !newAgentId) return;
+              const dev = (developments || []).find((d: any) => String(d._id || d.id) === String(selectedDevId));
+              if (!dev) return;
+              const createdBy = dev?.createdBy ? String(dev.createdBy) : undefined;
+              const collabs: string[] = Array.isArray(dev?.collaborators) ? (dev!.collaborators as any[]).map((c: any) => String(c)) : [];
+              const agId = String(newAgentId);
+              const isOwner = createdBy && createdBy === agId;
+              const isCollab = collabs.includes(agId);
+              if (!isOwner && !isCollab) {
+                setWarnDialogMessage('Agent is not a development owner or collaborator.');
+                setWarnDialogOpen(true);
+              }
+            } catch {
+              // no-op
+            }
           }}
           onCancel={() => {
             // Clear any previous selections/prefill when cancelling

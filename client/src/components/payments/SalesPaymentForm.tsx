@@ -38,12 +38,13 @@ type Props = {
       agentPercentRemaining?: number;
     }
   };
+  onAgentChange?: (agentId: string) => void;
 };
 
 const PAYMENT_METHODS: PaymentMethod[] = ['bank_transfer', 'cash', 'credit_card', 'mobile_money'];
 const CURRENCIES: Currency[] = ['USD', 'ZiG', 'ZAR'];
 
-const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, prefill }) => {
+const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, prefill, onAgentChange }) => {
   const { user } = useAuth();
   const { company } = useCompany();
   const [buyerName, setBuyerName] = useState('');
@@ -341,7 +342,18 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         <Grid item xs={12} md={6}>
           <FormControl fullWidth>
             <InputLabel id="sales-agent-label">Sales Agent</InputLabel>
-            <Select labelId="sales-agent-label" id="sales-agent" name="agentId" value={agentId} label="Sales Agent" onChange={(e) => setAgentId(e.target.value as string)}>
+            <Select
+              labelId="sales-agent-label"
+              id="sales-agent"
+              name="agentId"
+              value={agentId}
+              label="Sales Agent"
+              onChange={(e) => {
+                const val = e.target.value as string;
+                setAgentId(val);
+                if (onAgentChange) onAgentChange(val);
+              }}
+            >
               <MenuItem value="">None</MenuItem>
               {agents.map((a: any) => (
                 <MenuItem key={a._id || a.id} value={a._id || a.id}>

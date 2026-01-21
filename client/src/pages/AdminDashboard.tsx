@@ -881,7 +881,7 @@ const AdminDashboard: React.FC = () => {
                     const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
                     if (!isCompleted) continue;
                     const anyP: any = p as any;
-                    const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+                    const pid = getId(anyP?.propertyId) || getId(anyP?.property);
                     if (!pid) continue;
                     const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
                     const sy = Number(anyP?.advancePeriodStart?.year);
@@ -911,9 +911,11 @@ const AdminDashboard: React.FC = () => {
                   const items = (rentalProperties || [])
                     .filter((prop: any) => (prop as any)?.levyOrMunicipalType === 'levy')
                     .map((prop: any) => {
-                      const pid = String((prop as any)?._id || (prop as any)?.id || '');
+                      const pid = getId((prop as any)._id) || getId((prop as any).id);
                       const paidKeys = paidByProperty[pid] || new Set<string>();
-                      const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+                      const leasesForProperty = (leases || [])
+                        .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
+                        .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
                       const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
                       let propertyTotalMissing = 0;
                       let propertyTotalAmount = 0;
@@ -931,8 +933,8 @@ const AdminDashboard: React.FC = () => {
                           if (!paidKeys.has(ymKey(y, m))) labels.push(label);
                         });
                         if (labels.length > 0) {
-                          const tid = String(l?.tenantId?._id || l?.tenantId || '');
-                          const t = (tenants || []).find((tt: any) => String(tt?._id || tt?.id) === tid);
+                          const tid = getId((l as any).tenantId);
+                          const t = (tenants || []).find((tt: any) => (getId((tt as any)._id) || getId((tt as any).id)) === tid);
                           const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
                           perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
                           propertyTotalMissing += labels.length;
@@ -1013,7 +1015,7 @@ const AdminDashboard: React.FC = () => {
                     const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
                     if (!isCompleted) continue;
                     const anyP: any = p as any;
-                    const pid = String(anyP?.propertyId ?? anyP?.property?._id ?? anyP?.property?.id ?? '');
+                    const pid = getId(anyP?.propertyId) || getId(anyP?.property);
                     if (!pid) continue;
                     const monthsPaid: number = Number(anyP?.advanceMonthsPaid || 1);
                     const sy = Number(anyP?.advancePeriodStart?.year);
@@ -1042,9 +1044,11 @@ const AdminDashboard: React.FC = () => {
                   };
                   const items = (rentalProperties || [])
                     .map((prop: any) => {
-                      const pid = String((prop as any)?._id || (prop as any)?.id || '');
+                      const pid = getId((prop as any)._id) || getId((prop as any).id);
                       const paidKeys = paidByProperty[pid] || new Set<string>();
-                      const leasesForProperty = (leases || []).filter((l: any) => String(l?.propertyId?._id || l?.propertyId) === pid);
+                      const leasesForProperty = (leases || [])
+                        .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
+                        .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
                       const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
                       const missingSet = new Set<string>();
                       const missingLabels: string[] = [];
@@ -1064,8 +1068,8 @@ const AdminDashboard: React.FC = () => {
                           }
                         });
                         if (labels.length > 0) {
-                          const tid = String(l?.tenantId?._id || l?.tenantId || '');
-                          const t = (tenants || []).find((tt: any) => String(tt?._id || tt?.id) === tid);
+                          const tid = getId((l as any).tenantId);
+                          const t = (tenants || []).find((tt: any) => (getId((tt as any)._id) || getId((tt as any).id)) === tid);
                           const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
                           perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
                         }
