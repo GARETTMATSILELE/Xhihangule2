@@ -448,12 +448,30 @@ class PropertyAccountService {
                 else {
                     targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
                 }
+                let postedToAtLeastOneTarget = false;
+                let notFoundCount = 0;
                 for (const target of targets) {
-                    const account = yield this.getOrCreatePropertyAccount(target.id, target.ledger);
+                    let account = null;
+                    try {
+                        account = yield this.getOrCreatePropertyAccount(target.id, target.ledger);
+                    }
+                    catch (e) {
+                        const message = String((e === null || e === void 0 ? void 0 : e.message) || '');
+                        const status = Number((e === null || e === void 0 ? void 0 : e.statusCode) || (e === null || e === void 0 ? void 0 : e.status) || 0);
+                        // Treat missing entity as a non-fatal condition for this payment target
+                        if (status === 404 ||
+                            /not found|entity not found/i.test(message) ||
+                            status === 400 && /unable to determine ledger type/i.test(message)) {
+                            notFoundCount++;
+                            continue;
+                        }
+                        throw e;
+                    }
                     // Check if income already recorded for this payment
                     const existingTransaction = account.transactions.find(t => { var _a; return ((_a = t.paymentId) === null || _a === void 0 ? void 0 : _a.toString()) === paymentId && t.type === 'income'; });
                     if (existingTransaction) {
                         logger_1.logger.info(`Income already recorded for payment: ${paymentId} on account ${String(account._id)}`);
+                        postedToAtLeastOneTarget = true;
                         continue;
                     }
                     const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0;
@@ -496,6 +514,16 @@ class PropertyAccountService {
                         yield this.recalculateBalance(fresh);
                     }
                     logger_1.logger.info(`Recorded income of ${incomeAmount} to account ${String(account._id)} (target ${target.id}, ledger ${target.ledger}) from payment ${paymentId}`);
+                    postedToAtLeastOneTarget = true;
+                }
+                // If we could not post to any target and every attempt failed due to missing entities,
+                // place the payment in suspense to avoid repeated degradation.
+                if (!postedToAtLeastOneTarget && notFoundCount >= targets.length && targets.length > 0) {
+                    try {
+                        yield Payment_1.Payment.updateOne({ _id: payment._id, isInSuspense: { $ne: true } }, { $set: { isInSuspense: true } });
+                        logger_1.logger.warn(`Payment ${String(payment._id)} placed in suspense (no backing property/development/unit found)`);
+                    }
+                    catch (_d) { }
                 }
             }
             catch (error) {

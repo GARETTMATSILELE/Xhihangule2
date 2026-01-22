@@ -402,7 +402,7 @@ class ScheduledSyncService {
                             notes: p.notes
                         };
                         yield CompanyAccount.updateOne({ companyId: p.companyId }, { $setOnInsert: { companyId: p.companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
-                        yield CompanyAccount.updateOne({ companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id } } } }, {
+                        yield CompanyAccount.updateOne({ companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id, isArchived: { $ne: true } } } } }, {
                             $push: { transactions: txDoc },
                             $inc: { totalIncome: Number(((_e = p.commissionDetails) === null || _e === void 0 ? void 0 : _e.agencyShare) || 0), runningBalance: Number(((_f = p.commissionDetails) === null || _f === void 0 ? void 0 : _f.agencyShare) || 0) },
                             $set: { lastUpdated: new Date() }
@@ -422,7 +422,7 @@ class ScheduledSyncService {
                         logger_1.logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String(acct._id), err: (e === null || e === void 0 ? void 0 : e.message) || e });
                     }
                 }
-                // 4) Dedupe company accounts updated recently (keep earliest for each paymentId)
+                // 4) Dedupe company accounts updated recently (keep earliest for each paymentId, archive the rest)
                 try {
                     const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
                     const cursor = CompanyAccount.find({ lastUpdated: { $gte: since } })
@@ -443,22 +443,23 @@ class ScheduledSyncService {
                                         continue;
                                     (grouped[pid] || (grouped[pid] = [])).push({ _id: t._id, date: new Date(t.date) });
                                 }
-                                const toRemove = [];
+                                const toArchive = [];
                                 for (const pid of Object.keys(grouped)) {
                                     const list = grouped[pid];
                                     if (list.length <= 1)
                                         continue;
                                     const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-                                    toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+                                    toArchive.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
                                 }
-                                if (toRemove.length > 0) {
-                                    yield CompanyAccount.updateOne({ _id: ca._id }, { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } });
-                                    // Recalculate totals using a lean fetch of the updated doc
+                                if (toArchive.length > 0) {
+                                    // Soft-archive duplicates via native update to bypass immutability
+                                    yield CompanyAccount.collection.updateOne({ _id: ca._id }, { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } }, { arrayFilters: [{ 't._id': { $in: toArchive } }] });
+                                    // Recalculate totals using only active transactions
                                     const fresh = yield CompanyAccount.findById(ca._id).select('_id transactions').lean();
                                     if (fresh) {
-                                        const list = Array.isArray(fresh.transactions) ? fresh.transactions : [];
-                                        const income = list.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                        const expenses = list.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                        const active = (Array.isArray(fresh.transactions) ? fresh.transactions : []).filter((t) => (t === null || t === void 0 ? void 0 : t.isArchived) !== true);
+                                        const income = active.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                        const expenses = active.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
                                         yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
                                     }
                                 }
@@ -595,23 +596,43 @@ class ScheduledSyncService {
             try {
                 const PropertyAccount = require('../models/PropertyAccount').default;
                 const Property = require('../models/Property').default;
-                const propertyAccounts = yield PropertyAccount.find({});
-                let fixedCount = 0;
+                const Development = require('../models/Development').default;
+                const DevelopmentUnit = require('../models/DevelopmentUnit').default;
+                // Only consider non-archived accounts for repair
+                const propertyAccounts = yield PropertyAccount.find({ isArchived: { $ne: true } });
+                let archivedCount = 0;
                 for (const account of propertyAccounts) {
-                    const property = yield Property.findById(account.propertyId);
-                    if (!property) {
-                        yield PropertyAccount.findByIdAndDelete(account._id);
-                        fixedCount++;
+                    const pid = account.propertyId;
+                    // Check presence across all supported entity types
+                    const [propExists, devExists, unitExists] = yield Promise.all([
+                        Property.findById(pid).select('_id').lean(),
+                        Development.findById(pid).select('_id').lean(),
+                        DevelopmentUnit.findById(pid).select('_id').lean()
+                    ]);
+                    const exists = Boolean(propExists || devExists || unitExists);
+                    if (!exists) {
+                        yield PropertyAccount.updateOne({ _id: account._id, isArchived: { $ne: true } }, { $set: { isArchived: true, isActive: false, lastUpdated: new Date() } });
+                        archivedCount++;
                     }
                 }
-                if (fixedCount > 0) {
-                    logger_1.logger.info(`Fixed ${fixedCount} orphaned property accounts`);
+                if (archivedCount > 0) {
+                    logger_1.logger.info(`Archived ${archivedCount} orphaned property account(s) (no backing entity found)`);
                 }
+                return archivedCount;
             }
             catch (error) {
                 logger_1.logger.error('Failed to fix orphaned property accounts:', error);
                 throw error;
             }
+        });
+    }
+    /**
+     * Public entrypoint to archive orphaned property accounts on demand
+     */
+    runOrphanedAccountArchival() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const archived = yield this.fixOrphanedPropertyAccounts();
+            return { archived };
         });
     }
     /**
@@ -645,12 +666,16 @@ class ScheduledSyncService {
             try {
                 const PropertyAccount = require('../models/PropertyAccount').default;
                 const User = require('../models/User').default;
+                const PropertyOwner = require('../models/PropertyOwner').default;
                 const propertyAccounts = yield PropertyAccount.find({ ownerId: { $exists: true } });
                 let fixedCount = 0;
                 for (const account of propertyAccounts) {
                     if (account.ownerId) {
-                        const owner = yield User.findById(account.ownerId);
-                        if (!owner) {
+                        const [po, u] = yield Promise.all([
+                            PropertyOwner.findById(account.ownerId).select('_id'),
+                            User.findById(account.ownerId).select('_id')
+                        ]);
+                        if (!po && !u) {
                             yield PropertyAccount.findByIdAndUpdate(account._id, {
                                 $unset: { ownerId: 1, ownerName: 1 },
                                 $set: { lastUpdated: new Date() }
@@ -662,10 +687,52 @@ class ScheduledSyncService {
                 if (fixedCount > 0) {
                     logger_1.logger.info(`Fixed ${fixedCount} orphaned owner references`);
                 }
+                return fixedCount;
             }
             catch (error) {
                 logger_1.logger.error('Failed to fix orphaned owner references:', error);
                 throw error;
+            }
+        });
+    }
+    /**
+     * Public entrypoint to cleanup orphaned owner references
+     */
+    runOrphanedOwnerReferenceCleanup() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const cleaned = yield this.fixOrphanedOwnerReferences();
+            return { cleaned };
+        });
+    }
+    /**
+     * Cleanup orphaned owner references for a specific ownerId
+     */
+    runOwnerReferenceCleanupForOwnerId(ownerId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const PropertyAccount = require('../models/PropertyAccount').default;
+                const User = require('../models/User').default;
+                const PropertyOwner = require('../models/PropertyOwner').default;
+                let cleaned = 0;
+                const accounts = yield PropertyAccount.find({ ownerId: ownerId });
+                for (const account of accounts) {
+                    const [po, u] = yield Promise.all([
+                        PropertyOwner.findById(ownerId).select('_id').lean(),
+                        User.findById(ownerId).select('_id').lean()
+                    ]);
+                    if (!po && !u) {
+                        yield PropertyAccount.updateOne({ _id: account._id }, { $unset: { ownerId: 1, ownerName: 1 }, $set: { lastUpdated: new Date() } });
+                        cleaned++;
+                    }
+                }
+                if (cleaned > 0) {
+                    logger_1.logger.info(`Cleaned ${cleaned} orphaned owner reference(s) for ownerId ${ownerId}`);
+                }
+                return { cleaned };
+            }
+            catch (e) {
+                logger_1.logger.error('Failed to cleanup orphaned owner reference for ownerId:', ownerId, e);
+                throw e;
             }
         });
     }

@@ -24,6 +24,8 @@ export interface CompanyTransaction {
   description?: string;
   processedBy?: Types.ObjectId;
   notes?: string;
+  // Soft archive flag for duplicate/correction entries
+  isArchived?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -51,6 +53,7 @@ const CompanyTransactionSchema = new Schema<CompanyTransaction>({
   description: { type: String },
   processedBy: { type: Schema.Types.ObjectId, required: false },
   notes: { type: String },
+  isArchived: { type: Boolean, default: false },
 }, { timestamps: true });
 
 const CompanyAccountSchema = new Schema<ICompanyAccount>({
@@ -63,8 +66,11 @@ const CompanyAccountSchema = new Schema<ICompanyAccount>({
 }, { timestamps: true });
 
 CompanyAccountSchema.index({ companyId: 1, 'transactions.date': -1 });
-// Prevent double-posting the same payment into company ledger
-CompanyAccountSchema.index({ companyId: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+// Prevent double-posting the same payment into company ledger (ignore archived duplicates)
+CompanyAccountSchema.index(
+  { companyId: 1, 'transactions.paymentId': 1 },
+  { unique: true, partialFilterExpression: { 'transactions.isArchived': { $ne: true } } }
+);
 
 // Immutability guard for update operations
 function isIllegalCompanyLedgerMutation(update: Record<string, any>): boolean {

@@ -15,6 +15,7 @@ const CompanyTransactionSchema = new mongoose_1.Schema({
     description: { type: String },
     processedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false },
     notes: { type: String },
+    isArchived: { type: Boolean, default: false },
 }, { timestamps: true });
 const CompanyAccountSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
@@ -25,8 +26,8 @@ const CompanyAccountSchema = new mongoose_1.Schema({
     lastUpdated: { type: Date },
 }, { timestamps: true });
 CompanyAccountSchema.index({ companyId: 1, 'transactions.date': -1 });
-// Prevent double-posting the same payment into company ledger
-CompanyAccountSchema.index({ companyId: 1, 'transactions.paymentId': 1 }, { unique: true, sparse: true });
+// Prevent double-posting the same payment into company ledger (ignore archived duplicates)
+CompanyAccountSchema.index({ companyId: 1, 'transactions.paymentId': 1 }, { unique: true, partialFilterExpression: { 'transactions.isArchived': { $ne: true } } });
 // Immutability guard for update operations
 function isIllegalCompanyLedgerMutation(update) {
     const illegalSetters = ['$set', '$unset', '$inc'];

@@ -37,7 +37,8 @@ const getCompanyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, f
             return res.status(400).json({ message: 'companyId is required' });
         }
         const account = yield CompanyAccount_1.CompanyAccount.findOne({ companyId });
-        res.json({ transactions: (account === null || account === void 0 ? void 0 : account.transactions) || [], runningBalance: (account === null || account === void 0 ? void 0 : account.runningBalance) || 0 });
+        const transactions = ((account === null || account === void 0 ? void 0 : account.transactions) || []).filter((t) => (t === null || t === void 0 ? void 0 : t.isArchived) !== true);
+        res.json({ transactions, runningBalance: (account === null || account === void 0 ? void 0 : account.runningBalance) || 0 });
     }
     catch (err) {
         res.status(500).json({ message: err.message || 'Failed to fetch company transactions' });

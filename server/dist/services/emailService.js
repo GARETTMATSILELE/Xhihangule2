@@ -285,9 +285,13 @@ function sendMail(params) {
             // Try API-based providers when SMTP isn't configured
             const sentViaApi = yield tryApiFallbacks(params);
             if (!sentViaApi) {
-                const strict = String(process.env.EMAIL_STRICT || process.env.EMAIL_REQUIRE_PROVIDER || '').toLowerCase() === 'true';
+                // In production, fail hard when no provider is configured to avoid silent success.
+                // You can override by setting EMAIL_STRICT=false, but the default is strict in prod.
+                const envStrict = String(process.env.EMAIL_STRICT || process.env.EMAIL_REQUIRE_PROVIDER || '').toLowerCase() === 'true';
+                const status = getEmailConfigStatus();
+                const isProd = process.env.NODE_ENV === 'production';
+                const strict = envStrict || (isProd && !status.anyProviderConfigured);
                 if (strict) {
-                    const status = getEmailConfigStatus();
                     throw new errorHandler_1.AppError('Email sending is not configured', 500, 'EMAIL_NOT_CONFIGURED', status);
                 }
                 else {

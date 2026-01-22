@@ -415,8 +415,26 @@ export class PropertyAccountService {
         targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
       }
 
+      let postedToAtLeastOneTarget = false;
+      let notFoundCount = 0;
       for (const target of targets) {
-        const account = await this.getOrCreatePropertyAccount(target.id, target.ledger);
+        let account: IPropertyAccount | null = null as any;
+        try {
+          account = await this.getOrCreatePropertyAccount(target.id, target.ledger);
+        } catch (e: any) {
+          const message = String(e?.message || '');
+          const status = Number((e as any)?.statusCode || (e as any)?.status || 0);
+          // Treat missing entity as a non-fatal condition for this payment target
+          if (
+            status === 404 ||
+            /not found|entity not found/i.test(message) ||
+            status === 400 && /unable to determine ledger type/i.test(message)
+          ) {
+            notFoundCount++;
+            continue;
+          }
+          throw e;
+        }
 
         // Check if income already recorded for this payment
         const existingTransaction = account.transactions.find(
@@ -424,6 +442,7 @@ export class PropertyAccountService {
         );
         if (existingTransaction) {
           logger.info(`Income already recorded for payment: ${paymentId} on account ${String((account as any)._id)}`);
+          postedToAtLeastOneTarget = true;
           continue;
         }
 
@@ -474,6 +493,19 @@ export class PropertyAccountService {
           await this.recalculateBalance(fresh as any);
         }
         logger.info(`Recorded income of ${incomeAmount} to account ${String((account as any)._id)} (target ${target.id}, ledger ${target.ledger}) from payment ${paymentId}`);
+        postedToAtLeastOneTarget = true;
+      }
+
+      // If we could not post to any target and every attempt failed due to missing entities,
+      // place the payment in suspense to avoid repeated degradation.
+      if (!postedToAtLeastOneTarget && notFoundCount >= targets.length && targets.length > 0) {
+        try {
+          await Payment.updateOne(
+            { _id: payment._id, isInSuspense: { $ne: true } },
+            { $set: { isInSuspense: true } }
+          );
+          logger.warn(`Payment ${String(payment._id)} placed in suspense (no backing property/development/unit found)`);
+        } catch {}
       }
 
     } catch (error) {

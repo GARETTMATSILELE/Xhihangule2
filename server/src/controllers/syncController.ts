@@ -49,6 +49,51 @@ export const startRealTimeSync = async (req: Request, res: Response) => {
 };
 
 /**
+ * Cleanup orphaned owner references on property accounts (unset owner link)
+ */
+export const cleanupOrphanedOwnerReferences = async (req: Request, res: Response) => {
+  try {
+    const scheduledService = ScheduledSyncService.getInstance();
+    const result = await scheduledService.runOrphanedOwnerReferenceCleanup();
+    return res.json({
+      success: true,
+      message: `Cleaned ${result.cleaned} orphaned owner reference(s)`,
+      data: result,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error cleaning orphaned owner references:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: 'Failed to cleanup orphaned owner references' });
+  }
+};
+
+/**
+ * Cleanup orphaned owner references for a specific ownerId
+ */
+export const cleanupOwnerReferenceById = async (req: Request, res: Response) => {
+  try {
+    const ownerId = String(req.params?.ownerId || '').trim();
+    if (!ownerId) return res.status(400).json({ success: false, message: 'ownerId is required' });
+    const scheduledService = ScheduledSyncService.getInstance();
+    const result = await scheduledService.runOwnerReferenceCleanupForOwnerId(ownerId);
+    return res.json({
+      success: true,
+      message: `Cleaned ${result.cleaned} orphaned owner reference(s) for ownerId ${ownerId}`,
+      data: result,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error cleaning orphaned owner reference by ownerId:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: 'Failed to cleanup orphaned owner reference for ownerId' });
+  }
+};
+/**
  * Stop real-time synchronization
  */
 export const stopRealTimeSync = async (req: Request, res: Response) => {
@@ -690,5 +735,27 @@ export const reconcilePaymentPosting = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Error reconciling payment posting:', error);
     res.status(500).json({ success: false, message: 'Failed to reconcile payment posting' });
+  }
+};
+
+/**
+ * Archive orphaned property accounts (no backing Property/Development/Unit)
+ */
+export const archiveOrphanedPropertyAccounts = async (req: Request, res: Response) => {
+  try {
+    const scheduledService = ScheduledSyncService.getInstance();
+    const result = await scheduledService.runOrphanedAccountArchival();
+    return res.json({
+      success: true,
+      message: `Archived ${result.archived} orphaned property account(s)`,
+      data: result,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    logger.error('Error archiving orphaned property accounts:', error);
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: 'Failed to archive orphaned property accounts' });
   }
 };

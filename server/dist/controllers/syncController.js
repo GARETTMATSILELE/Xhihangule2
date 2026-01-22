@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reconcilePaymentPosting = exports.retrySyncFailure = exports.listSyncFailures = exports.getSyncHealth = exports.removeSyncSchedule = exports.addSyncSchedule = exports.stopAllSchedules = exports.startAllSchedules = exports.disableSyncSchedule = exports.enableSyncSchedule = exports.updateSyncSchedule = exports.getSyncSchedules = exports.validateDataConsistency = exports.getSyncStats = exports.getSyncStatus = exports.performFullSync = exports.stopRealTimeSync = exports.startRealTimeSync = void 0;
+exports.archiveOrphanedPropertyAccounts = exports.reconcilePaymentPosting = exports.retrySyncFailure = exports.listSyncFailures = exports.getSyncHealth = exports.removeSyncSchedule = exports.addSyncSchedule = exports.stopAllSchedules = exports.startAllSchedules = exports.disableSyncSchedule = exports.enableSyncSchedule = exports.updateSyncSchedule = exports.getSyncSchedules = exports.validateDataConsistency = exports.getSyncStats = exports.getSyncStatus = exports.performFullSync = exports.stopRealTimeSync = exports.cleanupOwnerReferenceById = exports.cleanupOrphanedOwnerReferences = exports.startRealTimeSync = void 0;
 const databaseSyncService_1 = __importDefault(require("../services/databaseSyncService"));
 const scheduledSyncService_1 = __importDefault(require("../services/scheduledSyncService"));
 const logger_1 = require("../utils/logger");
@@ -59,6 +59,56 @@ const startRealTimeSync = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.startRealTimeSync = startRealTimeSync;
+/**
+ * Cleanup orphaned owner references on property accounts (unset owner link)
+ */
+const cleanupOrphanedOwnerReferences = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const scheduledService = scheduledSyncService_1.default.getInstance();
+        const result = yield scheduledService.runOrphanedOwnerReferenceCleanup();
+        return res.json({
+            success: true,
+            message: `Cleaned ${result.cleaned} orphaned owner reference(s)`,
+            data: result,
+            timestamp: new Date()
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error cleaning orphaned owner references:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: 'Failed to cleanup orphaned owner references' });
+    }
+});
+exports.cleanupOrphanedOwnerReferences = cleanupOrphanedOwnerReferences;
+/**
+ * Cleanup orphaned owner references for a specific ownerId
+ */
+const cleanupOwnerReferenceById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const ownerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.ownerId) || '').trim();
+        if (!ownerId)
+            return res.status(400).json({ success: false, message: 'ownerId is required' });
+        const scheduledService = scheduledSyncService_1.default.getInstance();
+        const result = yield scheduledService.runOwnerReferenceCleanupForOwnerId(ownerId);
+        return res.json({
+            success: true,
+            message: `Cleaned ${result.cleaned} orphaned owner reference(s) for ownerId ${ownerId}`,
+            data: result,
+            timestamp: new Date()
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error cleaning orphaned owner reference by ownerId:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: 'Failed to cleanup orphaned owner reference for ownerId' });
+    }
+});
+exports.cleanupOwnerReferenceById = cleanupOwnerReferenceById;
 /**
  * Stop real-time synchronization
  */
@@ -653,3 +703,26 @@ const reconcilePaymentPosting = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.reconcilePaymentPosting = reconcilePaymentPosting;
+/**
+ * Archive orphaned property accounts (no backing Property/Development/Unit)
+ */
+const archiveOrphanedPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const scheduledService = scheduledSyncService_1.default.getInstance();
+        const result = yield scheduledService.runOrphanedAccountArchival();
+        return res.json({
+            success: true,
+            message: `Archived ${result.archived} orphaned property account(s)`,
+            data: result,
+            timestamp: new Date()
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error archiving orphaned property accounts:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        return res.status(500).json({ success: false, message: 'Failed to archive orphaned property accounts' });
+    }
+});
+exports.archiveOrphanedPropertyAccounts = archiveOrphanedPropertyAccounts;

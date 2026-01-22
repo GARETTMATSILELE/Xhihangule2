@@ -119,8 +119,9 @@ const getCompanyPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 
             const allIds = [...propertyIds, ...developmentIds, ...unitIds];
             const developmentIdSet = new Set(developmentIds.map((d) => String(d)));
             const unitIdSet = new Set(unitIds.map((u) => String(u)));
-            const query = Object.assign({}, (allIds.length > 0 ? { propertyId: { $in: allIds } } : { _id: null }) // empty result if no ids
-            );
+            const query = Object.assign(Object.assign({}, (allIds.length > 0 ? { propertyId: { $in: allIds } } : { _id: null })), { 
+                // Only return canonical/non-archived ledgers in summary list
+                isArchived: { $ne: true } });
             if (ledger)
                 query.ledgerType = ledger;
             if (search) {

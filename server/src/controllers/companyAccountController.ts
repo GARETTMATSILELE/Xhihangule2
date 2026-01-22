@@ -24,7 +24,8 @@ export const getCompanyTransactions = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'companyId is required' });
     }
     const account = await CompanyAccount.findOne({ companyId });
-    res.json({ transactions: account?.transactions || [], runningBalance: account?.runningBalance || 0 });
+    const transactions = (account?.transactions || []).filter((t: any) => t?.isArchived !== true);
+    res.json({ transactions, runningBalance: account?.runningBalance || 0 });
   } catch (err: any) {
     res.status(500).json({ message: err.message || 'Failed to fetch company transactions' });
   }

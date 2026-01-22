@@ -33,4 +33,9 @@ router.get('/failures', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant
 router.post('/failures/retry', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.retrySyncFailure);
 // Reconciliation endpoints
 router.post('/reconcile/payment/:paymentId', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.reconcilePaymentPosting);
+// Maintenance: archive orphaned property accounts immediately
+router.post('/fix/orphaned-accounts', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.archiveOrphanedPropertyAccounts);
+// Maintenance: cleanup orphaned owner references on property accounts
+router.post('/fix/orphaned-owner-references', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.cleanupOrphanedOwnerReferences);
+router.post('/fix/orphaned-owner-references/:ownerId', auth_1.auth, (0, auth_1.authorize)(['admin', 'accountant']), syncController_1.cleanupOwnerReferenceById);
 exports.default = router;

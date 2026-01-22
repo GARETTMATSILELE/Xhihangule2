@@ -115,7 +115,9 @@ export const getCompanyPropertyAccounts = async (req: Request, res: Response) =>
       const unitIdSet = new Set<string>(unitIds.map((u: any) => String(u)));
 
       const query: Record<string, any> = {
-        ...(allIds.length > 0 ? { propertyId: { $in: allIds } } : { _id: null }) // empty result if no ids
+        ...(allIds.length > 0 ? { propertyId: { $in: allIds } } : { _id: null }), // empty result if no ids
+        // Only return canonical/non-archived ledgers in summary list
+        isArchived: { $ne: true }
       };
       if (ledger) query.ledgerType = ledger;
       if (search) {

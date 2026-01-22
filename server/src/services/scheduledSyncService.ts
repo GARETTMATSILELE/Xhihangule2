@@ -393,7 +393,7 @@ export class ScheduledSyncService {
             { upsert: true }
           );
           await CompanyAccount.updateOne(
-            { companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id } } } },
+            { companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id, isArchived: { $ne: true } } } } },
             {
               $push: { transactions: txDoc },
               $inc: { totalIncome: Number(p.commissionDetails?.agencyShare || 0), runningBalance: Number(p.commissionDetails?.agencyShare || 0) },
@@ -415,7 +415,7 @@ export class ScheduledSyncService {
         }
       }
 
-      // 4) Dedupe company accounts updated recently (keep earliest for each paymentId)
+      // 4) Dedupe company accounts updated recently (keep earliest for each paymentId, archive the rest)
       try {
         const { CompanyAccount } = await import('../models/CompanyAccount');
         const cursor = CompanyAccount.find(
@@ -434,24 +434,26 @@ export class ScheduledSyncService {
               if (!pid) continue;
               (grouped[pid] ||= []).push({ _id: (t as any)._id, date: new Date(t.date) });
             }
-            const toRemove: any[] = [];
+            const toArchive: any[] = [];
             for (const pid of Object.keys(grouped)) {
               const list = grouped[pid];
               if (list.length <= 1) continue;
               const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-              toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
+              toArchive.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
             }
-            if (toRemove.length > 0) {
-              await CompanyAccount.updateOne(
+            if (toArchive.length > 0) {
+              // Soft-archive duplicates via native update to bypass immutability
+              await (CompanyAccount as any).collection.updateOne(
                 { _id: ca._id },
-                { $pull: { transactions: { _id: { $in: toRemove } } }, $set: { lastUpdated: new Date() } }
+                { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } },
+                { arrayFilters: [{ 't._id': { $in: toArchive } }] } as any
               );
-              // Recalculate totals using a lean fetch of the updated doc
+              // Recalculate totals using only active transactions
               const fresh = await CompanyAccount.findById(ca._id).select('_id transactions').lean() as any;
               if (fresh) {
-                const list = Array.isArray(fresh.transactions) ? fresh.transactions : [];
-                const income = list.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
-                const expenses = list.filter((t: any) => t.type !== 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+                const active = (Array.isArray(fresh.transactions) ? fresh.transactions : []).filter((t: any) => t?.isArchived !== true);
+                const income = active.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+                const expenses = active.filter((t: any) => t.type !== 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
                 await CompanyAccount.updateOne(
                   { _id: fresh._id },
                   { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } }
@@ -581,30 +583,52 @@ export class ScheduledSyncService {
   /**
    * Fix orphaned property accounts
    */
-  private async fixOrphanedPropertyAccounts(): Promise<void> {
+  private async fixOrphanedPropertyAccounts(): Promise<number> {
     try {
       const PropertyAccount = require('../models/PropertyAccount').default;
       const Property = require('../models/Property').default;
-      
-      const propertyAccounts = await PropertyAccount.find({});
-      let fixedCount = 0;
-      
+      const Development = require('../models/Development').default;
+      const DevelopmentUnit = require('../models/DevelopmentUnit').default;
+
+      // Only consider non-archived accounts for repair
+      const propertyAccounts = await PropertyAccount.find({ isArchived: { $ne: true } });
+      let archivedCount = 0;
+
       for (const account of propertyAccounts) {
-        const property = await Property.findById(account.propertyId);
-        if (!property) {
-          await PropertyAccount.findByIdAndDelete(account._id);
-          fixedCount++;
+        const pid = account.propertyId;
+        // Check presence across all supported entity types
+        const [propExists, devExists, unitExists] = await Promise.all([
+          Property.findById(pid).select('_id').lean(),
+          Development.findById(pid).select('_id').lean(),
+          DevelopmentUnit.findById(pid).select('_id').lean()
+        ]);
+        const exists = Boolean(propExists || devExists || unitExists);
+        if (!exists) {
+          await PropertyAccount.updateOne(
+            { _id: account._id, isArchived: { $ne: true } },
+            { $set: { isArchived: true, isActive: false, lastUpdated: new Date() } }
+          );
+          archivedCount++;
         }
       }
-      
-      if (fixedCount > 0) {
-        logger.info(`Fixed ${fixedCount} orphaned property accounts`);
+
+      if (archivedCount > 0) {
+        logger.info(`Archived ${archivedCount} orphaned property account(s) (no backing entity found)`);
       }
-      
+
+      return archivedCount;
     } catch (error) {
       logger.error('Failed to fix orphaned property accounts:', error);
       throw error;
     }
+  }
+
+  /**
+   * Public entrypoint to archive orphaned property accounts on demand
+   */
+  public async runOrphanedAccountArchival(): Promise<{ archived: number }> {
+    const archived = await this.fixOrphanedPropertyAccounts();
+    return { archived };
   }
 
   /**
@@ -634,18 +658,22 @@ export class ScheduledSyncService {
   /**
    * Fix orphaned owner references
    */
-  private async fixOrphanedOwnerReferences(): Promise<void> {
+  private async fixOrphanedOwnerReferences(): Promise<number> {
     try {
       const PropertyAccount = require('../models/PropertyAccount').default;
       const User = require('../models/User').default;
+      const PropertyOwner = require('../models/PropertyOwner').default;
       
       const propertyAccounts = await PropertyAccount.find({ ownerId: { $exists: true } });
       let fixedCount = 0;
       
       for (const account of propertyAccounts) {
         if (account.ownerId) {
-          const owner = await User.findById(account.ownerId);
-          if (!owner) {
+          const [po, u] = await Promise.all([
+            PropertyOwner.findById(account.ownerId).select('_id'),
+            User.findById(account.ownerId).select('_id')
+          ]);
+          if (!po && !u) {
             await PropertyAccount.findByIdAndUpdate(account._id, {
               $unset: { ownerId: 1, ownerName: 1 },
               $set: { lastUpdated: new Date() }
@@ -658,10 +686,51 @@ export class ScheduledSyncService {
       if (fixedCount > 0) {
         logger.info(`Fixed ${fixedCount} orphaned owner references`);
       }
-      
+      return fixedCount;
     } catch (error) {
       logger.error('Failed to fix orphaned owner references:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Public entrypoint to cleanup orphaned owner references
+   */
+  public async runOrphanedOwnerReferenceCleanup(): Promise<{ cleaned: number }> {
+    const cleaned = await this.fixOrphanedOwnerReferences();
+    return { cleaned };
+  }
+
+  /**
+   * Cleanup orphaned owner references for a specific ownerId
+   */
+  public async runOwnerReferenceCleanupForOwnerId(ownerId: string): Promise<{ cleaned: number }> {
+    try {
+      const PropertyAccount = require('../models/PropertyAccount').default;
+      const User = require('../models/User').default;
+      const PropertyOwner = require('../models/PropertyOwner').default;
+      let cleaned = 0;
+      const accounts = await PropertyAccount.find({ ownerId: ownerId });
+      for (const account of accounts) {
+        const [po, u] = await Promise.all([
+          PropertyOwner.findById(ownerId).select('_id').lean(),
+          User.findById(ownerId).select('_id').lean()
+        ]);
+        if (!po && !u) {
+          await PropertyAccount.updateOne(
+            { _id: account._id },
+            { $unset: { ownerId: 1, ownerName: 1 }, $set: { lastUpdated: new Date() } }
+          );
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        logger.info(`Cleaned ${cleaned} orphaned owner reference(s) for ownerId ${ownerId}`);
+      }
+      return { cleaned };
+    } catch (e) {
+      logger.error('Failed to cleanup orphaned owner reference for ownerId:', ownerId, e);
+      throw e;
     }
   }
 

@@ -49,7 +49,10 @@ exports.DatabaseSyncService = void 0;
 const database_1 = require("../config/database");
 const Payment_1 = require("../models/Payment");
 const Property_1 = require("../models/Property");
+const Development_1 = require("../models/Development");
+const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
 const User_1 = require("../models/User");
+const PropertyOwner_1 = require("../models/PropertyOwner");
 const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
@@ -323,7 +326,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 // Get recent payments that might need syncing
                 const recentPayments = yield Payment_1.Payment.find({
-                    updatedAt: { $gte: new Date(Date.now() - 60000) } // Last minute
+                    updatedAt: { $gte: new Date(Date.now() - 60000) }, // Last minute
+                    status: 'completed',
+                    paymentType: { $in: ['rental', 'sale'] },
+                    isProvisional: { $ne: true },
+                    isInSuspense: { $ne: true }
                 }).limit(100);
                 for (const payment of recentPayments) {
                     if (payment.status === 'completed' && (payment.paymentType === 'rental' || payment.paymentType === 'sale')) {
@@ -388,7 +395,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             const documentId = documentKey._id.toString();
             try {
                 if (operationType === 'insert' || operationType === 'update') {
-                    if (fullDocument && fullDocument.status === 'completed' && (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale')) {
+                    if (fullDocument && fullDocument.status === 'completed' && (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale') && fullDocument.isInSuspense !== true && fullDocument.isProvisional !== true) {
                         try {
                             yield this.syncPaymentToAccounting(fullDocument);
                             // Reflect to property ledger as well (idempotent)
@@ -532,7 +539,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         // 1) Ensure base account exists (idempotent)
                         yield CompanyAccount.updateOne({ companyId }, { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
                         // 2) Append commission transaction only if not already present; do NOT upsert here to avoid duplicate docs
-                        const res = yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id } } } }, {
+                        const res = yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id, isArchived: { $ne: true } } } } }, {
                             $push: { transactions: txDoc },
                             $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
                             $set: { lastUpdated: new Date() }
@@ -797,7 +804,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 const payments = yield Payment_1.Payment.find({
                     status: 'completed',
-                    paymentType: { $in: ['rental', 'sale'] }
+                    paymentType: { $in: ['rental', 'sale'] },
+                    isProvisional: { $ne: true },
+                    isInSuspense: { $ne: true }
                 });
                 logger_1.logger.info(`Syncing ${payments.length} completed payments...`);
                 for (const payment of payments) {
@@ -1074,24 +1083,31 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 try {
                     // Check property accounts consistency
                     const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                    const propertyAccounts = yield PropertyAccount.find({})
+                    const propertyAccounts = yield PropertyAccount.find({ isArchived: { $ne: true } })
                         .select('_id propertyId ownerId')
                         .lean();
                     yield runWithConcurrency(propertyAccounts, (account) => __awaiter(this, void 0, void 0, function* () {
                         try {
-                            // Check if property still exists
-                            const property = yield Property_1.Property.findById(account.propertyId).select('_id').lean();
-                            if (!property) {
+                            // Check if backing entity still exists across Property/Development/DevelopmentUnit
+                            const [prop, dev, unit] = yield Promise.all([
+                                Property_1.Property.findById(account.propertyId).select('_id').lean(),
+                                Development_1.Development.findById(account.propertyId).select('_id').lean(),
+                                DevelopmentUnit_1.DevelopmentUnit.findById(account.propertyId).select('_id').lean()
+                            ]);
+                            if (!prop && !dev && !unit) {
                                 inconsistencies.push({
                                     type: 'orphaned_property_account',
                                     description: `Property account exists but property ${account.propertyId} not found`,
                                     count: 1
                                 });
                             }
-                            // Check if owner still exists
+                            // Check if owner still exists (support legacy owner types)
                             if (account.ownerId) {
-                                const owner = yield User_1.User.findById(account.ownerId).select('_id').lean();
-                                if (!owner) {
+                                const [po, u] = yield Promise.all([
+                                    PropertyOwner_1.PropertyOwner.findById(account.ownerId).select('_id').lean(),
+                                    User_1.User.findById(account.ownerId).select('_id').lean()
+                                ]);
+                                if (!po && !u) {
                                     inconsistencies.push({
                                         type: 'orphaned_owner_reference',
                                         description: `Property account references non-existent owner ${account.ownerId}`,
@@ -1135,6 +1151,8 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     const payments = yield Payment_1.Payment.find({
                         status: 'completed',
                         paymentType: { $in: ['rental', 'sale'] },
+                        isProvisional: { $ne: true },
+                        isInSuspense: { $ne: true },
                         $or: [
                             { paymentDate: { $gte: since } },
                             { updatedAt: { $gte: since } }
@@ -1210,7 +1228,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                             .select('_id companyId transactions').lean();
                         for (const ca of companyAccounts) {
                             const counts = Object.create(null);
-                            for (const t of (ca.transactions || [])) {
+                            for (const t of ((ca.transactions || []).filter((x) => (x === null || x === void 0 ? void 0 : x.isArchived) !== true))) {
                                 const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
                                 if (!pid)
                                     continue;
@@ -1269,6 +1287,8 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 const payment = yield Payment_1.Payment.findById(paymentId).lean();
                 if (!payment || payment.status !== 'completed')
                     return;
+                if (payment.isInSuspense === true)
+                    return;
                 // Property/development ledgers: idempotent record and dedupe if needed
                 try {
                     yield propertyAccountService_1.default.recordIncomeFromPayment(paymentId);
@@ -1326,7 +1346,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         };
                         // Ensure account exists and append only if not already present
                         yield CompanyAccount.updateOne({ companyId }, { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
-                        yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id } } } }, {
+                        yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id, isArchived: { $ne: true } } } } }, {
                             $push: { transactions: txDoc },
                             $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
                             $set: { lastUpdated: new Date() }
@@ -1335,13 +1355,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     catch (postErr) {
                         logger_1.logger.warn('verifyAndReconcile: failed ensuring company commission posting:', (postErr === null || postErr === void 0 ? void 0 : postErr.message) || postErr);
                     }
-                    // Dedupe duplicate postings in company ledger (keep earliest)
+                    // Dedupe duplicate postings in company ledger (keep earliest, archive the rest)
                     try {
                         const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
                         const ca = yield CompanyAccount.findOne({ companyId: payment.companyId }).lean();
                         if (ca && Array.isArray(ca.transactions)) {
                             const dupIds = [];
-                            const seen = new Set();
                             const grouped = Object.create(null);
                             for (const t of ca.transactions) {
                                 const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
@@ -1356,18 +1375,19 @@ class DatabaseSyncService extends events_1.EventEmitter {
                                 if (list.length <= 1)
                                     continue;
                                 const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-                                // remove all but the first
+                                // archive all but the first
                                 dupIds.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
                             }
                             if (dupIds.length > 0) {
-                                yield (yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')))).CompanyAccount.updateOne({ companyId: payment.companyId }, { $pull: { transactions: { _id: { $in: dupIds } } }, $set: { lastUpdated: new Date() } });
-                                // Recalculate totals quickly
-                                const fresh = yield (yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')))).CompanyAccount.findOne({ companyId: payment.companyId });
-                                if (fresh) {
-                                    const list = fresh.transactions || [];
-                                    const income = list.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                    const expenses = list.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                    yield (yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')))).CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
+                                // Soft-archive duplicates (bypass immutability guard using native collection update)
+                                yield CompanyAccount.collection.updateOne({ companyId: payment.companyId }, { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } }, { arrayFilters: [{ 't._id': { $in: dupIds } }] });
+                                // Recalculate totals ignoring archived
+                                const fresh = yield CompanyAccount.findOne({ companyId: payment.companyId }).lean();
+                                if (fresh && Array.isArray(fresh.transactions)) {
+                                    const active = fresh.transactions.filter((t) => (t === null || t === void 0 ? void 0 : t.isArchived) !== true);
+                                    const income = active.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                    const expenses = active.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+                                    yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
                                 }
                             }
                         }

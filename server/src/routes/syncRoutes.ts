@@ -17,7 +17,10 @@ import {
   getSyncHealth,
   listSyncFailures,
   retrySyncFailure,
-  reconcilePaymentPosting
+  reconcilePaymentPosting,
+  archiveOrphanedPropertyAccounts,
+  cleanupOrphanedOwnerReferences,
+  cleanupOwnerReferenceById
 } from '../controllers/syncController';
 import { isAdmin, isAccountant } from '../middleware/roles';
 import { auth, authorize } from '../middleware/auth';
@@ -67,6 +70,13 @@ router.post('/failures/retry', auth, authorize(['admin','accountant']), retrySyn
 
 // Reconciliation endpoints
 router.post('/reconcile/payment/:paymentId', auth, authorize(['admin','accountant']), reconcilePaymentPosting);
+
+// Maintenance: archive orphaned property accounts immediately
+router.post('/fix/orphaned-accounts', auth, authorize(['admin','accountant']), archiveOrphanedPropertyAccounts);
+
+// Maintenance: cleanup orphaned owner references on property accounts
+router.post('/fix/orphaned-owner-references', auth, authorize(['admin','accountant']), cleanupOrphanedOwnerReferences);
+router.post('/fix/orphaned-owner-references/:ownerId', auth, authorize(['admin','accountant']), cleanupOwnerReferenceById);
 
 export default router;
 

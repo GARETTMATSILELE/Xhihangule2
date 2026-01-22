@@ -68,16 +68,32 @@ const PropertyAccountsPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, ledgerFilter]);
 
+  const normalizeLedgerType = (type?: string): 'rental' | 'sale' =>
+    (String(type || '').toLowerCase() === 'sale' ? 'sale' : 'rental');
+
+  // Deduplicate by propertyId + normalized ledger type, prefer most recently updated
   const uniqueAccounts = useMemo(() => {
-    const seen = new Set<string>();
-    return accounts.filter(acc => {
+    const byKey = new Map<string, PropertyAccount>();
+    for (const acc of accounts) {
       const idPart = acc.propertyId || acc._id;
-      if (!idPart) return true;
-      const key = `${String(idPart)}:${String(acc.ledgerType || '')}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+      if (!idPart) {
+        // Keep items without an id key as-is
+        const randomKey = `${Math.random()}-${Date.now()}`;
+        byKey.set(randomKey, acc);
+        continue;
+      }
+      const normalized = normalizeLedgerType(acc.ledgerType);
+      const key = `${String(idPart)}:${normalized}`;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, acc);
+      } else {
+        const a = new Date(acc.lastUpdated || acc.updatedAt || 0).getTime();
+        const b = new Date(existing.lastUpdated || existing.updatedAt || 0).getTime();
+        if (a > b) byKey.set(key, acc);
+      }
+    }
+    return Array.from(byKey.values());
   }, [accounts]);
 
   const filteredAccounts = useMemo(() => {
@@ -97,14 +113,14 @@ const PropertyAccountsPage: React.FC = () => {
   }, [uniqueAccounts, searchQuery]);
 
   const handleAccountClick = (acc: PropertyAccount) => {
-    const isSale = acc.ledgerType === 'sale';
+    const isSale = normalizeLedgerType(acc.ledgerType) === 'sale';
     navigate(`/accountant-dashboard/property-accounts/${acc.propertyId}${isSale ? '?ledger=sale' : ''}`);
   };
 
   const rentalsSorted = useMemo(() => {
     const toName = (a: PropertyAccount) => String(a.propertyName || a.propertyId || '').toLowerCase();
     return filteredAccounts
-      .filter(acc => String(acc.ledgerType || '').toLowerCase() !== 'sale')
+      .filter(acc => normalizeLedgerType(acc.ledgerType) !== 'sale')
       .slice()
       .sort((a, b) => toName(a).localeCompare(toName(b), undefined, { sensitivity: 'base' }));
   }, [filteredAccounts]);
@@ -112,7 +128,7 @@ const PropertyAccountsPage: React.FC = () => {
   const salesSorted = useMemo(() => {
     const toName = (a: PropertyAccount) => String(a.propertyName || a.propertyId || '').toLowerCase();
     return filteredAccounts
-      .filter(acc => String(acc.ledgerType || '').toLowerCase() === 'sale')
+      .filter(acc => normalizeLedgerType(acc.ledgerType) === 'sale')
       .slice()
       .sort((a, b) => toName(a).localeCompare(toName(b), undefined, { sensitivity: 'base' }));
   }, [filteredAccounts]);
