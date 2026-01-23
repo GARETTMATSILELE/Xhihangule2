@@ -88,6 +88,34 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
   const [onlyDeposits, setOnlyDeposits] = useState<boolean>(false);
   const [allSalesPayments, setAllSalesPayments] = useState<Payment[] | null>(null);
 
+  // ---- Rental period helpers (display only for rental payments) ----
+  const monthNamesShort = useMemo(
+    () => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+    []
+  );
+  const getRentalMonthsList = useCallback((payment: Payment): string[] => {
+    const type = String((payment as any).paymentType || (payment as any).type || '').toLowerCase();
+    if (type !== 'rental') return [];
+    const startMonth = Number((payment as any).advancePeriodStart?.month || (payment as any).rentalPeriodMonth);
+    const startYear = Number((payment as any).advancePeriodStart?.year || (payment as any).rentalPeriodYear);
+    if (!startMonth || !startYear) return [];
+    const monthsCount = Math.max(1, Number((payment as any).advanceMonthsPaid || 1));
+    const out: string[] = [];
+    for (let i = 0; i < monthsCount; i++) {
+      const idx = (startMonth - 1) + i;
+      const y = startYear + Math.floor(idx / 12);
+      const m1 = ((idx % 12) + 12) % 12; // 0..11
+      out.push(`${monthNamesShort[m1]} ${y}`);
+    }
+    return out;
+  }, [monthNamesShort]);
+  const getRentalPeriodSummary = useCallback((payment: Payment): string => {
+    const list = getRentalMonthsList(payment);
+    if (list.length === 0) return '-';
+    if (list.length === 1) return list[0];
+    return `${list[0]} – ${list[list.length - 1]} (${list.length})`;
+  }, [getRentalMonthsList]);
+
   type PropertyFilterOption = {
     id: string; // propertyId or manual:<address>
     idKind: 'propertyId' | 'manualAddress';
@@ -441,6 +469,11 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
         <Typography variant="body2" gutterBottom>
           Property: {getPropertyDisplay(payment)}
         </Typography>
+        {String((payment as any).paymentType || (payment as any).type).toLowerCase() === 'rental' && (
+          <Typography variant="body2" gutterBottom>
+            Period: {getRentalPeriodSummary(payment)}
+          </Typography>
+        )}
         <Typography variant="body2" gutterBottom>
           Method: {(payment.paymentMethod || 'unknown').replace('_', ' ').toUpperCase()}
         </Typography>
@@ -684,6 +717,7 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
                 <TableCell>Date</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Property</TableCell>
+                <TableCell>Period</TableCell>
                 <TableCell>Amount</TableCell>
                 <TableCell>Outstanding</TableCell>
                 <TableCell>Method</TableCell>
@@ -707,6 +741,9 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
                   </TableCell>
                   <TableCell>
                     {getPropertyDisplay(payment)}
+                  </TableCell>
+                  <TableCell>
+                    {getRentalPeriodSummary(payment)}
                   </TableCell>
                   <TableCell>
                     {payment.currency} {(payment.amount || 0).toFixed(2)}

@@ -23,6 +23,7 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
   const [saleTotal, setSaleTotal] = useState<number | null>(null);
   const [saleCurrency, setSaleCurrency] = useState<string | null>(null);
   const isSale = useMemo(() => (receipt?.paymentType || receipt?.type) === 'sale', [receipt]);
+  const isRental = useMemo(() => (receipt?.paymentType || receipt?.type) === 'rental', [receipt]);
   const groupRef = useMemo(() => receipt?.saleId || receipt?.referenceNumber || receipt?.manualPropertyAddress || '', [receipt]);
   const currency = receipt?.currency || 'USD';
   const isLevy = useMemo(() => (receipt?.paymentType || receipt?.type) === 'levy', [receipt]);
@@ -131,6 +132,49 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     if (preferredTotalSale == null || paidToDate == null) return null;
     return Math.max(0, preferredTotalSale - paidToDate);
   }, [serverOutstanding, preferredTotalSale, paidToDate]);
+
+  // ---- Rental period helpers ----
+  const monthNamesShort = useMemo(
+    () => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+    []
+  );
+  const rentalMonthsList = useMemo(() => {
+    if (!isRental) return [] as string[];
+    // Derive start month/year with robust fallbacks:
+    // 1) advancePeriodStart
+    // 2) rentalPeriodMonth/Year
+    // 3) levyPeriodMonth/Year (legacy/fallback usage in some data)
+    // 4) paymentDate month/year
+    const paymentDt = receipt?.paymentDate ? new Date(receipt.paymentDate) : null;
+    const startMonthRaw =
+      receipt?.advancePeriodStart?.month ??
+      receipt?.rentalPeriodMonth ??
+      receipt?.levyPeriodMonth ??
+      (paymentDt ? paymentDt.getMonth() + 1 : undefined);
+    const startYearRaw =
+      receipt?.advancePeriodStart?.year ??
+      receipt?.rentalPeriodYear ??
+      receipt?.levyPeriodYear ??
+      (paymentDt ? paymentDt.getFullYear() : undefined);
+    const startMonth = Number(startMonthRaw);
+    const startYear = Number(startYearRaw);
+    if (!Number.isFinite(startMonth) || !Number.isFinite(startYear) || startMonth <= 0) return [] as string[];
+    const monthsCount = Math.max(1, Number(receipt?.advanceMonthsPaid || 1));
+    const out: string[] = [];
+    for (let i = 0; i < monthsCount; i++) {
+      const idx = (startMonth - 1) + i;
+      const y = startYear + Math.floor(idx / 12);
+      const m1 = ((idx % 12) + 12) % 12; // 0..11
+      out.push(`${monthNamesShort[m1]} ${y}`);
+    }
+    return out;
+  }, [isRental, receipt?.advancePeriodStart, receipt?.rentalPeriodMonth, receipt?.rentalPeriodYear, receipt?.levyPeriodMonth, receipt?.levyPeriodYear, receipt?.paymentDate, receipt?.advanceMonthsPaid, monthNamesShort]);
+  const rentalPeriodSummary = useMemo(() => {
+    const list = rentalMonthsList;
+    if (!Array.isArray(list) || list.length === 0) return null;
+    if (list.length === 1) return list[0];
+    return `${list[0]} – ${list[list.length - 1]} (${list.length})`;
+  }, [rentalMonthsList]);
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -142,6 +186,10 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
       const rentPaidOnly = Number(receipt.amount || 0);
       const rentalOutstandingLocal = (serverRentalOutstanding != null ? serverRentalOutstanding : Math.max(0, (rentAmount || 0) - rentPaidOnly));
       const paidToDateRental = typeof receipt?.paidToDate === 'number' ? Number(receipt.paidToDate) : null;
+      const rentalMonths = (isRental ? (Array.isArray(rentalMonthsList) ? rentalMonthsList : []) : []);
+      const rentalPeriodHtml = (isRental && rentalMonths.length > 0) ? `
+                <div class="detail-row"><span class="label">Rental Period:</span><span class="value">${rentalMonths.join(', ')}</span></div>
+              ` : '';
       const depositBreakdownHtml = `
                 <div class="detail-row"><span class="label">Rent Amount:</span><span class="value">$${(rentAmount || 0).toFixed(2)}</span></div>
                 ${depositAmount > 0 ? `<div class="detail-row"><span class="label">Deposit Amount:</span><span class="value">$${(depositAmount || 0).toFixed(2)}</span></div>` : ''}
@@ -149,6 +197,9 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 <div class="detail-row"><span class="label">Outstanding:</span><span class="value">$${(rentalOutstandingLocal || 0).toFixed(2)}</span></div>
                 <div class="detail-row"><span class="label">Total Paid:</span><span class="value">$${(totalPaid || 0).toFixed(2)}</span></div>
               `;
+      const periodInlineHtml = (isRental && rentalMonths.length > 0)
+        ? `<div class="period-inline">${rentalMonths.join(', ')}</div>`
+        : '';
       printWindow.document.write(`
         <!DOCTYPE html>
         <html>
@@ -171,6 +222,30 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 border-bottom: 2px solid #333;
                 padding-bottom: 10px;
                 margin-bottom: 20px;
+              }
+              .company-meta {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 16px;
+                margin: 8px 0 12px 0;
+              }
+              .company-left, .company-right {
+                flex: 1 1 50%;
+              }
+              .company-left {
+                text-align: left;
+              }
+              .company-right {
+                text-align: right;
+              }
+              .company-left div, .company-right div {
+                line-height: 1.4;
+              }
+              .period-inline {
+                font-style: italic;
+                text-align: left;
+                margin: 8px 0 12px 0;
               }
               .company-logo {
                 max-width: 150px;
@@ -243,15 +318,22 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
               <div class="header">
                 ${safeCompany.logo ? `<img src="data:image/png;base64,${safeCompany.logo}" alt="Company Logo" class="company-logo">` : ''}
                 <h1>${safeCompany.name}</h1>
-                <p>${safeCompany.address}</p>
-                <p>Phone: ${safeCompany.phone} | Email: ${safeCompany.email}</p>
-                ${safeCompany.website ? `<p>Website: ${safeCompany.website}</p>` : ''}
-                ${safeCompany.registrationNumber ? `<p>Reg. No: ${safeCompany.registrationNumber}</p>` : ''}
-                ${safeCompany.tinNumber ? `<p>Tax No: ${safeCompany.tinNumber}</p>` : ''}
                 <div class="receipt-title">${isLevy ? 'Levy Payment Receipt' : 'Payment Receipt'}</div>
                 <div class="receipt-number">Receipt #${displayReceiptNumber}</div>
               </div>
-              
+              <div class="company-meta">
+                <div class="company-left">
+                  ${safeCompany.address ? `<div>${safeCompany.address}</div>` : ''}
+                  <div>Phone: ${safeCompany.phone}${safeCompany.email ? ` | Email: ${safeCompany.email}` : ''}</div>
+                </div>
+                <div class="company-right">
+                  ${safeCompany.website ? `<div>Website: ${safeCompany.website}</div>` : ''}
+                  ${safeCompany.registrationNumber ? `<div>Reg. No: ${safeCompany.registrationNumber}</div>` : ''}
+                  ${safeCompany.tinNumber ? `<div>Tax No: ${safeCompany.tinNumber}</div>` : ''}
+                </div>
+              </div>
+              ${periodInlineHtml}
+
               <div class="amount">
                 $${(totalPaid || 0).toFixed(2)}
               </div>
@@ -434,6 +516,14 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
             {receipt.manualPropertyAddress || receipt.property?.name || 'N/A'}
           </Typography>
         </Grid>
+        {isRental && rentalPeriodSummary && (
+          <Grid item xs={6}>
+            <Typography variant="subtitle2" color="textSecondary">Rental Period</Typography>
+            <Typography variant="body1">
+              {rentalPeriodSummary}
+            </Typography>
+          </Grid>
+        )}
         <Grid item xs={6}>
           <Typography variant="subtitle2" color="textSecondary">{(receipt.paymentType || receipt.type) === 'sale' ? 'Buyer' : 'Tenant'}</Typography>
           <Typography variant="body1">

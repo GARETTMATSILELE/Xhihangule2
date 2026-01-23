@@ -135,6 +135,13 @@ export interface Payment {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   rentUsed?: number;
+  // Advance rental payment fields (optional)
+  advanceMonthsPaid?: number;
+  advancePeriodStart?: { month: number; year: number };
+  advancePeriodEnd?: { month: number; year: number };
+  // Manual entry fields (optional)
+  manualPropertyAddress?: string;
+  manualTenantName?: string;
   buyerName?: string;
   sellerName?: string;
   // Provisional workflow

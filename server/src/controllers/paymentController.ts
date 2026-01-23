@@ -1505,7 +1505,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     if (paginate) {
       const [items, total] = await Promise.all([
         baseQuery
-          .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear notes rentUsed')
+          .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd notes rentUsed')
           .populate('propertyId', 'name address rent')
           .lean()
           .skip((page - 1) * limit)
@@ -2393,6 +2393,12 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       paymentType: (payment as any).paymentType,
       saleId: (payment as any).saleId,
       referenceNumber: payment.referenceNumber,
+      // Rental period details
+      rentalPeriodMonth: (payment as any).rentalPeriodMonth,
+      rentalPeriodYear: (payment as any).rentalPeriodYear,
+      advanceMonthsPaid: (payment as any).advanceMonthsPaid,
+      advancePeriodStart: (payment as any).advancePeriodStart,
+      advancePeriodEnd: (payment as any).advancePeriodEnd,
       levyPeriodMonth: (payment as any).levyPeriodMonth,
       levyPeriodYear: (payment as any).levyPeriodYear
     };
