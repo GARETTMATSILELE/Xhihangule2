@@ -1475,7 +1475,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (paginate) {
             const [items, total] = yield Promise.all([
                 baseQuery
-                    .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear notes rentUsed')
+                    .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd notes rentUsed')
                     .populate('propertyId', 'name address rent')
                     .lean()
                     .skip((page - 1) * limit)
@@ -2309,6 +2309,12 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             paymentType: payment.paymentType,
             saleId: payment.saleId,
             referenceNumber: payment.referenceNumber,
+            // Rental period details
+            rentalPeriodMonth: payment.rentalPeriodMonth,
+            rentalPeriodYear: payment.rentalPeriodYear,
+            advanceMonthsPaid: payment.advanceMonthsPaid,
+            advancePeriodStart: payment.advancePeriodStart,
+            advancePeriodEnd: payment.advancePeriodEnd,
             levyPeriodMonth: payment.levyPeriodMonth,
             levyPeriodYear: payment.levyPeriodYear
         };
