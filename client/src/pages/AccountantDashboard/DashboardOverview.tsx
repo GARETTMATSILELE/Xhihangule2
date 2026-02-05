@@ -105,11 +105,18 @@ const DashboardOverview: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    // Run core and deferred in parallel so cards fill in as data arrives; page renders immediately
     (async () => {
-      await loadCore();
-      if (cancelled) return;
-      // Defer heavy/secondary fetches to next tick to let first paint occur
-      setTimeout(() => { if (!cancelled) loadDeferred(); }, 0);
+      const runCore = async () => {
+        if (cancelled) return;
+        await loadCore();
+      };
+      const runDeferred = async () => {
+        if (cancelled) return;
+        await loadDeferred();
+      };
+      runCore();
+      runDeferred();
     })();
     return () => { cancelled = true; };
     // Re-load when company context changes
@@ -464,14 +471,7 @@ const DashboardOverview: React.FC = () => {
     { title: 'Bank Revenue', value: periodFilteredPayments.filter(p => p.paymentMethod === 'bank_transfer').reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' }
   ];
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" p={4}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
+  // Render dashboard immediately; cards show "Loading…" until their data is ready (no full-page block)
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" component="h1" sx={{ mb: 3, fontWeight: 600 }}>
@@ -496,38 +496,59 @@ const DashboardOverview: React.FC = () => {
         </FormControl>
       </Box>
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        {stats.map((stat, index) => (
-          <Grid item xs={12} sm={6} md={3} key={index}>
-            <Card 
-              elevation={2} 
-              sx={{ 
-                cursor: 'pointer',
-                '&:hover': { elevation: 4 }
-              }}
-              onClick={() => {
-                if (stat.title === 'Outstanding rentals') { setShowOutstandingRentals(true); setShowOutstandingLevies(false); return; }
-                if (stat.title === 'Outstanding levies') { setShowOutstandingLevies(true); setShowOutstandingRentals(false); return; }
-                if (stat.path) navigate(stat.path);
-              }}
-            >
-              <CardContent>
-                <Box display="flex" alignItems="center" justifyContent="space-between">
-                  <Box>
-                    <Typography variant="h4" component="div" sx={{ color: stat.color, fontWeight: 'bold' }}>
-                      {typeof stat.value === 'number' ? `$${Number(stat.value).toLocaleString()}` : stat.value}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {stat.title}
-                    </Typography>
+        {stats.map((stat, index) => {
+          const isCoreDataCard = [
+            'Rental Revenue',
+            'Total Revenue',
+            'Sales',
+            'Bank Revenue'
+          ].includes(stat.title);
+          const isDeferredDataCard = [
+            'Outstanding rentals',
+            'Outstanding levies',
+            'Expenses',
+            'Invoices'
+          ].includes(stat.title);
+          const isCardLoading =
+            (loading && isCoreDataCard) || (deferredLoading && isDeferredDataCard);
+
+          return (
+            <Grid item xs={12} sm={6} md={3} key={index}>
+              <Card 
+                elevation={2} 
+                sx={{ 
+                  cursor: 'pointer',
+                  '&:hover': { elevation: 4 }
+                }}
+                onClick={() => {
+                  if (stat.title === 'Outstanding rentals') { setShowOutstandingRentals(true); setShowOutstandingLevies(false); return; }
+                  if (stat.title === 'Outstanding levies') { setShowOutstandingLevies(true); setShowOutstandingRentals(false); return; }
+                  if (stat.path) navigate(stat.path);
+                }}
+              >
+                <CardContent>
+                  <Box display="flex" alignItems="center" justifyContent="space-between">
+                    <Box>
+                      <Typography variant="h4" component="div" sx={{ color: stat.color, fontWeight: 'bold' }}>
+                        {isCardLoading
+                          ? 'Loading…'
+                          : (typeof stat.value === 'number'
+                              ? `$${Number(stat.value).toLocaleString()}`
+                              : stat.value)}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {stat.title}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ color: stat.color }}>
+                      {stat.icon}
+                    </Box>
                   </Box>
-                  <Box sx={{ color: stat.color }}>
-                    {stat.icon}
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
       </Grid>
 
       {/* Outstanding Details */}
@@ -819,7 +840,11 @@ const DashboardOverview: React.FC = () => {
               </Button>
             </Box>
             
-            {pendingRequests.length === 0 ? (
+            {loading ? (
+              <Box display="flex" justifyContent="center" py={2}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : pendingRequests.length === 0 ? (
               <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
                 No pending payment requests
               </Typography>
