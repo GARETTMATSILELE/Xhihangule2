@@ -427,6 +427,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
 // Request password reset: create token, store hash+expiry, email link
 export const requestPasswordReset = async (req: Request, res: Response, next: NextFunction) => {
+  // Log so we can confirm in Azure Log stream that this route was hit
+  console.log('[auth] forgot-password request received', { path: req.path, method: req.method, hasBody: !!req.body });
   try {
     const { email } = req.body as { email?: string };
     if (!email) {
