@@ -11,6 +11,7 @@ import { isDatabaseAvailable } from '../config/database';
 import { logger } from '../utils/logger';
 import { DatabaseService } from './databaseService';
 import { CommissionService } from './commissionService';
+import { sendAgentPaymentNotificationEmail } from './agentPaymentNotificationService';
 
 const dbService = DatabaseService.getInstance();
 // Remove unused singleton reference; commission calculations are handled in controllers via CommissionService
@@ -173,6 +174,10 @@ export const createPayment = async (req: Request, res: Response) => {
     }
 
     await session.commitTransaction();
+
+    // Notify agent by email (fire-and-forget)
+    void sendAgentPaymentNotificationEmail(payment);
+
     res.status(201).json({
       message: 'Payment processed successfully',
       payment,

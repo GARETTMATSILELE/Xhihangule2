@@ -58,6 +58,7 @@ const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
+const agentPaymentNotificationService_1 = require("../services/agentPaymentNotificationService");
 // Get properties managed by the agent
 const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -806,6 +807,8 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             catch (_d) { }
             console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
+        // Notify agent by email with payment details (fire-and-forget)
+        void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         res.status(201).json({
             status: 'success',
             data: payment,

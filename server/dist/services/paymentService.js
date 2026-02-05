@@ -24,6 +24,7 @@ const database_1 = require("../config/database");
 const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const commissionService_1 = require("./commissionService");
+const agentPaymentNotificationService_1 = require("./agentPaymentNotificationService");
 const dbService = databaseService_1.DatabaseService.getInstance();
 // Remove unused singleton reference; commission calculations are handled in controllers via CommissionService
 // Commission calculations are centralized in CommissionService
@@ -135,6 +136,8 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }, { session });
         }
         yield session.commitTransaction();
+        // Notify agent by email (fire-and-forget)
+        void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         res.status(201).json({
             message: 'Payment processed successfully',
             payment,

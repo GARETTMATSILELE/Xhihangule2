@@ -56,6 +56,7 @@ const Company_1 = require("../models/Company");
 const SalesContract_1 = require("../models/SalesContract");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
+const agentPaymentNotificationService_1 = require("../services/agentPaymentNotificationService");
 // List sales-only payments for a company
 const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -580,7 +581,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 title: 'Rental payment recorded',
                 message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
                 link: '/sales-dashboard/notifications',
-                payload: { paymentId: payment._id, paymentType: payment.paymentType }
+                payload: { paymentId: payment._id, paymentType: payment.paymentType, skipEmail: true }
             }));
             if (docs.length) {
                 const saved = yield Notification_1.Notification.insertMany(docs);
@@ -599,6 +600,8 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         catch (e) {
             console.warn('Non-fatal: failed to create agent notification for rental payment', e);
         }
+        // Email agent with payment details (fire-and-forget)
+        void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         res.status(201).json({
             message: 'Payment processed successfully',
             payment,
@@ -966,7 +969,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                     title: 'Sale payment recorded',
                     message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
                     link: '/sales-dashboard/notifications',
-                    payload: { paymentId: payment._id, paymentType: payment.paymentType }
+                    payload: { paymentId: payment._id, paymentType: payment.paymentType, skipEmail: true }
                 }));
                 if (docs.length) {
                     const saved = yield Notification_1.Notification.insertMany(docs);
@@ -1003,7 +1006,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                     title: 'Rental payment recorded',
                     message: `Reference ${payment.referenceNumber} · Amount ${payment.amount} ${payment.currency || 'USD'}`,
                     link: '/sales-dashboard/notifications',
-                    payload: { paymentId: payment._id, paymentType: payment.paymentType }
+                    payload: { paymentId: payment._id, paymentType: payment.paymentType, skipEmail: true }
                 }));
                 if (docs.length) {
                     const saved = yield Notification_1.Notification.insertMany(docs);
@@ -1022,6 +1025,10 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         catch (e) {
             console.warn('Non-fatal: failed to create agent notification for rental payment', e);
+        }
+        // Email agent with payment details when payment is finalized (fire-and-forget)
+        if (!payment.isProvisional) {
+            void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         }
         return { payment };
     });

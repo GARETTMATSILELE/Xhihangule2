@@ -11,6 +11,7 @@ import { Company } from '../models/Company';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 import agentAccountService from '../services/agentAccountService';
+import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
 
 // Get properties managed by the agent
 export const getAgentProperties = async (req: Request, res: Response) => {
@@ -852,6 +853,9 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       } catch {}
       console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e as any)?.message || e);
     }
+
+    // Notify agent by email with payment details (fire-and-forget)
+    void sendAgentPaymentNotificationEmail(payment);
 
     res.status(201).json({
       status: 'success',

@@ -59,6 +59,9 @@ NotificationSchema.index({ companyId: 1, userId: 1, createdAt: -1 });
 function sendNotificationEmail(doc) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            // Skip when a dedicated payment email is sent instead (payload.skipEmail)
+            if (doc.payload && doc.payload.skipEmail === true)
+                return;
             const user = yield User_1.User.findById(doc.userId).select('email firstName lastName').lean();
             if (!user || !user.email)
                 return;
