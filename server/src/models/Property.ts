@@ -21,6 +21,10 @@ export interface IProperty extends Document {
   ownerId?: mongoose.Types.ObjectId;
   agentId?: mongoose.Types.ObjectId;
   propertyOwnerId?: mongoose.Types.ObjectId;
+  /** Optional buyer attached to this property (sales). */
+  buyerId?: mongoose.Types.ObjectId;
+  /** Optional permanent backlink to the source valuation (set on conversion). */
+  sourceValuationId?: mongoose.Types.ObjectId;
   occupancyRate?: number;
   totalRentCollected?: number;
   currentArrears?: number;
@@ -144,6 +148,19 @@ const PropertySchema: Schema = new Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PropertyOwner',
     required: false
+  },
+  buyerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Buyer',
+    required: false,
+    index: true
+  },
+  sourceValuationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Valuation',
+    required: false,
+    immutable: true,
+    index: true
   },
   occupancyRate: { 
     type: Number, 

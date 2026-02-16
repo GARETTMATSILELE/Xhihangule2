@@ -23,7 +23,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateUserById = exports.createUser = exports.getCurrentUser = exports.getUserCommissionSummary = void 0;
+exports.deleteUserById = exports.updateUserById = exports.createUser = exports.getCurrentUser = exports.getUserCommissionSummary = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Payment_1 = require("../models/Payment");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -115,7 +115,7 @@ exports.getCurrentUser = getCurrentUser;
 const createUser = (userData) => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Creating user with data:', userData);
     // Check if user already exists
-    const existingUser = yield User_1.User.findOne({ email: userData.email, companyId: userData.companyId });
+    const existingUser = yield User_1.User.findOne({ email: userData.email, companyId: userData.companyId, isArchived: { $ne: true } });
     if (existingUser) {
         throw new errorHandler_1.AppError('User already exists', 400);
     }
@@ -147,6 +147,9 @@ const updateUserById = (id, updates, currentCompanyId) => __awaiter(void 0, void
     const user = yield User_1.User.findById(id);
     if (!user) {
         throw new errorHandler_1.AppError('User not found', 404);
+    }
+    if (user.isArchived) {
+        throw new errorHandler_1.AppError('Archived users cannot be updated', 400);
     }
     // Enforce company scoping if provided
     if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
@@ -183,3 +186,43 @@ const updateUserById = (id, updates, currentCompanyId) => __awaiter(void 0, void
     return userWithoutPassword;
 });
 exports.updateUserById = updateUserById;
+const deleteUserById = (id, actorUserId, currentCompanyId) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!id) {
+        throw new errorHandler_1.AppError('User ID is required', 400);
+    }
+    const user = yield User_1.User.findById(id);
+    if (!user) {
+        throw new errorHandler_1.AppError('User not found', 404);
+    }
+    if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
+        throw new errorHandler_1.AppError('Forbidden: User does not belong to your company', 403);
+    }
+    if (user.isArchived) {
+        return {
+            alreadyArchived: true,
+            id: String(user._id),
+            isActive: Boolean(user.isActive)
+        };
+    }
+    if (actorUserId && String(user._id) === String(actorUserId)) {
+        throw new errorHandler_1.AppError('You cannot delete your own account', 400);
+    }
+    user.archivedDetails = {
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        roles: Array.isArray(user.roles) ? user.roles : undefined
+    };
+    user.isArchived = true;
+    user.archivedAt = new Date();
+    user.archivedBy = actorUserId ? new mongoose_1.default.Types.ObjectId(actorUserId) : undefined;
+    user.isActive = false;
+    yield user.save();
+    return {
+        id: String(user._id),
+        isArchived: true,
+        archivedAt: user.archivedAt
+    };
+});
+exports.deleteUserById = deleteUserById;

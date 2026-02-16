@@ -9,4 +9,6 @@ const valuationController_1 = require("../controllers/valuationController");
 const router = express_1.default.Router();
 router.get('/', auth_1.authWithCompany, valuationController_1.listValuations);
 router.post('/', auth_1.authWithCompany, valuationController_1.createValuation);
+router.get('/:id', auth_1.authWithCompany, valuationController_1.getValuationById);
+router.patch('/:id', auth_1.authWithCompany, valuationController_1.updateValuation);
 exports.default = router;

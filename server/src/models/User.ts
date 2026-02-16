@@ -22,6 +22,16 @@ export interface IUser extends Document {
   // Avatar fields
   avatar?: string;
   avatarMimeType?: string;
+  isArchived?: boolean;
+  archivedAt?: Date;
+  archivedBy?: Types.ObjectId;
+  archivedDetails?: {
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    role?: UserRole;
+    roles?: UserRole[];
+  };
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -68,6 +78,35 @@ const userSchema = new Schema<IUser>({
   isActive: {
     type: Boolean,
     default: true
+  },
+  isArchived: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  archivedAt: {
+    type: Date,
+    required: false
+  },
+  archivedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
+  },
+  archivedDetails: {
+    email: { type: String, required: false },
+    firstName: { type: String, required: false },
+    lastName: { type: String, required: false },
+    role: {
+      type: String,
+      enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
+      required: false
+    },
+    roles: {
+      type: [String],
+      enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
+      required: false
+    }
   },
   lastLogin: {
     type: Date

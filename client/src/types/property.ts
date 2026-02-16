@@ -22,6 +22,7 @@ export interface Property {
   ownerId: string;
   agentId?: string;
   propertyOwnerId?: string;
+  buyerId?: string;
   occupancyRate: number;
   totalRentCollected: number;
   currentArrears: number;

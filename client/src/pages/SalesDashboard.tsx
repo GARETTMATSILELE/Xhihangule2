@@ -327,6 +327,237 @@ const propertyColors = {
   Sold: "bg-gray-100 text-gray-600 border-gray-200",
 };
 
+// --- Quick Add Property (mandatory fields only, completable in under 30 seconds) ---
+function QuickAddPropertyModal({ open, onClose, onSubmit, owners = [], companyId, initialValuationId }) {
+  const [form, setForm] = useState({ title: "", address: "", ownerId: owners?.[0]?.id || "", price: "", status: "Available", type: "house", bedrooms: 0, bathrooms: 0, landArea: "" });
+  useEffect(() => {
+    if (open) {
+      setForm(prev => ({ ...prev, title: "", address: "", ownerId: owners?.[0]?.id || "", price: "", status: "Available", type: "house", bedrooms: 0, bathrooms: 0, landArea: "" }));
+    }
+  }, [open, owners]);
+  const [valuations, setValuations] = useState<any[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!open || !companyId) return;
+      try {
+        const mod = await import('../services/valuationsService');
+        const vals = await mod.default.listByCompany(companyId);
+        if (!cancelled) setValuations(Array.isArray(vals) ? vals : []);
+      } catch {}
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [open, companyId]);
+  const applyValuation = (valId: string) => {
+    const v = (valuations || []).find((x: any) => x._id === valId);
+    if (!v) return;
+    const valType = (v.propertyType === 'townhouse' ? 'house' : v.propertyType) || 'house';
+    setForm(prev => ({
+      ...prev,
+      title: typeof v.propertyAddress === 'string' ? v.propertyAddress : prev.title,
+      address: typeof v.propertyAddress === 'string' ? v.propertyAddress : prev.address,
+      price: (v.estimatedValue != null && !isNaN(Number(v.estimatedValue))) ? String(v.estimatedValue) : prev.price,
+      bedrooms: (v.bedrooms != null && !isNaN(Number(v.bedrooms))) ? Number(v.bedrooms) : prev.bedrooms,
+      bathrooms: (v.bathrooms != null && !isNaN(Number(v.bathrooms))) ? Number(v.bathrooms) : prev.bathrooms,
+      landArea: (v.landSize != null && v.landSize !== '') ? String(v.landSize) : prev.landArea,
+      type: valType,
+    }));
+  };
+  useEffect(() => {
+    if (open && initialValuationId && valuations.length > 0) {
+      applyValuation(initialValuationId);
+    }
+  }, [open, initialValuationId, valuations]);
+  const handleSubmit = (e: React.FormEvent, continueLater: boolean) => {
+    e.preventDefault();
+    onSubmit({ ...form, price: Number(form.price || 0), type: form.type, bedrooms: form.bedrooms, bathrooms: form.bathrooms, landArea: form.landArea }, continueLater);
+    onClose();
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Quick Add Property" width="max-w-lg">
+      <form onSubmit={(e) => handleSubmit(e, false)} className="grid grid-cols-1 gap-3">
+        <div>
+          <label className="text-sm font-medium">Title</label>
+          <Input required value={form.title} onChange={e=>setForm({ ...form, title: e.target.value })} placeholder="e.g., 3-bed House in Avondale" />
+        </div>
+        <div>
+          <label className="text-sm font-medium">Address</label>
+          <Input required value={form.address} onChange={e=>setForm({ ...form, address: e.target.value })} placeholder="Street, suburb" />
+        </div>
+        {valuations.length > 0 && (
+          <div>
+            <label className="text-sm text-slate-500">Pick from valuation (optional)</label>
+            <select className="w-full px-3 py-2 rounded-xl border" value="" onChange={e=>applyValuation(e.target.value)}>
+              <option value="">-- Select valuation --</option>
+              {valuations.map((v: any) => (
+                <option key={v._id} value={v._id}>{v.propertyAddress}{v.city ? `, ${v.city}` : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label className="text-sm font-medium">Owner</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.ownerId} onChange={e=>setForm({ ...form, ownerId: e.target.value })} required>
+            <option value="">Select owner</option>
+            {(owners || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-sm font-medium">Asking Price</label>
+          <Input type="number" required value={form.price} onChange={e=>setForm({ ...form, price: e.target.value })} placeholder="0" />
+        </div>
+        <div>
+          <label className="text-sm font-medium">Status</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.status} onChange={e=>setForm({ ...form, status: e.target.value })}>
+            {Object.keys(propertyColors).map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-sm text-slate-500">Property Type (optional)</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.type} onChange={e=>setForm({ ...form, type: e.target.value })}>
+            <option value="house">House</option>
+            <option value="apartment">Apartment</option>
+            <option value="commercial">Commercial</option>
+            <option value="land">Land</option>
+          </select>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2 pt-2">
+          <Button type="submit" className="bg-slate-900 text-white border-slate-900 hover:bg-slate-800 flex-1">Save Property</Button>
+          <Button type="button" className="flex-1" onClick={(e)=>{ e.preventDefault(); handleSubmit(e as any, true); }}>Save &amp; Continue Later</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// --- Property Success Panel (momentum engine after save) ---
+function PropertySuccessPanel({ property, ownerName, onClose, onAddBuyer, onScheduleViewing, onUploadDocuments, onShareListing, onCreateValuation, onEnhanceListing }) {
+  const statusLabel = property?.status === 'under_offer' ? 'Under Offer' : property?.status === 'sold' ? 'Sold' : 'Available';
+  return (
+    <Modal open={!!property} onClose={onClose} title="" width="max-w-md">
+      <div className="text-center space-y-4">
+        <div className="text-2xl">Your property is live 🎉</div>
+        <p className="text-slate-600">Listed and ready for buyers.</p>
+        {property && (
+          <div className="rounded-xl border bg-slate-50 p-4 text-left space-y-1">
+            <div className="font-semibold">{property.name || property.title}</div>
+            <div className="flex items-center gap-2">
+              <Badge className={propertyColors[statusLabel]}>{statusLabel}</Badge>
+            </div>
+            {ownerName && <div className="text-sm text-slate-600">Owner: {ownerName}</div>}
+          </div>
+        )}
+        <div className="text-sm font-medium text-slate-700 pt-2">What would you like to do next?</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Button className="justify-center" onClick={()=>{ onAddBuyer(); onClose(); }}>➕ Add Buyer</Button>
+          <Button className="justify-center" onClick={()=>{ onScheduleViewing(); onClose(); }}>📅 Schedule Viewing</Button>
+          <Button className="justify-center" onClick={()=>{ onUploadDocuments(); onClose(); }}>📄 Upload Documents</Button>
+          <Button className="justify-center" onClick={()=>{ onShareListing(); onClose(); }}>💬 Share Listing</Button>
+          <Button className="justify-center sm:col-span-2" onClick={()=>{ onCreateValuation(); onClose(); }}>🏷 Create Valuation</Button>
+          <Button className="justify-center sm:col-span-2 bg-slate-100 border-slate-300" onClick={()=>{ onEnhanceListing(); onClose(); }}>✨ Improve listing quality (optional)</Button>
+        </div>
+        <button type="button" className="text-sm text-slate-500 underline mt-2" onClick={onClose}>Done</button>
+      </div>
+    </Modal>
+  );
+}
+
+// --- Enhance Property (optional: images, beds, baths, area, notes, sale type; no commission) ---
+function EnhancePropertyModal({ open, onClose, propertyId, initial, onSave }) {
+  const [form, setForm] = useState({
+    bedrooms: initial?.bedrooms ?? 3,
+    bathrooms: initial?.bathrooms ?? 2,
+    builtArea: initial?.builtArea || "",
+    landArea: initial?.landArea || "",
+    notes: initial?.notes || "",
+    saleType: initial?.saleType || "cash",
+    images: (initial as any)?.images || [],
+  });
+  useEffect(() => {
+    if (open && initial) {
+      setForm({
+        bedrooms: initial?.bedrooms ?? 3,
+        bathrooms: initial?.bathrooms ?? 2,
+        builtArea: initial?.builtArea || "",
+        landArea: initial?.landArea || "",
+        notes: initial?.notes || "",
+        saleType: initial?.saleType || "cash",
+        images: (initial as any)?.images || [],
+      });
+    }
+  }, [open, initial]);
+  const handleImageFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const fileArray = Array.from(files);
+    let remaining = fileArray.length;
+    const newImages: string[] = [];
+    fileArray.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        if (result) newImages.push(result);
+        remaining -= 1;
+        if (remaining === 0) setForm(prev => ({ ...prev, images: [...(Array.isArray(prev.images) ? prev.images : []), ...newImages] }));
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Improve listing quality (optional)" width="max-w-lg">
+      <form onSubmit={(e)=>{ e.preventDefault(); onSave(propertyId, form); onClose(); }} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm">Bedrooms</label>
+            <Input type="number" value={form.bedrooms} onChange={e=>setForm({ ...form, bedrooms: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-sm">Bathrooms</label>
+            <Input type="number" value={form.bathrooms} onChange={e=>setForm({ ...form, bathrooms: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-sm">Built Area (sqm)</label>
+            <Input type="number" value={form.builtArea} onChange={e=>setForm({ ...form, builtArea: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-sm">Land Area (sqm)</label>
+            <Input type="number" value={form.landArea} onChange={e=>setForm({ ...form, landArea: e.target.value })} />
+          </div>
+        </div>
+        <div>
+          <label className="text-sm">Sale Type</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.saleType} onChange={e=>setForm({ ...form, saleType: e.target.value })}>
+            <option value="cash">Cash</option>
+            <option value="installment">Installment</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-sm">Images</label>
+          <input type="file" accept="image/*" multiple onChange={e=>handleImageFiles(e.target.files)} className="block w-full text-sm" />
+          {Array.isArray(form.images) && form.images.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {form.images.map((src: any, idx: number) => (
+                <div key={idx} className="relative rounded-lg overflow-hidden border">
+                  <img src={src} alt="" className="w-full h-24 object-cover" />
+                  <button type="button" className="absolute top-1 right-1 text-xs px-1.5 py-0.5 rounded bg-white border" onClick={()=> setForm({ ...form, images: form.images.filter((_: any, i: number) => i !== idx) })}>Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="text-sm">Notes</label>
+          <Textarea rows={2} value={form.notes} onChange={e=>setForm({ ...form, notes: e.target.value })} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" className="bg-slate-900 text-white border-slate-900">Save</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // --- Main CRM component ---
 export default function CRM() {
   const { user, logout, setActiveRole } = useAuth() as any;
@@ -341,12 +572,11 @@ export default function CRM() {
       (window as any).__API_BASE__ = `${window.location.origin}/api/s/${sessionId}`;
     }
   }, []);
-  // Open Add Property modal when navigated with ?add=property
+  // Open Add Property modal when navigated with ?add=property (optionally with valuationId for prefill)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('add') === 'property') {
       setShowPropertyModal(true);
-      // Clean the query param to avoid reopening on navigation
       try {
         const url = new URL(window.location.href);
         url.searchParams.delete('add');
@@ -361,12 +591,40 @@ export default function CRM() {
   // Boot skeleton for initial paint
   const [bootLoading, setBootLoading] = useState(true);
   useEffect(() => { const t = setTimeout(()=>setBootLoading(false), 800); return ()=>clearTimeout(t); }, []);
-  const [tab, setTab] = usePersistentState('sales_tab', "Leads");
+  // Default to Owners to promote the owner -> property -> lead -> viewing -> buyer -> deal workflow.
+  // Existing users will keep their saved tab via localStorage.
+  const [tab, setTab] = usePersistentState('sales_tab', "Owners");
   const [query, setQuery] = usePersistentState('sales_query', "");
   const [nav, setNav] = usePersistentState('sales_nav', 'dashboard');
+  // Properties card density (Compact/Comfortable)
+  const [propDensity, setPropDensity] = useState(() => {
+    try {
+      return localStorage.getItem('prop_density') || 'comfortable';
+    } catch {
+      return 'comfortable';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('prop_density', propDensity);
+    } catch {}
+  }, [propDensity]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editPropertyId, setEditPropertyId] = useState<string | null>(null);
+  const [leadAssistId, setLeadAssistId] = useState<string | null>(null);
+  const [viewingPrefill, setViewingPrefill] = useState<{ propertyId?: string; leadId?: string } | null>(null);
   const displayName = (user ? `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email : "Property CRM");
+  const avatarUrl = useMemo(() => {
+    const u: any = user || {};
+    if (u?.avatarUrl) return u.avatarUrl;
+    // Support older server payloads that might return base64 + mimetype
+    if (u?.avatar && typeof u.avatar === 'string') {
+      const mt = u?.avatarMimeType || 'image/png';
+      if (u.avatar.startsWith('data:')) return u.avatar;
+      return `data:${mt};base64,${u.avatar}`;
+    }
+    return u?.profile?.avatar || u?.photoUrl || undefined;
+  }, [user]);
   const userInitials = useMemo(() => {
     const fn = (user?.firstName || '').trim();
     const ln = (user?.lastName || '').trim();
@@ -439,6 +697,9 @@ export default function CRM() {
   const [showDealModal, setShowDealModal] = useState(false);
   const [showConvertLeadModal, setShowConvertLeadModal] = useState(false);
   const [convertLeadId, setConvertLeadId] = useState<string | null>(null);
+  const [successPanelProperty, setSuccessPanelProperty] = useState<any>(null);
+  const [showEnhancePropertyModal, setShowEnhancePropertyModal] = useState(false);
+  const [enhancePropertyId, setEnhancePropertyId] = useState<string | null>(null);
   const [convertForm, setConvertForm] = useState<{ propertyId?: string; offerPrice?: string; notes?: string; file?: File | null }>({});
   const [stageDocsOpen, setStageDocsOpen] = useState(false);
   const [stageDocsTarget, setStageDocsTarget] = useState<{ dealId?: string; propertyId?: string; stage?: string } | null>(null);
@@ -482,7 +743,12 @@ export default function CRM() {
   const refreshBuyers = async () => {
     try {
       const list = await buyerService.list();
-      setBackendBuyers(Array.isArray(list) ? list : []);
+      const rows = Array.isArray(list) ? list : [];
+      // Extra UI-level guard: for non-admin/non-accountant users, only show buyers owned by them.
+      const roles = Array.isArray((user as any)?.roles) && (user as any)?.roles.length > 0 ? (user as any).roles : [user?.role].filter(Boolean);
+      const isPrivileged = roles.includes('admin') || roles.includes('accountant');
+      const authUserId = String(user?._id || user?.id || user?.userId || '');
+      setBackendBuyers(!isPrivileged && authUserId ? rows.filter((b: any) => String(b?.ownerId || '') === authUserId) : rows);
     } catch (e) {
       setBackendBuyers([]);
     }
@@ -580,9 +846,16 @@ export default function CRM() {
         notes: lead.notes,
         email: lead.email,
         phone: lead.phone,
-        status: lead.status || 'New'
+        status: lead.status || 'New',
+        budgetMin: lead.budgetMin,
+        budgetMax: lead.budgetMax,
+        preferredSuburbs: lead.preferredSuburbs,
+        propertyType: lead.propertyType,
+        minBedrooms: lead.minBedrooms,
+        features: lead.features
       });
       await refreshLeads();
+      addNotification({ id: uid(), title: 'Lead added', message: 'Lead saved. Follow up to move them forward.', read: false, createdAt: new Date() });
     } catch (e) {
       // swallow error; UI stays unchanged
     }
@@ -596,6 +869,7 @@ export default function CRM() {
         propertyId: buyer.propertyId
       });
       await refreshBuyers();
+      addNotification({ id: uid(), title: 'Buyer added', message: 'Buyer saved. Match them with properties or schedule a viewing.', read: false, createdAt: new Date() });
     } catch (e) {}
   };
   const addOwner = async (owner) => {
@@ -609,15 +883,17 @@ export default function CRM() {
         password: owner.password
       }, { channel: 'sales' });
       await refreshOwners();
+      addNotification({ id: uid(), title: 'Owner added', message: 'Property owner saved. You can now assign properties to them.', read: false, createdAt: new Date() });
     } catch (e) {
       // no-op fallback
     }
   };
   // Persist non-backend items locally, but create properties via backend
   const addPropertyLocal = (_property) => {};
-  const handleCreateProperty = async (property) => {
+  const handleCreateProperty = async (property): Promise<any> => {
     try {
-      // Submit via sales-specific endpoint so it doesn't use rental routes
+      const valuationId = new URLSearchParams(window.location.search).get('valuationId');
+      // Submit via sales-specific endpoint; use defaults for commission (set at deal stage)
       const payload = {
         name: property.title,
         address: property.address,
@@ -630,42 +906,42 @@ export default function CRM() {
         builtArea: Number(property.builtArea || 0),
         landArea: Number(property.landArea || 0),
         saleType: property.saleType || 'cash',
-        commission: Number(property.commission || 0),
-        commissionPreaPercent: Number(property.commissionPreaPercent || 3),
-        commissionAgencyPercentRemaining: Number(property.commissionAgencyPercentRemaining || 50),
-        commissionAgentPercentRemaining: Number(property.commissionAgentPercentRemaining || 50),
+        commission: Number(property.commission ?? 5),
+        commissionPreaPercent: Number(property.commissionPreaPercent ?? 3),
+        commissionAgencyPercentRemaining: Number(property.commissionAgencyPercentRemaining ?? 50),
+        commissionAgentPercentRemaining: Number(property.commissionAgentPercentRemaining ?? 50),
         images: Array.isArray((property as any).images) ? (property as any).images.filter((u: any)=> String(u||'').trim() !== '') : [],
       } as any;
-      // Include property owner (from selection) and agent
+      if (valuationId) {
+        (payload as any).sourceValuationId = valuationId;
+      }
       if (property.ownerId) {
         (payload as any).propertyOwnerId = property.ownerId;
       }
       if (user?._id) {
         (payload as any).agentId = user._id;
       }
-      // Prefer direct sales endpoint to avoid rental routes
       const createdRes = await apiService.createPropertySales(payload);
       const created = (createdRes && (createdRes as any).data) ? (createdRes as any).data : createdRes;
 
-      // If an owner was selected, append the created property to the owner's properties in salesowners collection
       const ownerId = property.ownerId;
       if (ownerId && created && (created as any)._id) {
         try {
-          // Fetch current sales owner to get latest properties array
           const owner = await propertyOwnerService.getSalesById(ownerId);
           const currentProps: string[] = Array.isArray((owner as any)?.properties)
             ? (owner as any).properties.map((p: any) => (typeof p === 'object' && p?._id ? p._id : (p?.$oid || p)))
             : [];
           const nextProps = Array.from(new Set([...(currentProps || []), String((created as any)._id)]));
           await propertyOwnerService.updateSales(ownerId, { properties: nextProps });
-        } catch (e) {
-          // Non-fatal: proceed even if linking fails
-        }
+        } catch (e) {}
       }
 
       await refreshProperties();
       await refreshOwners();
-    } catch (e) {}
+      return created;
+    } catch (e) {
+      return null;
+    }
   };
   const openEditProperty = (id: string) => {
     setEditPropertyId(id);
@@ -692,6 +968,7 @@ export default function CRM() {
         notes: v.notes
       });
       await refreshViewings();
+      addNotification({ id: uid(), title: 'Viewing scheduled', message: 'Viewing saved. You’ll get a reminder before it starts.', read: false, createdAt: new Date() });
     } catch (e) {}
   };
 
@@ -791,9 +1068,17 @@ export default function CRM() {
         <div className="w-full pl-0 pr-4 py-3 flex items-center gap-3">
           <div className="flex items-center gap-2">
             <button className="md:hidden p-2 rounded-xl border bg-slate-100 hover:bg-slate-200" onClick={()=>setSidebarOpen(true)} aria-label="Open menu">☰</button>
-            <div className="h-9 w-9 rounded-2xl bg-slate-900 text-white grid place-items-center font-bold">
-              {userInitials}
-            </div>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt="Profile"
+                className="h-9 w-9 rounded-2xl object-cover border border-slate-200"
+              />
+            ) : (
+              <div className="h-9 w-9 rounded-2xl bg-slate-900 text-white grid place-items-center font-bold">
+                {userInitials}
+              </div>
+            )}
             <div>
               <div className="text-sm text-slate-500">{displayName}</div>
               <h1 className="text-xl font-semibold leading-none">Sales Agent Workspace</h1>
@@ -834,7 +1119,11 @@ export default function CRM() {
               aria-label="Open user menu"
               title="Switch dashboard"
             >
-              {userInitials}
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Profile" className="h-9 w-9 rounded-full object-cover" />
+              ) : (
+                userInitials
+              )}
             </button>
             {roleMenuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white border rounded-xl shadow z-50">
@@ -935,6 +1224,71 @@ export default function CRM() {
         </section>
         )}
 
+        {/* Smart Insight Cards + Agent Momentum Meter */}
+        {!location.pathname.includes('/sales-dashboard/valuations') && !location.pathname.includes('/sales-dashboard/files') && !bootLoading && (() => {
+          const now = new Date();
+          const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0,0,0,0);
+          const propsThisWeek = (backendProperties || []).filter((p: any) => { const d = new Date(p.createdAt || p.updatedAt || 0); return d >= startOfWeek; });
+          const viewingsThisWeek = (backendViewings || []).filter((v: any) => { const d = new Date(v.when); return d >= startOfWeek && d >= now; });
+          const activeLeads = (backendLeads || []).filter((l: any) => l.status !== 'Won' && l.status !== 'Lost');
+          const lastActivityTs = Math.max(
+            ...(backendProperties || []).map((p: any) => new Date(p.updatedAt || p.createdAt || 0).getTime()),
+            ...(backendViewings || []).map((v: any) => new Date(v.when).getTime()),
+            ...(backendLeads || []).map((l: any) => new Date(l.updatedAt || l.createdAt || 0).getTime()),
+            0
+          );
+          const lastActivityLabel = lastActivityTs ? (() => {
+            const mins = Math.floor((Date.now() - lastActivityTs) / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+            const days = Math.floor(hrs / 24);
+            return `${days} day${days === 1 ? '' : 's'} ago`;
+          })() : null;
+          const insights = [];
+          if (activeLeads.length > 0) insights.push({ text: `You have ${activeLeads.length} active lead${activeLeads.length === 1 ? '' : 's'} — follow up today`, type: 'lead' });
+          if (viewingsThisWeek.length === 0 && (backendViewings || []).length === 0) insights.push({ text: 'No viewings scheduled this week', type: 'viewing' });
+          else if (viewingsThisWeek.length === 0) insights.push({ text: 'No viewings scheduled this week', type: 'viewing' });
+          if (lastActivityLabel) insights.push({ text: `Last activity: ${lastActivityLabel}`, type: 'activity' });
+          return (
+            <section className="space-y-4">
+              {insights.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {insights.slice(0, 3).map((ins, i) => (
+                    <Card key={i} className="border-slate-200 bg-white">
+                      <CardContent className="py-3 text-sm text-slate-700">
+                        {ins.text}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+              <Card className="border-slate-200 bg-slate-50/50">
+                <CardHeader>
+                  <CardTitle className="text-base">This week</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <div className="text-2xl font-semibold text-slate-900">{propsThisWeek.length}</div>
+                      <div className="text-xs text-slate-500">Properties added</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-semibold text-slate-900">{activeLeads.length}</div>
+                      <div className="text-xs text-slate-500">Leads to contact</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-semibold text-slate-900">{(backendViewings || []).filter((v: any) => new Date(v.when) >= startOfWeek).length}</div>
+                      <div className="text-xs text-slate-500">Viewings scheduled</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+          );
+        })()}
+
         {/* Commission card under KPI cards (hidden on Valuations page) */}
         {!location.pathname.includes('/sales-dashboard/valuations') && (company?.featureFlags?.commissionEnabled !== false) && (
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -956,7 +1310,7 @@ export default function CRM() {
         {!location.pathname.includes('/sales-dashboard/files') && !location.pathname.includes('/sales-dashboard/valuations') && (
           <nav className="flex gap-2 overflow-x-auto whitespace-nowrap">
             {[
-              "Leads","Viewings","Owners","Properties","Buyers","Deals"
+              "Owners","Properties","Leads","Viewings","Buyers","Deals"
             ].map(t => (
               <Button
                 key={t}
@@ -1171,6 +1525,7 @@ export default function CRM() {
                           <div className="mt-2 flex gap-2">
                             <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100" onClick={()=> setShowViewingModal(true)}>Viewing</button>
                             <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100" onClick={()=> setShowDealModal(true)}>Deal</button>
+                            <button className="text-xs px-2 py-1 rounded-lg border bg-blue-50 text-blue-900 border-blue-200" onClick={()=> setLeadAssistId(String(l._id))}>Suggested</button>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-1">
                             {["New","Contacted","Qualified","Viewing","Offer","Won","Lost"].map(s=> (
@@ -1193,6 +1548,13 @@ export default function CRM() {
               <CardTitle>Scheduled Viewings</CardTitle>
             </CardHeader>
             <CardContent>
+              {(backendViewings || []).length === 0 ? (
+                <div className="py-8 text-center text-slate-600">
+                  <p className="font-medium">No viewings scheduled — this is where deals start</p>
+                  <p className="text-sm mt-1">Schedule a viewing to connect buyers with properties.</p>
+                  <Button className="mt-3 bg-slate-900 text-white border-slate-900" onClick={()=>setShowViewingModal(true)}>Schedule Viewing</Button>
+                </div>
+              ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -1217,6 +1579,7 @@ export default function CRM() {
                   </tbody>
                 </table>
               </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1236,6 +1599,13 @@ export default function CRM() {
                   </button>
                 ))}
               </div>
+              {(backendBuyers || []).length === 0 ? (
+                <div className="py-8 text-center text-slate-600">
+                  <p className="font-medium">No buyers yet — add one to match with properties</p>
+                  <p className="text-sm mt-1">Buyers you add here can be matched to listings and scheduled for viewings.</p>
+                  <Button className="mt-3 bg-slate-900 text-white border-slate-900" onClick={()=>setShowBuyerModal(true)}>Add Buyer</Button>
+                </div>
+              ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -1266,6 +1636,7 @@ export default function CRM() {
                   </tbody>
                 </table>
               </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1327,7 +1698,11 @@ export default function CRM() {
             <CardHeader className="flex items-center justify-between">
               <CardTitle>Properties</CardTitle>
               <div className="flex items-center gap-2">
-                <select className="px-3 py-2 rounded-xl border" value={localStorage.getItem('prop_density')||'comfortable'} onChange={(e)=>{ localStorage.setItem('prop_density', e.target.value); forceRerender?.(); }}>
+                <select
+                  className="px-3 py-2 rounded-xl border"
+                  value={propDensity}
+                  onChange={(e) => setPropDensity(e.target.value)}
+                >
                   <option value="comfortable">Comfortable</option>
                   <option value="compact">Compact</option>
                 </select>
@@ -1335,12 +1710,19 @@ export default function CRM() {
               </div>
             </CardHeader>
             <CardContent>
-              {/* Grid view with images */}
+              {(backendProperties || []).length === 0 ? (
+                <div className="py-8 text-center text-slate-600">
+                  <p className="font-medium">No properties yet — add your first listing</p>
+                  <p className="text-sm mt-1">Quick add takes under 30 seconds. You can enhance the listing later.</p>
+                  <Button className="mt-3 bg-slate-900 text-white border-slate-900" onClick={()=>setShowPropertyModal(true)}>Add Property</Button>
+                </div>
+              ) : (
+              /* Grid view with images */
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(backendProperties||[]).map((bp:any) => {
                   const raw = (bp.status || 'available');
                   const human = raw === 'available' ? 'Available' : raw === 'under_offer' ? 'Under Offer' : (raw === 'sold' || raw === 'rented') ? 'Sold' : 'Available';
-                  const density = (localStorage.getItem('prop_density')||'comfortable');
+                  const density = propDensity;
                   return (
                     <div key={bp._id} className="rounded-2xl border overflow-hidden bg-white">
                       {Array.isArray((bp as any)?.images) && (bp as any).images.length > 0 ? (
@@ -1365,6 +1747,7 @@ export default function CRM() {
                   );
                 })}
               </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1535,13 +1918,62 @@ export default function CRM() {
 
       {/* Modals */}
       <LeadModal open={showLeadModal} onClose={()=>setShowLeadModal(false)} onSubmit={addLead} />
+      <LeadAssistantModal
+        open={!!leadAssistId}
+        leadId={leadAssistId}
+        leads={backendLeads || []}
+        onClose={()=>setLeadAssistId(null)}
+        onScheduleViewing={(propertyId: string) => {
+          setViewingPrefill({ propertyId, leadId: leadAssistId || undefined });
+          setShowViewingModal(true);
+        }}
+        onRequestCollab={(propertyId: string, agent: any) => {
+          addNotification({
+            id: uid(),
+            title: 'Suggested collaboration',
+            message: agent?.name ? `Message copied. You can reach out to ${agent.name} when you're ready.` : 'Opportunity noted. You decide the next step.',
+            read: false,
+            createdAt: new Date()
+          });
+        }}
+      />
       <BuyerModal open={showBuyerModal} onClose={()=>setShowBuyerModal(false)} onSubmit={addBuyer} />
       <OwnerModal open={showOwnerModal} onClose={()=>setShowOwnerModal(false)} onSubmit={addOwner} />
-      <PropertyModal
-        open={showPropertyModal}
-        onClose={() => { setShowPropertyModal(false); setEditPropertyId(null); }}
-        onSubmit={async (values) => {
-          if (editPropertyId) {
+      {showPropertyModal && !editPropertyId && (
+        <QuickAddPropertyModal
+          open={true}
+          onClose={() => setShowPropertyModal(false)}
+          initialValuationId={new URLSearchParams(location.search).get('valuationId') || undefined}
+          onSubmit={async (values) => {
+            const valuationId = new URLSearchParams(location.search).get('valuationId');
+            const created = await handleCreateProperty(values);
+            if (created && (created as any)._id) {
+              addNotification({ id: uid(), title: 'Property added', message: '👉 Property added successfully', read: false, createdAt: new Date() });
+            }
+            setShowPropertyModal(false);
+            if (valuationId && created && (created as any)._id) {
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('valuationId');
+                window.history.replaceState({}, '', url.toString());
+              } catch {}
+              navigate(`/sales-dashboard/valuations?converted=${valuationId}`);
+              return;
+            }
+            if (created && (created as any)._id) {
+              setSuccessPanelProperty(created);
+              setTab('Properties');
+            }
+          }}
+          owners={(owners || []).map((o: any) => ({ id: String(o?._id || o?.id || ''), name: ((`${o?.firstName || ''} ${o?.lastName || ''}`.trim()) || o?.name || o?.email || 'Owner') }))}
+          companyId={user?.companyId}
+        />
+      )}
+      {showPropertyModal && editPropertyId && (
+        <PropertyModal
+          open={true}
+          onClose={() => { setShowPropertyModal(false); setEditPropertyId(null); }}
+          onSubmit={async (values) => {
             try {
               const payload: any = {
                 name: values.title,
@@ -1554,51 +1986,86 @@ export default function CRM() {
                 builtArea: Number(values.builtArea || 0),
                 landArea: Number(values.landArea || 0),
                 saleType: values.saleType || 'cash',
-                commission: Number(values.commission || 0),
-                commissionPreaPercent: Number(values.commissionPreaPercent || 3),
-                commissionAgencyPercentRemaining: Number(values.commissionAgencyPercentRemaining || 50),
-                commissionAgentPercentRemaining: Number(values.commissionAgentPercentRemaining || 50),
                 images: Array.isArray((values as any).images) ? (values as any).images.filter((u: any)=> String(u||'').trim() !== '') : [],
               };
               if (values.ownerId) payload.propertyOwnerId = values.ownerId;
+              // buyerId: allow clearing by sending null
+              payload.buyerId = values.buyerId ? values.buyerId : null;
               await propertyService.updateProperty(editPropertyId, payload);
               await refreshProperties();
+              addNotification({ id: uid(), title: 'Property updated', message: 'Property details saved.', read: false, createdAt: new Date() });
             } catch (e) {}
-          } else {
-            await handleCreateProperty(values);
-          }
-        }}
-        editing={Boolean(editPropertyId)}
-        initial={(() => {
-          if (!editPropertyId) return undefined;
-          const bp = (backendProperties || []).find((x: any) => x._id === editPropertyId);
-          if (!bp) return undefined;
-          return {
-            title: bp.name,
-            address: bp.address,
-            price: bp.price ?? '',
-            bedrooms: bp.bedrooms ?? 0,
-            bathrooms: bp.bathrooms ?? 0,
-            status: (bp.status || 'available') === 'under_offer' ? 'Under Offer' : (bp.status || 'available') === 'sold' ? 'Sold' : 'Available',
-            ownerId: (bp as any).propertyOwnerId || undefined,
-            notes: bp.description || '',
-            builtArea: bp.builtArea || '',
-            landArea: bp.landArea || '',
-            saleType: (bp as any).saleType || 'cash',
-            commission: (bp as any).commission ?? 5,
-            commissionPreaPercent: (bp as any).commissionPreaPercent ?? 3,
-            commissionAgencyPercentRemaining: (bp as any).commissionAgencyPercentRemaining ?? 50,
-            commissionAgentPercentRemaining: (bp as any).commissionAgentPercentRemaining ?? 50,
-            images: Array.isArray((bp as any)?.images) ? (bp as any).images : [],
-          };
-        })()}
-        owners={(owners || []).map((o: any) => ({
-          id: String(o?._id || o?.id || ''),
-          name: ((`${o?.firstName || ''} ${o?.lastName || ''}`.trim()) || o?.name || o?.email || 'Owner')
-        }))}
-        companyId={user?.companyId}
+          }}
+          editing={true}
+          initial={(() => {
+            const bp = (backendProperties || []).find((x: any) => x._id === editPropertyId);
+            if (!bp) return undefined;
+            const fallbackBuyer = (backendBuyers || []).find((b: any) => String(b?.propertyId || '') === String(bp?._id || ''));
+            return {
+              title: bp.name,
+              address: bp.address,
+              price: bp.price ?? '',
+              bedrooms: bp.bedrooms ?? 0,
+              bathrooms: bp.bathrooms ?? 0,
+              status: (bp.status || 'available') === 'under_offer' ? 'Under Offer' : (bp.status || 'available') === 'sold' ? 'Sold' : 'Available',
+              ownerId: (bp as any).propertyOwnerId || undefined,
+              buyerId: (bp as any).buyerId || (fallbackBuyer?._id || ''),
+              notes: bp.description || '',
+              builtArea: bp.builtArea || '',
+              landArea: bp.landArea || '',
+              saleType: (bp as any).saleType || 'cash',
+              images: Array.isArray((bp as any)?.images) ? (bp as any).images : [],
+            };
+          })()}
+          owners={(owners || []).map((o: any) => ({ id: String(o?._id || o?.id || ''), name: ((`${o?.firstName || ''} ${o?.lastName || ''}`.trim()) || o?.name || o?.email || 'Owner') }))}
+          buyers={backendBuyers || []}
+          companyId={user?.companyId}
+        />
+      )}
+      <PropertySuccessPanel
+        property={successPanelProperty}
+        ownerName={successPanelProperty ? (propertyIdToOwnerDetails[getId(successPanelProperty._id)]?.name || '') : ''}
+        onClose={() => setSuccessPanelProperty(null)}
+        onAddBuyer={() => { setShowBuyerModal(true); }}
+        onScheduleViewing={() => { setShowViewingModal(true); }}
+        onUploadDocuments={() => { if (successPanelProperty?._id) navigate(`/sales-dashboard/files/${successPanelProperty._id}`); }}
+        onShareListing={() => { if (successPanelProperty?._id) { const url = `${window.location.origin}/sales-dashboard/files/${successPanelProperty._id}`; navigator.clipboard.writeText(url).then(() => addNotification({ id: uid(), title: 'Link copied', message: 'Listing link copied to clipboard.', read: false, createdAt: new Date() })); } }}
+        onCreateValuation={() => { navigate('/sales-dashboard/valuations'); } }
+        onEnhanceListing={() => { if (successPanelProperty?._id) { setEnhancePropertyId(successPanelProperty._id); setShowEnhancePropertyModal(true); } }}
       />
-      <ViewingModal open={showViewingModal} onClose={()=>setShowViewingModal(false)} onSubmit={addViewing} leads={(backendLeads || []).map((l: any) => ({ id: l._id, name: l.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
+      <EnhancePropertyModal
+        open={showEnhancePropertyModal}
+        onClose={() => { setShowEnhancePropertyModal(false); setEnhancePropertyId(null); }}
+        propertyId={enhancePropertyId || ''}
+        initial={enhancePropertyId ? (() => {
+          const bp = (backendProperties || []).find((x: any) => x._id === enhancePropertyId);
+          return bp ? { bedrooms: bp.bedrooms, bathrooms: bp.bathrooms, builtArea: bp.builtArea, landArea: bp.landArea, notes: bp.description, saleType: (bp as any).saleType, images: (bp as any)?.images } : undefined;
+        })() : undefined}
+        onSave={async (id, data) => {
+          try {
+            await propertyService.updateProperty(id, {
+              bedrooms: data.bedrooms,
+              bathrooms: data.bathrooms,
+              builtArea: Number(data.builtArea || 0),
+              landArea: Number(data.landArea || 0),
+              description: data.notes || '',
+              saleType: data.saleType || 'cash',
+              images: Array.isArray(data.images) ? data.images.filter((u: any) => String(u || '').trim() !== '') : [],
+            });
+            await refreshProperties();
+            addNotification({ id: uid(), title: 'Listing updated', message: 'Listing quality improved.', read: false, createdAt: new Date() });
+          } catch (e) {}
+        }}
+      />
+      <ViewingModal
+        open={showViewingModal}
+        onClose={() => { setShowViewingModal(false); setViewingPrefill(null); }}
+        onSubmit={addViewing}
+        leads={(backendLeads || []).map((l: any) => ({ id: l._id, name: l.name }))}
+        properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))}
+        initialPropertyId={viewingPrefill?.propertyId}
+        initialLeadId={viewingPrefill?.leadId}
+      />
       <DealModal open={showDealModal} onClose={()=>setShowDealModal(false)} onSubmit={addDeal} buyers={(backendBuyers || []).map((b: any) => ({ id: b._id, name: b.name }))} properties={(backendProperties || []).map((p: any) => ({ id: p._id, title: p.name }))} />
       <ConvertLeadToDealModal
         open={showConvertLeadModal}
@@ -1764,19 +2231,41 @@ function PasswordChange() {
 }
 function LeadModal({ open, onClose, onSubmit }) {
   const { properties: backendProperties } = useProperties();
-  const [form, setForm] = useState({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New", notes: "" });
+  const [form, setForm] = useState({
+    name: "",
+    source: "Website",
+    interest: "",
+    email: "",
+    phone: "",
+    status: "New",
+    notes: "",
+    budgetMin: "",
+    budgetMax: "",
+    preferredSuburbs: "",
+    propertyType: "",
+    minBedrooms: "",
+    features: [] as string[]
+  });
   const [useManualInterest, setUseManualInterest] = useState(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | "">("");
-  useEffect(()=>{ if(!open) { setForm({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New", notes: "" }); setUseManualInterest(false); setSelectedPropertyId(""); } }, [open]);
+  useEffect(()=>{ if(!open) { setForm({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New", notes: "", budgetMin: "", budgetMax: "", preferredSuburbs: "", propertyType: "", minBedrooms: "", features: [] }); setUseManualInterest(false); setSelectedPropertyId(""); } }, [open]);
   const saleProperties = (backendProperties || []).filter((p: any) => (p as any).rentalType === 'sale');
   const handleSubmit = (e: any) => {
     e.preventDefault();
     const interest = useManualInterest
       ? form.interest
       : (saleProperties.find((p: any) => String(p._id) === String(selectedPropertyId))?.name || form.interest);
-    onSubmit({ ...form, interest });
+    onSubmit({
+      ...form,
+      interest,
+      budgetMin: form.budgetMin === "" ? undefined : Number(form.budgetMin),
+      budgetMax: form.budgetMax === "" ? undefined : Number(form.budgetMax),
+      preferredSuburbs: form.preferredSuburbs,
+      minBedrooms: form.minBedrooms === "" ? undefined : Number(form.minBedrooms),
+    });
     onClose();
   };
+  const FEATURE_OPTIONS = ['Borehole', 'Solar', 'Security', 'Staff quarters'];
   return (
     <Modal open={open} onClose={onClose} title="Add Lead">
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1825,11 +2314,316 @@ function LeadModal({ open, onClose, onSubmit }) {
           <label className="text-sm">Notes</label>
           <Textarea rows={3} value={form.notes} onChange={e=>setForm({ ...form, notes: e.target.value })} placeholder="Additional notes about this lead" />
         </div>
+        <div className="md:col-span-2">
+          <div className="text-sm font-medium">Optional requirements (for suggestions)</div>
+          <div className="text-xs text-slate-500">These fields are optional. They help us suggest matching properties — we never auto-assign.</div>
+        </div>
+        <div>
+          <label className="text-sm">Budget min</label>
+          <Input type="number" value={form.budgetMin} onChange={e=>setForm({ ...form, budgetMin: e.target.value })} placeholder="e.g., 150000" />
+        </div>
+        <div>
+          <label className="text-sm">Budget max</label>
+          <Input type="number" value={form.budgetMax} onChange={e=>setForm({ ...form, budgetMax: e.target.value })} placeholder="e.g., 250000" />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-sm">Preferred suburbs (comma-separated)</label>
+          <Input value={form.preferredSuburbs} onChange={e=>setForm({ ...form, preferredSuburbs: e.target.value })} placeholder="e.g., Avondale, Borrowdale" />
+        </div>
+        <div>
+          <label className="text-sm">Property type</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.propertyType} onChange={e=>setForm({ ...form, propertyType: e.target.value })}>
+            <option value="">Any</option>
+            <option value="house">House</option>
+            <option value="apartment">Apartment</option>
+            <option value="commercial">Commercial</option>
+            <option value="land">Land</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-sm">Min bedrooms</label>
+          <Input type="number" value={form.minBedrooms} onChange={e=>setForm({ ...form, minBedrooms: e.target.value })} placeholder="e.g., 3" />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-sm">Optional features</label>
+          <div className="mt-1 grid grid-cols-2 md:grid-cols-4 gap-2">
+            {FEATURE_OPTIONS.map((f) => (
+              <label key={f} className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={Array.isArray(form.features) && form.features.includes(f)}
+                  onChange={(e)=> {
+                    const next = new Set<string>(Array.isArray(form.features) ? form.features : []);
+                    if (e.target.checked) next.add(f); else next.delete(f);
+                    setForm({ ...form, features: Array.from(next) });
+                  }}
+                />
+                {f}
+              </label>
+            ))}
+          </div>
+        </div>
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button className="bg-slate-900 text-white border-slate-900" type="submit">Save Lead</Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+function LeadAssistantModal({ open, onClose, leadId, leads, onScheduleViewing, onRequestCollab, onLeadUpdated }: any) {
+  const [loading, setLoading] = React.useState(false);
+  const [suggestions, setSuggestions] = React.useState<any[]>([]);
+  const [banner, setBanner] = React.useState<string | null>(null);
+  const [savingReq, setSavingReq] = React.useState(false);
+  const [reqOpen, setReqOpen] = React.useState(false);
+  const [reloadTick, setReloadTick] = React.useState(0);
+  const lead = (leads || []).find((l: any) => String(l._id) === String(leadId));
+  const [reqForm, setReqForm] = React.useState<any>({
+    budgetMin: '',
+    budgetMax: '',
+    preferredSuburbs: '',
+    propertyType: '',
+    minBedrooms: '',
+    features: [] as string[]
+  });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!open || !leadId) return;
+      try {
+        setLoading(true);
+        const data = await leadService.suggestedProperties(String(leadId), { includeUnderOffer: true });
+        const next = Array.isArray(data?.suggestions)
+          ? data.suggestions
+          : (Array.isArray(data?.data?.suggestions) ? data.data.suggestions : []);
+        if (cancelled) return;
+        setSuggestions(next);
+
+        // Micro-feedback: only show when suggestions list changes
+        try {
+          const key = `lead_suggestions_sig_${String(leadId)}`;
+          const sig = JSON.stringify(next.map((s: any) => `${s?.property?._id}:${s?.score}`).slice(0, 5));
+          const prev = localStorage.getItem(key);
+          if (prev !== sig) {
+            localStorage.setItem(key, sig);
+            if (next.length > 0) {
+              setBanner(`We found ${next.length} suggested propert${next.length === 1 ? 'y' : 'ies'} that match this lead.`);
+              setTimeout(() => setBanner(null), 4500);
+            }
+          }
+        } catch {}
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [open, leadId, reloadTick]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setReqForm({
+      budgetMin: lead?.budgetMin != null ? String(lead.budgetMin) : '',
+      budgetMax: lead?.budgetMax != null ? String(lead.budgetMax) : '',
+      preferredSuburbs: Array.isArray(lead?.preferredSuburbs) ? lead.preferredSuburbs.join(', ') : (lead?.preferredSuburbs || ''),
+      propertyType: lead?.propertyType || '',
+      minBedrooms: lead?.minBedrooms != null ? String(lead.minBedrooms) : '',
+      features: Array.isArray(lead?.features) ? lead.features : []
+    });
+  }, [open, leadId, lead?._id]);
+
+  const FEATURE_OPTIONS = ['Borehole', 'Solar', 'Security', 'Staff quarters'];
+
+  return (
+    <Modal open={open} onClose={onClose} title="Suggested Properties" width="max-w-3xl">
+      <div className="space-y-3">
+        <div className="text-sm text-slate-600">
+          {lead?.name ? (
+            <div>
+              <div className="font-medium text-slate-900">{lead.name}</div>
+              <div className="text-xs text-slate-500">Suggestions only — nothing is auto-assigned.</div>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500">Suggestions only — nothing is auto-assigned.</div>
+          )}
+        </div>
+
+        {banner && (
+          <div className="text-sm border border-blue-200 bg-blue-50 text-blue-900 rounded-xl px-3 py-2">
+            {banner}
+          </div>
+        )}
+
+        <div className="rounded-2xl border bg-white">
+          <button
+            className="w-full flex items-center justify-between px-3 py-2"
+            onClick={() => setReqOpen((v) => !v)}
+            type="button"
+          >
+            <div className="text-sm font-medium">Lead requirements (optional)</div>
+            <div className="text-xs text-slate-500">{reqOpen ? 'Hide' : 'Edit'}</div>
+          </button>
+          {reqOpen && (
+            <div className="px-3 pb-3 pt-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm">Budget min</label>
+                <Input type="number" value={reqForm.budgetMin} onChange={(e)=>setReqForm((f:any)=>({ ...f, budgetMin: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-sm">Budget max</label>
+                <Input type="number" value={reqForm.budgetMax} onChange={(e)=>setReqForm((f:any)=>({ ...f, budgetMax: e.target.value }))} />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm">Preferred suburbs (comma-separated)</label>
+                <Input value={reqForm.preferredSuburbs} onChange={(e)=>setReqForm((f:any)=>({ ...f, preferredSuburbs: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-sm">Property type</label>
+                <select className="w-full px-3 py-2 rounded-xl border" value={reqForm.propertyType} onChange={(e)=>setReqForm((f:any)=>({ ...f, propertyType: e.target.value }))}>
+                  <option value="">Any</option>
+                  <option value="house">House</option>
+                  <option value="apartment">Apartment</option>
+                  <option value="commercial">Commercial</option>
+                  <option value="land">Land</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm">Min bedrooms</label>
+                <Input type="number" value={reqForm.minBedrooms} onChange={(e)=>setReqForm((f:any)=>({ ...f, minBedrooms: e.target.value }))} />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm">Optional features</label>
+                <div className="mt-1 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {FEATURE_OPTIONS.map((f) => (
+                    <label key={f} className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={Array.isArray(reqForm.features) && reqForm.features.includes(f)}
+                        onChange={(e)=> {
+                          const next = new Set<string>(Array.isArray(reqForm.features) ? reqForm.features : []);
+                          if (e.target.checked) next.add(f); else next.delete(f);
+                          setReqForm((prev:any)=>({ ...prev, features: Array.from(next) }));
+                        }}
+                      />
+                      {f}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="md:col-span-2 flex justify-end gap-2">
+                <button
+                  className="text-xs px-3 py-2 rounded-xl border bg-slate-100 hover:bg-slate-200"
+                  type="button"
+                  onClick={async ()=>{
+                    if (!leadId) return;
+                    try {
+                      setSavingReq(true);
+                      await leadService.update(String(leadId), {
+                        budgetMin: reqForm.budgetMin === '' ? undefined : Number(reqForm.budgetMin),
+                        budgetMax: reqForm.budgetMax === '' ? undefined : Number(reqForm.budgetMax),
+                        preferredSuburbs: reqForm.preferredSuburbs,
+                        propertyType: reqForm.propertyType || undefined,
+                        minBedrooms: reqForm.minBedrooms === '' ? undefined : Number(reqForm.minBedrooms),
+                        features: reqForm.features
+                      } as any);
+                      onLeadUpdated?.();
+                      setReloadTick((x:number)=>x+1);
+                      setReqOpen(false);
+                    } finally {
+                      setSavingReq(false);
+                    }
+                  }}
+                  disabled={savingReq}
+                >
+                  {savingReq ? 'Saving…' : 'Save requirements'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-sm text-slate-500">Finding matches…</div>
+        ) : suggestions.length === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-600">
+            No suggested properties yet. Add a budget, suburbs, or bedrooms to get stronger matches.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {suggestions.map((s: any) => {
+              const p = s?.property || {};
+              const score = Number(s?.score || 0);
+              const reasons = Array.isArray(s?.reasons) ? s.reasons : [];
+              const listingAgent = s?.listingAgent;
+              const isOtherAgent = !!listingAgent;
+              return (
+                <div key={String(p._id)} className="rounded-2xl border bg-white p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium text-sm">{p.name || p.address || 'Property'}</div>
+                      <div className="text-xs text-slate-600">{p.address || '—'}</div>
+                      <div className="text-xs text-slate-600 mt-1">
+                        {money(p.price ?? 0)} · <span className={cls("inline-flex items-center px-2 py-0.5 rounded-full border text-[10px]", String(p.status)==='under_offer' ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
+                          {String(p.status || 'available').replace('_',' ')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold">{Math.round(score)}% match</div>
+                      <div className="text-[11px] text-slate-500">Suggested</div>
+                    </div>
+                  </div>
+
+                  {reasons.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {reasons.slice(0, 4).map((r: string, idx: number) => (
+                        <span key={idx} className="text-[11px] px-2 py-1 rounded-full border bg-slate-50 text-slate-700 border-slate-200">
+                          {r}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {isOtherAgent && (
+                    <div className="mt-2 text-xs text-slate-600">
+                      This lead matches a property listed by <span className="font-medium">{listingAgent?.name || 'another agent'}</span>.
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>onScheduleViewing?.(String(p._id))}>
+                      Schedule viewing
+                    </button>
+                    {isOtherAgent ? (
+                      <>
+                        <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>{
+                          const msg = `Hi ${listingAgent?.name || ''} — I have a lead that may match your listing (${p.name || p.address}). Are you open to collaborating?`;
+                          try { navigator.clipboard.writeText(msg); } catch {}
+                          onRequestCollab?.(String(p._id), listingAgent);
+                        }}>
+                          Message agent
+                        </button>
+                        <button className="text-xs px-2 py-1 rounded-lg border bg-blue-50 text-blue-900 border-blue-200 hover:bg-blue-100" onClick={()=>onRequestCollab?.(String(p._id), listingAgent)}>
+                          Request collaboration
+                        </button>
+                      </>
+                    ) : (
+                      <button className="text-xs px-2 py-1 rounded-lg border bg-slate-100 hover:bg-slate-200" onClick={()=>onRequestCollab?.(String(p._id), null)}>
+                        Contact listing agent
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -1921,13 +2715,13 @@ function OwnerModal({ open, onClose, onSubmit }) {
   );
 }
 
-function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial, companyId }) {
-  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50, images: (initial as any)?.images || [] });
+function PropertyModal({ open, onClose, onSubmit, owners = [], buyers = [], editing, initial, companyId }) {
+  const [form, setForm] = useState({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, buyerId: (initial as any)?.buyerId || "", notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50, images: (initial as any)?.images || [] });
   useEffect(()=>{
     if (open) {
-      setForm({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50, images: (initial as any)?.images || [] });
+      setForm({ title: initial?.title || "", address: initial?.address || "", type: (initial?.type || 'house'), price: initial?.price || "", bedrooms: initial?.bedrooms ?? 3, bathrooms: initial?.bathrooms ?? 2, status: initial?.status || "Available", ownerId: initial?.ownerId || owners?.[0]?.id, buyerId: (initial as any)?.buyerId || "", notes: initial?.notes || "", builtArea: initial?.builtArea || "", landArea: initial?.landArea || "", saleType: (initial?.saleType || 'cash'), commission: initial?.commission ?? 5, commissionPreaPercent: initial?.commissionPreaPercent ?? 3, commissionAgencyPercentRemaining: initial?.commissionAgencyPercentRemaining ?? 50, commissionAgentPercentRemaining: initial?.commissionAgentPercentRemaining ?? 50, images: (initial as any)?.images || [] });
     }
-  }, [open, owners, initial]);
+  }, [open, owners, buyers, initial]);
   const [valuations, setValuations] = useState<any[]>([]);
   const [pickedValuationId, setPickedValuationId] = useState<string>("");
   const handleImageFiles = (files: FileList | null) => {
@@ -2014,6 +2808,17 @@ function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial,
           </select>
         </div>
         <div>
+          <label className="text-sm">Buyer</label>
+          <select className="w-full px-3 py-2 rounded-xl border" value={form.buyerId} onChange={e=>setForm({ ...form, buyerId: e.target.value })}>
+            <option value="">-- Select Buyer (optional) --</option>
+            {(buyers || []).map((b: any) => (
+              <option key={b._id || b.id} value={b._id || b.id}>
+                {b.name}{b.email ? ` (${b.email})` : ''}{b.phone ? ` • ${b.phone}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="text-sm">Price</label>
           <Input type="number" value={form.price} onChange={e=>setForm({ ...form, price: e.target.value })} />
         </div>
@@ -2069,24 +2874,6 @@ function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial,
           <label className="text-sm">Notes</label>
           <Textarea rows={3} value={form.notes} onChange={e=>setForm({ ...form, notes: e.target.value })} />
         </div>
-        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div>
-            <label className="text-sm">Commission %</label>
-            <Input type="number" value={form.commission} onChange={e=>setForm({ ...form, commission: Number(e.target.value) })} />
-          </div>
-          <div>
-            <label className="text-sm">PREA % of Commission</label>
-            <Input type="number" value={form.commissionPreaPercent} onChange={e=>setForm({ ...form, commissionPreaPercent: Number(e.target.value) })} />
-          </div>
-          <div>
-            <label className="text-sm">Agency % of Remaining</label>
-            <Input type="number" value={form.commissionAgencyPercentRemaining} onChange={e=>setForm({ ...form, commissionAgencyPercentRemaining: Number(e.target.value) })} />
-          </div>
-          <div>
-            <label className="text-sm">Agent % of Remaining</label>
-            <Input type="number" value={form.commissionAgentPercentRemaining} onChange={e=>setForm({ ...form, commissionAgentPercentRemaining: Number(e.target.value) })} />
-          </div>
-        </div>
         <div className="md:col-span-2 flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button className="bg-slate-900 text-white border-slate-900" type="submit">{editing ? 'Update Property' : 'Save Property'}</Button>
@@ -2096,9 +2883,9 @@ function PropertyModal({ open, onClose, onSubmit, owners = [], editing, initial,
   );
 }
 
-function ViewingModal({ open, onClose, onSubmit, leads, properties }) {
-  const [form, setForm] = useState({ propertyId: properties[0]?.id, leadId: leads[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" });
-  useEffect(()=>{ if(!open) setForm({ propertyId: properties[0]?.id, leadId: leads[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" }); }, [open, leads, properties]);
+function ViewingModal({ open, onClose, onSubmit, leads, properties, initialPropertyId, initialLeadId }) {
+  const [form, setForm] = useState({ propertyId: initialPropertyId || properties[0]?.id, leadId: initialLeadId || leads[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" });
+  useEffect(()=>{ if(!open) setForm({ propertyId: initialPropertyId || properties[0]?.id, leadId: initialLeadId || leads[0]?.id, when: new Date(Date.now()+86400000).toISOString().slice(0,16), status: "Scheduled", notes: "" }); }, [open, leads, properties, initialPropertyId, initialLeadId]);
   return (
     <Modal open={open} onClose={onClose} title="Schedule Viewing">
       <form onSubmit={(e)=>{ e.preventDefault(); onSubmit({ ...form, when: new Date(form.when).toISOString() }); onClose(); }} className="grid grid-cols-1 md:grid-cols-2 gap-3">

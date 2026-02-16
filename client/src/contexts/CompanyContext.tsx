@@ -72,10 +72,13 @@ const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 
 export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [company, setCompany] = useState<Company | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasCompany, setHasCompany] = useState(false);
   const { isAuthenticated, user } = useAuth();
+  const inFlightRef = React.useRef<Promise<void> | null>(null);
+  const lastFetchKeyRef = React.useRef<string | null>(null);
+  const lastFetchAtRef = React.useRef<number>(0);
 
   const validateCompanyData = (data: any): Company => {
     if (!data._id || !data.name || !data.email || 
@@ -121,15 +124,34 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
 
     try {
-      setLoading(true);
+      // Dedupe concurrent calls (StrictMode + rerenders)
+      if (inFlightRef.current) {
+        await inFlightRef.current;
+        return;
+      }
+
+      const key = String(user.companyId || 'current');
+      // If we already have this company and we fetched it very recently, skip.
+      // (Prevents "constant refresh" feel when something triggers repeated renders.)
+      const now = Date.now();
+      const recentlyFetched = lastFetchKeyRef.current === key && (now - lastFetchAtRef.current) < 15_000;
+      if (company && hasCompany && recentlyFetched) {
+        return;
+      }
+
+      // Only show a loading state if we don't already have a company object.
+      if (!company) setLoading(true);
       setError(null);
       
-      console.log('Fetching company data for user:', {
-        userId: user._id,
-        companyId: user.companyId,
-        role: user.role
-      });
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Fetching company data for user:', {
+          userId: user._id,
+          companyId: user.companyId,
+          role: user.role
+        });
+      }
 
+      const run = (async () => {
       let response: any;
       let endpoint = '/companies/current';
       
@@ -150,7 +172,9 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
       }
 
-      console.log('Company data received:', response.data);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Company data received:', response.data);
+      }
       
       // Handle both response formats: direct company data or wrapped response
       const companyData = response.data.status === 'success' ? response.data.data : response.data;
@@ -198,13 +222,21 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         __v: companyData.__v || 0
       };
 
-      console.log('Validated company data:', validatedCompany);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Validated company data:', validatedCompany);
+      }
       setCompany(validatedCompany);
       setHasCompany(true);
       setError(null);
       
       // Store company ID in localStorage for other services to use
       localStorage.setItem('companyId', validatedCompany._id);
+      lastFetchKeyRef.current = key;
+      lastFetchAtRef.current = Date.now();
+      })();
+
+      inFlightRef.current = run;
+      await run;
     } catch (err: any) {
       console.error('Error fetching company:', err);
       
@@ -224,6 +256,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
       localStorage.removeItem('companyId');
     } finally {
       setLoading(false);
+      inFlightRef.current = null;
     }
   };
 

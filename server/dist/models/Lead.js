@@ -43,6 +43,13 @@ const LeadSchema = new mongoose_1.Schema({
     email: { type: String, trim: true },
     phone: { type: String, trim: true },
     status: { type: String, enum: ['New', 'Contacted', 'Qualified', 'Viewing', 'Offer', 'Won', 'Lost'], default: 'New' },
+    // Requirements (optional)
+    budgetMin: { type: Number, min: 0, required: false },
+    budgetMax: { type: Number, min: 0, required: false },
+    preferredSuburbs: [{ type: String, trim: true }],
+    propertyType: { type: String, trim: true, required: false },
+    minBedrooms: { type: Number, min: 0, required: false },
+    features: [{ type: String, trim: true }],
     companyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',

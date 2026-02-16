@@ -41,6 +41,22 @@ export const developmentService = {
     const res = await api.delete(`/developments/${devId}`);
     return res.data?.data || res.data;
   },
+  async update(devId: string, body: {
+    name?: string;
+    type?: string;
+    description?: string;
+    address?: string;
+    owner?: object;
+    commissionPercent?: number;
+    commissionPreaPercent?: number;
+    commissionAgencyPercentRemaining?: number;
+    commissionAgentPercentRemaining?: number;
+    collabOwnerAgentPercent?: number;
+    collabCollaboratorAgentPercent?: number;
+  }) {
+    const res = await api.patch(`/developments/${devId}`, body);
+    return res.data?.data || res.data;
+  },
   async addCollaborator(devId: string, userId: string) {
     const res = await api.post(`/developments/${devId}/collaborators`, { userId });
     return res.data?.data || res.data;

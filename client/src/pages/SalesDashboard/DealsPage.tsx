@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { dealService } from '../../services/dealService';
 import { useProperties } from '../../contexts/PropertyContext';
@@ -23,6 +24,7 @@ const Input = (props: any) => (
 );
 
 export default function DealsPage() {
+  const location = useLocation();
   const { properties, refreshProperties } = useProperties();
   const propertyService = usePropertyService();
   const propsById = React.useMemo(() => Object.fromEntries((properties||[]).map((p:any)=>[p._id, p])), [properties]);
@@ -34,11 +36,24 @@ export default function DealsPage() {
   const [form, setForm] = React.useState<any>({ propertyId: '', buyerName: '', buyerEmail: '', buyerPhone: '', stage: 'Offer', offerPrice: '', closeDate: '', notes: '', won: false });
   const [createForm, setCreateForm] = React.useState<any>({ propertyId: '', buyerName: '', buyerEmail: '', buyerPhone: '', stage: 'Offer', offerPrice: '', closeDate: '', notes: '' });
 
+  const propertyIdFilter = React.useMemo(() => {
+    try {
+      return new URLSearchParams(location.search).get('propertyId') || '';
+    } catch {
+      return '';
+    }
+  }, [location.search]);
+
   const load = React.useCallback(async () => {
-    try { setLoading(true); setError(null); const list = await dealService.list(); setDeals(Array.isArray(list)?list:[]); }
+    try {
+      setLoading(true);
+      setError(null);
+      const list = await dealService.list(propertyIdFilter ? { propertyId: propertyIdFilter } : undefined);
+      setDeals(Array.isArray(list) ? list : []);
+    }
     catch (e:any) { setError(e?.message || 'Failed to load deals'); }
     finally { setLoading(false); }
-  }, []);
+  }, [propertyIdFilter]);
 
   React.useEffect(() => { load(); }, [load]);
 
@@ -83,7 +98,32 @@ export default function DealsPage() {
             <div className="w-full max-w-sm"><Input placeholder="Search deals" value={query} onChange={(e:any)=>setQuery(e.target.value)} /></div>
           </div>
           <Card>
-            <CardHeader><CardTitle>Deals</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Deals</CardTitle>
+              {propertyIdFilter && (
+                <div className="mt-1 text-xs text-slate-500 flex items-center gap-2">
+                  <span>
+                    Filtered by property:{' '}
+                    <span className="font-medium text-slate-700">
+                      {propsById?.[propertyIdFilter]?.name || propertyIdFilter}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      try {
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('propertyId');
+                        window.history.replaceState({}, '', url.toString());
+                      } catch {}
+                    }}
+                  >
+                    Clear filter
+                  </button>
+                </div>
+              )}
+            </CardHeader>
             <CardContent>
               {error && <div className="text-sm text-rose-600 mb-2">{error}</div>}
               {/* Create */}

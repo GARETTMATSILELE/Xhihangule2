@@ -32,7 +32,7 @@ export interface IPaymentRequest extends Document {
     status: 'pending' | 'approved' | 'rejected';
     approvedBy?: mongoose.Types.ObjectId;
     approvedByName?: string;
-    approvedByRole?: 'principal' | 'prea' | 'admin';
+    approvedByRole?: 'principal' | 'prea' | 'admin' | 'owner';
     approvedAt?: Date;
     notes?: string;
   };
@@ -133,7 +133,7 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     approvedByName: { type: String },
-    approvedByRole: { type: String, enum: ['principal', 'prea', 'admin'] },
+    approvedByRole: { type: String, enum: ['principal', 'prea', 'admin', 'owner'] },
     approvedAt: { type: Date },
     notes: { type: String }
   },

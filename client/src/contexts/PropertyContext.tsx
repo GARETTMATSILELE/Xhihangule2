@@ -18,7 +18,8 @@ const PropertyContext = createContext<PropertyContextType | undefined>(undefined
 
 export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [properties, setProperties] = useState<Property[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Loading here is for property fetches only (auth is handled by ProtectedRoute).
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const propertyService = usePropertyService();
@@ -26,6 +27,9 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const userId = user?._id;
   const companyId = user?.companyId;
   const userRole = user?.role;
+  const inFlightRef = React.useRef<Promise<void> | null>(null);
+  const lastSuccessfulFetchKeyRef = React.useRef<string | null>(null);
+  const requestSeqRef = React.useRef(0);
 
   // Check if we're on an admin route
   const isAdminRoute = location.pathname.includes('/admin-dashboard') || 
@@ -60,6 +64,8 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Don't fetch if auth is still loading
     if (authLoading) {
       console.log('PropertyContext: Auth is still loading, skipping fetch');
+      // Ensure we never get stuck showing a properties loading state
+      setLoading(false);
       return;
     }
 
@@ -82,33 +88,57 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    try {
-      setLoading(true);
-      setError(null);
-      console.log('PropertyContext: All checks passed, fetching properties...');
-      console.log('PropertyContext: About to call propertyService.getProperties()');
-      const fetchedProperties = await propertyService.getProperties();
-      console.log('PropertyContext: Properties fetched successfully:', fetchedProperties?.length, 'properties');
-      
-      if (Array.isArray(fetchedProperties)) {
-        setProperties(fetchedProperties);
-      } else {
-        console.error('PropertyContext: Fetched properties is not an array:', fetchedProperties);
-        setError('Invalid response format from server');
-        setProperties([]);
-      }
-    } catch (err) {
-      console.error('PropertyContext: Error in refreshProperties:', err);
-      console.error('PropertyContext: Error details:', {
-        message: err instanceof Error ? err.message : 'Unknown error',
-        stack: err instanceof Error ? err.stack : undefined
-      });
-      setError(err instanceof Error ? err.message : 'Failed to fetch properties');
-      setProperties([]);
-    } finally {
-      setLoading(false);
+    // Dedupe concurrent refreshes (StrictMode / route effects / manual refresh clicks)
+    if (inFlightRef.current) {
+      return inFlightRef.current;
     }
-  }, [shouldSkipPropertyContext, authLoading, userId, companyId]);
+
+    const fetchKey = `${userId}:${companyId}:${userRole || ''}`;
+    const seq = ++requestSeqRef.current;
+
+    const run = (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        console.log('PropertyContext: All checks passed, fetching properties...');
+        console.log('PropertyContext: About to call propertyService.getProperties()');
+        const fetchedProperties = await propertyService.getProperties();
+        console.log('PropertyContext: Properties fetched successfully:', fetchedProperties?.length, 'properties');
+
+        // Ignore stale responses (e.g., user switches accounts quickly)
+        if (seq !== requestSeqRef.current) return;
+
+        if (Array.isArray(fetchedProperties)) {
+          setProperties(fetchedProperties);
+          lastSuccessfulFetchKeyRef.current = fetchKey;
+        } else {
+          console.error('PropertyContext: Fetched properties is not an array:', fetchedProperties);
+          setError('Invalid response format from server');
+          setProperties([]);
+        }
+      } catch (err) {
+        console.error('PropertyContext: Error in refreshProperties:', err);
+        console.error('PropertyContext: Error details:', {
+          message: err instanceof Error ? err.message : 'Unknown error',
+          stack: err instanceof Error ? err.stack : undefined
+        });
+        if (seq !== requestSeqRef.current) return;
+        setError(err instanceof Error ? err.message : 'Failed to fetch properties');
+        setProperties([]);
+      } finally {
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    inFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      if (inFlightRef.current === run) inFlightRef.current = null;
+    }
+  }, [shouldSkipPropertyContext, authLoading, userId, companyId, userRole, propertyService]);
 
   const addProperty = async (property: Property) => {
     // Skip if we're on admin routes or user is admin
@@ -170,7 +200,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const hasFetchedForPaymentsPage = React.useRef(false);
   useEffect(() => {
     // Reduce verbose logs in production
-    if (import.meta.env?.MODE === 'development') {
+    if (process.env.NODE_ENV === 'development') {
       console.log('PropertyContext: useEffect triggered', {
         authLoading,
         isAuthenticated,
@@ -218,10 +248,14 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    // Only fetch when auth is ready and user/companyId are available
+    // Only fetch when auth is ready and user/companyId are available.
+    // Also avoid refetching repeatedly for the same user/company key.
     if (!authLoading && user && user.companyId) {
-      console.log('PropertyContext: All conditions met, calling refreshProperties');
-      refreshProperties();
+      const key = `${user._id}:${user.companyId}:${user.role || ''}`;
+      if (lastSuccessfulFetchKeyRef.current !== key) {
+        console.log('PropertyContext: All conditions met, calling refreshProperties');
+        refreshProperties();
+      }
     } else if (!authLoading && !user) {
       console.log('PropertyContext: No user data available, clearing properties');
       setProperties([]);
@@ -233,11 +267,11 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setError('User is not associated with any company');
       setLoading(false);
     }
-  }, [authLoading, userId, companyId, shouldSkipPropertyContext, location.pathname]);
+  }, [authLoading, userId, companyId, userRole, shouldSkipPropertyContext, location.pathname, refreshProperties]);
 
   const contextValue = useMemo(() => ({
     properties,
-    loading: loading || authLoading,
+    loading,
     error,
     refreshProperties,
     addProperty,

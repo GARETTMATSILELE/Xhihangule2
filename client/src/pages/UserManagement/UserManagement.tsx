@@ -286,15 +286,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({ embedded = false
   const handleDeleteUser = async (userId: string) => {
     if (window.confirm('Are you sure you want to delete this user?')) {
       try {
+        await api.delete(`/users/${userId}`);
+        setUsers((prev) => prev.filter((u) => u.id !== userId));
         setMessage({
-          type: 'error',
-          text: 'User deletion is not supported',
+          type: 'success',
+          text: 'User archived successfully',
         });
+        fetchUsers();
       } catch (error) {
         console.error('Error deleting user:', error);
+        const errorMessage = (error as any)?.response?.data?.message || 'Failed to delete user';
         setMessage({
           type: 'error',
-          text: 'Failed to delete user',
+          text: errorMessage,
         });
       }
     }

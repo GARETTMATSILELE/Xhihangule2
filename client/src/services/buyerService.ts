@@ -29,6 +29,10 @@ export const buyerService = {
     const res = await api.get('/buyers', { params: filters });
     return Array.isArray(res.data) ? res.data : res.data.data;
   },
+  async get(id: string) {
+    const res = await api.get(`/buyers/${id}`);
+    return res.data.data || res.data;
+  },
   async create(input: CreateBuyerInput) {
     const res = await api.post('/buyers', input);
     return res.data.data || res.data;

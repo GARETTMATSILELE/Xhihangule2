@@ -9,6 +9,7 @@ const leadController_1 = require("../controllers/leadController");
 const router = express_1.default.Router();
 router.get('/', auth_1.authWithCompany, leadController_1.listLeads);
 router.post('/', auth_1.authWithCompany, leadController_1.createLead);
+router.get('/:id/suggested-properties', auth_1.authWithCompany, leadController_1.getLeadSuggestedProperties);
 router.put('/:id', auth_1.authWithCompany, leadController_1.updateLead);
 router.delete('/:id', auth_1.authWithCompany, leadController_1.deleteLead);
 exports.default = router;

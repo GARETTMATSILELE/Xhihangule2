@@ -15,6 +15,10 @@ export interface User {
   createdAt: Date;
   updatedAt: Date;
   phone?: string;
+  // Avatar (provided by server as a data URL; may also exist as base64 + mimetype)
+  avatarUrl?: string;
+  avatar?: string;
+  avatarMimeType?: string;
   twoFactorEnabled?: boolean;
   notifications?: {
     email: boolean;

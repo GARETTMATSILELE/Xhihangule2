@@ -336,24 +336,34 @@ class PropertyAccountService {
    * Calculate running balance for transactions
    */
   calculateRunningBalance(transactions: Transaction[]): { transactions: Transaction[]; finalBalance: number } {
-    let runningBalance = 0;
-    const sortedTransactions = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
+    let balanceCents = 0;
+    // Sort by date ascending for deterministic running balance
+    const sortedTransactions = [...transactions].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
     const transactionsWithBalance = sortedTransactions.map(transaction => {
-      if (transaction.type === 'income') {
-        runningBalance += transaction.amount;
-      } else {
-        runningBalance -= transaction.amount;
+      const amtCents = Math.round((Number(transaction.amount || 0)) * 100);
+      const isCompleted = transaction.status === 'completed';
+
+      // Only completed entries affect balance (aligns with backend ledger totals)
+      if (isCompleted) {
+        if (transaction.type === 'income') {
+          balanceCents += amtCents;
+        } else {
+          balanceCents -= amtCents;
+        }
       }
+
       return {
         ...transaction,
-        runningBalance
+        runningBalance: Number((balanceCents / 100).toFixed(2))
       };
     });
 
     return {
       transactions: transactionsWithBalance,
-      finalBalance: runningBalance
+      finalBalance: Number((balanceCents / 100).toFixed(2))
     };
   }
 

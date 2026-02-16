@@ -55,6 +55,15 @@ const ValuationSchema = new mongoose_1.Schema({
     outBuildings: { type: Boolean, default: false },
     staffQuarters: { type: Boolean, default: false },
     cottage: { type: Boolean, default: false },
-    estimatedValue: { type: Number, min: 0 }
+    estimatedValue: { type: Number, min: 0 },
+    convertedPropertyId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Property', required: false, index: true },
+    actualSoldPrice: { type: Number, required: false, min: 0 },
+    soldDate: { type: Date, required: false },
+    status: {
+        type: String,
+        enum: ['draft', 'owner_reviewing', 'converted', 'archived'],
+        default: 'draft',
+        index: true
+    }
 }, { timestamps: true });
 exports.Valuation = mongoose_1.default.model('Valuation', ValuationSchema, collections_1.COLLECTIONS.VALUATIONS);

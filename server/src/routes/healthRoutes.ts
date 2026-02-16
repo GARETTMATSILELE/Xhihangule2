@@ -1,18 +1,21 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { getDatabaseHealth, getAccountingDatabaseHealth } from '../config/database';
 import LedgerEvent from '../models/LedgerEvent';
 
 const router = express.Router();
 
-// Debug middleware to log health check requests
+// Optional verbose health logging (disabled by default in production)
 router.use((req, res, next) => {
-  console.log('Health check request received:', {
-    method: req.method,
-    path: req.path,
-    headers: req.headers,
-    cookies: req.cookies,
-    body: req.body
-  });
+  if (process.env.HEALTH_LOG_VERBOSE === 'true') {
+    console.log('Health check request received:', {
+      method: req.method,
+      path: req.path,
+      headers: req.headers,
+      cookies: req.cookies,
+      body: req.body
+    });
+  }
   next();
 });
 
@@ -27,14 +30,32 @@ router.head('/live', (req, res) => {
 });
 
 // Readiness probe: main DB connected and healthy. Accounting DB is ignored here to avoid false restarts
-router.get('/ready', (req, res) => {
+router.get('/ready', async (req, res) => {
   try {
     const dbHealth = getDatabaseHealth();
     const uptime = process.uptime();
-    if (!dbHealth.isConnected || !dbHealth.isHealthy) {
-      return res.status(503).json({ status: 'error', reason: 'db_not_ready', database: dbHealth, uptime });
+
+    if (dbHealth.isConnected && dbHealth.isHealthy) {
+      return res.json({ status: 'ok', timestamp: new Date().toISOString(), database: dbHealth, uptime });
     }
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), database: dbHealth, uptime });
+
+    // Fallback: run a direct ping before declaring not ready.
+    // This avoids false 503s when cached health state lags transient recoveries.
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await mongoose.connection.db.admin().ping();
+        return res.json({
+          status: 'ok',
+          timestamp: new Date().toISOString(),
+          database: { ...dbHealth, isHealthy: true },
+          uptime
+        });
+      } catch {
+        // Keep readiness failure response below
+      }
+    }
+
+    return res.status(503).json({ status: 'error', reason: 'db_not_ready', database: dbHealth, uptime });
   } catch (error: any) {
     console.error('Readiness check error:', error);
     res.status(500).json({ status: 'error', message: 'Readiness check failed' });

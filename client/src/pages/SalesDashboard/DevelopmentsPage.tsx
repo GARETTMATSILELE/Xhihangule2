@@ -22,8 +22,11 @@ import {
   Checkbox,
   FormControlLabel,
   FormGroup,
-  TablePagination
+  TablePagination,
+  Collapse,
+  Autocomplete
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { Add as AddIcon, Delete as DeleteIcon, Print as PrintIcon, FileDownload as FileDownloadIcon } from '@mui/icons-material';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { buyerService } from '../../services/buyerService';
@@ -33,6 +36,7 @@ import { developmentUnitService } from '../../services/developmentUnitService';
 import paymentService from '../../services/paymentService';
 import { Payment } from '../../types/payment';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotification } from '../../components/Layout/Header';
 
 type DevelopmentType = 'stands' | 'apartments' | 'houses' | 'semidetached' | 'townhouses';
 
@@ -67,6 +71,7 @@ interface DevelopmentUnit {
   label: string; // derived from variation
   status: UnitStatus;
   buyerName?: string;
+  buyerHidden?: boolean; // set by API when sold by another agent (confidentiality)
   externalSale?: boolean; // sold outside system
   unitNumber?: number; // sequential number within its variation
   collaborators?: string[];
@@ -81,7 +86,6 @@ interface Development {
   collaborators?: string[];
   createdBy?: string;
   isUnitCollaborator?: boolean;
-  // Owner details (optional)
   ownerFirstName?: string;
   ownerLastName?: string;
   ownerCompanyName?: string;
@@ -91,6 +95,12 @@ interface Development {
   variations: UnitVariation[];
   units: DevelopmentUnit[];
   createdAt: string;
+  commissionPercent?: number;
+  commissionPreaPercent?: number;
+  commissionAgencyPercentRemaining?: number;
+  commissionAgentPercentRemaining?: number;
+  collabOwnerAgentPercent?: number;
+  collabCollaboratorAgentPercent?: number;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -133,14 +143,17 @@ const computeUnitPrice = (dev: Development, unit: DevelopmentUnit, variation?: U
 
 const SalesDevelopmentsPage: React.FC = () => {
   const { user } = useAuth();
+  const { addNotification } = useNotification();
   const [developments, setDevelopments] = useState<Development[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [showQuickCreateDialog, setShowQuickCreateDialog] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState<DevelopmentType>('stands');
   const [description, setDescription] = useState('');
   const [devAddress, setDevAddress] = useState('');
   const [variations, setVariations] = useState<UnitVariation[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [loadingUnits, setLoadingUnits] = useState<Record<string, boolean>>({});
   // Owner fields
   const [ownerFirstName, setOwnerFirstName] = useState('');
@@ -159,6 +172,9 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [buyerIdNumber, setBuyerIdNumber] = useState<string>('');
   const [buyerEmail, setBuyerEmail] = useState<string>('');
   const [buyerSaving, setBuyerSaving] = useState<boolean>(false);
+  const [buyerPickerId, setBuyerPickerId] = useState<string>('');
+  const [buyerPickerOptions, setBuyerPickerOptions] = useState<any[]>([]);
+  const [buyerPickerLoading, setBuyerPickerLoading] = useState<boolean>(false);
   const [creating, setCreating] = useState<boolean>(false);
   const [openUnit, setOpenUnit] = useState<Record<string, boolean>>({});
   const [unitPayments, setUnitPayments] = useState<Record<string, Payment[]>>({});
@@ -173,6 +189,17 @@ const SalesDevelopmentsPage: React.FC = () => {
   // Collaborator management dialog
   const [showCollab, setShowCollab] = useState<{ open: boolean; devId: string | null }>({ open: false, devId: null });
   const [collabUserId, setCollabUserId] = useState<string>('');
+  // Commission structure dialog (checklist "Set commission structure")
+  const [showCommissionDialog, setShowCommissionDialog] = useState<{ open: boolean; devId: string | null }>({ open: false, devId: null });
+  const [commissionDialogForm, setCommissionDialogForm] = useState({
+    commissionPercent: 5,
+    commissionPreaPercent: 3,
+    commissionAgencyPercentRemaining: 50,
+    commissionAgentPercentRemaining: 50,
+    collabOwnerAgentPercent: 50,
+    collabCollaboratorAgentPercent: 50
+  });
+  const [commissionDialogSaving, setCommissionDialogSaving] = useState(false);
   const [preaPercentOfCommission, setPreaPercentOfCommission] = useState<number>(3);
   const [agencyPercent, setAgencyPercent] = useState<number>(50);
   const [agentPercent, setAgentPercent] = useState<number>(50);
@@ -199,6 +226,19 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [editVarAddUnits, setEditVarAddUnits] = useState<number>(0);
   const [savingEditVar, setSavingEditVar] = useState<boolean>(false);
 
+  // Quick Create form (Phase 1 - agent-first, no commission/variations)
+  const [quickName, setQuickName] = useState('');
+  const [quickType, setQuickType] = useState<DevelopmentType>('stands');
+  const [quickAddress, setQuickAddress] = useState('');
+  const [quickOwnerName, setQuickOwnerName] = useState('');
+  const [quickOwnerCompany, setQuickOwnerCompany] = useState('');
+  const [quickDescription, setQuickDescription] = useState('');
+  const [quickCreating, setQuickCreating] = useState(false);
+
+  // Unit row highlight after status change (for micro-feedback)
+  const [highlightUnitId, setHighlightUnitId] = useState<string | null>(null);
+  const [showAdvancedCreate, setShowAdvancedCreate] = useState(false);
+
   // Edit Unit dialog
   const [showEditUnit, setShowEditUnit] = useState<{ open: boolean; devId: string | null; unitId: string | null }>({ open: false, devId: null, unitId: null });
   const [editUnitCode, setEditUnitCode] = useState<string>('');
@@ -208,6 +248,13 @@ const SalesDevelopmentsPage: React.FC = () => {
   const [editUnitStandSize, setEditUnitStandSize] = useState<string>('');
   const [savingUnit, setSavingUnit] = useState<boolean>(false);
   const [unitCollabUserId, setUnitCollabUserId] = useState<string>('');
+
+  useEffect(() => {
+    if (justCreatedId) {
+      const el = document.getElementById('dev-card-just-created');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [justCreatedId]);
 
   useEffect(() => {
     const loadDevs = async () => {
@@ -230,12 +277,35 @@ const SalesDevelopmentsPage: React.FC = () => {
           variations: (d.variations || []).map((v: any) => ({ id: v.id, label: v.label, count: v.count, price: v.price, sizeSqm: d.type==='stands' ? v.size : undefined })),
           units: [],
           createdAt: d.createdAt,
+          commissionPercent: d.commissionPercent,
+          commissionPreaPercent: d.commissionPreaPercent,
+          commissionAgencyPercentRemaining: d.commissionAgencyPercentRemaining,
+          commissionAgentPercentRemaining: d.commissionAgentPercentRemaining,
+          collabOwnerAgentPercent: d.collabOwnerAgentPercent,
+          collabCollaboratorAgentPercent: d.collabCollaboratorAgentPercent,
         }));
         setDevelopments(mapped);
       } catch {}
     };
     loadDevs();
   }, []);
+
+  // When commission dialog opens, prefill form from development
+  useEffect(() => {
+    if (showCommissionDialog.open && showCommissionDialog.devId) {
+      const dev = developments.find(d => d.id === showCommissionDialog.devId);
+      if (dev) {
+        setCommissionDialogForm({
+          commissionPercent: dev.commissionPercent ?? 5,
+          commissionPreaPercent: dev.commissionPreaPercent ?? 3,
+          commissionAgencyPercentRemaining: dev.commissionAgencyPercentRemaining ?? 50,
+          commissionAgentPercentRemaining: dev.commissionAgentPercentRemaining ?? 50,
+          collabOwnerAgentPercent: dev.collabOwnerAgentPercent ?? 50,
+          collabCollaboratorAgentPercent: dev.collabCollaboratorAgentPercent ?? 50
+        });
+      }
+    }
+  }, [showCommissionDialog.open, showCommissionDialog.devId, developments]);
 
   // Lazy-load sales users only when Collaborators dialog is opened
   useEffect(() => {
@@ -352,6 +422,83 @@ const SalesDevelopmentsPage: React.FC = () => {
     }
   };
 
+  const createDevelopmentQuick = async () => {
+    const nameTrim = quickName.trim();
+    if (!nameTrim || !quickType) return;
+    const primaryOwner = quickOwnerName.trim() || quickOwnerCompany.trim();
+    if (!primaryOwner) return;
+    try {
+      setQuickCreating(true);
+      const created = await developmentService.create({
+        name: nameTrim,
+        type: quickType,
+        description: quickDescription.trim() || undefined,
+        address: quickAddress.trim() || undefined,
+        owner: quickOwnerCompany.trim()
+          ? { companyName: quickOwnerCompany.trim() }
+          : (() => {
+              const parts = quickOwnerName.trim().split(/\s+/);
+              const firstName = parts[0] || '';
+              const lastName = parts.slice(1).join(' ') || '';
+              return { firstName, lastName };
+            })(),
+        variations: [],
+        commissionPercent: 5,
+        commissionPreaPercent: 3,
+        commissionAgencyPercentRemaining: 50,
+        commissionAgentPercentRemaining: 50,
+        collabOwnerAgentPercent: 50,
+        collabCollaboratorAgentPercent: 50
+      });
+      const mapped: Development = {
+        id: created._id || created.id,
+        name: created.name,
+        type: created.type,
+        description: created.description,
+        collaborators: Array.isArray(created.collaborators) ? created.collaborators.map((x: any) => String(x)) : [],
+        createdBy: created.createdBy ? String(created.createdBy) : undefined,
+        ownerFirstName: created.owner?.firstName,
+        ownerLastName: created.owner?.lastName,
+        ownerCompanyName: created.owner?.companyName,
+        ownerEmail: created.owner?.email,
+        ownerIdNumber: created.owner?.idNumber,
+        ownerPhone: created.owner?.phone,
+        variations: (created.variations || []).map((v: any) => ({
+          id: v.id,
+          label: v.label,
+          count: v.count,
+          price: v.price,
+          sizeSqm: created.type === 'stands' ? v.size : undefined
+        })),
+        units: [],
+        createdAt: created.createdAt || new Date().toISOString()
+      };
+      setDevelopments(prev => [mapped, ...prev]);
+      setShowQuickCreateDialog(false);
+      setQuickName('');
+      setQuickType('stands');
+      setQuickAddress('');
+      setQuickOwnerName('');
+      setQuickOwnerCompany('');
+      setQuickDescription('');
+      setExpanded(prev => ({ ...prev, [mapped.id]: true }));
+      setJustCreatedId(mapped.id);
+      setTimeout(() => setJustCreatedId(null), 2000);
+      addNotification({
+        id: uid(),
+        title: 'Development created',
+        message: '👉 Development created successfully 🎉',
+        read: false,
+        createdAt: new Date()
+      });
+    } catch (e: any) {
+      const msg = (e?.response?.data?.message) || 'Failed to create development';
+      addNotification({ id: uid(), title: 'Error', message: msg, read: false, createdAt: new Date() });
+    } finally {
+      setQuickCreating(false);
+    }
+  };
+
   const updateDevelopment = (id: string, patch: Partial<Development>) => {
     setDevelopments(prev => prev.map(d => d.id === id ? { ...d, ...patch } : d));
   };
@@ -407,6 +554,7 @@ const SalesDevelopmentsPage: React.FC = () => {
   const openAddBuyer = (devId: string, unitId: string) => {
     setBuyerDevId(devId);
     setBuyerUnitId(unitId);
+    setBuyerPickerId('');
     setBuyerName('');
     setBuyerPhone('');
     setBuyerIdNumber('');
@@ -414,20 +562,52 @@ const SalesDevelopmentsPage: React.FC = () => {
     setShowAddBuyer(true);
   };
 
+  // Load all buyers belonging to this logged-in agent/user when the dialog opens
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!showAddBuyer) return;
+      try {
+        setBuyerPickerLoading(true);
+        const list = await buyerService.list();
+        if (!cancelled) setBuyerPickerOptions(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setBuyerPickerOptions([]);
+      } finally {
+        if (!cancelled) setBuyerPickerLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [showAddBuyer]);
+
   const submitAddBuyer = async () => {
     if (!buyerName.trim()) return;
     try {
       setBuyerSaving(true);
-      const created = await buyerService.create({
-        name: buyerName.trim(),
-        phone: buyerPhone.trim() || undefined,
-        email: buyerEmail.trim() || undefined,
-        idNumber: buyerIdNumber.trim() || undefined,
-        developmentId: buyerDevId,
-        developmentUnitId: buyerUnitId
-      });
-      const displayName = created?.name || buyerName.trim();
-      updateUnit(buyerDevId, buyerUnitId, { buyerName: displayName });
+      if (buyerPickerId) {
+        const picked = (buyerPickerOptions || []).find((b: any) => String(b?._id || b?.id || '') === String(buyerPickerId));
+        const pickedName = (picked as any)?.name || buyerName.trim();
+        // Update buyer record to link to this unit and also set the unit's buyerId/buyerName
+        await buyerService.update(buyerPickerId, { developmentId: buyerDevId, developmentUnitId: buyerUnitId } as any).catch(() => undefined);
+        await developmentUnitService.setBuyer(buyerUnitId, buyerPickerId).catch(() => undefined);
+        updateUnit(buyerDevId, buyerUnitId, { buyerName: pickedName });
+      } else {
+        const created = await buyerService.create({
+          name: buyerName.trim(),
+          phone: buyerPhone.trim() || undefined,
+          email: buyerEmail.trim() || undefined,
+          idNumber: buyerIdNumber.trim() || undefined,
+          developmentId: buyerDevId,
+          developmentUnitId: buyerUnitId
+        });
+        const displayName = created?.name || buyerName.trim();
+        const createdId = String((created as any)?._id || (created as any)?.id || '');
+        if (createdId) {
+          await developmentUnitService.setBuyer(buyerUnitId, createdId).catch(() => undefined);
+        }
+        updateUnit(buyerDevId, buyerUnitId, { buyerName: displayName });
+      }
       setShowAddBuyer(false);
     } catch (e) {
       // no-op UI error handling for now; could add snackbar
@@ -552,16 +732,62 @@ const SalesDevelopmentsPage: React.FC = () => {
     <Box sx={{ width: '100%' }}>
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
         <Typography variant="h4">Developments</Typography>
-        <Button startIcon={<AddIcon />} variant="contained" onClick={() => setShowCreate(true)}>Add Development</Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" onClick={() => setShowCreate(true)}>Full setup</Button>
+          <Button startIcon={<AddIcon />} variant="contained" onClick={() => setShowQuickCreateDialog(true)}>Add Development</Button>
+        </Box>
       </Box>
+
+      {/* Quick Create Development (Phase 1 - under 60 seconds, no commission) */}
+      <Dialog open={showQuickCreateDialog} onClose={() => setShowQuickCreateDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Quick Create Development</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 0 }}>
+            <Grid item xs={12}>
+              <TextField fullWidth label="Development Name" value={quickName} onChange={(e) => setQuickName(e.target.value)} required />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField select fullWidth label="Type" value={quickType} onChange={(e) => setQuickType(e.target.value as DevelopmentType)}>
+                <MenuItem value="stands">Stands</MenuItem>
+                <MenuItem value="apartments">Apartments</MenuItem>
+                <MenuItem value="houses">Houses</MenuItem>
+                <MenuItem value="semidetached">Semi-detached</MenuItem>
+                <MenuItem value="townhouses">Townhouses</MenuItem>
+              </TextField>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth label="Development Address" value={quickAddress} onChange={(e) => setQuickAddress(e.target.value)} required />
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Primary Owner (name or company)</Typography>
+              <TextField fullWidth label="Owner name (First Last)" value={quickOwnerName} onChange={(e) => setQuickOwnerName(e.target.value)} placeholder="e.g. John Smith" />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>— or —</Typography>
+              <TextField fullWidth label="Company name" value={quickOwnerCompany} onChange={(e) => setQuickOwnerCompany(e.target.value)} placeholder="e.g. ABC Holdings" sx={{ mt: 1 }} />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField fullWidth multiline minRows={2} label="Short description (optional)" value={quickDescription} onChange={(e) => setQuickDescription(e.target.value)} />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowQuickCreateDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={createDevelopmentQuick}
+            disabled={quickCreating || !quickName.trim() || !quickType || (!quickOwnerName.trim() && !quickOwnerCompany.trim()) || !quickAddress.trim()}
+          >
+            {quickCreating ? 'Creating…' : 'Create Development'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Grid container spacing={2}>
         {developments.map((dev) => {
           const statusCounts = dev.units.reduce((acc, u) => { acc[u.status] = (acc[u.status] || 0) + 1; return acc; }, {} as Record<UnitStatus, number>);
           const isOpen = !!expanded[dev.id];
           return (
-            <Grid item xs={12} key={dev.id}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
+            <Grid item xs={12} key={dev.id} id={justCreatedId === dev.id ? 'dev-card-just-created' : undefined}>
+              <Paper variant="outlined" sx={{ p: 2, ...(justCreatedId === dev.id ? { boxShadow: 2, borderColor: 'primary.main', borderWidth: 2 } : {}) }}>
                 <Box
                   display="flex"
                   alignItems="center"
@@ -582,13 +808,14 @@ const SalesDevelopmentsPage: React.FC = () => {
                           variationId: String(u.variationId),
                           label: String(u.unitCode || ''),
                           status: (u.status || 'available') as UnitStatus,
-                          buyerName: u.buyerName,
+                          buyerName: u.buyerHidden ? undefined : u.buyerName,
+                          buyerHidden: !!u.buyerHidden,
                           unitNumber: typeof u.unitNumber === 'number' ? u.unitNumber : undefined,
                           collaborators: Array.isArray(u.collaborators) ? u.collaborators.map((x:any)=>String(x)) : [],
                           price: typeof u.price === 'number' ? Number(u.price) : undefined
                         }));
                         updateDevelopment(dev.id, { units: mappedUnits });
-                        // For each unit, load its buyers filtered by development and unit
+                        // For each unit, load its buyers filtered by development and unit (don't attach if buyerHidden)
                         try {
                           const allBuyers = await buyerService.list({ developmentId: dev.id });
                           const buyersByUnit: Record<string, string> = {};
@@ -602,7 +829,8 @@ const SalesDevelopmentsPage: React.FC = () => {
                             variationId: String(unit.variationId),
                             label: String(unit.label),
                             status: unit.status as UnitStatus,
-                            buyerName: buyersByUnit[String(unit.id)] || unit.buyerName,
+                            buyerName: unit.buyerHidden ? undefined : (buyersByUnit[String(unit.id)] || unit.buyerName),
+                            buyerHidden: unit.buyerHidden,
                             unitNumber: typeof unit.unitNumber === 'number' ? unit.unitNumber : undefined,
                             collaborators: Array.isArray(unit.collaborators) ? unit.collaborators.map((x:any)=>String(x)) : [],
                             price: typeof unit.price === 'number' ? Number(unit.price) : undefined
@@ -650,9 +878,77 @@ const SalesDevelopmentsPage: React.FC = () => {
                 {isOpen && (
                   <>
                     <Divider sx={{ my: 2 }} />
-                    {/* Variations list */}
+
+                    {/* Sales Snapshot */}
+                    {(() => {
+                      const total = dev.units.length;
+                      const available = (dev.units || []).filter(u => u.status === 'available').length;
+                      const underOffer = (dev.units || []).filter(u => u.status === 'under_offer').length;
+                      const sold = (dev.units || []).filter(u => u.status === 'sold').length;
+                      const reservedOrOffer = underOffer;
+                      const sellThrough = total > 0 ? Math.round((sold / total) * 100) : 0;
+                      const totalValueSold = (dev.units || [])
+                        .filter(u => u.status === 'sold')
+                        .reduce((sum, u) => sum + computeUnitPrice(dev, u, dev.variations.find(v => v.id === u.variationId)), 0);
+                      return (
+                        <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'grey.50' }}>
+                          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>Sales snapshot</Typography>
+                          <Grid container spacing={2}>
+                            <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Total units</Typography><Typography variant="h6">{total}</Typography></Grid>
+                            <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Available</Typography><Typography variant="h6" color="success.main">{available}</Typography></Grid>
+                            <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Reserved / Under offer</Typography><Typography variant="h6" color="warning.main">{reservedOrOffer}</Typography></Grid>
+                            <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Sold</Typography><Typography variant="h6" color="info.main">{sold}</Typography></Grid>
+                            <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Sell-through %</Typography><Typography variant="h6">{sellThrough}%</Typography></Grid>
+                            <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Total value sold</Typography><Typography variant="h6">{totalValueSold.toLocaleString()}</Typography></Grid>
+                          </Grid>
+                        </Paper>
+                      );
+                    })()}
+
+                    {/* Setup Checklist (progress engine) */}
+                    <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1 }}>Setup checklist</Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                        <Chip size="small" color="success" label="✓ Development created" />
+                        <Chip
+                          size="small"
+                          variant={dev.variations.some(v => v.label && v.label !== 'To be defined') ? 'filled' : 'outlined'}
+                          color={dev.variations.some(v => v.label && v.label !== 'To be defined') ? 'success' : 'default'}
+                          label={dev.variations.some(v => v.label && v.label !== 'To be defined') ? '✓ Add unit types' : '⬜ Add unit types'}
+                          onClick={(e) => { e.stopPropagation(); setShowAddVar({ open: true, devId: dev.id }); setNewVarLabel(''); setNewVarCount(1); setNewVarSizeSqm(0); setNewVarPricePerSqm(0); setNewVarPrice(0); }}
+                          sx={{ cursor: 'pointer' }}
+                        />
+                        <Chip
+                          size="small"
+                          variant={(dev.units || []).length > 0 ? 'filled' : 'outlined'}
+                          color={(dev.units || []).length > 0 ? 'success' : 'default'}
+                          label={(dev.units || []).length > 0 ? `✓ Add units (${dev.units.length})` : '⬜ Add units'}
+                          onClick={(e) => { e.stopPropagation(); setShowAddVar({ open: true, devId: dev.id }); }}
+                          sx={{ cursor: 'pointer' }}
+                        />
+                        <Chip
+                          size="small"
+                          variant={(dev.commissionPercent != null && dev.commissionPercent > 0) ? 'filled' : 'outlined'}
+                          color={(dev.commissionPercent != null && dev.commissionPercent > 0) ? 'success' : 'default'}
+                          label={(dev.commissionPercent != null && dev.commissionPercent > 0) ? '✓ Set commission structure' : '⬜ Set commission structure (advanced)'}
+                          onClick={(e) => { e.stopPropagation(); setShowCommissionDialog({ open: true, devId: dev.id }); }}
+                          sx={{ cursor: 'pointer' }}
+                        />
+                        <Chip
+                          size="small"
+                          variant={(dev.collaborators?.length ?? 0) > 0 ? 'filled' : 'outlined'}
+                          color={(dev.collaborators?.length ?? 0) > 0 ? 'success' : 'default'}
+                          label={(dev.collaborators?.length ?? 0) > 0 ? `✓ Add collaborators (${dev.collaborators?.length ?? 0})` : '⬜ Add collaborators'}
+                          onClick={(e) => { e.stopPropagation(); setShowCollab({ open: true, devId: dev.id }); }}
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Commission &amp; collaborators: Advanced (can be updated later)</Typography>
+                    </Box>
+
+                    {/* Unit Types (renamed from Variations) */}
                     <Box sx={{ mb: 2 }}>
-                      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Variations</Typography>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>Unit types</Typography>
                       <Box display="flex" flexWrap="wrap" gap={1} alignItems="center">
                         {dev.variations.map(v => {
                           const uid = user?._id;
@@ -661,9 +957,10 @@ const SalesDevelopmentsPage: React.FC = () => {
                           const limitedView = !(user?.role === 'admin' || user?.role === 'accountant') && !isOwner && !isDevCollab;
                           const visibleCount = (dev.units || []).filter(u => String(u.variationId) === String(v.id)).length;
                           const countToShow = limitedView ? visibleCount : (v.count || 0);
+                          const unitLabel = dev.type === 'stands' && typeof v.sizeSqm === 'number' ? `${v.sizeSqm} sqm Stands` : v.label;
                           return (
                             <Box key={v.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <Chip label={`${v.label} • ${countToShow} units${typeof v.price === 'number' ? ` • ${v.price.toLocaleString()}` : ''}${dev.type==='stands' && typeof v.sizeSqm === 'number' ? ` • ${v.sizeSqm} sqm` : ''}`} />
+                              <Chip label={`${unitLabel} · ${countToShow} units`} />
                               <Button size="small" variant="outlined" onClick={(e)=>{ e.stopPropagation();
                                 setShowEditVar({ open: true, devId: dev.id, variationId: v.id });
                                 setEditVarLabel(v.label || '');
@@ -674,7 +971,7 @@ const SalesDevelopmentsPage: React.FC = () => {
                             </Box>
                           );
                         })}
-                        <Button size="small" startIcon={<AddIcon />} onClick={(e)=>{ e.stopPropagation(); setShowAddVar({ open: true, devId: dev.id }); setNewVarLabel(''); setNewVarCount(1); setNewVarSizeSqm(0); setNewVarPricePerSqm(0); setNewVarPrice(0); }}>Add Variation</Button>
+                        <Button size="small" startIcon={<AddIcon />} onClick={(e)=>{ e.stopPropagation(); setShowAddVar({ open: true, devId: dev.id }); setNewVarLabel(''); setNewVarCount(1); setNewVarSizeSqm(0); setNewVarPricePerSqm(0); setNewVarPrice(0); }}>Add unit type</Button>
                       </Box>
                     </Box>
                     <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
@@ -702,7 +999,7 @@ const SalesDevelopmentsPage: React.FC = () => {
                       <TableHead>
                         <TableRow>
                           <TableCell>Unit</TableCell>
-                          <TableCell>Variation</TableCell>
+                          <TableCell>Unit type</TableCell>
                           <TableCell>Status</TableCell>
                           <TableCell>Buyer</TableCell>
                           <TableCell align="right">Total</TableCell>
@@ -727,13 +1024,14 @@ const SalesDevelopmentsPage: React.FC = () => {
                               <TableRow>
                                 <TableCell colSpan={6} style={{ paddingTop: 12, paddingBottom: 8 }}>
                                   <Box sx={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 1, px: 1.25, py: 0.75 }}>
-                                    <Typography variant="subtitle2" color="text.secondary">Variation: {variationLabel}</Typography>
+                                    <Typography variant="subtitle2" color="text.secondary">Unit type: {variationLabel}</Typography>
                                   </Box>
                                 </TableCell>
                               </TableRow>
                             )}
                             <TableRow
                               hover
+                              sx={{ ...(highlightUnitId === u.id ? { bgcolor: 'primary.light' } : {}) }}
                               onClick={async () => {
                                 setOpenUnit(prev => ({ ...prev, [u.id]: !prev[u.id] }));
                                 const opening = !openUnit[u.id];
@@ -762,9 +1060,16 @@ const SalesDevelopmentsPage: React.FC = () => {
                               <TableCell>
                                 <TextField select size="small" value={u.status} onChange={async (e) => {
                                   const next = e.target.value as UnitStatus;
+                                  const prevStatus = u.status;
                                   updateUnit(dev.id, u.id, { status: next });
                                   try {
                                     await developmentUnitService.updateStatus(u.id, { to: next });
+                                    setHighlightUnitId(u.id);
+                                    setTimeout(() => setHighlightUnitId(null), 1200);
+                                    if (next === 'sold') {
+                                      const unitLabel = (u.label && u.label.trim()) ? u.label : `Unit ${typeof u.unitNumber === 'number' ? u.unitNumber : ''}`;
+                                      addNotification({ id: uid(), title: 'Unit sold', message: `${unitLabel} marked as sold 🎉`, read: false, createdAt: new Date() });
+                                    }
                                   } catch {}
                                 }}>
                                   <MenuItem value="available">Available</MenuItem>
@@ -773,16 +1078,31 @@ const SalesDevelopmentsPage: React.FC = () => {
                                 </TextField>
                               </TableCell>
                               <TableCell>
-                                {u.buyerName && u.buyerName.trim().length > 0 ? (
-                                  <Chip label={u.buyerName} size="small" />
+                                {u.status === 'sold' ? (
+                                  (u.buyerHidden || !(u.buyerName && u.buyerName.trim().length > 0)) ? (
+                                    <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <span style={{ opacity: 0.7 }}>🔒</span> Sold by collaborating agent
+                                    </Typography>
+                                  ) : (
+                                    <Chip label={u.buyerName} size="small" />
+                                  )
                                 ) : (
-                                  <Typography variant="body2" color="text.secondary">No buyer</Typography>
+                                  (u.buyerName && u.buyerName.trim().length > 0) ? (
+                                    <Chip label={u.buyerName} size="small" />
+                                  ) : (
+                                    <Typography variant="body2" color="text.secondary">—</Typography>
+                                  )
                                 )}
                               </TableCell>
                               <TableCell align="right">{total.toLocaleString()}</TableCell>
                               
                               <TableCell>
-                                <Button size="small" startIcon={<AddIcon />} onClick={(e) => { e.stopPropagation(); openAddBuyer(dev.id, u.id); }}>Add Buyer</Button>
+                                {u.status !== 'sold' && (
+                                  <Button size="small" startIcon={<AddIcon />} onClick={(e) => { e.stopPropagation(); openAddBuyer(dev.id, u.id); }}>Add Buyer</Button>
+                                )}
+                                {u.status === 'sold' && (u.buyerHidden || !(u.buyerName && u.buyerName.trim())) && (
+                                  <Typography variant="caption" color="text.secondary">Buyer details hidden (collaboration sale)</Typography>
+                                )}
                                 <Button size="small" sx={{ ml: 1 }} onClick={(e)=>{ e.stopPropagation();
                                   // Prefill edit dialog
                                   setShowEditUnit({ open: true, devId: dev.id, unitId: u.id });
@@ -976,8 +1296,13 @@ const SalesDevelopmentsPage: React.FC = () => {
             </Grid>
           </Grid>
           <Divider sx={{ my: 2 }} />
-        {/* Commission section (applies across all variations/units) */}
         <Box sx={{ mb: 2 }}>
+          <Button size="small" startIcon={<ExpandMoreIcon sx={{ transform: showAdvancedCreate ? 'rotate(180deg)' : 'none' }} />} onClick={() => setShowAdvancedCreate(!showAdvancedCreate)}>
+            Advanced settings (commission &amp; collaborators — can be updated later)
+          </Button>
+          <Collapse in={showAdvancedCreate}>
+        {/* Commission section (applies across all variations/units) */}
+        <Box sx={{ mb: 2, mt: 1 }}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Commission</Typography>
           <Grid container spacing={2}>
             <Grid item xs={12} md={3}>
@@ -1061,6 +1386,8 @@ const SalesDevelopmentsPage: React.FC = () => {
           <Typography variant="caption" color="text.secondary">
             When a collaborator sells a unit, the development owner's share of the agent commission is applied here. Collaborators cannot add other collaborators.
           </Typography>
+        </Box>
+          </Collapse>
         </Box>
           <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
             <Typography variant="subtitle1">Variations</Typography>
@@ -1149,9 +1476,9 @@ const SalesDevelopmentsPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Add Variation Dialog */}
+      {/* Add Unit Type Dialog */}
       <Dialog open={showAddVar.open} onClose={()=>setShowAddVar({ open:false, devId:null })} maxWidth="sm" fullWidth>
-        <DialogTitle>Add Variation</DialogTitle>
+        <DialogTitle>Add unit type</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid item xs={12}>
@@ -1247,9 +1574,9 @@ const SalesDevelopmentsPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Edit Variation Dialog */}
+      {/* Edit Unit Type Dialog */}
       <Dialog open={showEditVar.open} onClose={()=>setShowEditVar({ open:false, devId:null, variationId:null })} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Variation</DialogTitle>
+        <DialogTitle>Edit unit type</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid item xs={12}>
@@ -1394,11 +1721,160 @@ const SalesDevelopmentsPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Set commission structure (advanced) */}
+      <Dialog open={showCommissionDialog.open} onClose={() => setShowCommissionDialog({ open: false, devId: null })} maxWidth="sm" fullWidth>
+        <DialogTitle>Set commission structure</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Commission can be configured once sales begin. These apply to all units in this development.
+          </Typography>
+          <Grid container spacing={2} sx={{ mt: 0 }}>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Commission %"
+                value={commissionDialogForm.commissionPercent}
+                onChange={(e) => setCommissionDialogForm(prev => ({ ...prev, commissionPercent: Math.max(0, Number(e.target.value) || 0) }))}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+                helperText="Applies to total sale price"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="PREA % of Commission"
+                value={commissionDialogForm.commissionPreaPercent}
+                onChange={(e) => setCommissionDialogForm(prev => ({ ...prev, commissionPreaPercent: Math.max(0, Number(e.target.value) || 0) }))}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Agency % of Remaining"
+                value={commissionDialogForm.commissionAgencyPercentRemaining}
+                onChange={(e) => {
+                  const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                  setCommissionDialogForm(prev => ({ ...prev, commissionAgencyPercentRemaining: v, commissionAgentPercentRemaining: Number((100 - v).toFixed(2)) }));
+                }}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Agent % of Remaining"
+                value={commissionDialogForm.commissionAgentPercentRemaining}
+                InputProps={{ readOnly: true }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Collaborator agent split</Typography>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Owner's % of Agent Share (when collaborator sells)"
+                value={commissionDialogForm.collabOwnerAgentPercent}
+                onChange={(e) => {
+                  const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                  setCommissionDialogForm(prev => ({ ...prev, collabOwnerAgentPercent: v, collabCollaboratorAgentPercent: Number((100 - v).toFixed(2)) }));
+                }}
+                inputProps={{ min: 0, max: 100, step: 1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Collaborator's % of Agent Share"
+                value={commissionDialogForm.collabCollaboratorAgentPercent}
+                InputProps={{ readOnly: true }}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowCommissionDialog({ open: false, devId: null })} disabled={commissionDialogSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={commissionDialogSaving || !showCommissionDialog.devId}
+            onClick={async () => {
+              if (!showCommissionDialog.devId) return;
+              try {
+                setCommissionDialogSaving(true);
+                const updated = await developmentService.update(showCommissionDialog.devId, {
+                  commissionPercent: commissionDialogForm.commissionPercent,
+                  commissionPreaPercent: commissionDialogForm.commissionPreaPercent,
+                  commissionAgencyPercentRemaining: commissionDialogForm.commissionAgencyPercentRemaining,
+                  commissionAgentPercentRemaining: commissionDialogForm.commissionAgentPercentRemaining,
+                  collabOwnerAgentPercent: commissionDialogForm.collabOwnerAgentPercent,
+                  collabCollaboratorAgentPercent: commissionDialogForm.collabCollaboratorAgentPercent
+                });
+                const u = updated as any;
+                updateDevelopment(showCommissionDialog.devId, {
+                  commissionPercent: u.commissionPercent,
+                  commissionPreaPercent: u.commissionPreaPercent,
+                  commissionAgencyPercentRemaining: u.commissionAgencyPercentRemaining,
+                  commissionAgentPercentRemaining: u.commissionAgentPercentRemaining,
+                  collabOwnerAgentPercent: u.collabOwnerAgentPercent,
+                  collabCollaboratorAgentPercent: u.collabCollaboratorAgentPercent
+                });
+                setShowCommissionDialog({ open: false, devId: null });
+                addNotification({ id: uid(), title: 'Commission updated', message: 'Commission structure saved for this development.', read: false, createdAt: new Date() });
+              } catch (e: any) {
+                addNotification({ id: uid(), title: 'Error', message: e?.response?.data?.message || 'Failed to save commission', read: false, createdAt: new Date() });
+              } finally {
+                setCommissionDialogSaving(false);
+              }
+            }}
+          >
+            {commissionDialogSaving ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Add Buyer Dialog */}
       <Dialog open={showAddBuyer} onClose={() => setShowAddBuyer(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add Buyer</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0 }}>
+            <Grid item xs={12}>
+              <Autocomplete
+                options={buyerPickerOptions || []}
+                loading={buyerPickerLoading}
+                value={(buyerPickerOptions || []).find((b: any) => String(b?._id || b?.id || '') === String(buyerPickerId)) || null}
+                onChange={(_, next: any | null) => {
+                  const nextId = next ? String(next._id || next.id || '') : '';
+                  setBuyerPickerId(nextId);
+                  if (next) {
+                    setBuyerName(String(next.name || ''));
+                    setBuyerPhone(String(next.phone || ''));
+                    setBuyerEmail(String(next.email || ''));
+                    setBuyerIdNumber(String(next.idNumber || ''));
+                  }
+                }}
+                getOptionLabel={(b: any) => {
+                  const name = String(b?.name || '').trim();
+                  const email = String(b?.email || '').trim();
+                  const phone = String(b?.phone || '').trim();
+                  return [name, email ? `(${email})` : '', phone ? `• ${phone}` : ''].filter(Boolean).join(' ');
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Pick existing buyer (optional)"
+                    placeholder="Search your buyers…"
+                  />
+                )}
+              />
+            </Grid>
             <Grid item xs={12}>
               <TextField fullWidth label="Name" value={buyerName} onChange={(e)=>setBuyerName(e.target.value)} autoFocus />
             </Grid>

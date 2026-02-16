@@ -18,8 +18,11 @@ const SalesOwner_1 = require("../models/SalesOwner");
 const chartController_1 = require("./chartController");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
+const Valuation_1 = require("../models/Valuation");
+const Deal_1 = require("../models/Deal");
 const mongoose_1 = __importDefault(require("mongoose"));
 const access_1 = require("../utils/access");
+const Buyer_1 = require("../models/Buyer");
 // Helper function to extract user context from request
 const getUserContext = (req) => {
     // Try to get user context from query parameters first
@@ -36,6 +39,48 @@ const getUserContext = (req) => {
         userRole: userRole || headerUserRole
     };
 };
+function syncValuationOnPropertySold(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const { companyId, propertyId, fallbackSoldPrice, fallbackSoldDate } = params;
+        // Find the linked valuation (if any)
+        const valuation = yield Valuation_1.Valuation.findOne({
+            companyId: new mongoose_1.default.Types.ObjectId(companyId),
+            convertedPropertyId: propertyId
+        })
+            .select('_id actualSoldPrice soldDate')
+            .lean();
+        // If there's no linked valuation, or it's already captured a sold price, don't overwrite history.
+        if (!valuation || valuation.actualSoldPrice != null)
+            return;
+        // Prefer a "Won" deal price as the final sale price (source of truth).
+        const wonDeal = yield Deal_1.Deal.findOne({
+            companyId: new mongoose_1.default.Types.ObjectId(companyId),
+            propertyId,
+            $or: [{ won: true }, { stage: 'Won' }]
+        })
+            .sort({ updatedAt: -1 })
+            .select('offerPrice closeDate')
+            .lean();
+        const dealSoldPrice = wonDeal === null || wonDeal === void 0 ? void 0 : wonDeal.offerPrice;
+        const soldPriceCandidate = (typeof dealSoldPrice === 'number' && Number.isFinite(dealSoldPrice) && dealSoldPrice > 0)
+            ? dealSoldPrice
+            : (typeof fallbackSoldPrice === 'number' && Number.isFinite(fallbackSoldPrice) && fallbackSoldPrice > 0)
+                ? fallbackSoldPrice
+                : null;
+        if (soldPriceCandidate == null)
+            return;
+        const soldDateCandidate = ((wonDeal === null || wonDeal === void 0 ? void 0 : wonDeal.closeDate) ? new Date(wonDeal.closeDate) : null) ||
+            (fallbackSoldDate || null) ||
+            new Date();
+        // Update only if still unset, to preserve historical accuracy.
+        yield Valuation_1.Valuation.updateOne({
+            _id: valuation._id,
+            $or: [{ actualSoldPrice: { $exists: false } }, { actualSoldPrice: null }]
+        }, {
+            $set: { actualSoldPrice: soldPriceCandidate, soldDate: soldDateCandidate }
+        });
+    });
+}
 // Public endpoint for getting properties with user-based filtering
 const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -123,6 +168,7 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
                 commissionAgencyPercentRemaining: 1,
                 commissionAgentPercentRemaining: 1,
                 propertyOwnerId: 1,
+                buyerId: 1,
                 rentalType: 1
             };
         }
@@ -440,9 +486,31 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, images, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body || {};
+        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, images, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining, sourceValuationId } = req.body || {};
         if (!name || !address) {
             throw new errorHandler_1.AppError('Missing required fields: name and address', 400);
+        }
+        // Optional: link a valuation permanently to the created listing (hot-load conversion)
+        let sourceValuationObjectId = null;
+        if (sourceValuationId != null && String(sourceValuationId).trim() !== '') {
+            const rawId = String(sourceValuationId);
+            if (!mongoose_1.default.Types.ObjectId.isValid(rawId)) {
+                throw new errorHandler_1.AppError('Invalid sourceValuationId', 400);
+            }
+            sourceValuationObjectId = new mongoose_1.default.Types.ObjectId(rawId);
+            const valuation = yield Valuation_1.Valuation.findOne({
+                _id: sourceValuationObjectId,
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            })
+                .select('_id convertedPropertyId')
+                .lean();
+            if (!valuation) {
+                throw new errorHandler_1.AppError('Valuation not found for conversion', 404);
+            }
+            if (valuation === null || valuation === void 0 ? void 0 : valuation.convertedPropertyId) {
+                // Data integrity: a valuation can link to only one property.
+                throw new errorHandler_1.AppError('This valuation has already been converted to a listing', 409);
+            }
         }
         // Map status from UI labels to backend enums if necessary
         const normalizedStatus = (status || 'available').toString().toLowerCase().replace(' ', '_');
@@ -450,31 +518,29 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         const allowedTypes = ['apartment', 'house', 'commercial', 'land'];
         const isLand = typeNormalized === 'land';
         const computedPrice = isLand ? (Number(landArea || 0) * Number(pricePerSqm || 0)) : Number(price || 0);
-        const property = new Property_1.Property({
-            name,
-            address,
-            type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house'),
-            status: normalizedStatus,
-            price: computedPrice,
-            pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0,
-            bedrooms: isLand ? 0 : Number(bedrooms || 0),
-            bathrooms: isLand ? 0 : Number(bathrooms || 0),
-            builtArea: Number(builtArea || 0),
-            landArea: Number(landArea || 0),
-            description: description || '',
-            images: Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim() !== '') : [],
-            ownerId: req.user.userId,
-            companyId: req.user.companyId,
-            agentId: agentId || req.user.userId,
-            propertyOwnerId: propertyOwnerId || undefined,
-            rentalType: 'sale',
-            saleType: (saleType === 'installment' ? 'installment' : 'cash'),
-            commission: typeof commission === 'number' ? commission : Number(commission || 0),
-            commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0),
-            commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0),
-            commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0),
-        });
+        const property = new Property_1.Property(Object.assign(Object.assign({ name,
+            address, type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house'), status: normalizedStatus, price: computedPrice, pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0, bedrooms: isLand ? 0 : Number(bedrooms || 0), bathrooms: isLand ? 0 : Number(bathrooms || 0), builtArea: Number(builtArea || 0), landArea: Number(landArea || 0), description: description || '', images: Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim() !== '') : [], ownerId: req.user.userId, companyId: req.user.companyId, agentId: agentId || req.user.userId, propertyOwnerId: propertyOwnerId || undefined }, (sourceValuationObjectId ? { sourceValuationId: sourceValuationObjectId } : {})), { rentalType: 'sale', saleType: (saleType === 'installment' ? 'installment' : 'cash'), commission: typeof commission === 'number' ? commission : Number(commission || 0), commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0), commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0), commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0) }));
         const saved = yield property.save();
+        // Persist valuation -> property lifecycle link (do not overwrite if already linked)
+        if (sourceValuationObjectId) {
+            try {
+                yield Valuation_1.Valuation.findOneAndUpdate({
+                    _id: sourceValuationObjectId,
+                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                    $or: [{ convertedPropertyId: { $exists: false } }, { convertedPropertyId: null }]
+                }, {
+                    $set: { convertedPropertyId: saved._id, status: 'converted' }
+                }, { new: true }).lean();
+            }
+            catch (linkErr) {
+                // Non-fatal: property creation succeeds; link is best-effort.
+                console.warn('Failed to link valuation to created property', {
+                    error: linkErr === null || linkErr === void 0 ? void 0 : linkErr.message,
+                    sourceValuationId: String(sourceValuationObjectId),
+                    propertyId: String(saved._id)
+                });
+            }
+        }
         // If a sales owner was selected, associate this property to the owner's properties list
         if (propertyOwnerId) {
             try {
@@ -500,7 +566,7 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.createSalesProperty = createSalesProperty;
 const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -508,13 +574,97 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const property = yield Property_1.Property.findOneAndUpdate({
+        const match = {
             _id: req.params.id,
             ownerId: req.user.userId,
             companyId: req.user.companyId
-        }, Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId }), { new: true });
+        };
+        const before = yield Property_1.Property.findOne(match).select('status price buyerId').lean();
+        if (!before) {
+            throw new errorHandler_1.AppError('Property not found', 404);
+        }
+        // Special handling for buyer linkage: validate buyerId, allow clearing, and keep Buyer.propertyId in sync.
+        let nextBuyerId = undefined; // undefined = not updating
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, 'buyerId')) {
+            const raw = (_c = req.body) === null || _c === void 0 ? void 0 : _c.buyerId;
+            if (raw == null || String(raw).trim() === '') {
+                nextBuyerId = null;
+            }
+            else {
+                const rawId = String(raw);
+                if (!mongoose_1.default.Types.ObjectId.isValid(rawId)) {
+                    throw new errorHandler_1.AppError('Invalid buyerId', 400);
+                }
+                const exists = yield Buyer_1.Buyer.findOne({
+                    _id: new mongoose_1.default.Types.ObjectId(rawId),
+                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+                })
+                    .select('_id')
+                    .lean();
+                if (!exists) {
+                    throw new errorHandler_1.AppError('Buyer not found', 404);
+                }
+                nextBuyerId = new mongoose_1.default.Types.ObjectId(rawId);
+            }
+        }
+        const updateDoc = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId });
+        // Ensure we only ever write a validated buyerId
+        if (Object.prototype.hasOwnProperty.call(updateDoc, 'buyerId')) {
+            delete updateDoc.buyerId;
+        }
+        if (nextBuyerId !== undefined) {
+            updateDoc.buyerId = nextBuyerId;
+        }
+        const property = yield Property_1.Property.findOneAndUpdate(match, updateDoc, { new: true });
         if (!property) {
             throw new errorHandler_1.AppError('Property not found', 404);
+        }
+        // Keep Buyer.propertyId in sync with Property.buyerId (best-effort; non-fatal).
+        if (nextBuyerId !== undefined) {
+            try {
+                const propObjectId = new mongoose_1.default.Types.ObjectId(String(property._id));
+                if (nextBuyerId === null) {
+                    // Clear any buyers pointing at this property (including previous buyer).
+                    yield Buyer_1.Buyer.updateMany({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), propertyId: propObjectId }, { $unset: { propertyId: '' } });
+                }
+                else {
+                    // Link selected buyer to this property.
+                    yield Buyer_1.Buyer.updateOne({ _id: nextBuyerId, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, { $set: { propertyId: propObjectId } });
+                    // Ensure no other buyer still points at this property.
+                    yield Buyer_1.Buyer.updateMany({
+                        companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                        propertyId: propObjectId,
+                        _id: { $ne: nextBuyerId }
+                    }, { $unset: { propertyId: '' } });
+                }
+            }
+            catch (syncErr) {
+                console.warn('Failed to sync property buyer linkage:', {
+                    error: syncErr === null || syncErr === void 0 ? void 0 : syncErr.message,
+                    propertyId: String(property._id),
+                    buyerId: nextBuyerId ? String(nextBuyerId) : null
+                });
+            }
+        }
+        // Lifecycle tracking: when a linked property is marked sold, capture sold price/date on valuation automatically.
+        const prevStatus = String((before === null || before === void 0 ? void 0 : before.status) || '').toLowerCase();
+        const nextStatus = String((property === null || property === void 0 ? void 0 : property.status) || '').toLowerCase();
+        if (prevStatus !== 'sold' && nextStatus === 'sold') {
+            try {
+                yield syncValuationOnPropertySold({
+                    companyId: String(req.user.companyId),
+                    propertyId: property._id,
+                    // Fallback to property.price if no Won deal exists yet (keeps feature non-blocking).
+                    fallbackSoldPrice: typeof (property === null || property === void 0 ? void 0 : property.price) === 'number' ? property.price : undefined,
+                    fallbackSoldDate: new Date()
+                });
+            }
+            catch (syncErr) {
+                console.warn('Failed to sync valuation sold info', {
+                    error: syncErr === null || syncErr === void 0 ? void 0 : syncErr.message,
+                    propertyId: String(property._id)
+                });
+            }
         }
         // Ensure a property account exists/updated after property changes (e.g., owner link)
         try {

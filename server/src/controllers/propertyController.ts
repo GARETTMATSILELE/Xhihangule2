@@ -6,8 +6,11 @@ import { JwtPayload } from '../types/auth';
 import { updateChartMetrics } from './chartController';
 import propertyAccountService from '../services/propertyAccountService';
 import { AppError } from '../middleware/errorHandler';
+import { Valuation } from '../models/Valuation';
+import { Deal } from '../models/Deal';
 import mongoose from 'mongoose';
 import { hasAnyRole, hasRole } from '../utils/access';
+import { Buyer } from '../models/Buyer';
 
 // Helper function to extract user context from request
 const getUserContext = (req: Request) => {
@@ -27,6 +30,75 @@ const getUserContext = (req: Request) => {
     userRole: userRole || headerUserRole
   };
 };
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const isRetryableMongoConnectionError = (error: any): boolean => {
+  const labels: Set<string> | undefined = error?.[Symbol.for('errorLabels')];
+  const hasRetryLabel =
+    (labels instanceof Set && (labels.has('ResetPool') || labels.has('RetryableWriteError'))) ||
+    (Array.isArray(error?.errorLabels) && error.errorLabels.some((l: string) => l === 'ResetPool' || l === 'RetryableWriteError'));
+  const message = String(error?.message || '').toLowerCase();
+  const name = String(error?.name || '').toLowerCase();
+
+  return hasRetryLabel || name.includes('mongonetworkerror') || (message.includes('connection') && message.includes('closed'));
+};
+
+async function syncValuationOnPropertySold(params: {
+  companyId: string;
+  propertyId: mongoose.Types.ObjectId;
+  fallbackSoldPrice?: number | null;
+  fallbackSoldDate?: Date | null;
+}) {
+  const { companyId, propertyId, fallbackSoldPrice, fallbackSoldDate } = params;
+
+  // Find the linked valuation (if any)
+  const valuation = await Valuation.findOne({
+    companyId: new mongoose.Types.ObjectId(companyId),
+    convertedPropertyId: propertyId
+  })
+    .select('_id actualSoldPrice soldDate')
+    .lean();
+
+  // If there's no linked valuation, or it's already captured a sold price, don't overwrite history.
+  if (!valuation || valuation.actualSoldPrice != null) return;
+
+  // Prefer a "Won" deal price as the final sale price (source of truth).
+  const wonDeal = await Deal.findOne({
+    companyId: new mongoose.Types.ObjectId(companyId),
+    propertyId,
+    $or: [{ won: true }, { stage: 'Won' }]
+  })
+    .sort({ updatedAt: -1 })
+    .select('offerPrice closeDate')
+    .lean();
+
+  const dealSoldPrice = (wonDeal as any)?.offerPrice;
+  const soldPriceCandidate =
+    (typeof dealSoldPrice === 'number' && Number.isFinite(dealSoldPrice) && dealSoldPrice > 0)
+      ? dealSoldPrice
+      : (typeof fallbackSoldPrice === 'number' && Number.isFinite(fallbackSoldPrice) && fallbackSoldPrice > 0)
+        ? fallbackSoldPrice
+        : null;
+
+  if (soldPriceCandidate == null) return;
+
+  const soldDateCandidate =
+    ((wonDeal as any)?.closeDate ? new Date((wonDeal as any).closeDate) : null) ||
+    (fallbackSoldDate || null) ||
+    new Date();
+
+  // Update only if still unset, to preserve historical accuracy.
+  await Valuation.updateOne(
+    {
+      _id: (valuation as any)._id,
+      $or: [{ actualSoldPrice: { $exists: false } }, { actualSoldPrice: null }]
+    },
+    {
+      $set: { actualSoldPrice: soldPriceCandidate, soldDate: soldDateCandidate }
+    }
+  );
+}
 
 // Public endpoint for getting properties with user-based filtering
 export const getPublicProperties = async (req: Request, res: Response) => {
@@ -126,17 +198,35 @@ export const getPublicProperties = async (req: Request, res: Response) => {
         commissionAgencyPercentRemaining: 1,
         commissionAgentPercentRemaining: 1,
         propertyOwnerId: 1,
+        buyerId: 1,
         rentalType: 1
       };
     }
 
-    // Get properties with optional projection; avoid heavy populate for autocomplete
-    const properties = await Property.find(query)
-      .select(projection)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
+    // Get properties with optional projection; avoid heavy populate for autocomplete.
+    // Retry once for transient connection resets from managed Mongo services.
+    let properties: any[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        properties = await Property.find(query)
+          .select(projection)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean();
+        break;
+      } catch (queryError: any) {
+        const shouldRetry = attempt === 0 && isRetryableMongoConnectionError(queryError);
+        if (!shouldRetry) {
+          throw queryError;
+        }
+        console.warn('Transient Mongo connection error in getPublicProperties; retrying once', {
+          message: queryError?.message,
+          name: queryError?.name
+        });
+        await wait(200);
+      }
+    }
 
     console.log('Found properties:', {
       count: properties.length,
@@ -259,10 +349,27 @@ export const getProperties = async (req: Request, res: Response) => {
       queryString: JSON.stringify(query)
     });
 
-    // Get properties with populated owner information
-    const properties = await Property.find(query)
-      .populate('ownerId', 'firstName lastName email')
-      .sort({ createdAt: -1 }); // Sort by newest first
+    // Get properties with populated owner information.
+    // Retry once for transient connection resets from managed Mongo services.
+    let properties: IProperty[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        properties = await Property.find(query)
+          .populate('ownerId', 'firstName lastName email')
+          .sort({ createdAt: -1 }); // Sort by newest first
+        break;
+      } catch (queryError: any) {
+        const shouldRetry = attempt === 0 && isRetryableMongoConnectionError(queryError);
+        if (!shouldRetry) {
+          throw queryError;
+        }
+        console.warn('Transient Mongo connection error in getProperties; retrying once', {
+          message: queryError?.message,
+          name: queryError?.name
+        });
+        await wait(200);
+      }
+    }
 
     console.log('Found properties:', {
       count: properties.length,
@@ -497,11 +604,37 @@ export const createSalesProperty = async (req: Request, res: Response) => {
       saleType,
       commissionPreaPercent,
       commissionAgencyPercentRemaining,
-      commissionAgentPercentRemaining
+      commissionAgentPercentRemaining,
+      sourceValuationId
     } = req.body || {};
 
     if (!name || !address) {
       throw new AppError('Missing required fields: name and address', 400);
+    }
+
+    // Optional: link a valuation permanently to the created listing (hot-load conversion)
+    let sourceValuationObjectId: mongoose.Types.ObjectId | null = null;
+    if (sourceValuationId != null && String(sourceValuationId).trim() !== '') {
+      const rawId = String(sourceValuationId);
+      if (!mongoose.Types.ObjectId.isValid(rawId)) {
+        throw new AppError('Invalid sourceValuationId', 400);
+      }
+      sourceValuationObjectId = new mongoose.Types.ObjectId(rawId);
+
+      const valuation = await Valuation.findOne({
+        _id: sourceValuationObjectId,
+        companyId: new mongoose.Types.ObjectId(req.user.companyId)
+      })
+        .select('_id convertedPropertyId')
+        .lean();
+
+      if (!valuation) {
+        throw new AppError('Valuation not found for conversion', 404);
+      }
+      if ((valuation as any)?.convertedPropertyId) {
+        // Data integrity: a valuation can link to only one property.
+        throw new AppError('This valuation has already been converted to a listing', 409);
+      }
     }
 
     // Map status from UI labels to backend enums if necessary
@@ -529,6 +662,7 @@ export const createSalesProperty = async (req: Request, res: Response) => {
       companyId: req.user.companyId,
       agentId: agentId || req.user.userId,
       propertyOwnerId: propertyOwnerId || undefined,
+      ...(sourceValuationObjectId ? { sourceValuationId: sourceValuationObjectId } : {}),
       rentalType: 'sale',
       saleType: (saleType === 'installment' ? 'installment' : 'cash'),
       commission: typeof commission === 'number' ? commission : Number(commission || 0),
@@ -538,6 +672,30 @@ export const createSalesProperty = async (req: Request, res: Response) => {
     });
 
     const saved = await property.save();
+
+    // Persist valuation -> property lifecycle link (do not overwrite if already linked)
+    if (sourceValuationObjectId) {
+      try {
+        await Valuation.findOneAndUpdate(
+          {
+            _id: sourceValuationObjectId,
+            companyId: new mongoose.Types.ObjectId(req.user.companyId),
+            $or: [{ convertedPropertyId: { $exists: false } }, { convertedPropertyId: null }]
+          },
+          {
+            $set: { convertedPropertyId: saved._id, status: 'converted' }
+          },
+          { new: true }
+        ).lean();
+      } catch (linkErr) {
+        // Non-fatal: property creation succeeds; link is best-effort.
+        console.warn('Failed to link valuation to created property', {
+          error: (linkErr as any)?.message,
+          sourceValuationId: String(sourceValuationObjectId),
+          propertyId: String(saved._id)
+        });
+      }
+    }
 
     // If a sales owner was selected, associate this property to the owner's properties list
     if (propertyOwnerId) {
@@ -574,24 +732,119 @@ export const updateProperty = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
+    const match = {
+      _id: req.params.id,
+      ownerId: req.user.userId,
+      companyId: req.user.companyId
+    } as any;
+
+    const before = await Property.findOne(match).select('status price buyerId').lean();
+    if (!before) {
+      throw new AppError('Property not found', 404);
+    }
+
+    // Special handling for buyer linkage: validate buyerId, allow clearing, and keep Buyer.propertyId in sync.
+    let nextBuyerId: mongoose.Types.ObjectId | null | undefined = undefined; // undefined = not updating
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'buyerId')) {
+      const raw = (req.body as any)?.buyerId;
+      if (raw == null || String(raw).trim() === '') {
+        nextBuyerId = null;
+      } else {
+        const rawId = String(raw);
+        if (!mongoose.Types.ObjectId.isValid(rawId)) {
+          throw new AppError('Invalid buyerId', 400);
+        }
+        const exists = await Buyer.findOne({
+          _id: new mongoose.Types.ObjectId(rawId),
+          companyId: new mongoose.Types.ObjectId(req.user.companyId)
+        })
+          .select('_id')
+          .lean();
+        if (!exists) {
+          throw new AppError('Buyer not found', 404);
+        }
+        nextBuyerId = new mongoose.Types.ObjectId(rawId);
+      }
+    }
+
+    const updateDoc: any = {
+      ...req.body,
+      ownerId: req.user.userId,
+      companyId: req.user.companyId
+    };
+    // Ensure we only ever write a validated buyerId
+    if (Object.prototype.hasOwnProperty.call(updateDoc, 'buyerId')) {
+      delete updateDoc.buyerId;
+    }
+    if (nextBuyerId !== undefined) {
+      updateDoc.buyerId = nextBuyerId;
+    }
+
     const property = await Property.findOneAndUpdate(
-      { 
-        _id: req.params.id, 
-        ownerId: req.user.userId,
-        companyId: req.user.companyId 
-      },
-      { 
-        ...req.body, 
-        ownerId: req.user.userId,
-        companyId: req.user.companyId 
-      },
+      match,
+      updateDoc,
       { new: true }
     );
 
     if (!property) {
       throw new AppError('Property not found', 404);
     }
+
+    // Keep Buyer.propertyId in sync with Property.buyerId (best-effort; non-fatal).
+    if (nextBuyerId !== undefined) {
+      try {
+        const propObjectId = new mongoose.Types.ObjectId(String(property._id));
+        if (nextBuyerId === null) {
+          // Clear any buyers pointing at this property (including previous buyer).
+          await Buyer.updateMany(
+            { companyId: new mongoose.Types.ObjectId(req.user.companyId), propertyId: propObjectId },
+            { $unset: { propertyId: '' } }
+          );
+        } else {
+          // Link selected buyer to this property.
+          await Buyer.updateOne(
+            { _id: nextBuyerId, companyId: new mongoose.Types.ObjectId(req.user.companyId) },
+            { $set: { propertyId: propObjectId } }
+          );
+          // Ensure no other buyer still points at this property.
+          await Buyer.updateMany(
+            {
+              companyId: new mongoose.Types.ObjectId(req.user.companyId),
+              propertyId: propObjectId,
+              _id: { $ne: nextBuyerId }
+            },
+            { $unset: { propertyId: '' } }
+          );
+        }
+      } catch (syncErr) {
+        console.warn('Failed to sync property buyer linkage:', {
+          error: (syncErr as any)?.message,
+          propertyId: String(property._id),
+          buyerId: nextBuyerId ? String(nextBuyerId) : null
+        });
+      }
+    }
     
+    // Lifecycle tracking: when a linked property is marked sold, capture sold price/date on valuation automatically.
+    const prevStatus = String((before as any)?.status || '').toLowerCase();
+    const nextStatus = String((property as any)?.status || '').toLowerCase();
+    if (prevStatus !== 'sold' && nextStatus === 'sold') {
+      try {
+        await syncValuationOnPropertySold({
+          companyId: String(req.user.companyId),
+          propertyId: property._id,
+          // Fallback to property.price if no Won deal exists yet (keeps feature non-blocking).
+          fallbackSoldPrice: typeof (property as any)?.price === 'number' ? (property as any).price : undefined,
+          fallbackSoldDate: new Date()
+        });
+      } catch (syncErr) {
+        console.warn('Failed to sync valuation sold info', {
+          error: (syncErr as any)?.message,
+          propertyId: String(property._id)
+        });
+      }
+    }
+
     // Ensure a property account exists/updated after property changes (e.g., owner link)
     try {
       await propertyAccountService.getOrCreatePropertyAccount(property._id.toString());

@@ -91,6 +91,35 @@ const userSchema = new mongoose_1.Schema({
         type: Boolean,
         default: true
     },
+    isArchived: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    archivedAt: {
+        type: Date,
+        required: false
+    },
+    archivedBy: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false
+    },
+    archivedDetails: {
+        email: { type: String, required: false },
+        firstName: { type: String, required: false },
+        lastName: { type: String, required: false },
+        role: {
+            type: String,
+            enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'],
+            required: false
+        },
+        roles: {
+            type: [String],
+            enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'],
+            required: false
+        }
+    },
     lastLogin: {
         type: Date
     },

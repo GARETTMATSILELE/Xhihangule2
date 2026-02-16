@@ -31,6 +31,8 @@ export interface IDevelopmentUnit extends Document {
   reservationExpiresAt?: Date;
   soldAt?: Date;
   dealId?: mongoose.Types.ObjectId;
+  /** Agent who marked the unit as sold (for buyer confidentiality in collaborations) */
+  soldByAgentId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,7 +69,8 @@ const DevelopmentUnitSchema: Schema = new Schema({
   reservedAt: { type: Date },
   reservationExpiresAt: { type: Date },
   soldAt: { type: Date },
-  dealId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deal' }
+  dealId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deal' },
+  soldByAgentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, {
   timestamps: true
 });

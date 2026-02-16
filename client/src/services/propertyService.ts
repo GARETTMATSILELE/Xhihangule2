@@ -3,6 +3,7 @@ import { AxiosError } from 'axios';
 import { Property } from '../types/property';
 import { useAuth } from '../contexts/AuthContext';
 import publicApi from '../api/publicApi';
+import { useMemo } from 'react';
 
 interface ApiResponse<T> {
   status: string;
@@ -78,319 +79,321 @@ const validateUserAndCompany = (user: { _id?: string; companyId?: string; role?:
 export const usePropertyService = () => {
   const { user, activeRole } = useAuth();
 
-  // Public method for fetching all properties
-  const getPublicProperties = async (): Promise<Property[]> => {
-    try {
-      // Prefer company-scoped public fetch when user context is available
-      const params: any = {};
-      if (user?._id) params.userId = user._id;
-      if (user?.companyId) params.companyId = user.companyId;
-      // Use activeRole if available; when on accountant dashboard, default to 'accountant'
-      const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-      const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
-      const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
-      if (roleForQuery) params.userRole = roleForQuery;
-      const response = await publicApi.get('/properties/public-filtered', { params });
-      return Array.isArray(response.data) ? response.data : response.data.data;
-    } catch (error: any) {
-      console.error('Error fetching properties (public):', error);
-      // Don't throw auth errors for public endpoints, just return empty array
-      if (error.response?.status === 401) {
-        console.warn('Authentication required for public properties endpoint');
-        return [];
-      }
-      throw error;
-    }
-  };
-
-  // Public, lightweight search for properties (optimized for autocomplete)
-  const searchPublicProperties = async (params?: { q?: string; saleOnly?: boolean; limit?: number; page?: number; fields?: string }): Promise<Property[]> => {
-    try {
-      const query: any = {};
-      if (user?._id) query.userId = user._id;
-      if (user?.companyId) query.companyId = user.companyId;
-      // Use activeRole if available; when on accountant dashboard, default to 'accountant'
-      const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-      const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
-      const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
-      if (roleForQuery) query.userRole = roleForQuery;
-      if (params?.q) query.q = params.q;
-      if (typeof params?.saleOnly !== 'undefined') query.saleOnly = params.saleOnly ? 'true' : 'false';
-      if (params?.limit) query.limit = params.limit;
-      if (params?.page) query.page = params.page;
-      if (params?.fields) query.fields = params.fields;
-      const response = await publicApi.get('/properties/public-filtered', { params: query });
-      return Array.isArray(response.data?.data) ? response.data.data : (Array.isArray(response.data) ? response.data : []);
-    } catch (error: any) {
-      console.error('Error searching properties (public):', error);
-      if (error.response?.status === 401) {
-        return [];
-      }
-      throw error;
-    }
-  };
-
-  const getProperties = async (): Promise<Property[]> => {
-    try {
-      console.log('propertyService: getProperties called');
-      console.log('propertyService: Current user:', user);
-      
-      validateUserAndCompany(user);
-
-      console.log('propertyService: About to make API call to /properties');
-      console.log('propertyService: Current API headers:', api.defaults.headers.common);
-      
-      const response = await api.get('/properties');
-      console.log('Properties API Response:', response.data);
-
-      const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
-      
-      if (!Array.isArray(data)) {
-        throw new Error('Invalid properties data received');
-      }
-
-      console.log('propertyService: Successfully fetched properties:', data.length);
-      return data;
-    } catch (error) {
-      console.error('propertyService: Error in getProperties:', error);
-      console.error('propertyService: Error response:', error instanceof AxiosError ? {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        headers: error.response?.headers
-      } : 'Not an AxiosError');
-      return handleApiError(error);
-    }
-  };
-
-  // Authenticated method for fetching only vacant properties for the current user
-  const getVacantProperties = async (): Promise<Property[]> => {
-    try {
-      console.log('propertyService: getVacantProperties called');
-      validateUserAndCompany(user);
-      const response = await api.get('/properties/vacant');
-      // Endpoint returns { properties: [...] }
-      const raw = response.data as any;
-      const data: Property[] = Array.isArray(raw)
-        ? raw
-        : Array.isArray(raw?.data)
-          ? raw.data
-          : Array.isArray(raw?.properties)
-            ? raw.properties
-            : [];
-      console.log('propertyService: Successfully fetched vacant properties:', data.length);
-      return data;
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
-
-  const getProperty = async (id: string): Promise<Property> => {
-    try {
-      validateUserAndCompany(user);
-
-      if (!id) {
-        throw new Error('Property ID is required');
-      }
-
-      const response = await api.get(`/properties/${id}`);
-      console.log('Property API Response:', response.data);
-
-      return extractPropertyData(response.data);
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
-
-  const createProperty = async (propertyData: Partial<Property>): Promise<Property> => {
-    try {
-      const validatedUser = validateUserAndCompany(user);
-
-      if (!propertyData.name || !propertyData.address || !propertyData.type) {
-        throw new Error('Name, address, and type are required');
-      }
-
-      // Use public API with user context in query parameters
-      const response = await publicApi.post('/properties/public', propertyData, {
-        params: {
-          userId: validatedUser.userId,
-          companyId: validatedUser.companyId,
-          userRole: validatedUser.role
+  return useMemo(() => {
+    // Public method for fetching all properties
+    const getPublicProperties = async (): Promise<Property[]> => {
+      try {
+        // Prefer company-scoped public fetch when user context is available
+        const params: any = {};
+        if (user?._id) params.userId = user._id;
+        if (user?.companyId) params.companyId = user.companyId;
+        // Use activeRole if available; when on accountant dashboard, default to 'accountant'
+        const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+        const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
+        const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
+        if (roleForQuery) params.userRole = roleForQuery;
+        const response = await publicApi.get('/properties/public-filtered', { params });
+        return Array.isArray(response.data) ? response.data : response.data.data;
+      } catch (error: any) {
+        console.error('Error fetching properties (public):', error);
+        // Don't throw auth errors for public endpoints, just return empty array
+        if (error.response?.status === 401) {
+          console.warn('Authentication required for public properties endpoint');
+          return [];
         }
-      });
-      console.log('Create Property Public API Response:', response.data);
-
-      // Extract data from the response structure
-      const data = response.data.data || response.data;
-      return extractPropertyData(data);
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
-
-  // Sales-specific create using authenticated sales endpoint
-  const createPropertySales = async (propertyData: Partial<Property>): Promise<Property> => {
-    try {
-      validateUserAndCompany(user);
-
-      const payload = {
-        name: propertyData.name,
-        address: propertyData.address,
-        type: (propertyData as any).type,
-        price: propertyData.price ?? propertyData.rent ?? 0,
-        pricePerSqm: (propertyData as any).pricePerSqm ?? 0,
-        bedrooms: propertyData.bedrooms ?? 0,
-        bathrooms: propertyData.bathrooms ?? 0,
-        status: propertyData.status ?? 'available',
-        builtArea: propertyData.builtArea ?? 0,
-        landArea: propertyData.landArea ?? 0,
-        description: propertyData.description ?? '',
-        propertyOwnerId: (propertyData as any).propertyOwnerId,
-        agentId: (propertyData as any).agentId,
-        commission: propertyData.commission,
-        commissionPreaPercent: (propertyData as any).commissionPreaPercent,
-        commissionAgencyPercentRemaining: (propertyData as any).commissionAgencyPercentRemaining,
-        commissionAgentPercentRemaining: (propertyData as any).commissionAgentPercentRemaining,
-      };
-
-      const response = await api.post('/properties/sales', payload);
-      return extractPropertyData(response.data);
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
-
-  const updateProperty = async (id: string, propertyData: Partial<Property>): Promise<Property> => {
-    try {
-      const validatedUser = validateUserAndCompany(user);
-
-      if (!id) {
-        throw new Error('Property ID is required');
+        throw error;
       }
+    };
 
-      // Sales dashboard users use dedicated sales update route (no admin gate)
-      const endpoint = validatedUser.role === 'sales' ? `/properties/sales/${id}` : `/properties/${id}`;
-      const response = await api.put(endpoint, {
-        ...propertyData,
-        companyId: validatedUser.companyId
-      });
-      console.log('Update Property API Response:', response.data);
-
-      return extractPropertyData(response.data);
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
-
-  const deleteProperty = async (id: string): Promise<Property> => {
-    try {
-      validateUserAndCompany(user);
-
-      if (!id) {
-        throw new Error('Property ID is required');
+    // Public, lightweight search for properties (optimized for autocomplete)
+    const searchPublicProperties = async (params?: { q?: string; saleOnly?: boolean; limit?: number; page?: number; fields?: string }): Promise<Property[]> => {
+      try {
+        const query: any = {};
+        if (user?._id) query.userId = user._id;
+        if (user?.companyId) query.companyId = user.companyId;
+        // Use activeRole if available; when on accountant dashboard, default to 'accountant'
+        const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+        const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
+        const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
+        if (roleForQuery) query.userRole = roleForQuery;
+        if (params?.q) query.q = params.q;
+        if (typeof params?.saleOnly !== 'undefined') query.saleOnly = params.saleOnly ? 'true' : 'false';
+        if (params?.limit) query.limit = params.limit;
+        if (params?.page) query.page = params.page;
+        if (params?.fields) query.fields = params.fields;
+        const response = await publicApi.get('/properties/public-filtered', { params: query });
+        return Array.isArray(response.data?.data) ? response.data.data : (Array.isArray(response.data) ? response.data : []);
+      } catch (error: any) {
+        console.error('Error searching properties (public):', error);
+        if (error.response?.status === 401) {
+          return [];
+        }
+        throw error;
       }
+    };
 
-      const response = await api.delete(`/properties/${id}`);
-      console.log('Delete Property API Response:', response.data);
+    const getProperties = async (): Promise<Property[]> => {
+      try {
+        console.log('propertyService: getProperties called');
+        console.log('propertyService: Current user:', user);
 
-      return extractPropertyData(response.data);
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
+        validateUserAndCompany(user);
 
-  const getByOwnerId = async (ownerId: string): Promise<Property[]> => {
-    try {
-      validateUserAndCompany(user);
+        console.log('propertyService: About to make API call to /properties');
+        console.log('propertyService: Current API headers:', api.defaults.headers.common);
 
-      if (!ownerId) {
-        throw new Error('Owner ID is required');
+        const response = await api.get('/properties');
+        console.log('Properties API Response:', response.data);
+
+        const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
+
+        if (!Array.isArray(data)) {
+          throw new Error('Invalid properties data received');
+        }
+
+        console.log('propertyService: Successfully fetched properties:', data.length);
+        return data;
+      } catch (error) {
+        console.error('propertyService: Error in getProperties:', error);
+        console.error('propertyService: Error response:', error instanceof AxiosError ? {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          headers: error.response?.headers
+        } : 'Not an AxiosError');
+        return handleApiError(error);
       }
+    };
 
-      const response = await api.get(`/properties/owner/${ownerId}`);
-      console.log('Owner Properties API Response:', response.data);
-
-      const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
-      
-      if (!Array.isArray(data)) {
-        throw new Error('Invalid properties data received');
+    // Authenticated method for fetching only vacant properties for the current user
+    const getVacantProperties = async (): Promise<Property[]> => {
+      try {
+        console.log('propertyService: getVacantProperties called');
+        validateUserAndCompany(user);
+        const response = await api.get('/properties/vacant');
+        // Endpoint returns { properties: [...] }
+        const raw = response.data as any;
+        const data: Property[] = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.data)
+            ? raw.data
+            : Array.isArray(raw?.properties)
+              ? raw.properties
+              : [];
+        console.log('propertyService: Successfully fetched vacant properties:', data.length);
+        return data;
+      } catch (error) {
+        return handleApiError(error);
       }
+    };
 
-      return data;
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
+    const getProperty = async (id: string): Promise<Property> => {
+      try {
+        validateUserAndCompany(user);
 
-  const transferOwnership = async (propertyId: string, newOwnerId: string): Promise<Property> => {
-    try {
-      const validatedUser = validateUserAndCompany(user);
+        if (!id) {
+          throw new Error('Property ID is required');
+        }
 
-      if (!propertyId || !newOwnerId) {
-        throw new Error('Property ID and new owner ID are required');
+        const response = await api.get(`/properties/${id}`);
+        console.log('Property API Response:', response.data);
+
+        return extractPropertyData(response.data);
+      } catch (error) {
+        return handleApiError(error);
       }
+    };
 
-      const response = await api.put(`/properties/${propertyId}/transfer`, {
-        newOwnerId,
-        companyId: validatedUser.companyId
-      });
-      console.log('Transfer Ownership API Response:', response.data);
+    const createProperty = async (propertyData: Partial<Property>): Promise<Property> => {
+      try {
+        const validatedUser = validateUserAndCompany(user);
 
-      return extractPropertyData(response.data);
-    } catch (error) {
-      return handleApiError(error);
-    }
-  };
+        if (!propertyData.name || !propertyData.address || !propertyData.type) {
+          throw new Error('Name, address, and type are required');
+        }
 
-  // Method to get properties for any user context (useful for testing)
-  const getPropertiesForUser = async (userId?: string, companyId?: string, userRole?: string): Promise<Property[]> => {
-    try {
-      console.log('propertyService: getPropertiesForUser called', { userId, companyId, userRole });
-      
-      // Build query parameters with provided user context
-      const params = new URLSearchParams();
-      if (userId) params.append('userId', userId);
-      if (companyId) params.append('companyId', companyId);
-      if (userRole) params.append('userRole', userRole);
+        // Use public API with user context in query parameters
+        const response = await publicApi.post('/properties/public', propertyData, {
+          params: {
+            userId: validatedUser.userId,
+            companyId: validatedUser.companyId,
+            userRole: validatedUser.role
+          }
+        });
+        console.log('Create Property Public API Response:', response.data);
 
-      console.log('propertyService: About to make API call to /properties/public-filtered');
-      console.log('propertyService: Query params:', params.toString());
-      
-      const response = await publicApi.get(`/properties/public-filtered?${params.toString()}`);
-      console.log('Properties for User API Response:', response.data);
-
-      const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
-      
-      if (!Array.isArray(data)) {
-        throw new Error('Invalid properties data received');
+        // Extract data from the response structure
+        const data = response.data.data || response.data;
+        return extractPropertyData(data);
+      } catch (error) {
+        return handleApiError(error);
       }
+    };
 
-      console.log('propertyService: Successfully fetched properties for user:', data.length);
-      return data;
-    } catch (error) {
-      console.error('propertyService: Error in getPropertiesForUser:', error);
-      console.error('propertyService: Error response:', error instanceof AxiosError ? {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        headers: error.response?.headers
-      } : 'Not an AxiosError');
-      return handleApiError(error);
-    }
-  };
+    // Sales-specific create using authenticated sales endpoint
+    const createPropertySales = async (propertyData: Partial<Property>): Promise<Property> => {
+      try {
+        validateUserAndCompany(user);
 
-  return {
-    getProperties,
-    getVacantProperties,
-    getPublicProperties,
-    searchPublicProperties,
-    getPropertiesForUser,
-    getProperty,
-    createProperty,
-    createPropertySales,
-    updateProperty,
-    deleteProperty,
-    getByOwnerId,
-    transferOwnership
-  };
+        const payload = {
+          name: propertyData.name,
+          address: propertyData.address,
+          type: (propertyData as any).type,
+          price: propertyData.price ?? propertyData.rent ?? 0,
+          pricePerSqm: (propertyData as any).pricePerSqm ?? 0,
+          bedrooms: propertyData.bedrooms ?? 0,
+          bathrooms: propertyData.bathrooms ?? 0,
+          status: propertyData.status ?? 'available',
+          builtArea: propertyData.builtArea ?? 0,
+          landArea: propertyData.landArea ?? 0,
+          description: propertyData.description ?? '',
+          propertyOwnerId: (propertyData as any).propertyOwnerId,
+          agentId: (propertyData as any).agentId,
+          commission: propertyData.commission,
+          commissionPreaPercent: (propertyData as any).commissionPreaPercent,
+          commissionAgencyPercentRemaining: (propertyData as any).commissionAgencyPercentRemaining,
+          commissionAgentPercentRemaining: (propertyData as any).commissionAgentPercentRemaining,
+        };
+
+        const response = await api.post('/properties/sales', payload);
+        return extractPropertyData(response.data);
+      } catch (error) {
+        return handleApiError(error);
+      }
+    };
+
+    const updateProperty = async (id: string, propertyData: Partial<Property>): Promise<Property> => {
+      try {
+        const validatedUser = validateUserAndCompany(user);
+
+        if (!id) {
+          throw new Error('Property ID is required');
+        }
+
+        // Sales dashboard users use dedicated sales update route (no admin gate)
+        const endpoint = validatedUser.role === 'sales' ? `/properties/sales/${id}` : `/properties/${id}`;
+        const response = await api.put(endpoint, {
+          ...propertyData,
+          companyId: validatedUser.companyId
+        });
+        console.log('Update Property API Response:', response.data);
+
+        return extractPropertyData(response.data);
+      } catch (error) {
+        return handleApiError(error);
+      }
+    };
+
+    const deleteProperty = async (id: string): Promise<Property> => {
+      try {
+        validateUserAndCompany(user);
+
+        if (!id) {
+          throw new Error('Property ID is required');
+        }
+
+        const response = await api.delete(`/properties/${id}`);
+        console.log('Delete Property API Response:', response.data);
+
+        return extractPropertyData(response.data);
+      } catch (error) {
+        return handleApiError(error);
+      }
+    };
+
+    const getByOwnerId = async (ownerId: string): Promise<Property[]> => {
+      try {
+        validateUserAndCompany(user);
+
+        if (!ownerId) {
+          throw new Error('Owner ID is required');
+        }
+
+        const response = await api.get(`/properties/owner/${ownerId}`);
+        console.log('Owner Properties API Response:', response.data);
+
+        const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
+
+        if (!Array.isArray(data)) {
+          throw new Error('Invalid properties data received');
+        }
+
+        return data;
+      } catch (error) {
+        return handleApiError(error);
+      }
+    };
+
+    const transferOwnership = async (propertyId: string, newOwnerId: string): Promise<Property> => {
+      try {
+        const validatedUser = validateUserAndCompany(user);
+
+        if (!propertyId || !newOwnerId) {
+          throw new Error('Property ID and new owner ID are required');
+        }
+
+        const response = await api.put(`/properties/${propertyId}/transfer`, {
+          newOwnerId,
+          companyId: validatedUser.companyId
+        });
+        console.log('Transfer Ownership API Response:', response.data);
+
+        return extractPropertyData(response.data);
+      } catch (error) {
+        return handleApiError(error);
+      }
+    };
+
+    // Method to get properties for any user context (useful for testing)
+    const getPropertiesForUser = async (userId?: string, companyId?: string, userRole?: string): Promise<Property[]> => {
+      try {
+        console.log('propertyService: getPropertiesForUser called', { userId, companyId, userRole });
+
+        // Build query parameters with provided user context
+        const params = new URLSearchParams();
+        if (userId) params.append('userId', userId);
+        if (companyId) params.append('companyId', companyId);
+        if (userRole) params.append('userRole', userRole);
+
+        console.log('propertyService: About to make API call to /properties/public-filtered');
+        console.log('propertyService: Query params:', params.toString());
+
+        const response = await publicApi.get(`/properties/public-filtered?${params.toString()}`);
+        console.log('Properties for User API Response:', response.data);
+
+        const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
+
+        if (!Array.isArray(data)) {
+          throw new Error('Invalid properties data received');
+        }
+
+        console.log('propertyService: Successfully fetched properties for user:', data.length);
+        return data;
+      } catch (error) {
+        console.error('propertyService: Error in getPropertiesForUser:', error);
+        console.error('propertyService: Error response:', error instanceof AxiosError ? {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          headers: error.response?.headers
+        } : 'Not an AxiosError');
+        return handleApiError(error);
+      }
+    };
+
+    return {
+      getProperties,
+      getVacantProperties,
+      getPublicProperties,
+      searchPublicProperties,
+      getPropertiesForUser,
+      getProperty,
+      createProperty,
+      createPropertySales,
+      updateProperty,
+      deleteProperty,
+      getByOwnerId,
+      transferOwnership
+    };
+  }, [user, activeRole]);
 }; 

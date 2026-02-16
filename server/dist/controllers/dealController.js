@@ -20,6 +20,7 @@ const access_1 = require("../utils/access");
 const SalesFile_1 = __importDefault(require("../models/SalesFile"));
 const Property_1 = require("../models/Property");
 const Lead_1 = require("../models/Lead");
+const Buyer_1 = require("../models/Buyer");
 const salesDocs_1 = require("../constants/salesDocs");
 const archiver_1 = __importDefault(require("archiver"));
 const stream_1 = require("stream");
@@ -58,23 +59,14 @@ const createDeal = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { propertyId, buyerName, buyerEmail, buyerPhone, stage, offerPrice, closeDate, notes } = req.body;
+        const { propertyId, buyerName, buyerEmail, buyerPhone, stage, offerPrice, closeDate, notes, commissionPercent, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining } = req.body;
         if (!propertyId || !buyerName || offerPrice == null) {
             throw new errorHandler_1.AppError('Missing required fields: propertyId, buyerName, offerPrice', 400);
         }
-        const deal = yield Deal_1.Deal.create({
-            propertyId,
+        const deal = yield Deal_1.Deal.create(Object.assign(Object.assign(Object.assign(Object.assign({ propertyId,
             buyerName,
             buyerEmail,
-            buyerPhone,
-            stage: stage || 'Offer',
-            offerPrice,
-            closeDate: closeDate || null,
-            notes: notes || '',
-            won: false,
-            companyId: req.user.companyId,
-            ownerId: req.user.userId
-        });
+            buyerPhone, stage: stage || 'Offer', offerPrice, closeDate: closeDate || null, notes: notes || '', won: false, companyId: req.user.companyId, ownerId: req.user.userId }, (typeof commissionPercent === 'number' && { commissionPercent })), (typeof commissionPreaPercent === 'number' && { commissionPreaPercent })), (typeof commissionAgencyPercentRemaining === 'number' && { commissionAgencyPercentRemaining })), (typeof commissionAgentPercentRemaining === 'number' && { commissionAgentPercentRemaining })));
         res.status(201).json({ status: 'success', data: deal });
     }
     catch (error) {
@@ -93,7 +85,16 @@ const updateDeal = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
         const { id } = req.params;
-        const updates = req.body || {};
+        const raw = req.body || {};
+        const allowed = [
+            'buyerName', 'buyerEmail', 'buyerPhone', 'stage', 'offerPrice', 'closeDate', 'won', 'notes',
+            'commissionPercent', 'commissionPreaPercent', 'commissionAgencyPercentRemaining', 'commissionAgentPercentRemaining'
+        ];
+        const updates = {};
+        for (const key of allowed) {
+            if (raw[key] !== undefined)
+                updates[key] = raw[key];
+        }
         const deal = yield Deal_1.Deal.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, updates, { new: true });
         if (!deal)
             throw new errorHandler_1.AppError('Deal not found', 404);
@@ -268,6 +269,53 @@ const createDealFromLead = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (lead.status !== 'Offer') {
             lead.status = 'Offer';
             yield lead.save();
+        }
+        // Convert this lead into a Buyer and tie it to the property for accountant payment workflows.
+        // Best-effort: do not fail deal creation if this linkage fails.
+        try {
+            const propObjectId = mongoose_1.default.Types.ObjectId.isValid(String(propertyId))
+                ? new mongoose_1.default.Types.ObjectId(String(propertyId))
+                : null;
+            if (propObjectId) {
+                // Upsert buyer by email/phone/name within company
+                const query = { companyId: req.user.companyId };
+                if (lead.email)
+                    query.email = lead.email;
+                else if (lead.phone)
+                    query.phone = lead.phone;
+                else
+                    query.name = lead.name;
+                let buyer = yield Buyer_1.Buyer.findOne(query);
+                if (!buyer) {
+                    buyer = yield Buyer_1.Buyer.create({
+                        name: lead.name,
+                        email: lead.email,
+                        phone: lead.phone,
+                        prefs: lead.interest || '',
+                        propertyId: propObjectId,
+                        companyId: req.user.companyId,
+                        ownerId: req.user.userId
+                    });
+                }
+                else {
+                    buyer.propertyId = propObjectId;
+                    // Fill missing fields where possible (do not overwrite existing values)
+                    if (!buyer.email && lead.email)
+                        buyer.email = lead.email;
+                    if (!buyer.phone && lead.phone)
+                        buyer.phone = lead.phone;
+                    if (!buyer.name && lead.name)
+                        buyer.name = lead.name;
+                    yield buyer.save();
+                }
+                // Set property.buyerId as the canonical linkage
+                yield Property_1.Property.updateOne({ _id: propObjectId, companyId: req.user.companyId }, { $set: { buyerId: buyer._id } });
+                // Ensure only this buyer points at this property in Buyer.propertyId
+                yield Buyer_1.Buyer.updateMany({ companyId: req.user.companyId, propertyId: propObjectId, _id: { $ne: buyer._id } }, { $unset: { propertyId: '' } });
+            }
+        }
+        catch (syncErr) {
+            console.warn('DealFromLead lead->buyer linkage failed:', (syncErr === null || syncErr === void 0 ? void 0 : syncErr.message) || syncErr);
         }
         res.status(201).json({ status: 'success', data: deal });
     }

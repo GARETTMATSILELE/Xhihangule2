@@ -8,6 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -54,7 +65,7 @@ const updateUnitStatus = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 buyerPatch = { buyerId: buyer._id, buyerName: buyer.name };
         }
         const update = {
-            $set: Object.assign({ status: to, reservationExpiresAt: to === 'under_offer' ? expires : undefined, reservedAt: to === 'under_offer' ? now : undefined, reservedBy: to === 'under_offer' ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined, soldAt: to === 'sold' ? now : undefined, dealId: to === 'sold' && dealId ? new mongoose_1.default.Types.ObjectId(dealId) : undefined }, buyerPatch),
+            $set: Object.assign({ status: to, reservationExpiresAt: to === 'under_offer' ? expires : undefined, reservedAt: to === 'under_offer' ? now : undefined, reservedBy: to === 'under_offer' ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined, soldAt: to === 'sold' ? now : undefined, dealId: to === 'sold' && dealId ? new mongoose_1.default.Types.ObjectId(dealId) : undefined, soldByAgentId: to === 'sold' ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined }, buyerPatch),
             $push: {
                 statusHistory: {
                     from: unit.status,
@@ -135,7 +146,7 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const selectFields = typeof fields === 'string'
             ? String(fields).split(',').map((s) => s.trim()).filter(Boolean).join(' ')
             : undefined;
-        const [items, total] = yield Promise.all([
+        const [rawItems, total] = yield Promise.all([
             (() => {
                 let q = DevelopmentUnit_1.DevelopmentUnit.find(query)
                     .sort({ variationId: 1, unitNumber: 1 })
@@ -147,6 +158,14 @@ const listUnits = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             })(),
             DevelopmentUnit_1.DevelopmentUnit.countDocuments(query)
         ]);
+        const currentUserId = String(req.user.userId);
+        const items = rawItems.map((u) => {
+            if (u.status === 'sold' && u.soldByAgentId && String(u.soldByAgentId) !== currentUserId && !isPrivileged) {
+                const { buyerName: _bn, buyerId: _bid } = u, rest = __rest(u, ["buyerName", "buyerId"]);
+                return Object.assign(Object.assign({}, rest), { buyerHidden: true });
+            }
+            return u;
+        });
         return res.json({ items, total, page: pageNum, limit: limitNum });
     }
     catch (error) {

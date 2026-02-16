@@ -68,7 +68,8 @@ const DevelopmentUnitSchema = new mongoose_1.Schema({
     reservedAt: { type: Date },
     reservationExpiresAt: { type: Date },
     soldAt: { type: Date },
-    dealId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Deal' }
+    dealId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Deal' },
+    soldByAgentId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User' }
 }, {
     timestamps: true
 });

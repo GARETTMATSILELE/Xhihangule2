@@ -3,7 +3,9 @@ import SalesSidebar from '../../components/Layout/SalesSidebar';
 import { usePropertyService } from '../../services/propertyService';
 import { usePropertyOwnerService } from '../../services/propertyOwnerService';
 import valuationsService from '../../services/valuationsService';
+import { buyerService } from '../../services/buyerService';
 import { useCompany } from '../../contexts/CompanyContext';
+import { useProperties } from '../../contexts/PropertyContext';
 import type { PropertyStatus } from '../../types/property';
 
 const cls = (...s: any[]) => s.filter(Boolean).join(' ');
@@ -37,8 +39,9 @@ export default function PropertiesPage() {
   const propertyService = usePropertyService();
   const propertyOwnerService = usePropertyOwnerService();
   const { company } = useCompany();
-  const [properties, setProperties] = React.useState<any[]>([]);
+  const { properties, loading: propertiesLoading, error: propertiesError, refreshProperties } = useProperties();
   const [owners, setOwners] = React.useState<any[]>([]);
+  const [buyers, setBuyers] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState<string>('');
@@ -52,6 +55,7 @@ export default function PropertiesPage() {
     bathrooms: 2,
     status: 'Available',
     ownerId: '',
+    buyerId: '',
     notes: '',
     builtArea: '',
     landArea: '',
@@ -66,14 +70,46 @@ export default function PropertiesPage() {
   const [showCreateModal, setShowCreateModal] = React.useState<boolean>(false);
   const [valuations, setValuations] = React.useState<any[]>([]);
   const [pickedValuationId, setPickedValuationId] = React.useState<string>('');
+  const ownersLoadedForCompanyRef = React.useRef<string | null>(null);
 
-  const load = React.useCallback(async () => {
-    try { setLoading(true); setError(null); const [list, ownerRes] = await Promise.all([propertyService.getProperties(), propertyOwnerService.getAll()]); setProperties(Array.isArray(list)?list:[]); setOwners(Array.isArray(ownerRes?.owners)? ownerRes.owners : (Array.isArray(ownerRes)? ownerRes : [])); }
-    catch (e:any) { setError(e?.message || 'Failed to load properties'); }
-    finally { setLoading(false); }
+  const loadOwners = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const ownerRes = await propertyOwnerService.getAll();
+      setOwners(Array.isArray(ownerRes?.owners) ? ownerRes.owners : (Array.isArray(ownerRes) ? ownerRes : []));
+    } catch (e: any) {
+      setOwners([]);
+      setError(e?.message || 'Failed to load owners');
+    } finally {
+      setLoading(false);
+    }
+  }, [propertyOwnerService]);
+
+  React.useEffect(() => {
+    // Prevent repeated owner reloads from render-time service identity changes.
+    const key = company?._id || '__no_company__';
+    if (ownersLoadedForCompanyRef.current === key) return;
+    ownersLoadedForCompanyRef.current = key;
+    loadOwners();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company?._id]);
+
+  // Load buyers list for picker
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadBuyers = async () => {
+      try {
+        const res = await buyerService.list().catch(() => []);
+        const list = Array.isArray(res) ? res : Array.isArray((res as any)?.data) ? (res as any).data : [];
+        if (!cancelled) setBuyers(list);
+      } catch {
+        if (!cancelled) setBuyers([]);
+      }
+    };
+    loadBuyers();
+    return () => { cancelled = true; };
   }, []);
-
-  React.useEffect(() => { load(); }, [load]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -97,6 +133,7 @@ export default function PropertiesPage() {
   const startEdit = (p: any) => {
     setEditing(p);
     setPickedValuationId('');
+    const fallbackBuyer = (buyers || []).find((b: any) => String(b?.propertyId || '') === String(p?._id || ''));
     setForm({
       title: p.name || '',
       address: p.address || '',
@@ -106,6 +143,7 @@ export default function PropertiesPage() {
       bathrooms: p.bathrooms ?? 2,
       status: (p.status === 'under_offer' ? 'Under Offer' : (p.status === 'sold' ? 'Sold' : 'Available')),
       ownerId: (p as any).propertyOwnerId || '',
+      buyerId: (p as any).buyerId || (fallbackBuyer?._id || ''),
       notes: p.description || '',
       builtArea: p.builtArea || '',
       landArea: p.landArea || '',
@@ -139,9 +177,12 @@ export default function PropertiesPage() {
         images: Array.isArray(form.images) ? (form.images as any[]).filter((u: any)=> String(u||'').trim() !== '') : [],
       };
       if (form.ownerId) payload.propertyOwnerId = form.ownerId;
+      // buyerId: allow clearing by sending null
+      payload.buyerId = form.buyerId ? form.buyerId : null;
       await propertyService.updateProperty(editing._id, payload);
       setEditing(null);
-      await load();
+      await refreshProperties();
+      await loadOwners();
     } catch(e:any){ setError(e?.message||'Failed to update'); } finally { setLoading(false);} };
   const createProperty = async () => {
     if (!createForm.name?.trim() || !createForm.address?.trim()) { setError('Name and address are required'); return; }
@@ -158,10 +199,11 @@ export default function PropertiesPage() {
         propertyOwnerId: createForm.propertyOwnerId || undefined
       });
       setCreateForm({ name: '', address: '', type: 'house', price: '', bedrooms: '', bathrooms: '', description: '', landArea: '', pricePerSqm: '', propertyOwnerId: '' });
-      await load();
+      await refreshProperties();
+      await loadOwners();
       setShowCreateModal(false);
     } catch(e:any){ setError(e?.message||'Failed to create'); } finally { setLoading(false);} };
-  const deleteProperty = async (id: string) => { if (!id) return; if (!window.confirm('Delete this property?')) return; try { setLoading(true); await propertyService.deleteProperty(id); await load(); } catch(e:any){ setError(e?.message||'Failed to delete'); } finally { setLoading(false);} };
+  const deleteProperty = async (id: string) => { if (!id) return; if (!window.confirm('Delete this property?')) return; try { setLoading(true); await propertyService.deleteProperty(id); await refreshProperties(); } catch(e:any){ setError(e?.message||'Failed to delete'); } finally { setLoading(false);} };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900">
@@ -181,9 +223,10 @@ export default function PropertiesPage() {
             </CardHeader>
             <CardContent>
               {error && <div className="text-sm text-rose-600 mb-2">{error}</div>}
+              {propertiesError && <div className="text-sm text-rose-600 mb-2">{propertiesError}</div>}
               {/* Create handled by main Sales Dashboard modal */}
 
-              {loading ? (
+              {(loading || propertiesLoading) ? (
                 <div className="py-8 text-center text-sm text-slate-500">Loading…</div>
               ) : (
                 <div className="overflow-x-auto">
@@ -222,8 +265,7 @@ export default function PropertiesPage() {
                                   const statusPayload = next.toLowerCase().replace(' ', '_') as PropertyStatus;
                                   try {
                                     await propertyService.updateProperty(p._id, { status: statusPayload });
-                                    // Update local state optimistically
-                                    setProperties(prev => prev.map(x => x._id === p._id ? { ...x, status: statusPayload } : x));
+                                    await refreshProperties();
                                   } catch (err:any) {
                                     alert(err?.message || 'Failed to update status');
                                   }
@@ -299,6 +341,17 @@ export default function PropertiesPage() {
                       <option value="">-- Select Owner (optional) --</option>
                       {owners.map((o:any)=> (
                         <option key={o._id} value={o._id}>{(`${o.firstName || ''} ${o.lastName || ''}`).trim() || o.name || o.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm">Buyer</label>
+                    <select className="w-full px-3 py-2 rounded-xl border" value={form.buyerId} onChange={(e:any)=>setForm({ ...form, buyerId: e.target.value })}>
+                      <option value="">-- Select Buyer (optional) --</option>
+                      {buyers.map((b:any)=> (
+                        <option key={b._id} value={b._id}>
+                          {b.name}{b.email ? ` (${b.email})` : ''}{b.phone ? ` • ${b.phone}` : ''}
+                        </option>
                       ))}
                     </select>
                   </div>

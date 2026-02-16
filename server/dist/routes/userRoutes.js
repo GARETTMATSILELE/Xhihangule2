@@ -19,6 +19,14 @@ const User_1 = require("../models/User");
 const auth_1 = require("../middleware/auth");
 const errorHandler_1 = require("../middleware/errorHandler");
 const multer_1 = __importDefault(require("multer"));
+const emailService_1 = require("../services/emailService");
+function escapeHtml(s) {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
 const router = express_1.default.Router();
 // Debug middleware for user routes
 router.use((req, res, next) => {
@@ -41,7 +49,7 @@ router.get('/public/agents', (req, res) => __awaiter(void 0, void 0, void 0, fun
         // Get company ID from query params or headers (for admin dashboard)
         const companyId = req.query.companyId || req.headers['x-company-id'];
         const role = req.query.role || 'agent';
-        let query = { $or: [{ role }, { roles: role }] };
+        let query = { $or: [{ role }, { roles: role }], isArchived: { $ne: true } };
         // Filter by company ID if provided
         if (companyId) {
             query.companyId = companyId;
@@ -188,9 +196,13 @@ router.get('/me', (req, res, next) => __awaiter(void 0, void 0, void 0, function
         }
         const user = yield (0, userController_1.getCurrentUser)(req.user.userId);
         console.log('Current user found:', user);
+        const safe = typeof (user === null || user === void 0 ? void 0 : user.toObject) === 'function' ? user.toObject() : user;
+        if (safe === null || safe === void 0 ? void 0 : safe.avatar) {
+            safe.avatarUrl = `data:${safe.avatarMimeType || 'image/png'};base64,${safe.avatar}`;
+        }
         res.json({
             status: 'success',
-            data: user
+            data: safe
         });
     }
     catch (error) {
@@ -205,7 +217,7 @@ router.get('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(
         console.log('GET / route hit');
         console.log('Fetching users with filters:', req.query);
         // Build query based on filters and enforce company scoping
-        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId };
+        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId, isArchived: { $ne: true } };
         if (req.query.role) {
             query.role = req.query.role;
         }
@@ -226,7 +238,8 @@ router.get('/agents', (0, auth_1.authorize)(['admin', 'accountant', 'agent', 'sa
         const role = req.query.role || 'agent';
         const query = {
             companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId,
-            $or: [{ role }, { roles: role }]
+            $or: [{ role }, { roles: role }],
+            isArchived: { $ne: true }
         };
         const agents = yield User_1.User.find(query).select('firstName lastName email role roles companyId');
         console.log('Found agents:', agents.length);
@@ -255,9 +268,45 @@ router.post('/', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter
         const payload = Object.assign(Object.assign({}, req.body), { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId });
         const user = yield (0, userController_1.createUser)(payload);
         console.log('User created:', user);
+        // Email the new user that their account has been created (non-fatal if email fails)
+        let accountCreatedEmailSent = false;
+        try {
+            const to = String((user === null || user === void 0 ? void 0 : user.email) || '').trim();
+            if (to) {
+                const linkBase = process.env.CLIENT_URL || process.env.APP_BASE_URL || 'http://localhost:3000';
+                const loginUrl = `${String(linkBase).replace(/\/+$/, '')}/login`;
+                const fullName = [String((user === null || user === void 0 ? void 0 : user.firstName) || ''), String((user === null || user === void 0 ? void 0 : user.lastName) || '')]
+                    .filter((p) => p && p.trim())
+                    .join(' ')
+                    .trim();
+                const greeting = fullName ? `Hi ${fullName},` : 'Hello,';
+                const subject = 'Your account has been created';
+                const plain = [
+                    greeting,
+                    '',
+                    'An administrator has created an account for you.',
+                    'Please log in to access your account.',
+                    '',
+                    `Login: ${loginUrl}`,
+                ].join('\n');
+                const html = [
+                    `<p>${escapeHtml(greeting)}</p>`,
+                    '<p>An administrator has created an account for you.</p>',
+                    '<p>Please log in to access your account.</p>',
+                    `<p><a href="${loginUrl}" target="_blank" rel="noopener noreferrer">Log in</a></p>`,
+                    `<p style="color:#6b7280;font-size:12px">If you did not expect this email, please ignore it or contact your administrator.</p>`,
+                ].join('');
+                yield (0, emailService_1.sendMail)({ to, subject, html, text: plain });
+                accountCreatedEmailSent = true;
+            }
+        }
+        catch (e) {
+            console.warn('[userRoutes] Failed to send account created email:', (e === null || e === void 0 ? void 0 : e.message) || e);
+        }
         res.status(201).json({
             status: 'success',
-            data: user
+            data: user,
+            meta: { accountCreatedEmailSent }
         });
     }
     catch (error) {
@@ -271,6 +320,21 @@ router.put('/:id', (0, auth_1.authorize)(['admin']), (req, res, next) => __await
     try {
         const updated = yield (0, userController_1.updateUserById)(req.params.id, req.body, (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         res.json({ status: 'success', data: updated });
+    }
+    catch (error) {
+        next(error);
+    }
+}));
+// Archive (soft-delete) user by ID - Admin only
+router.delete('/:id', (0, auth_1.authorize)(['admin']), (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const result = yield (0, userController_1.deleteUserById)(req.params.id, (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
+        res.json({
+            status: 'success',
+            message: result.alreadyArchived ? 'User already archived' : 'User archived successfully',
+            data: result
+        });
     }
     catch (error) {
         next(error);

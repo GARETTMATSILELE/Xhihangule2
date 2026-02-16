@@ -5,6 +5,42 @@ import { User } from '../types/auth';
 import { AxiosError } from 'axios';
 import { getDashboardPath } from '../utils/registrationUtils';
 
+function getSafeNextPathFromUrlSearch(search: string): string | null {
+  try {
+    const next = new URLSearchParams(search || '').get('next');
+    if (!next) return null;
+    const decoded = String(next);
+    // Prevent open redirects: only allow internal absolute paths.
+    if (!decoded.startsWith('/')) return null;
+    if (decoded.startsWith('//')) return null;
+    if (decoded.includes('://')) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+function pickRoleForPath(nextPath: string, roles: string[]): string | null {
+  const has = (r: string) => roles.includes(r);
+  if (nextPath.startsWith('/accountant-dashboard')) {
+    if (has('accountant')) return 'accountant';
+    if (has('principal')) return 'principal';
+    if (has('prea')) return 'prea';
+    return null;
+  }
+  if (nextPath.startsWith('/admin-dashboard')) {
+    if (has('admin')) return 'admin';
+    if (has('principal')) return 'principal';
+    if (has('prea')) return 'prea';
+    return null;
+  }
+  if (nextPath.startsWith('/sales-dashboard')) return has('sales') ? 'sales' : null;
+  if (nextPath.startsWith('/agent-dashboard')) return has('agent') ? 'agent' : null;
+  if (nextPath.startsWith('/owner-dashboard')) return has('owner') ? 'owner' : null;
+  if (nextPath.startsWith('/system-admin')) return has('system_admin') ? 'system_admin' : null;
+  return null;
+}
+
 interface Company {
   _id: string;
   name: string;
@@ -341,6 +377,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Decide next route
       try {
         const roles: any[] = Array.isArray((userData as any).roles) && (userData as any).roles.length > 0 ? (userData as any).roles : [userData.role];
+        const nextPath = getSafeNextPathFromUrlSearch(window.location.search);
+        const roleForNext = nextPath ? pickRoleForPath(nextPath, roles.map(String)) : null;
+
+        if (nextPath && roleForNext) {
+          setActiveRoleState(roleForNext as any);
+          setLoading(false);
+          navigate(nextPath);
+          return userData;
+        }
+
         if (roles.length > 1) {
           // Multi-role users must choose a dashboard every login
           setActiveRoleState(undefined);
@@ -350,9 +396,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         // Single role
         setActiveRoleState(roles[0]);
-        const dashboardPath = getDashboardPath(roles[0] as any);
-        console.log('Navigating to dashboard:', dashboardPath);
-        navigate(dashboardPath);
+        if (nextPath) {
+          setLoading(false);
+          navigate(nextPath);
+          return userData;
+        } else {
+          const dashboardPath = getDashboardPath(roles[0] as any);
+          console.log('Navigating to dashboard:', dashboardPath);
+          navigate(dashboardPath);
+        }
       } catch {}
       
       console.log('User state updated:', { 
@@ -392,6 +444,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCompany(companyData);
             setIsAuthenticated(true);
             setLoading(false);
+            // Honor deep-link redirects when present
+            try {
+              const roles: any[] = Array.isArray((userData as any).roles) && (userData as any).roles.length > 0 ? (userData as any).roles : [userData.role];
+              const nextPath = getSafeNextPathFromUrlSearch(window.location.search);
+              const roleForNext = nextPath ? pickRoleForPath(nextPath, roles.map(String)) : null;
+              if (nextPath && roleForNext) {
+                setActiveRoleState(roleForNext as any);
+                navigate(nextPath);
+                return userData as any;
+              }
+              if (nextPath) {
+                navigate(nextPath);
+                return userData as any;
+              }
+            } catch {}
             const dashboardPath = getDashboardPath(userData.role);
             navigate(dashboardPath);
             return userData as any; // early return on successful retry

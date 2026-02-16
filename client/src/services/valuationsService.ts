@@ -44,10 +44,16 @@ async function listByAgent(agentId: string): Promise<ValuationRecord[]> {
   return arr as ValuationRecord[];
 }
 
+async function update(id: string, record: Partial<ValuationRecord>): Promise<ValuationRecord> {
+  const res = await api.patch(`/valuations/${id}`, record);
+  return res.data as ValuationRecord;
+}
+
 export default {
   create,
   listByCompany,
   listByAgent,
+  update,
 };
 
 

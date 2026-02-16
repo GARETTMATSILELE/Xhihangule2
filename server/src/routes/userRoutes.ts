@@ -1,11 +1,20 @@
 import express from 'express';
-import { createUser, getCurrentUser, updateUserById } from '../controllers/userController';
+import { createUser, deleteUserById, getCurrentUser, updateUserById } from '../controllers/userController';
 import { getUserCommissionSummary } from '../controllers/userController';
 import { User } from '../models/User';
 import { Request, Response, NextFunction } from 'express';
 import { auth, authWithCompany, authorize } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import multer from 'multer';
+import { sendMail } from '../services/emailService';
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 const router = express.Router();
 
@@ -33,7 +42,7 @@ router.get('/public/agents', async (req: Request, res: Response) => {
     const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
     const role = (req.query.role as string) || 'agent';
     
-    let query: any = { $or: [{ role }, { roles: role }] };
+    let query: any = { $or: [{ role }, { roles: role }], isArchived: { $ne: true } };
     
     // Filter by company ID if provided
     if (companyId) {
@@ -197,9 +206,13 @@ router.get('/me', async (req: Request, res, next) => {
     }
     const user = await getCurrentUser(req.user.userId);
     console.log('Current user found:', user);
+    const safe: any = typeof (user as any)?.toObject === 'function' ? (user as any).toObject() : user;
+    if (safe?.avatar) {
+      safe.avatarUrl = `data:${safe.avatarMimeType || 'image/png'};base64,${safe.avatar}`;
+    }
     res.json({
       status: 'success',
-      data: user
+      data: safe
     });
   } catch (error) {
     console.error('Error in GET /me:', error);
@@ -214,7 +227,7 @@ router.get('/', authorize(['admin']), async (req: Request, res, next) => {
     console.log('Fetching users with filters:', req.query);
     
     // Build query based on filters and enforce company scoping
-    const query: any = { companyId: req.user?.companyId };
+    const query: any = { companyId: req.user?.companyId, isArchived: { $ne: true } };
     if (req.query.role) {
       query.role = req.query.role;
     }
@@ -233,9 +246,10 @@ router.get('/agents', authorize(['admin', 'accountant', 'agent', 'sales', 'princ
   try {
     console.log('GET /agents route hit');
     const role = (req.query.role as string) || 'agent';
-    const query: any = { 
+    const query: any = {
       companyId: req.user?.companyId, 
-      $or: [{ role }, { roles: role }]
+      $or: [{ role }, { roles: role }],
+      isArchived: { $ne: true }
     };
     const agents = await User.find(query).select('firstName lastName email role roles companyId');
     console.log('Found agents:', agents.length);
@@ -263,9 +277,50 @@ router.post('/', authorize(['admin']), async (req: Request, res, next) => {
     const payload = { ...req.body, companyId: req.user?.companyId };
     const user = await createUser(payload);
     console.log('User created:', user);
+
+    // Email the new user that their account has been created (non-fatal if email fails)
+    let accountCreatedEmailSent = false;
+    try {
+      const to = String((user as any)?.email || '').trim();
+      if (to) {
+        const linkBase = process.env.CLIENT_URL || process.env.APP_BASE_URL || 'http://localhost:3000';
+        const loginUrl = `${String(linkBase).replace(/\/+$/, '')}/login`;
+
+        const fullName = [String((user as any)?.firstName || ''), String((user as any)?.lastName || '')]
+          .filter((p) => p && p.trim())
+          .join(' ')
+          .trim();
+        const greeting = fullName ? `Hi ${fullName},` : 'Hello,';
+
+        const subject = 'Your account has been created';
+        const plain = [
+          greeting,
+          '',
+          'An administrator has created an account for you.',
+          'Please log in to access your account.',
+          '',
+          `Login: ${loginUrl}`,
+        ].join('\n');
+
+        const html = [
+          `<p>${escapeHtml(greeting)}</p>`,
+          '<p>An administrator has created an account for you.</p>',
+          '<p>Please log in to access your account.</p>',
+          `<p><a href="${loginUrl}" target="_blank" rel="noopener noreferrer">Log in</a></p>`,
+          `<p style="color:#6b7280;font-size:12px">If you did not expect this email, please ignore it or contact your administrator.</p>`,
+        ].join('');
+
+        await sendMail({ to, subject, html, text: plain });
+        accountCreatedEmailSent = true;
+      }
+    } catch (e: any) {
+      console.warn('[userRoutes] Failed to send account created email:', e?.message || e);
+    }
+
     res.status(201).json({
       status: 'success',
-      data: user
+      data: user,
+      meta: { accountCreatedEmailSent }
     });
   } catch (error) {
     console.error('Error in POST /:', error);
@@ -278,6 +333,20 @@ router.put('/:id', authorize(['admin']), async (req: Request, res, next) => {
   try {
     const updated = await updateUserById(req.params.id, req.body, req.user?.companyId);
     res.json({ status: 'success', data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Archive (soft-delete) user by ID - Admin only
+router.delete('/:id', authorize(['admin']), async (req: Request, res, next) => {
+  try {
+    const result = await deleteUserById(req.params.id, req.user?.userId, req.user?.companyId);
+    res.json({
+      status: 'success',
+      message: (result as any).alreadyArchived ? 'User already archived' : 'User archived successfully',
+      data: result
+    });
   } catch (error) {
     next(error);
   }

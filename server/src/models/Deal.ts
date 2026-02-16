@@ -16,6 +16,11 @@ export interface IDeal extends Document {
   notes?: string;
   companyId: mongoose.Types.ObjectId;
   ownerId: mongoose.Types.ObjectId; // agent user creating the deal
+  /** Commission set at deal stage (when the deal becomes real) */
+  commissionPercent?: number;
+  commissionPreaPercent?: number;
+  commissionAgencyPercentRemaining?: number;
+  commissionAgentPercentRemaining?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,7 +47,11 @@ const DealSchema: Schema = new Schema({
     ref: 'User',
     required: true,
     immutable: true
-  }
+  },
+  commissionPercent: { type: Number, min: 0 },
+  commissionPreaPercent: { type: Number, min: 0 },
+  commissionAgencyPercentRemaining: { type: Number, min: 0, max: 100 },
+  commissionAgentPercentRemaining: { type: Number, min: 0, max: 100 }
 }, { timestamps: true });
 
 DealSchema.index({ companyId: 1 });

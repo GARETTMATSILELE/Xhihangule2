@@ -5,6 +5,15 @@ import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
+import { sendMail } from '../services/emailService';
+
+function escapeHtml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 // Create a new payment request
 export const createPaymentRequest = async (req: Request, res: Response) => {
@@ -315,6 +324,65 @@ export const approvePaymentRequest = async (req: Request, res: Response) => {
     }
   } catch {}
     await paymentRequest.save();
+
+    // Email the requesting agent/sales user that their request was approved (non-fatal)
+    try {
+      const requesterId = (paymentRequest as any)?.requestedByUser;
+      if (requesterId) {
+        const requester = await User.findById(requesterId)
+          .select('email firstName lastName role roles')
+          .lean();
+        if (requester && (requester as any).email) {
+          const requesterName = [requester.firstName, requester.lastName].filter(Boolean).join(' ').trim();
+          const greeting = requesterName ? `Hi ${requesterName},` : 'Hello,';
+
+          const amount = Number((paymentRequest as any)?.amount || 0);
+          const currency = (paymentRequest as any)?.currency || 'USD';
+          const reason = String((paymentRequest as any)?.reason || 'Payment request');
+
+          const linkBase = process.env.CLIENT_URL || process.env.APP_BASE_URL || 'http://localhost:3000';
+          // Best-effort destination for the requester to review updates.
+          // Many requesters are sales users (Sales dashboard notifications). Fallback to agent dashboard root.
+          const requesterRoles: string[] = Array.isArray((requester as any).roles) && (requester as any).roles.length
+            ? (requester as any).roles.map((r: any) => String(r))
+            : [String((requester as any).role || '')];
+          const requesterPath = requesterRoles.includes('sales')
+            ? '/sales-dashboard/notifications'
+            : '/agent-dashboard';
+          const url = `${linkBase}${requesterPath}`;
+
+          const subject = 'Your payment request was approved';
+          const plain = [
+            greeting,
+            '',
+            'Your payment request has been approved.',
+            '',
+            `Amount: ${currency} ${amount.toLocaleString()}`,
+            `Reason: ${reason}`,
+            `Approved by: ${name}`,
+            '',
+            `View updates: ${url}`,
+          ].join('\n');
+          const html = [
+            `<p>${escapeHtml(greeting)}</p>`,
+            `<p>Your payment request has been approved.</p>`,
+            '<ul>',
+            `<li><strong>Amount:</strong> ${escapeHtml(`${currency} ${amount.toLocaleString()}`)}</li>`,
+            `<li><strong>Reason:</strong> ${escapeHtml(reason)}</li>`,
+            `<li><strong>Approved by:</strong> ${escapeHtml(name)}</li>`,
+            '</ul>',
+            `<p><a href="${url}" target="_blank" rel="noopener noreferrer">View updates</a></p>`,
+          ].join('');
+
+          void sendMail({ to: (requester as any).email, subject, html, text: plain }).catch((e: any) => {
+            console.warn('[paymentRequest] Failed to email requester about approval:', e?.message || e);
+          });
+        }
+      }
+    } catch (e: any) {
+      console.warn('[paymentRequest] Requester approval email block failed:', e?.message || e);
+    }
+
     // Notify accountants that a request is ready to process
     try {
       const companyId = (req.user as any)?.companyId;

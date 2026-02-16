@@ -8,6 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -58,12 +69,10 @@ const createDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!allowedTypes.includes(String(type))) {
             throw new errorHandler_1.AppError('Invalid development type', 400);
         }
-        if (!Array.isArray(variations) || variations.length === 0) {
-            throw new errorHandler_1.AppError('At least one variation is required', 400);
-        }
-        // Basic validation of variations
+        // Allow empty variations for Quick Create; unit types can be added later via addVariations
+        const variationsList = Array.isArray(variations) ? variations : [];
         const normalizedVariations = [];
-        for (const v of variations) {
+        for (const v of variationsList) {
             const unitCodes = Array.isArray(v === null || v === void 0 ? void 0 : v.unitCodes) ? v.unitCodes.map((s) => String(s).trim()).filter((s) => s.length > 0) : [];
             const hasCount = typeof (v === null || v === void 0 ? void 0 : v.count) === 'number' && Number(v.count) >= 1;
             if (!(v === null || v === void 0 ? void 0 : v.id) || !(v === null || v === void 0 ? void 0 : v.label) || (!hasCount && unitCodes.length === 0)) {
@@ -125,14 +134,7 @@ const createDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
             if (unitDocs.length > 0)
                 yield DevelopmentUnit_1.DevelopmentUnit.insertMany(unitDocs);
-            yield Development_1.Development.updateOne({ _id: dev._id }, {
-                $set: {
-                    'cachedStats.totalUnits': unitDocs.length,
-                    'cachedStats.availableUnits': unitDocs.length,
-                    'cachedStats.underOfferUnits': 0,
-                    'cachedStats.soldUnits': 0
-                }
-            });
+            yield recalcCachedStats(dev._id);
             const created = yield Development_1.Development.findById(dev._id).lean();
             return res.status(201).json(created);
         });
@@ -469,7 +471,7 @@ const listUnitsForDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (!isPrivileged && !isOwner && !isDevCollaborator) {
             query.collaborators = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        const [items, total] = yield Promise.all([
+        const [rawItems, total] = yield Promise.all([
             DevelopmentUnit_1.DevelopmentUnit.find(query)
                 .sort({ variationId: 1, unitNumber: 1 })
                 .skip((pageNum - 1) * limitNum)
@@ -477,6 +479,14 @@ const listUnitsForDevelopment = (req, res) => __awaiter(void 0, void 0, void 0, 
                 .lean(),
             DevelopmentUnit_1.DevelopmentUnit.countDocuments(query)
         ]);
+        const currentUserId = String(req.user.userId);
+        const items = rawItems.map((u) => {
+            if (u.status === 'sold' && u.soldByAgentId && String(u.soldByAgentId) !== currentUserId && !isPrivileged) {
+                const { buyerName: _bn, buyerId: _bid } = u, rest = __rest(u, ["buyerName", "buyerId"]);
+                return Object.assign(Object.assign({}, rest), { buyerHidden: true });
+            }
+            return u;
+        });
         return res.json({ items, total, page: pageNum, limit: limitNum });
     }
     catch (error) {

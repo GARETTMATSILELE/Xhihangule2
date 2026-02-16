@@ -98,7 +98,7 @@ export const createUser = async (userData: any) => {
   console.log('Creating user with data:', userData);
 
   // Check if user already exists
-  const existingUser = await User.findOne({ email: userData.email, companyId: userData.companyId });
+  const existingUser = await User.findOne({ email: userData.email, companyId: userData.companyId, isArchived: { $ne: true } });
   if (existingUser) {
     throw new AppError('User already exists', 400);
   }
@@ -134,6 +134,9 @@ export const updateUserById = async (id: string, updates: any, currentCompanyId?
   if (!user) {
     throw new AppError('User not found', 404);
   }
+  if ((user as any).isArchived) {
+    throw new AppError('Archived users cannot be updated', 400);
+  }
 
   // Enforce company scoping if provided
   if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
@@ -168,4 +171,51 @@ export const updateUserById = async (id: string, updates: any, currentCompanyId?
 
   const { password, ...userWithoutPassword } = user.toObject();
   return userWithoutPassword;
+};
+
+export const deleteUserById = async (id: string, actorUserId?: string, currentCompanyId?: string) => {
+  if (!id) {
+    throw new AppError('User ID is required', 400);
+  }
+
+  const user = await User.findById(id);
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
+    throw new AppError('Forbidden: User does not belong to your company', 403);
+  }
+
+  if ((user as any).isArchived) {
+    return {
+      alreadyArchived: true,
+      id: String(user._id),
+      isActive: Boolean(user.isActive)
+    };
+  }
+
+  if (actorUserId && String(user._id) === String(actorUserId)) {
+    throw new AppError('You cannot delete your own account', 400);
+  }
+
+  (user as any).archivedDetails = {
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role,
+    roles: Array.isArray((user as any).roles) ? (user as any).roles : undefined
+  };
+  (user as any).isArchived = true;
+  (user as any).archivedAt = new Date();
+  (user as any).archivedBy = actorUserId ? new mongoose.Types.ObjectId(actorUserId) : undefined;
+  user.isActive = false;
+
+  await user.save();
+
+  return {
+    id: String(user._id),
+    isArchived: true,
+    archivedAt: (user as any).archivedAt
+  };
 };

@@ -59,8 +59,10 @@ let circuitBreakerState = {
 let healthCheckState = {
   isHealthy: true,
   lastCheck: new Date(),
-  checkInterval: 300000, // Increased to 5 minutes
+  checkInterval: 30000, // 30 seconds for faster readiness recovery
 };
+
+let healthCheckInterval: NodeJS.Timeout | null = null;
 
 // Retry configuration
 const retryConfig = {
@@ -234,8 +236,6 @@ export const connectDatabase = async (): Promise<void> => {
 
 // Health check function
 const startHealthCheck = () => {
-  let healthCheckInterval: NodeJS.Timeout | null = null;
-
   const performHealthCheck = async () => {
     try {
       if (mongoose.connection.readyState !== 1) {
@@ -260,6 +260,7 @@ const startHealthCheck = () => {
   }
 
   // Start new interval
+  performHealthCheck();
   healthCheckInterval = setInterval(performHealthCheck, healthCheckState.checkInterval);
 };
 

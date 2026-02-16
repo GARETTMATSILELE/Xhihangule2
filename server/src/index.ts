@@ -324,6 +324,8 @@ app.use('/api/property-owners', propertyOwnerRoutes);
 app.use('/api/sales-owners', salesOwnerRoutes);
 app.use('/api/owners', ownerRoutes);
 app.use('/api/health', healthRoutes);
+// Root health aliases for platform probes (e.g., Azure App Service)
+app.use('/health', healthRoutes);
 app.use('/api/maintenance', maintenanceRequestRoutes);
 app.use('/api/deals', dealRoutes);
 app.use('/api/buyers', buyerRoutes);

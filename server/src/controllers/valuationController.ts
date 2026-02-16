@@ -40,7 +40,8 @@ export const createValuation = async (req: Request, res: Response) => {
       outBuildings: body.outBuildings,
       staffQuarters: body.staffQuarters,
       cottage: body.cottage,
-      estimatedValue: body.estimatedValue
+      estimatedValue: body.estimatedValue,
+      status: body.status || 'draft'
     });
     return res.status(201).json(doc);
   } catch (err: any) {
@@ -48,7 +49,63 @@ export const createValuation = async (req: Request, res: Response) => {
   }
 };
 
+export const getValuationById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid valuation id' });
+    }
+    const doc = await Valuation.findById(id).lean();
+    if (!doc) {
+      return res.status(404).json({ status: 'error', message: 'Valuation not found' });
+    }
+    return res.json(doc);
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err?.message || 'Failed to fetch valuation' });
+  }
+};
 
+export const updateValuation = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid valuation id' });
+    }
+    const body = req.body || {};
+    const allowed: any = {};
+    const fields: string[] = [
+      'status',
+      'propertyAddress',
+      'country',
+      'city',
+      'suburb',
+      'category',
+      'propertyType',
+      'bedrooms',
+      'bathrooms',
+      'landSize',
+      'zoning',
+      'amenitiesResidential',
+      'amenitiesCommercial',
+      'amenitiesIndustrial',
+      'outBuildings',
+      'staffQuarters',
+      'cottage',
+      'estimatedValue'
+    ];
+    fields.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(body, key)) {
+        (allowed as any)[key] = (body as any)[key];
+      }
+    });
 
-
+    const doc = await Valuation.findByIdAndUpdate(id, allowed, { new: true, runValidators: true }).lean();
+    if (!doc) {
+      return res.status(404).json({ status: 'error', message: 'Valuation not found' });
+    }
+    return res.json(doc);
+  } catch (err: any) {
+    return res.status(500).json({ status: 'error', message: err?.message || 'Failed to update valuation' });
+  }
+};
 

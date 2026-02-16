@@ -51,13 +51,10 @@ export const createDevelopment = async (req: Request, res: Response) => {
       throw new AppError('Invalid development type', 400);
     }
 
-    if (!Array.isArray(variations) || variations.length === 0) {
-      throw new AppError('At least one variation is required', 400);
-    }
-
-    // Basic validation of variations
+    // Allow empty variations for Quick Create; unit types can be added later via addVariations
+    const variationsList = Array.isArray(variations) ? variations : [];
     const normalizedVariations: any[] = [];
-    for (const v of variations as any[]) {
+    for (const v of variationsList as any[]) {
       const unitCodes: string[] = Array.isArray(v?.unitCodes) ? (v.unitCodes as any[]).map((s:any)=>String(s).trim()).filter((s:string)=>s.length>0) : [];
       const hasCount = typeof v?.count === 'number' && Number(v.count) >= 1;
       if (!v?.id || !v?.label || (!hasCount && unitCodes.length === 0)) {
@@ -119,17 +116,7 @@ export const createDevelopment = async (req: Request, res: Response) => {
         }
       }
       if (unitDocs.length > 0) await DevelopmentUnit.insertMany(unitDocs);
-      await Development.updateOne(
-        { _id: dev._id },
-        {
-          $set: {
-            'cachedStats.totalUnits': unitDocs.length,
-            'cachedStats.availableUnits': unitDocs.length,
-            'cachedStats.underOfferUnits': 0,
-            'cachedStats.soldUnits': 0
-          }
-        }
-      );
+      await recalcCachedStats(dev._id);
       const created = await Development.findById(dev._id).lean();
       return res.status(201).json(created);
     };
@@ -453,7 +440,7 @@ export const listUnitsForDevelopment = async (req: Request, res: Response) => {
       query.collaborators = new mongoose.Types.ObjectId(req.user!.userId);
     }
 
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       DevelopmentUnit.find(query)
         .sort({ variationId: 1, unitNumber: 1 })
         .skip((pageNum - 1) * limitNum)
@@ -461,6 +448,15 @@ export const listUnitsForDevelopment = async (req: Request, res: Response) => {
         .lean(),
       DevelopmentUnit.countDocuments(query)
     ]);
+
+    const currentUserId = String(req.user!.userId);
+    const items = (rawItems as any[]).map((u: any) => {
+      if (u.status === 'sold' && u.soldByAgentId && String(u.soldByAgentId) !== currentUserId && !isPrivileged) {
+        const { buyerName: _bn, buyerId: _bid, ...rest } = u;
+        return { ...rest, buyerHidden: true };
+      }
+      return u;
+    });
 
     return res.json({ items, total, page: pageNum, limit: limitNum });
   } catch (error: any) {

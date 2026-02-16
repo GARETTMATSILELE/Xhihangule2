@@ -138,6 +138,19 @@ const PropertySchema = new mongoose_1.Schema({
         ref: 'PropertyOwner',
         required: false
     },
+    buyerId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'Buyer',
+        required: false,
+        index: true
+    },
+    sourceValuationId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'Valuation',
+        required: false,
+        immutable: true,
+        index: true
+    },
     occupancyRate: {
         type: Number,
         min: [0, 'Occupancy rate cannot be negative'],

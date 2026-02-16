@@ -14,20 +14,24 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
   const location = useLocation();
   const { user, loading, isAuthenticated, error } = useAuth();
 
-  console.log('ProtectedRoute check:', {
-    pathname: location.pathname,
-    loading,
-    isAuthenticated,
-    hasUser: !!user,
-    userRole: user?.role,
-    userRoles: (user as any)?.roles,
-    requiredRoles,
-    error
-  });
+  if (process.env.NODE_ENV === 'development') {
+    console.log('ProtectedRoute check:', {
+      pathname: location.pathname,
+      loading,
+      isAuthenticated,
+      hasUser: !!user,
+      userRole: user?.role,
+      userRoles: (user as any)?.roles,
+      requiredRoles,
+      error
+    });
+  }
 
   // Show loading spinner while checking authentication
   if (loading) {
-    console.log('ProtectedRoute: Showing loading spinner');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('ProtectedRoute: Showing loading spinner');
+    }
     return (
       <Box
         display="flex"
@@ -47,15 +51,20 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated || !user) {
-    console.log('ProtectedRoute: Not authenticated, redirecting to login');
-    return <Navigate to="/login" replace />;
+    if (process.env.NODE_ENV === 'development') {
+      console.log('ProtectedRoute: Not authenticated, redirecting to login');
+    }
+    const next = `${location.pathname}${location.search || ''}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   }
 
   // Check role-based access if required roles are specified
   if (requiredRoles && requiredRoles.length > 0) {
     const roles: string[] = Array.isArray((user as any).roles) && (user as any).roles.length > 0 ? (user as any).roles : [user.role];
     if (!requiredRoles.some(r => roles.includes(r))) {
-      console.log('ProtectedRoute: User role not authorized', { userRole: user.role, requiredRoles });
+      if (process.env.NODE_ENV === 'development') {
+        console.log('ProtectedRoute: User role not authorized', { userRole: user.role, requiredRoles });
+      }
       // Redirect unauthorized users to role chooser if they have other roles
       const hasAnyRole = roles.length > 0;
       if (hasAnyRole) return <Navigate to="/choose-dashboard" replace />;
@@ -70,7 +79,9 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
     return <Navigate to="/admin/company-setup" replace />;
   }
 
-  console.log('ProtectedRoute: Access granted');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('ProtectedRoute: Access granted');
+  }
   return (
     <>
       <Helmet>

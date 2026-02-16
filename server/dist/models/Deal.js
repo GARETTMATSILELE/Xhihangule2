@@ -57,7 +57,11 @@ const DealSchema = new mongoose_1.Schema({
         ref: 'User',
         required: true,
         immutable: true
-    }
+    },
+    commissionPercent: { type: Number, min: 0 },
+    commissionPreaPercent: { type: Number, min: 0 },
+    commissionAgencyPercentRemaining: { type: Number, min: 0, max: 100 },
+    commissionAgentPercentRemaining: { type: Number, min: 0, max: 100 }
 }, { timestamps: true });
 DealSchema.index({ companyId: 1 });
 DealSchema.index({ ownerId: 1 });

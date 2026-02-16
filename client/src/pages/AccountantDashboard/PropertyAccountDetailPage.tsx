@@ -498,11 +498,11 @@ const PropertyAccountDetailPage: React.FC = () => {
 
       // Calculate summary for the period
       const periodIncome = filteredTransactions
-        .filter(t => t.type === 'income')
+        .filter(t => t.type === 'income' && t.status === 'completed')
         .reduce((sum, t) => sum + t.amount, 0);
       
       const periodExpenses = filteredTransactions
-        .filter(t => t.type === 'expense')
+        .filter(t => t.type === 'expense' && t.status === 'completed')
         .reduce((sum, t) => sum + t.amount, 0);
       
       // Get payouts from the account's ownerPayouts array and filter by date range
@@ -511,12 +511,12 @@ const PropertyAccountDetailPage: React.FC = () => {
       
       if (account?.ownerPayouts) {
         if (statementData.includeAllTransactions) {
-          filteredPayouts = account.ownerPayouts;
-          periodPayouts = account.totalOwnerPayouts;
+          filteredPayouts = account.ownerPayouts.filter(p => p.status === 'completed');
+          periodPayouts = filteredPayouts.reduce((sum, payout) => sum + payout.amount, 0);
         } else {
           filteredPayouts = account.ownerPayouts.filter(payout => {
             const payoutDate = new Date(payout.date);
-            return payoutDate >= statementData.startDate && payoutDate <= statementData.endDate;
+            return payout.status === 'completed' && payoutDate >= statementData.startDate && payoutDate <= statementData.endDate;
           });
           periodPayouts = filteredPayouts.reduce((sum, payout) => sum + payout.amount, 0);
         }
@@ -784,15 +784,38 @@ const PropertyAccountDetailPage: React.FC = () => {
 
   // Prepare transactions and stable, deduplicated view BEFORE any early returns
   const baseTransactions = Array.isArray(account?.transactions) ? account!.transactions : [];
-  const { transactions, finalBalance } = propertyAccountService.calculateRunningBalance(baseTransactions);
+  const payoutTransactions: Transaction[] = Array.isArray(account?.ownerPayouts)
+    ? account!.ownerPayouts.map((p) => ({
+        _id: (p as any)?._id ? String((p as any)._id) : undefined,
+        type: 'owner_payout',
+        amount: Number((p as any)?.amount || 0),
+        date: (p as any)?.date ? new Date((p as any).date) : new Date(),
+        description: `Owner payout - ${String((p as any)?.recipientName || 'Owner')}`,
+        category: 'owner_payout',
+        recipientId: (p as any)?.recipientId ? String((p as any).recipientId) : undefined,
+        recipientType: 'owner',
+        referenceNumber: String((p as any)?.referenceNumber || ''),
+        status: (p as any)?.status || 'pending',
+        processedBy: (p as any)?.processedBy ? String((p as any).processedBy) : undefined,
+        notes: (p as any)?.notes,
+        attachments: [],
+        createdAt: (p as any)?.createdAt ? new Date((p as any).createdAt) : ((p as any)?.date ? new Date((p as any).date) : new Date()),
+        updatedAt: (p as any)?.updatedAt ? new Date((p as any).updatedAt) : ((p as any)?.date ? new Date((p as any).date) : new Date()),
+        runningBalance: undefined
+      }))
+    : [];
+  const combinedLedgerEntries = [...baseTransactions, ...payoutTransactions];
+  const { transactions, finalBalance } = propertyAccountService.calculateRunningBalance(combinedLedgerEntries);
   const uniqueTransactions: Transaction[] = React.useMemo(() => {
     const seen = new Set<string>();
     const result: Transaction[] = [];
     for (const t of transactions) {
       const paymentId = (t as any)?.paymentId ? String((t as any).paymentId) : '';
+      const ref = (t as any)?.referenceNumber ? String((t as any).referenceNumber) : '';
+      const tid = (t as any)?._id ? String((t as any)._id) : '';
       const key = paymentId
-        ? `${t.type}:${paymentId}`
-        : `${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
+        ? `${t.type}:pid:${paymentId}`
+        : (t.type === 'owner_payout' ? `${t.type}:ref:${ref || tid}` : `${t.type}:free:${ref}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`);
       if (seen.has(key)) continue;
       seen.add(key);
       result.push(t);
@@ -1019,14 +1042,24 @@ const PropertyAccountDetailPage: React.FC = () => {
                   <TableCell>
                     <Chip
                       label={propertyAccountService.getTransactionTypeLabel(transaction.type)}
-                      color={transaction.type === 'income' ? 'success' : 'default'}
+                      color={
+                        transaction.type === 'income'
+                          ? 'success'
+                          : (transaction.type === 'expense'
+                              ? 'error'
+                              : (transaction.type === 'owner_payout' ? 'warning' : 'default'))
+                      }
                       size="small"
                     />
                   </TableCell>
                   <TableCell>{transaction.description}</TableCell>
                   <TableCell>
                     <Typography
-                      color={transaction.type === 'income' ? 'success.main' : 'error.main'}
+                      color={
+                        transaction.type === 'income'
+                          ? 'success.main'
+                          : (transaction.type === 'owner_payout' ? 'warning.main' : 'error.main')
+                      }
                     >
                       {transaction.type === 'income' ? '+' : '-'}
                       {propertyAccountService.formatCurrency(transaction.amount)}
@@ -1036,7 +1069,11 @@ const PropertyAccountDetailPage: React.FC = () => {
                   <TableCell>
                     <Chip
                       label={transaction.status}
-                      color={transaction.status === 'completed' ? 'success' : 'warning'}
+                      color={
+                        transaction.status === 'completed'
+                          ? 'success'
+                          : (transaction.status === 'failed' ? 'error' : (transaction.status === 'cancelled' ? 'default' : 'warning'))
+                      }
                       size="small"
                     />
                   </TableCell>

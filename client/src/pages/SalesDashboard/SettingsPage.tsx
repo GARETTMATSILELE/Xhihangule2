@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../api';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
@@ -78,7 +78,7 @@ function AvatarUpload({ onPreview }: { onPreview?: (url: string) => void }) {
         try {
           const res = await apiService.uploadUserAvatar(form);
           // If backend returns a URL, use it; otherwise keep preview
-          const url = (res?.data?.url || res?.data?.avatarUrl || res?.data?.avatar) as string | undefined;
+          const url = (res?.data?.data?.avatarUrl || res?.data?.avatarUrl || res?.data?.url || res?.data?.avatar) as string | undefined;
           if (url && onPreview) onPreview(url);
           // Ensure header updates after upload without full reload
           try { await refreshUser(); } catch {}
@@ -138,8 +138,27 @@ const SalesSettingsPage: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(() => {
     const u: any = user || {};
-    return u?.avatar || u?.profile?.avatar || u?.photoUrl || undefined;
+    if (u?.avatarUrl) return u.avatarUrl;
+    // Support older server payloads that might return base64 + mimetype
+    if (u?.avatar && typeof u.avatar === 'string') {
+      const mt = u?.avatarMimeType || 'image/png';
+      if (u.avatar.startsWith('data:')) return u.avatar;
+      return `data:${mt};base64,${u.avatar}`;
+    }
+    return u?.profile?.avatar || u?.photoUrl || undefined;
   });
+
+  // Keep local state in sync with auth user (e.g. after refreshUser() post-upload)
+  useEffect(() => {
+    const u: any = user || {};
+    const next =
+      u?.avatarUrl ||
+      (u?.avatar ? (u.avatar.startsWith?.('data:') ? u.avatar : `data:${u?.avatarMimeType || 'image/png'};base64,${u.avatar}`) : undefined) ||
+      u?.profile?.avatar ||
+      u?.photoUrl ||
+      undefined;
+    if (next) setAvatarUrl(next);
+  }, [user]);
 
   const displayName = (user ? `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email : "Property CRM");
   const userInitials = useMemo(() => {

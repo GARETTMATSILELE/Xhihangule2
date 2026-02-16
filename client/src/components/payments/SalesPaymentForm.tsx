@@ -120,7 +120,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         const list = await (propertyService as any).searchPublicProperties?.({
           saleOnly: true,
           limit: 20,
-          fields: 'id,_id,name,address,price,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+          fields: 'id,_id,name,address,price,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,buyerId,rentalType'
         }).catch(async () => {
           try { return await propertyService.getProperties(); } catch { return []; }
         });
@@ -161,7 +161,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
           q,
           saleOnly: true,
           limit: 20,
-          fields: 'id,_id,name,address,price,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+          fields: 'id,_id,name,address,price,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,buyerId,rentalType'
         });
         if (!cancelled) {
           setProperties(Array.isArray(list) ? (list as any[]) : []);
@@ -184,6 +184,17 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
       if (!selectedPropertyId) return;
       if ((buyerName || '').trim().length > 0) return;
       try {
+        // Prefer Property.buyerId when available (more deterministic than querying by propertyId)
+        const prop: any = (properties || []).find((p: any) => String(p?._id || '') === String(selectedPropertyId));
+        const buyerId = prop?.buyerId;
+        if (buyerId) {
+          const b = await buyerService.get(String(buyerId));
+          const name = (b as any)?.name;
+          if (!cancelled && typeof name === 'string' && name.trim()) {
+            setBuyerName(name.trim());
+            return;
+          }
+        }
         const buyers = await buyerService.list({ propertyId: selectedPropertyId });
         const list = Array.isArray(buyers) ? buyers : [];
         if (!cancelled && list.length > 0) {
@@ -402,6 +413,14 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
                 setSelectedPropertyId((newValue as any)._id || '');
                 // Auto-populate commission and price from selected property if present
                 const prop: any = newValue as any;
+                // Auto-populate Buyer from property.buyerId when present (do not override existing buyerName)
+                const buyerId = prop?.buyerId;
+                if (buyerId && !(buyerName || '').trim()) {
+                  buyerService.get(String(buyerId)).then((b: any) => {
+                    const name = (b as any)?.name;
+                    if (typeof name === 'string' && name.trim()) setBuyerName(name.trim());
+                  }).catch(() => {/* ignore */});
+                }
                 if (typeof prop?.commission === 'number') setCommissionPercent(Number(prop.commission));
                 if (typeof prop?.commissionPreaPercent === 'number') setPreaPercentOfCommission(Number(prop.commissionPreaPercent));
                 if (typeof prop?.commissionAgencyPercentRemaining === 'number') setAgencyPercent(Number(prop.commissionAgencyPercentRemaining));

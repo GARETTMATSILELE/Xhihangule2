@@ -126,7 +126,7 @@ const PaymentRequestSchema = new mongoose_1.Schema({
         status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
         approvedBy: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User' },
         approvedByName: { type: String },
-        approvedByRole: { type: String, enum: ['principal', 'prea', 'admin'] },
+        approvedByRole: { type: String, enum: ['principal', 'prea', 'admin', 'owner'] },
         approvedAt: { type: Date },
         notes: { type: String }
     },

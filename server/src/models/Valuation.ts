@@ -21,6 +21,16 @@ export interface IValuation extends Document {
   staffQuarters?: boolean;
   cottage?: boolean;
   estimatedValue?: number;
+  status?: 'draft' | 'owner_reviewing' | 'converted' | 'archived';
+  /**
+   * Lifecycle tracking
+   * - convertedPropertyId: permanent link to the listing created from this valuation
+   * - actualSoldPrice/soldDate: captured once when the linked property is sold
+   * Derived metrics (difference/accuracy) must be computed dynamically in the UI.
+   */
+  convertedPropertyId?: mongoose.Types.ObjectId | null;
+  actualSoldPrice?: number | null;
+  soldDate?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,7 +54,16 @@ const ValuationSchema: Schema = new Schema({
   outBuildings: { type: Boolean, default: false },
   staffQuarters: { type: Boolean, default: false },
   cottage: { type: Boolean, default: false },
-  estimatedValue: { type: Number, min: 0 }
+  estimatedValue: { type: Number, min: 0 },
+  convertedPropertyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Property', required: false, index: true },
+  actualSoldPrice: { type: Number, required: false, min: 0 },
+  soldDate: { type: Date, required: false },
+  status: {
+    type: String,
+    enum: ['draft', 'owner_reviewing', 'converted', 'archived'],
+    default: 'draft',
+    index: true
+  }
 }, { timestamps: true });
 
 export const Valuation = mongoose.model<IValuation>('Valuation', ValuationSchema, COLLECTIONS.VALUATIONS);

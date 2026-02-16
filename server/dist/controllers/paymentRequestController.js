@@ -47,6 +47,14 @@ const PaymentRequest_1 = require("../models/PaymentRequest");
 const Notification_1 = require("../models/Notification");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
+const emailService_1 = require("../services/emailService");
+function escapeHtml(s) {
+    return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
 // Create a new payment request
 const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -325,6 +333,60 @@ const approvePaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fu
         }
         catch (_f) { }
         yield paymentRequest.save();
+        // Email the requesting agent/sales user that their request was approved (non-fatal)
+        try {
+            const requesterId = paymentRequest === null || paymentRequest === void 0 ? void 0 : paymentRequest.requestedByUser;
+            if (requesterId) {
+                const requester = yield User_1.User.findById(requesterId)
+                    .select('email firstName lastName role roles')
+                    .lean();
+                if (requester && requester.email) {
+                    const requesterName = [requester.firstName, requester.lastName].filter(Boolean).join(' ').trim();
+                    const greeting = requesterName ? `Hi ${requesterName},` : 'Hello,';
+                    const amount = Number((paymentRequest === null || paymentRequest === void 0 ? void 0 : paymentRequest.amount) || 0);
+                    const currency = (paymentRequest === null || paymentRequest === void 0 ? void 0 : paymentRequest.currency) || 'USD';
+                    const reason = String((paymentRequest === null || paymentRequest === void 0 ? void 0 : paymentRequest.reason) || 'Payment request');
+                    const linkBase = process.env.CLIENT_URL || process.env.APP_BASE_URL || 'http://localhost:3000';
+                    // Best-effort destination for the requester to review updates.
+                    // Many requesters are sales users (Sales dashboard notifications). Fallback to agent dashboard root.
+                    const requesterRoles = Array.isArray(requester.roles) && requester.roles.length
+                        ? requester.roles.map((r) => String(r))
+                        : [String(requester.role || '')];
+                    const requesterPath = requesterRoles.includes('sales')
+                        ? '/sales-dashboard/notifications'
+                        : '/agent-dashboard';
+                    const url = `${linkBase}${requesterPath}`;
+                    const subject = 'Your payment request was approved';
+                    const plain = [
+                        greeting,
+                        '',
+                        'Your payment request has been approved.',
+                        '',
+                        `Amount: ${currency} ${amount.toLocaleString()}`,
+                        `Reason: ${reason}`,
+                        `Approved by: ${name}`,
+                        '',
+                        `View updates: ${url}`,
+                    ].join('\n');
+                    const html = [
+                        `<p>${escapeHtml(greeting)}</p>`,
+                        `<p>Your payment request has been approved.</p>`,
+                        '<ul>',
+                        `<li><strong>Amount:</strong> ${escapeHtml(`${currency} ${amount.toLocaleString()}`)}</li>`,
+                        `<li><strong>Reason:</strong> ${escapeHtml(reason)}</li>`,
+                        `<li><strong>Approved by:</strong> ${escapeHtml(name)}</li>`,
+                        '</ul>',
+                        `<p><a href="${url}" target="_blank" rel="noopener noreferrer">View updates</a></p>`,
+                    ].join('');
+                    void (0, emailService_1.sendMail)({ to: requester.email, subject, html, text: plain }).catch((e) => {
+                        console.warn('[paymentRequest] Failed to email requester about approval:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                    });
+                }
+            }
+        }
+        catch (e) {
+            console.warn('[paymentRequest] Requester approval email block failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
+        }
         // Notify accountants that a request is ready to process
         try {
             const companyId = (_e = req.user) === null || _e === void 0 ? void 0 : _e.companyId;

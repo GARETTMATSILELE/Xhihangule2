@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteBuyer = exports.updateBuyer = exports.createBuyer = exports.listBuyers = void 0;
+exports.deleteBuyer = exports.updateBuyer = exports.createBuyer = exports.getBuyer = exports.listBuyers = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Buyer_1 = require("../models/Buyer");
 const Property_1 = require("../models/Property");
@@ -27,6 +27,8 @@ const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
+        // Default: scope to the logged-in user.
+        // Exception: admin/accountant can list all buyers within their company (for payments/admin tasks).
         const query = { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) };
         if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
@@ -52,6 +54,36 @@ const listBuyers = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.listBuyers = listBuyers;
+const getBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId))
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        if (!req.user.companyId)
+            throw new errorHandler_1.AppError('Company ID not found', 400);
+        const { id } = req.params;
+        if (!id || !mongoose_1.default.Types.ObjectId.isValid(String(id))) {
+            throw new errorHandler_1.AppError('Invalid buyer id', 400);
+        }
+        const query = {
+            _id: new mongoose_1.default.Types.ObjectId(String(id)),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+        };
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
+            query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        }
+        const buyer = yield Buyer_1.Buyer.findOne(query).lean();
+        if (!buyer)
+            throw new errorHandler_1.AppError('Buyer not found', 404);
+        res.json({ status: 'success', data: buyer });
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError)
+            return res.status(error.statusCode).json({ status: 'error', message: error.message });
+        res.status(500).json({ status: 'error', message: 'Failed to fetch buyer' });
+    }
+});
+exports.getBuyer = getBuyer;
 const createBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -123,7 +155,7 @@ const updateBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             throw new errorHandler_1.AppError('Company ID not found', 400);
         const { id } = req.params;
         const updates = req.body || {};
-        const buyer = yield Buyer_1.Buyer.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, updates, { new: true });
+        const buyer = yield Buyer_1.Buyer.findOneAndUpdate({ _id: id, companyId: req.user.companyId, ownerId: req.user.userId }, updates, { new: true });
         if (!buyer)
             throw new errorHandler_1.AppError('Buyer not found', 404);
         res.json({ status: 'success', data: buyer });
@@ -143,7 +175,7 @@ const deleteBuyer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
         const { id } = req.params;
-        const buyer = yield Buyer_1.Buyer.findOneAndDelete({ _id: id, companyId: req.user.companyId });
+        const buyer = yield Buyer_1.Buyer.findOneAndDelete({ _id: id, companyId: req.user.companyId, ownerId: req.user.userId });
         if (!buyer)
             throw new errorHandler_1.AppError('Buyer not found', 404);
         res.json({ status: 'success', message: 'Buyer deleted' });

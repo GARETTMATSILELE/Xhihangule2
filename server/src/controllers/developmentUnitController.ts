@@ -51,6 +51,7 @@ export const updateUnitStatus = async (req: Request, res: Response) => {
         reservedBy: to === 'under_offer' ? new mongoose.Types.ObjectId(req.user!.userId) : undefined,
         soldAt: to === 'sold' ? now : undefined,
         dealId: to === 'sold' && dealId ? new mongoose.Types.ObjectId(dealId) : undefined,
+        soldByAgentId: to === 'sold' ? new mongoose.Types.ObjectId(req.user!.userId) : undefined,
         ...buyerPatch
       },
       $push: {
@@ -138,7 +139,7 @@ export const listUnits = async (req: Request, res: Response) => {
       ? String(fields).split(',').map((s: string) => s.trim()).filter(Boolean).join(' ')
       : undefined;
 
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       (() => {
         let q = DevelopmentUnit.find(query)
           .sort({ variationId: 1, unitNumber: 1 })
@@ -149,6 +150,15 @@ export const listUnits = async (req: Request, res: Response) => {
       })(),
       DevelopmentUnit.countDocuments(query)
     ]);
+
+    const currentUserId = String(req.user!.userId);
+    const items = (rawItems as any[]).map((u: any) => {
+      if (u.status === 'sold' && u.soldByAgentId && String(u.soldByAgentId) !== currentUserId && !isPrivileged) {
+        const { buyerName: _bn, buyerId: _bid, ...rest } = u;
+        return { ...rest, buyerHidden: true };
+      }
+      return u;
+    });
 
     return res.json({ items, total, page: pageNum, limit: limitNum });
   } catch (error: any) {

@@ -6,6 +6,7 @@ import { hasAnyRole } from '../utils/access';
 import SalesFile from '../models/SalesFile';
 import { Property } from '../models/Property';
 import { Lead } from '../models/Lead';
+import { Buyer } from '../models/Buyer';
 import { ALLOWED_DOCS_BY_STAGE, STAGES, STAGE_ORDER, SALES_DOC_TYPES, isValidTransition } from '../constants/salesDocs';
 import archiver from 'archiver';
 import { Readable } from 'stream';
@@ -41,7 +42,20 @@ export const createDeal = async (req: Request, res: Response) => {
     if (!req.user?.userId) throw new AppError('Authentication required', 401);
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
-    const { propertyId, buyerName, buyerEmail, buyerPhone, stage, offerPrice, closeDate, notes } = req.body;
+    const {
+      propertyId,
+      buyerName,
+      buyerEmail,
+      buyerPhone,
+      stage,
+      offerPrice,
+      closeDate,
+      notes,
+      commissionPercent,
+      commissionPreaPercent,
+      commissionAgencyPercentRemaining,
+      commissionAgentPercentRemaining
+    } = req.body;
     if (!propertyId || !buyerName || offerPrice == null) {
       throw new AppError('Missing required fields: propertyId, buyerName, offerPrice', 400);
     }
@@ -57,7 +71,11 @@ export const createDeal = async (req: Request, res: Response) => {
       notes: notes || '',
       won: false,
       companyId: req.user.companyId,
-      ownerId: req.user.userId
+      ownerId: req.user.userId,
+      ...(typeof commissionPercent === 'number' && { commissionPercent }),
+      ...(typeof commissionPreaPercent === 'number' && { commissionPreaPercent }),
+      ...(typeof commissionAgencyPercentRemaining === 'number' && { commissionAgencyPercentRemaining }),
+      ...(typeof commissionAgentPercentRemaining === 'number' && { commissionAgentPercentRemaining })
     });
     res.status(201).json({ status: 'success', data: deal });
   } catch (error) {
@@ -74,7 +92,15 @@ export const updateDeal = async (req: Request, res: Response) => {
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
     const { id } = req.params;
-    const updates = req.body || {};
+    const raw = req.body || {};
+    const allowed = [
+      'buyerName', 'buyerEmail', 'buyerPhone', 'stage', 'offerPrice', 'closeDate', 'won', 'notes',
+      'commissionPercent', 'commissionPreaPercent', 'commissionAgencyPercentRemaining', 'commissionAgentPercentRemaining'
+    ];
+    const updates: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (raw[key] !== undefined) updates[key] = raw[key];
+    }
 
     const deal = await Deal.findOneAndUpdate(
       { _id: id, companyId: req.user.companyId },
@@ -247,6 +273,55 @@ export const createDealFromLead = async (req: Request, res: Response) => {
     if (lead.status !== 'Offer') {
       lead.status = 'Offer';
       await lead.save();
+    }
+
+    // Convert this lead into a Buyer and tie it to the property for accountant payment workflows.
+    // Best-effort: do not fail deal creation if this linkage fails.
+    try {
+      const propObjectId = mongoose.Types.ObjectId.isValid(String(propertyId))
+        ? new mongoose.Types.ObjectId(String(propertyId))
+        : null;
+      if (propObjectId) {
+        // Upsert buyer by email/phone/name within company
+        const query: any = { companyId: req.user.companyId };
+        if (lead.email) query.email = lead.email;
+        else if (lead.phone) query.phone = lead.phone;
+        else query.name = lead.name;
+
+        let buyer = await Buyer.findOne(query);
+        if (!buyer) {
+          buyer = await Buyer.create({
+            name: lead.name,
+            email: lead.email,
+            phone: lead.phone,
+            prefs: (lead as any).interest || '',
+            propertyId: propObjectId,
+            companyId: req.user.companyId,
+            ownerId: req.user.userId
+          } as any);
+        } else {
+          buyer.propertyId = propObjectId as any;
+          // Fill missing fields where possible (do not overwrite existing values)
+          if (!buyer.email && lead.email) buyer.email = lead.email;
+          if (!buyer.phone && lead.phone) buyer.phone = lead.phone;
+          if (!buyer.name && lead.name) buyer.name = lead.name;
+          await buyer.save();
+        }
+
+        // Set property.buyerId as the canonical linkage
+        await Property.updateOne(
+          { _id: propObjectId, companyId: req.user.companyId },
+          { $set: { buyerId: buyer._id } }
+        );
+
+        // Ensure only this buyer points at this property in Buyer.propertyId
+        await Buyer.updateMany(
+          { companyId: req.user.companyId, propertyId: propObjectId, _id: { $ne: buyer._id } },
+          { $unset: { propertyId: '' } }
+        );
+      }
+    } catch (syncErr) {
+      console.warn('DealFromLead lead->buyer linkage failed:', (syncErr as any)?.message || syncErr);
     }
 
     res.status(201).json({ status: 'success', data: deal });
