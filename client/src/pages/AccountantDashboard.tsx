@@ -82,6 +82,23 @@ const AccountantDashboard: React.FC = () => {
     }
   }, [company, companyLoading, location.pathname]);
 
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.includes('/payments')) setActiveTab(1);
+    else if (path.includes('/ledger')) setActiveTab(2);
+    else if (path.includes('/levies')) setActiveTab(3);
+    else if (path.includes('/written-invoices')) setActiveTab(4);
+    else if (path.includes('/property-accounts')) setActiveTab(5);
+    else if (path.includes('/agent-accounts')) setActiveTab(6);
+    else if (path.includes('/commissions')) setActiveTab(7);
+    else if (path.includes('/reports')) setActiveTab(8);
+    else if (path.includes('/trust-account-reports')) setActiveTab(9);
+    else if (path.includes('/data-sync')) setActiveTab(10);
+    else if (path.includes('/tasks')) setActiveTab(11);
+    else if (path.includes('/settings')) setActiveTab(12);
+    else setActiveTab(0);
+  }, [location.pathname]);
+
   const initializeAndFetchData = async () => {
     if (!company) {
       setError('No company data available');

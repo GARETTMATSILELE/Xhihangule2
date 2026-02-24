@@ -461,10 +461,10 @@ const DashboardOverview: React.FC = () => {
   const totalRevenue = useMemo(() => rentalRevenue + salesRevenue, [rentalRevenue, salesRevenue]);
 
   const stats = [
-    { title: 'Rental Revenue', value: rentalRevenue, icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' },
+    { title: 'Rental Revenue + Company Account', value: rentalRevenue, icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' },
     { title: 'Total Revenue', value: totalRevenue, icon: <TrendingUpIcon />, color: 'secondary.main', path: '/accountant-dashboard/revenue' },
     { title: 'Invoices', value: invoicesTotal, icon: <ReceiptIcon />, color: 'info.main', path: '/accountant-dashboard/written-invoices' },
-    { title: 'Sales', value: salesRevenue, icon: <TrendingUpIcon />, color: 'primary.main', path: '/accountant-dashboard/sales' },
+    { title: 'Sales + Sales Payments', value: salesRevenue, icon: <TrendingUpIcon />, color: 'primary.main', path: '/accountant-dashboard/sales' },
     { title: 'Expenses', value: expensesForPeriod, icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/revenue' },
     { title: 'Outstanding rentals', value: (computedOutstandingRentals ?? 0), icon: <PaymentIcon />, color: 'error.main', path: '' },
     { title: 'Outstanding levies', value: (computedOutstandingLevies ?? 0), icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
@@ -498,9 +498,9 @@ const DashboardOverview: React.FC = () => {
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {stats.map((stat, index) => {
           const isCoreDataCard = [
-            'Rental Revenue',
+            'Rental Revenue + Company Account',
             'Total Revenue',
-            'Sales',
+            'Sales + Sales Payments',
             'Bank Revenue'
           ].includes(stat.title);
           const isDeferredDataCard = [

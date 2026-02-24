@@ -3,13 +3,14 @@ import { auth } from '../middleware/auth';
 import propertyAccountService from '../services/propertyAccountService';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { SalesOwner } from '../models/SalesOwner';
+import { redactHeaders } from '../utils/requestSecurity';
 
 const router = express.Router();
 
 // Debug middleware to log all requests
 router.use((req, res, next) => {
   console.log(`[Report Routes] ${req.method} ${req.path}`);
-  console.log('Request headers:', req.headers);
+  console.log('Request headers:', redactHeaders(req.headers));
   console.log('Request query:', req.query);
   console.log('Request body:', req.body);
   next();

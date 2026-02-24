@@ -18,6 +18,12 @@ const getEffectiveUri = (envValue: string | undefined, localFallback: string): s
 
 const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
 const ACCOUNTING_DB_URI = getEffectiveUri(process.env.ACCOUNTING_DB_URI, LOCAL_ACCOUNTING_URI);
+const IS_COSMOS_MONGO =
+  /cosmos\.azure\.com/i.test(MONGODB_URI) || /cosmos\.azure\.com/i.test(ACCOUNTING_DB_URI);
+const RETRY_WRITES =
+  typeof process.env.MONGODB_RETRY_WRITES === 'string'
+    ? process.env.MONGODB_RETRY_WRITES.toLowerCase() === 'true'
+    : !IS_COSMOS_MONGO;
 
 // Create connections without opening immediately to avoid crashing when DB is down.
 // We'll open these inside connectDatabase() within try/catch.
@@ -33,7 +39,7 @@ const connectionOptions = {
   serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
   connectTimeoutMS: 30000,
-  retryWrites: true,
+  retryWrites: RETRY_WRITES,
   retryReads: true,
   autoIndex: false,
   autoCreate: false,
@@ -86,6 +92,11 @@ export const connectDatabase = async (): Promise<void> => {
     if (mongoose.connection.readyState === 1) {
       console.log('Already connected to MongoDB');
       return;
+    }
+    if (IS_COSMOS_MONGO) {
+      console.log('Cosmos Mongo endpoint detected; using conservative write retry settings', {
+        retryWrites: RETRY_WRITES
+      });
     }
 
     // Set up connection event handlers before connecting

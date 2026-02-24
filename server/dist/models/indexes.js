@@ -24,6 +24,42 @@ const ChartData_1 = require("./ChartData");
 const User_1 = require("./User");
 const PropertyOwner_1 = require("./PropertyOwner");
 const File_1 = __importDefault(require("./File"));
+const ChartOfAccount_1 = require("./ChartOfAccount");
+const JournalEntry_1 = require("./JournalEntry");
+const JournalLine_1 = require("./JournalLine");
+const VatRecord_1 = require("./VatRecord");
+const CompanyBalance_1 = require("./CompanyBalance");
+const BankAccount_1 = require("./BankAccount");
+const BankTransaction_1 = require("./BankTransaction");
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isRetryableMongoConnectionError = (error) => {
+    const labels = error === null || error === void 0 ? void 0 : error[Symbol.for('errorLabels')];
+    const hasRetryLabel = (labels instanceof Set && (labels.has('ResetPool') || labels.has('RetryableWriteError'))) ||
+        (Array.isArray(error === null || error === void 0 ? void 0 : error.errorLabels) &&
+            error.errorLabels.some((l) => l === 'ResetPool' || l === 'RetryableWriteError'));
+    const message = String((error === null || error === void 0 ? void 0 : error.message) || '').toLowerCase();
+    const name = String((error === null || error === void 0 ? void 0 : error.name) || '').toLowerCase();
+    return (hasRetryLabel ||
+        name.includes('mongonetworkerror') ||
+        (message.includes('connection') && message.includes('closed')) ||
+        message.includes('timed out'));
+};
+const withTransientRetry = (operation_1, ...args_1) => __awaiter(void 0, [operation_1, ...args_1], void 0, function* (operation, retries = 2) {
+    let lastError;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return yield operation();
+        }
+        catch (error) {
+            lastError = error;
+            if (attempt === retries || !isRetryableMongoConnectionError(error)) {
+                throw error;
+            }
+            yield wait(400 * (attempt + 1));
+        }
+    }
+    throw lastError;
+});
 // Query Optimization Functions
 exports.optimizePaymentQueries = {
     getPaymentsByDateRange: (startDate, endDate, companyId) => __awaiter(void 0, void 0, void 0, function* () {
@@ -64,12 +100,19 @@ function createIndexes() {
                 { model: MaintenanceRequest_1.MaintenanceRequest, name: 'MaintenanceRequest' },
                 { model: ChartData_1.ChartData, name: 'ChartData' },
                 { model: PropertyOwner_1.PropertyOwner, name: 'PropertyOwner' },
-                { model: File_1.default, name: 'File' }
+                { model: File_1.default, name: 'File' },
+                { model: ChartOfAccount_1.ChartOfAccount, name: 'ChartOfAccount' },
+                { model: JournalEntry_1.JournalEntry, name: 'JournalEntry' },
+                { model: JournalLine_1.JournalLine, name: 'JournalLine' },
+                { model: VatRecord_1.VatRecord, name: 'VatRecord' },
+                { model: CompanyBalance_1.CompanyBalance, name: 'CompanyBalance' },
+                { model: BankAccount_1.BankAccount, name: 'BankAccount' },
+                { model: BankTransaction_1.BankTransaction, name: 'BankTransaction' }
             ];
             for (const { model, name } of models) {
                 // Try to create the collection if it doesn't exist yet
                 try {
-                    yield model.createCollection();
+                    yield withTransientRetry(() => model.createCollection());
                 }
                 catch (createErr) {
                     // Ignore "namespace exists" errors (code 48) and proceed
@@ -79,7 +122,7 @@ function createIndexes() {
                 }
                 // Now attempt to read indexes, but ignore NamespaceNotFound (code 26)
                 try {
-                    const indexes = yield model.collection.indexes();
+                    const indexes = yield withTransientRetry(() => model.collection.indexes());
                     console.log(`${name} indexes:`, indexes);
                 }
                 catch (error) {

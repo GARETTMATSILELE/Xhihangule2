@@ -37,6 +37,7 @@ interface Invoice {
   items: InvoiceItem[];
   type: 'rental' | 'sale';
   saleDetails?: string;
+  fiscalize?: boolean;
   status: 'paid' | 'unpaid' | 'overdue';
   createdAt: Date;
   companyId: string;
@@ -126,6 +127,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
   };
 
   const clientDetails = getClientDetails();
+  const isNonFiscalizedInvoice = invoice.fiscalize === false;
 
   // Derive QR image source strictly from what the fiscal machine provided
   const qrImageSrc: string | undefined =
@@ -208,7 +210,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
           {/* Invoice Details */}
           <div className="invoice-details">
             <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-              FISCAL TAX INVOICE
+              {isNonFiscalizedInvoice ? 'TAX INVOICE' : 'FISCAL TAX INVOICE'}
             </Typography>
             <div className="invoice-number">
               Invoice #: {invoice.fiscalData?.documentNumber ? invoice.fiscalData.documentNumber : invoice._id.slice(-8).toUpperCase()}
@@ -226,23 +228,24 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               {invoice.status.toUpperCase()}
             </div>
 
-            {/* Fiscal QR Code: only show if an image/URL is provided by the fiscal device */}
-            <div className="fiscal-qr">
-              {qrImageSrc && !qrError ? (
-                <img
-                  src={qrImageSrc}
-                  alt="Fiscal QR Code"
-                  className="fiscal-qr-box"
-                  onError={() => setQrError(true)}
-                />
-              ) : (
-                <div className="fiscal-qr-box">
-                  <Typography variant="caption" color="text.secondary">
-                    Fiscal QR Code
-                  </Typography>
-                </div>
-              )}
-            </div>
+            {!isNonFiscalizedInvoice && (
+              <div className="fiscal-qr">
+                {qrImageSrc && !qrError ? (
+                  <img
+                    src={qrImageSrc}
+                    alt="Fiscal QR Code"
+                    className="fiscal-qr-box"
+                    onError={() => setQrError(true)}
+                  />
+                ) : (
+                  <div className="fiscal-qr-box">
+                    <Typography variant="caption" color="text.secondary">
+                      Fiscal QR Code
+                    </Typography>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -401,7 +404,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
               {company.name} | Reg: {company.registrationNumber} | Tax: {company.tinNumber}
             </Typography>
           )}
-          {invoice.fiscalData && (
+          {!isNonFiscalizedInvoice && invoice.fiscalData && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
               {invoice.fiscalData.fiscalNumber ? `Fiscal No: ${invoice.fiscalData.fiscalNumber}  ` : ''}
               {invoice.fiscalData.deviceSerial ? `Device: ${invoice.fiscalData.deviceSerial}  ` : ''}

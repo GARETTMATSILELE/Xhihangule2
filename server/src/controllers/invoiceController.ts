@@ -44,7 +44,7 @@ export const createInvoice = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
-    const { items, discount = 0, taxPercentage = 15, client, currency = 'USD', ...otherData } = req.body;
+    const { items, discount = 0, taxPercentage = 15, client, currency = 'USD', fiscalize = true, ...otherData } = req.body;
 
     // Validate client details
     const validatedClient = validateClientDetails(client);
@@ -77,24 +77,27 @@ export const createInvoice = async (req: Request, res: Response) => {
       discount,
       taxPercentage,
       ...breakdown,
+      fiscalize: fiscalize !== false,
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
     };
 
     const invoice = new Invoice(invoiceData);
-    // Try to fiscalize; fail-open
-    try {
-      const fiscal = await tryFiscalizeInvoice(req.user.companyId, {
-        _id: (invoice as any)._id?.toString?.(),
-        totalAmount: (invoice as any).totalAmount,
-        taxAmount: (invoice as any).taxAmount,
-        taxPercentage: (invoice as any).taxPercentage,
-        amountExcludingTax: (invoice as any).amountExcludingTax,
-        createdAt: (invoice as any).createdAt
-      });
-      if (fiscal) {
-        (invoice as any).fiscalData = fiscal;
-      }
-    } catch {}
+    // Try to fiscalize only when requested; fail-open on device/service errors.
+    if ((invoice as any).fiscalize) {
+      try {
+        const fiscal = await tryFiscalizeInvoice(req.user.companyId, {
+          _id: (invoice as any)._id?.toString?.(),
+          totalAmount: (invoice as any).totalAmount,
+          taxAmount: (invoice as any).taxAmount,
+          taxPercentage: (invoice as any).taxPercentage,
+          amountExcludingTax: (invoice as any).amountExcludingTax,
+          createdAt: (invoice as any).createdAt
+        });
+        if (fiscal) {
+          (invoice as any).fiscalData = fiscal;
+        }
+      } catch {}
+    }
 
     await invoice.save();
     res.status(201).json(invoice);

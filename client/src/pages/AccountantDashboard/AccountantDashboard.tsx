@@ -7,6 +7,7 @@ const DashboardOverview = lazy(() => import('./DashboardOverview'));
 const AccountantPaymentsPage = lazy(() => import('./AccountantPaymentsPage'));
 const SalesPaymentsPage = lazy(() => import('./SalesPaymentsPage'));
 const RevenuePage = lazy(() => import('./RevenuePage'));
+const LedgerDrilldownPage = lazy(() => import('./LedgerDrilldownPage'));
 const VATManagementPage = lazy(() => import('./VATManagementPage'));
 const LevyPaymentsPage = lazy(() => import('./LevyPaymentsPage'));
 const WrittenInvoicesPage = lazy(() => import('./WrittenInvoicesPage'));
@@ -52,25 +53,27 @@ const AccountantDashboard: React.FC = () => {
   useEffect(() => {
     const path = location.pathname;
     if (path.includes('/settings')) {
-      setActiveTab(12);
+      setActiveTab(13);
     } else if (path.includes('/tasks')) {
-      setActiveTab(11);
+      setActiveTab(12);
     } else if (path.includes('/data-sync')) {
-      setActiveTab(10);
+      setActiveTab(11);
     } else if (path.includes('/reports')) {
-      setActiveTab(9);
+      setActiveTab(10);
     } else if (path.includes('/commissions')) {
-      setActiveTab(8);
+      setActiveTab(9);
     } else if (path.includes('/agent-accounts')) {
-      setActiveTab(7);
+      setActiveTab(8);
     } else if (path.includes('/property-accounts')) {
-      setActiveTab(6);
+      setActiveTab(7);
     } else if (path.includes('/written-invoices')) {
-      setActiveTab(5);
+      setActiveTab(6);
     } else if (path.includes('/levies')) {
-      setActiveTab(4);
+      setActiveTab(5);
     } else if (path.includes('/revenue')) {
       setActiveTab(3);
+    } else if (path.includes('/ledger')) {
+      setActiveTab(4);
     } else if (path.includes('/sales')) {
       setActiveTab(2);
     } else if (path.includes('/payments')) {
@@ -85,6 +88,7 @@ const AccountantDashboard: React.FC = () => {
     { label: 'Payments', path: '/accountant-dashboard/payments' },
     { label: 'Sales', path: '/accountant-dashboard/sales' },
     { label: 'Revenue', path: '/accountant-dashboard/revenue' },
+    { label: 'Ledger', path: '/accountant-dashboard/ledger' },
     { label: 'Levies', path: '/accountant-dashboard/levies' },
     { label: 'Invoices', path: '/accountant-dashboard/written-invoices' },
     { label: 'Property Accounts', path: '/accountant-dashboard/property-accounts' },
@@ -102,15 +106,16 @@ const AccountantDashboard: React.FC = () => {
     1: () => import('./AccountantPaymentsPage'),
     2: () => import('./SalesPaymentsPage'),
     3: () => import('./RevenuePage'),
-    4: () => import('./LevyPaymentsPage'),
-    5: () => import('./WrittenInvoicesPage'),
-    6: () => import('./PropertyAccountsPage'),
-    7: () => import('./AgentAccountsPage'),
-    8: () => import('./CommissionsPage'),
-    9: () => import('./ReportsPage'),
-    10: () => import('../../components/admin/DatabaseSyncDashboard'),
-    11: () => import('./TasksPage'),
-    12: () => import('./SettingsPage')
+    4: () => import('./LedgerDrilldownPage'),
+    5: () => import('./LevyPaymentsPage'),
+    6: () => import('./WrittenInvoicesPage'),
+    7: () => import('./PropertyAccountsPage'),
+    8: () => import('./AgentAccountsPage'),
+    9: () => import('./CommissionsPage'),
+    10: () => import('./ReportsPage'),
+    11: () => import('../../components/admin/DatabaseSyncDashboard'),
+    12: () => import('./TasksPage'),
+    13: () => import('./SettingsPage')
   };
 
   return (
@@ -161,6 +166,7 @@ const AccountantDashboard: React.FC = () => {
               <Route path="payments" element={<AccountantPaymentsPage />} />
               <Route path="sales" element={<SalesPaymentsPage />} />
               <Route path="revenue" element={<RevenuePage />} />
+              <Route path="ledger" element={<LedgerDrilldownPage />} />
               <Route path="vat" element={<VATManagementPage />} />
               <Route path="levies" element={<LevyPaymentsPage />} />
               <Route path="tasks" element={<TasksPage />} />

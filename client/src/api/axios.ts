@@ -203,6 +203,15 @@ api.interceptors.response.use(
         }
       } catch (refreshError) {
         console.log('Token refresh failed:', refreshError);
+        const transientRefreshFailure =
+          refreshError instanceof AxiosError &&
+          (!refreshError.response || refreshError.code === 'ECONNABORTED');
+        if (transientRefreshFailure) {
+          // Keep current auth state during brief backend outages; caller can retry.
+          processQueue(refreshError, null);
+          isRefreshing = false;
+          return Promise.reject(refreshError);
+        }
         // Refresh failed - clear all tokens and redirect to login
         setTokens(null, null);
         localStorage.removeItem('accessToken');

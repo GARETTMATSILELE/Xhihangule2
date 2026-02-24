@@ -17,11 +17,12 @@ const auth_1 = require("../middleware/auth");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const SalesOwner_1 = require("../models/SalesOwner");
+const requestSecurity_1 = require("../utils/requestSecurity");
 const router = express_1.default.Router();
 // Debug middleware to log all requests
 router.use((req, res, next) => {
     console.log(`[Report Routes] ${req.method} ${req.path}`);
-    console.log('Request headers:', req.headers);
+    console.log('Request headers:', (0, requestSecurity_1.redactHeaders)(req.headers));
     console.log('Request query:', req.query);
     console.log('Request body:', req.body);
     next();

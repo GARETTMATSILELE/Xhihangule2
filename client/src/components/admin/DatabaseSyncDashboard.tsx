@@ -110,6 +110,17 @@ interface ConsistencyResult {
   inconsistencies: Array<{ type: string; description: string; count: number }>;
 }
 
+interface TrustBackfillResult {
+  migrationName: string;
+  dryRun: boolean;
+  accountsCreated: number;
+  transactionsCreated: number;
+  skippedExisting: number;
+  errors: Array<{ propertyId?: string; paymentId?: string; error: string }>;
+  processedProperties: number;
+  duration: number;
+}
+
 const DatabaseSyncDashboard: React.FC = () => {
   const { user } = useAuth();
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -141,12 +152,30 @@ const DatabaseSyncDashboard: React.FC = () => {
   const [failuresLoading, setFailuresLoading] = useState(false);
   const [failuresError, setFailuresError] = useState<string | null>(null);
   const [retryingFailureId, setRetryingFailureId] = useState<string | null>(null);
+  const [backfillDialogOpen, setBackfillDialogOpen] = useState(false);
+  const [backfillDryRun, setBackfillDryRun] = useState(true);
+  const [backfillLimit, setBackfillLimit] = useState<number>(50);
+  const [backfillResult, setBackfillResult] = useState<TrustBackfillResult | null>(null);
+  const [backfillState, setBackfillState] = useState<any>(null);
 
   useEffect(() => {
     loadSyncData();
     const interval = setInterval(() => loadSyncData(true), 60000); // Background refresh every 60 seconds
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const loadBackfillState = async () => {
+      try {
+        if (!user || user.role !== 'admin') return;
+        const res = await api.get('/admin/backfill-trust-accounts/state');
+        setBackfillState((res as any)?.data?.data || null);
+      } catch {
+        setBackfillState(null);
+      }
+    };
+    loadBackfillState();
+  }, [user]);
 
   // Auto-start real-time sync when an authenticated admin/accountant visits the page
   useEffect(() => {
@@ -391,6 +420,23 @@ const DatabaseSyncDashboard: React.FC = () => {
     }
   };
 
+  const handleRunTrustBackfill = async () => {
+    try {
+      setActionLoading('trustBackfill');
+      setError(null);
+      const payload = { dryRun: backfillDryRun, limit: Math.min(50, Math.max(1, Number(backfillLimit || 50))) };
+      const res = await api.post('/admin/backfill-trust-accounts', payload);
+      setBackfillResult((res as any)?.data?.data || null);
+      setBackfillDialogOpen(false);
+      const stateRes = await api.get('/admin/backfill-trust-accounts/state');
+      setBackfillState((stateRes as any)?.data?.data || null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to run trust account backfill');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const formatDuration = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -552,9 +598,44 @@ const DatabaseSyncDashboard: React.FC = () => {
                 Refresh
               </Button>
             </Grid>
+            {user?.role === 'admin' && (
+              <Grid item>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<Schedule />}
+                  onClick={() => setBackfillDialogOpen(true)}
+                  disabled={actionLoading === 'trustBackfill'}
+                >
+                  {actionLoading === 'trustBackfill' ? <CircularProgress size={20} /> : 'Backfill Trust Accounts'}
+                </Button>
+              </Grid>
+            )}
           </Grid>
         </CardContent>
       </Card>
+
+      {backfillState && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Trust Backfill Status
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Migration: {backfillState?.migrationName || 'trust_backfill_v1'} | Status: {String(backfillState?.status || 'idle').toUpperCase()}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Processed: {Number(backfillState?.processedCount || 0)} | Last Processed ID: {backfillState?.lastProcessedId || 'N/A'}
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      {backfillResult && (
+        <Alert severity={backfillResult.errors.length ? 'warning' : 'success'} sx={{ mb: 3 }}>
+          Trust backfill {backfillResult.dryRun ? 'dry-run' : 'run'} completed. Accounts: {backfillResult.accountsCreated}, Transactions: {backfillResult.transactionsCreated}, Skipped: {backfillResult.skippedExisting}, Errors: {backfillResult.errors.length}, Duration: {Math.round(backfillResult.duration / 1000)}s.
+        </Alert>
+      )}
 
       {/* Sync Statistics */}
       {syncStatus && (
@@ -1024,6 +1105,38 @@ const DatabaseSyncDashboard: React.FC = () => {
            </Button>
          </DialogActions>
        </Dialog>
+
+      <Dialog open={backfillDialogOpen} onClose={() => setBackfillDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Backfill Trust Accounts</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              This operation scans historical property sales/payments and creates missing trust accounts and ledger entries safely.
+            </Alert>
+            <FormControlLabel
+              control={<Switch checked={backfillDryRun} onChange={(e) => setBackfillDryRun(e.target.checked)} />}
+              label="Dry run (simulate only, no writes)"
+            />
+            <TextField
+              label="Batch limit (max 50)"
+              type="number"
+              fullWidth
+              value={backfillLimit}
+              onChange={(e) => setBackfillLimit(Number(e.target.value || 50))}
+              inputProps={{ min: 1, max: 50 }}
+              sx={{ mt: 2 }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBackfillDialogOpen(false)} disabled={actionLoading === 'trustBackfill'}>
+            Cancel
+          </Button>
+          <Button onClick={handleRunTrustBackfill} variant="contained" color="warning" disabled={actionLoading === 'trustBackfill'}>
+            {actionLoading === 'trustBackfill' ? <CircularProgress size={20} /> : backfillDryRun ? 'Run Dry Run' : 'Run Backfill'}
+          </Button>
+        </DialogActions>
+      </Dialog>
      </Box>
    );
  };

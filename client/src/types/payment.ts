@@ -43,7 +43,8 @@ export type PaymentType = 'rental' | 'sale' | 'introduction' | 'levy' | 'municip
 export type PropertyType = 'residential' | 'commercial';
 export type SaleMode = 'quick' | 'installment';
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money';
-export type PaymentStatus = 'pending' | 'completed' | 'failed';
+export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'reversed' | 'voided';
+export type PostingStatus = 'draft' | 'posted' | 'reversed' | 'voided';
 export type Currency = 'USD' | 'ZiG' | 'ZAR';
 
 // Runtime array of payment methods that matches the type
@@ -100,6 +101,10 @@ export interface PaymentFormData {
   // Sales development linkage (optional)
   developmentId?: string;
   developmentUnitId?: string;
+  // Sales VAT behavior
+  vatIncluded?: boolean;
+  vatRate?: number;
+  vatAmount?: number;
 }
 
 export interface Payment {
@@ -127,6 +132,7 @@ export interface Payment {
     ownerAmount: number;
   };
   status: PaymentStatus;
+  postingStatus?: PostingStatus;
   createdAt: Date;
   updatedAt: Date;
   currency: Currency;
@@ -152,6 +158,16 @@ export interface Payment {
   // Sales development linkage (optional)
   developmentId?: string;
   developmentUnitId?: string;
+  // Sales VAT metadata (optional)
+  vatIncluded?: boolean;
+  vatRate?: number;
+  vatAmount?: number;
+  reversalOfPaymentId?: string;
+  reversalPaymentId?: string;
+  correctedPaymentId?: string;
+  reversedAt?: Date;
+  reversalReason?: string;
+  isCorrectionEntry?: boolean;
 }
 
 // Extended Payment interface for populated data from backend

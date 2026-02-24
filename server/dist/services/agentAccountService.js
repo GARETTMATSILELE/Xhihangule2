@@ -100,6 +100,50 @@ class AgentAccountService {
             }
         });
     }
+    reverseCommissionForPayment(paymentId, reason) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const payment = yield Payment_1.Payment.findById(paymentId)
+                    .select('_id paymentDate referenceNumber')
+                    .lean();
+                if (!payment)
+                    return;
+                const accounts = yield AgentAccount_1.AgentAccount.find({ 'transactions.paymentId': String(paymentId) });
+                for (const account of accounts) {
+                    const commissionRows = (account.transactions || []).filter((t) => t.type === 'commission' && String(t.paymentId || '') === String(paymentId) && String(t.status || '') === 'completed');
+                    if (!commissionRows.length)
+                        continue;
+                    for (const row of commissionRows) {
+                        const roleSuffix = String(row.reference || '').includes('-owner')
+                            ? 'owner'
+                            : String(row.reference || '').includes('-collaborator')
+                                ? 'collaborator'
+                                : 'agent';
+                        const reversalRef = `REV-${paymentId}-${roleSuffix}`;
+                        const exists = (account.transactions || []).some((t) => t.type === 'penalty' && String(t.reference || '') === reversalRef);
+                        if (exists)
+                            continue;
+                        account.transactions.push({
+                            type: 'penalty',
+                            amount: Number(row.amount || 0),
+                            date: new Date(),
+                            description: `Commission reversal for payment ${String(payment.referenceNumber || paymentId)}`,
+                            reference: reversalRef,
+                            status: 'completed',
+                            notes: reason || 'Manual payment reversal',
+                            paymentId: String(paymentId),
+                        });
+                    }
+                    yield this.recalculateBalance(account);
+                    yield account.save();
+                }
+            }
+            catch (error) {
+                logger_1.logger.error('Error reversing commission for payment:', error);
+                throw error;
+            }
+        });
+    }
     /**
      * Get or create agent account
      */

@@ -8,13 +8,14 @@ import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
 import { Payment } from '../models/Payment';
 import mongoose from 'mongoose';
+import { redactHeaders } from '../utils/requestSecurity';
 
 const router = express.Router();
 
 // Debug middleware to log all requests
 router.use((req, res, next) => {
   console.log(`[Chart Routes] ${req.method} ${req.path}`);
-  console.log('Request headers:', req.headers);
+  console.log('Request headers:', redactHeaders(req.headers));
   console.log('Request query:', req.query);
   console.log('Request body:', req.body);
   next();

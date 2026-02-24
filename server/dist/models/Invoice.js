@@ -41,6 +41,7 @@ const InvoiceSchema = new mongoose_1.Schema({
     items: [InvoiceItemSchema],
     type: { type: String, enum: ['rental', 'sale'], required: true },
     saleDetails: { type: String },
+    fiscalize: { type: Boolean, default: true },
     status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
     selectedBankAccount: { type: BankAccountSchema, required: false },
     fiscalData: {

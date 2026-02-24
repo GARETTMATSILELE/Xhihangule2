@@ -15,6 +15,9 @@ const API_URL =
   (typeof window !== 'undefined' && (window as any).__API_BASE__) ||
   import.meta.env?.VITE_API_URL ||
   DEFAULT_API_URL;
+const DEBUG_PUBLIC_API =
+  Boolean((typeof window !== 'undefined' && (window as any).__DEBUG_PUBLIC_API__)) ||
+  String(import.meta.env?.VITE_DEBUG_PUBLIC_API || '').toLowerCase() === 'true';
 
 // Create a public axios instance for unauthenticated requests
 // This instance does NOT have the request interceptor that adds Authorization headers
@@ -29,16 +32,20 @@ const publicApi = axios.create({
 // Request interceptor for logging (no auth headers)
 publicApi.interceptors.request.use(
   (config) => {
-    console.log('Public API Request Interceptor:', {
-      url: config.url,
-      method: config.method,
-      currentHeaders: config.headers,
-    });
+    if (DEBUG_PUBLIC_API) {
+      console.log('Public API Request Interceptor:', {
+        url: config.url,
+        method: config.method,
+        currentHeaders: config.headers,
+      });
+    }
 
     return config;
   },
   (error) => {
-    console.error('Public API Request Interceptor Error:', error);
+    if (DEBUG_PUBLIC_API) {
+      console.error('Public API Request Interceptor Error:', error);
+    }
     return Promise.reject(error);
   }
 );
@@ -47,12 +54,14 @@ publicApi.interceptors.request.use(
 publicApi.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error('Public API Response Error:', {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data,
-      url: error.config?.url,
-    });
+    if (DEBUG_PUBLIC_API) {
+      console.error('Public API Response Error:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        url: error.config?.url,
+      });
+    }
     return Promise.reject(error);
   }
 );

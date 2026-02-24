@@ -71,6 +71,7 @@ export default function PropertiesPage() {
   const [valuations, setValuations] = React.useState<any[]>([]);
   const [pickedValuationId, setPickedValuationId] = React.useState<string>('');
   const ownersLoadedForCompanyRef = React.useRef<string | null>(null);
+  const editFormRef = React.useRef<HTMLDivElement | null>(null);
 
   const loadOwners = React.useCallback(async () => {
     try {
@@ -123,6 +124,11 @@ export default function PropertiesPage() {
     loadVals();
     return () => { cancelled = true; };
   }, [editing, company?._id]);
+
+  React.useEffect(() => {
+    if (!editing || !editFormRef.current) return;
+    editFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [editing]);
 
   const filtered = (items: any[], fields: string[]) => items.filter(it => {
     if (!query) return true;
@@ -291,9 +297,10 @@ export default function PropertiesPage() {
           {/* Creation handled via main Sales Dashboard modal using ?add=property */}
 
           {editing && (
-            <Card className="mt-4">
-              <CardHeader><CardTitle>Edit Property</CardTitle></CardHeader>
-              <CardContent>
+            <div ref={editFormRef}>
+              <Card className="mt-4">
+                <CardHeader><CardTitle>Edit Property</CardTitle></CardHeader>
+                <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm">Title</label>
@@ -453,12 +460,13 @@ export default function PropertiesPage() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={saveEdit} disabled={loading}>Save</button>
-                  <button className="px-3 py-2 rounded-xl border" onClick={()=>setEditing(null)}>Cancel</button>
-                </div>
-              </CardContent>
-            </Card>
+                  <div className="mt-3 flex gap-2">
+                    <button className="px-3 py-2 rounded-xl border bg-slate-900 text-white" onClick={saveEdit} disabled={loading}>Save</button>
+                    <button className="px-3 py-2 rounded-xl border" onClick={()=>setEditing(null)}>Cancel</button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
         </div>
       </div>

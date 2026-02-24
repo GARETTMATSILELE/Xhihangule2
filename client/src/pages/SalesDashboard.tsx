@@ -2249,12 +2249,12 @@ function LeadModal({ open, onClose, onSubmit }) {
   const [useManualInterest, setUseManualInterest] = useState(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | "">("");
   useEffect(()=>{ if(!open) { setForm({ name: "", source: "Website", interest: "", email: "", phone: "", status: "New", notes: "", budgetMin: "", budgetMax: "", preferredSuburbs: "", propertyType: "", minBedrooms: "", features: [] }); setUseManualInterest(false); setSelectedPropertyId(""); } }, [open]);
-  const saleProperties = (backendProperties || []).filter((p: any) => (p as any).rentalType === 'sale');
+  const userProperties = (backendProperties || []);
   const handleSubmit = (e: any) => {
     e.preventDefault();
     const interest = useManualInterest
       ? form.interest
-      : (saleProperties.find((p: any) => String(p._id) === String(selectedPropertyId))?.name || form.interest);
+      : (userProperties.find((p: any) => String(p._id) === String(selectedPropertyId))?.name || form.interest);
     onSubmit({
       ...form,
       interest,
@@ -2282,7 +2282,7 @@ function LeadModal({ open, onClose, onSubmit }) {
             <label className="text-sm">Interest (Property)</label>
             <select className="w-full px-3 py-2 rounded-xl border" value={selectedPropertyId} onChange={e=>{ setSelectedPropertyId(e.target.value); setUseManualInterest(false); }} disabled={useManualInterest}>
               <option value="">-- Select sale property --</option>
-              {saleProperties.map((p: any) => (<option key={p._id} value={p._id}>{p.name}</option>))}
+              {userProperties.map((p: any) => (<option key={p._id} value={p._id}>{p.name}</option>))}
             </select>
             <div className="mt-2">
               <label className="inline-flex items-center gap-2 text-sm">

@@ -23,6 +23,8 @@ const Deal_1 = require("../models/Deal");
 const mongoose_1 = __importDefault(require("mongoose"));
 const access_1 = require("../utils/access");
 const Buyer_1 = require("../models/Buyer");
+const trustAccountService_1 = __importDefault(require("../services/trustAccountService"));
+const requestSecurity_1 = require("../utils/requestSecurity");
 // Helper function to extract user context from request
 const getUserContext = (req) => {
     // Try to get user context from query parameters first
@@ -38,6 +40,15 @@ const getUserContext = (req) => {
         companyId: companyId || headerCompanyId,
         userRole: userRole || headerUserRole
     };
+};
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const isRetryableMongoConnectionError = (error) => {
+    const labels = error === null || error === void 0 ? void 0 : error[Symbol.for('errorLabels')];
+    const hasRetryLabel = (labels instanceof Set && (labels.has('ResetPool') || labels.has('RetryableWriteError'))) ||
+        (Array.isArray(error === null || error === void 0 ? void 0 : error.errorLabels) && error.errorLabels.some((l) => l === 'ResetPool' || l === 'RetryableWriteError'));
+    const message = String((error === null || error === void 0 ? void 0 : error.message) || '').toLowerCase();
+    const name = String((error === null || error === void 0 ? void 0 : error.name) || '').toLowerCase();
+    return hasRetryLabel || name.includes('mongonetworkerror') || (message.includes('connection') && message.includes('closed'));
 };
 function syncValuationOnPropertySold(params) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -172,13 +183,31 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
                 rentalType: 1
             };
         }
-        // Get properties with optional projection; avoid heavy populate for autocomplete
-        const properties = yield Property_1.Property.find(query)
-            .select(projection)
-            .sort({ createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
-            .lean();
+        // Get properties with optional projection; avoid heavy populate for autocomplete.
+        // Retry once for transient connection resets from managed Mongo services.
+        let properties = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                properties = yield Property_1.Property.find(query)
+                    .select(projection)
+                    .sort({ createdAt: -1 })
+                    .skip((page - 1) * limit)
+                    .limit(limit)
+                    .lean();
+                break;
+            }
+            catch (queryError) {
+                const shouldRetry = attempt === 0 && isRetryableMongoConnectionError(queryError);
+                if (!shouldRetry) {
+                    throw queryError;
+                }
+                console.warn('Transient Mongo connection error in getPublicProperties; retrying once', {
+                    message: queryError === null || queryError === void 0 ? void 0 : queryError.message,
+                    name: queryError === null || queryError === void 0 ? void 0 : queryError.name
+                });
+                yield wait(200);
+            }
+        }
         console.log('Found properties:', {
             count: properties.length,
             properties: properties.map(p => ({
@@ -236,7 +265,7 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     var _a, _b, _c, _d, _e;
     try {
         console.log('getProperties request received:', {
-            headers: req.headers,
+            headers: (0, requestSecurity_1.redactHeaders)(req.headers),
             user: req.user,
             query: req.query,
             params: req.params
@@ -291,10 +320,28 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             query,
             queryString: JSON.stringify(query)
         });
-        // Get properties with populated owner information
-        const properties = yield Property_1.Property.find(query)
-            .populate('ownerId', 'firstName lastName email')
-            .sort({ createdAt: -1 }); // Sort by newest first
+        // Get properties with populated owner information.
+        // Retry once for transient connection resets from managed Mongo services.
+        let properties = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                properties = yield Property_1.Property.find(query)
+                    .populate('ownerId', 'firstName lastName email')
+                    .sort({ createdAt: -1 }); // Sort by newest first
+                break;
+            }
+            catch (queryError) {
+                const shouldRetry = attempt === 0 && isRetryableMongoConnectionError(queryError);
+                if (!shouldRetry) {
+                    throw queryError;
+                }
+                console.warn('Transient Mongo connection error in getProperties; retrying once', {
+                    message: queryError === null || queryError === void 0 ? void 0 : queryError.message,
+                    name: queryError === null || queryError === void 0 ? void 0 : queryError.name
+                });
+                yield wait(200);
+            }
+        }
         console.log('Found properties:', {
             count: properties.length,
             properties: properties.map(p => ({
@@ -521,6 +568,25 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         const property = new Property_1.Property(Object.assign(Object.assign({ name,
             address, type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house'), status: normalizedStatus, price: computedPrice, pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0, bedrooms: isLand ? 0 : Number(bedrooms || 0), bathrooms: isLand ? 0 : Number(bathrooms || 0), builtArea: Number(builtArea || 0), landArea: Number(landArea || 0), description: description || '', images: Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim() !== '') : [], ownerId: req.user.userId, companyId: req.user.companyId, agentId: agentId || req.user.userId, propertyOwnerId: propertyOwnerId || undefined }, (sourceValuationObjectId ? { sourceValuationId: sourceValuationObjectId } : {})), { rentalType: 'sale', saleType: (saleType === 'installment' ? 'installment' : 'cash'), commission: typeof commission === 'number' ? commission : Number(commission || 0), commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0), commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0), commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0) }));
         const saved = yield property.save();
+        // Non-breaking extension: open trust account shell for every sales property listing.
+        try {
+            yield trustAccountService_1.default.createTrustAccount({
+                companyId: String(req.user.companyId),
+                propertyId: String(saved._id),
+                buyerId: undefined,
+                sellerId: req.user.userId ? String(req.user.userId) : undefined,
+                dealId: undefined,
+                openingBalance: 0,
+                initialWorkflowState: 'LISTED',
+                createdBy: req.user.userId ? String(req.user.userId) : undefined
+            });
+        }
+        catch (trustErr) {
+            console.warn('Non-fatal: failed to initialize trust account for sales property', {
+                propertyId: String(saved._id),
+                error: trustErr === null || trustErr === void 0 ? void 0 : trustErr.message
+            });
+        }
         // Persist valuation -> property lifecycle link (do not overwrite if already linked)
         if (sourceValuationObjectId) {
             try {

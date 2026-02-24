@@ -162,6 +162,17 @@ class PaymentService {
     }
   }
 
+  async updateSalesPayment(id: string, paymentData: Partial<PaymentFormData> & { status?: string; postingStatus?: string }): Promise<Payment> {
+    try {
+      return await this.db.executeWithRetry(async () => {
+        const response = await api.put(`/accountants/sales-payments/${id}`, paymentData);
+        return response.data;
+      });
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
   async getSalesPayments(filters?: PaymentFilter): Promise<Payment[]> {
     try {
       const response = await this.db.executeWithRetry(async () => {
@@ -228,6 +239,17 @@ class PaymentService {
     try {
       return await this.db.executeWithRetry(async () => {
         const response = await api.post(`/accountants/payments/${id}/finalize`, payload);
+        return response.data;
+      });
+    } catch (error: any) {
+      return this.handleAuthError(error);
+    }
+  }
+
+  async reversePayment(id: string, reason: string): Promise<{ originalPayment: Payment; reversalPayment: Payment; correctedPayment: Payment; message: string }> {
+    try {
+      return await this.db.executeWithRetry(async () => {
+        const response = await api.post(`/accountants/payments/${id}/reverse`, { reason });
         return response.data;
       });
     } catch (error: any) {

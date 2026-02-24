@@ -20,7 +20,25 @@ exports.COLLECTIONS = {
     DEVELOPMENTS: 'developments',
     DEVELOPMENT_UNITS: 'developmentunits',
     INSPECTIONS: 'inspections',
-    VAT_PAYOUTS: 'vatpayouts'
+    VAT_PAYOUTS: 'vatpayouts',
+    CHART_OF_ACCOUNTS: 'chartofaccounts',
+    JOURNAL_ENTRIES: 'journalentries',
+    JOURNAL_LINES: 'journallines',
+    VAT_RECORDS: 'vatrecords',
+    COMPANY_BALANCES: 'companybalances',
+    BANK_ACCOUNTS: 'bankaccounts',
+    BANK_TRANSACTIONS: 'banktransactions',
+    ACCOUNTING_EVENT_LOGS: 'accountingeventlogs',
+    TRUST_ACCOUNTS: 'trustaccounts',
+    TRUST_TRANSACTIONS: 'trusttransactions',
+    TAX_RECORDS: 'taxrecords',
+    TRUST_SETTLEMENTS: 'trustsettlements',
+    TRUST_AUDIT_LOGS: 'trustauditlogs',
+    TRUST_EVENT_FAILURE_LOGS: 'trusteventfailurelogs',
+    TRUST_RECONCILIATION_RESULTS: 'trustreconciliationresults',
+    WEBHOOK_EVENT_RECEIPTS: 'webhookeventreceipts',
+    EVENT_DEDUP_RECORDS: 'eventdeduprecords',
+    MIGRATION_STATE: 'migration_state'
 };
 // Backward-compatible augmentation for new collections
 exports.ensureCollections = Object.assign(Object.assign({}, exports.COLLECTIONS), { INSPECTIONS: exports.COLLECTIONS.INSPECTIONS || 'inspections', VAT_PAYOUTS: exports.COLLECTIONS.VAT_PAYOUTS || 'vatpayouts' });

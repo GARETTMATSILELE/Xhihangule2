@@ -45,18 +45,158 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.finalizeProvisionalPayment = exports.getPaymentReceipt = exports.getPaymentReceiptDownload = exports.createPaymentPublic = exports.getPaymentByIdPublic = exports.getPaymentsPublic = exports.updatePaymentStatus = exports.getPaymentDetails = exports.getCompanyPayments = exports.deletePayment = exports.updatePayment = exports.createSalesPaymentAccountant = exports.createPaymentAccountant = exports.createPayment = exports.getPayment = exports.getPayments = exports.getCompanySalesPayments = void 0;
+exports.finalizeProvisionalPayment = exports.getPaymentReceipt = exports.getPaymentReceiptDownload = exports.createPaymentPublic = exports.getPaymentByIdPublic = exports.getPaymentsPublic = exports.reversePayment = exports.updatePaymentStatus = exports.getPaymentDetails = exports.getCompanyPayments = exports.deletePayment = exports.updatePayment = exports.createSalesPaymentAccountant = exports.createPaymentAccountant = exports.createPayment = exports.getPayment = exports.getPayments = exports.getCompanySalesPayments = void 0;
 const Payment_1 = require("../models/Payment");
 const Notification_1 = require("../models/Notification");
+const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Lease_1 = require("../models/Lease");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
 const SalesContract_1 = require("../models/SalesContract");
+const PaymentAuditLog_1 = require("../models/PaymentAuditLog");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const agentPaymentNotificationService_1 = require("../services/agentPaymentNotificationService");
+const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
+const eventBus_1 = require("../events/eventBus");
+const trustEventRetryService_1 = __importDefault(require("../services/trustEventRetryService"));
+const isConfirmedStatus = (status) => {
+    const s = String(status || '').toLowerCase();
+    return s === 'completed' || s === 'confirmed';
+};
+const emitPaymentConfirmedIfNeeded = (payment, sourceEvent) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!payment || !payment._id || !isConfirmedStatus(payment.status))
+        return;
+    const updateResult = yield Payment_1.Payment.updateOne({
+        _id: payment._id,
+        companyId: payment.companyId,
+        trustEventEmittedAt: { $exists: false }
+    }, { $set: { trustEventEmittedAt: new Date(), lastTrustEventSource: sourceEvent } });
+    if (!Number(updateResult.modifiedCount || 0))
+        return;
+    const payload = {
+        eventId: `payment.confirmed:${String(payment._id)}`,
+        paymentId: String(payment._id),
+        propertyId: String(payment.propertyId || ''),
+        payerId: String(payment.tenantId || ''),
+        amount: Number(payment.amount || 0),
+        reference: String(payment.referenceNumber || ''),
+        date: new Date(payment.paymentDate || new Date()).toISOString(),
+        companyId: String(payment.companyId || ''),
+        performedBy: String(payment.processedBy || '')
+    };
+    try {
+        yield (0, eventBus_1.emitEvent)('payment.confirmed', payload);
+    }
+    catch (error) {
+        yield trustEventRetryService_1.default.enqueueFailure('payment.confirmed', payload, (error === null || error === void 0 ? void 0 : error.message) || 'failed to emit payment.confirmed', String(payment.companyId || ''));
+    }
+});
+const hasFinancePrivileges = (user) => {
+    const roles = ((user === null || user === void 0 ? void 0 : user.roles) || [user === null || user === void 0 ? void 0 : user.role]).map((r) => String(r || '').toLowerCase());
+    return roles.some((r) => ['admin', 'accountant', 'principal', 'prea', 'finance'].includes(r));
+};
+const isAccountingPeriodLocked = (paymentDate) => {
+    const lockBefore = process.env.ACCOUNTING_PERIOD_LOCK_BEFORE;
+    if (!lockBefore)
+        return false;
+    const cutoff = new Date(lockBefore);
+    const txDate = paymentDate ? new Date(paymentDate) : new Date();
+    if (Number.isNaN(cutoff.getTime()) || Number.isNaN(txDate.getTime()))
+        return false;
+    return txDate < cutoff;
+};
+const buildSaleCommissionDetails = (input) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    const grossAmount = Math.max(0, Number(input.amount || 0));
+    const saleVatRate = Math.max(0, Math.min(1, Number((_a = input.vatRate) !== null && _a !== void 0 ? _a : 0.155)));
+    const saleVatAmount = input.vatIncluded
+        ? Number((grossAmount - grossAmount / (1 + saleVatRate)).toFixed(2))
+        : 0;
+    const commissionBaseAmount = Math.max(0, Number((grossAmount - saleVatAmount).toFixed(2)));
+    const companyObjectId = new mongoose_1.default.Types.ObjectId(String(input.companyId));
+    let commissionPercent = Number(input.commissionPercentOverride);
+    if (!Number.isFinite(commissionPercent) || commissionPercent <= 0) {
+        commissionPercent = 5;
+        try {
+            if (input.propertyId && mongoose_1.default.Types.ObjectId.isValid(String(input.propertyId))) {
+                const property = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(String(input.propertyId))).select('commission').lean();
+                if (typeof (property === null || property === void 0 ? void 0 : property.commission) === 'number' && Number(property.commission) > 0) {
+                    commissionPercent = Number(property.commission);
+                }
+            }
+        }
+        catch (_f) {
+            // keep fallback percent
+        }
+    }
+    const computed = yield commissionService_1.CommissionService.calculate(commissionBaseAmount, commissionPercent, companyObjectId);
+    const company = yield Company_1.Company.findById(companyObjectId).lean();
+    const configuredVat = Number((_c = (_b = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _b === void 0 ? void 0 : _b.vatPercentOnCommission) !== null && _c !== void 0 ? _c : 0.155);
+    const vatOnCommissionRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
+    const vatOnCommission = Number((Number(computed.totalCommission || 0) * vatOnCommissionRate).toFixed(2));
+    const result = {
+        totalCommission: Number(Number(computed.totalCommission || 0).toFixed(2)),
+        preaFee: Number(Number(computed.preaFee || 0).toFixed(2)),
+        agentShare: Number(Number(computed.agentShare || 0).toFixed(2)),
+        agencyShare: Number(Number(computed.agencyShare || 0).toFixed(2)),
+        vatOnCommission,
+        ownerAmount: Number((grossAmount - saleVatAmount - Number(computed.totalCommission || 0) - vatOnCommission).toFixed(2))
+    };
+    const split = input.existingSplit;
+    if (split && typeof split === 'object') {
+        const ownerPct = Math.max(0, Math.min(100, Number((_d = split === null || split === void 0 ? void 0 : split.splitPercentOwner) !== null && _d !== void 0 ? _d : 0)));
+        const collabPct = Math.max(0, Math.min(100, Number((_e = split === null || split === void 0 ? void 0 : split.splitPercentCollaborator) !== null && _e !== void 0 ? _e : (100 - ownerPct))));
+        if ((split === null || split === void 0 ? void 0 : split.ownerUserId) || (split === null || split === void 0 ? void 0 : split.collaboratorUserId)) {
+            const ownerAgentShare = Number((result.agentShare * (ownerPct / 100)).toFixed(2));
+            const collaboratorAgentShare = Number((result.agentShare * (collabPct / 100)).toFixed(2));
+            result.agentSplit = {
+                ownerAgentShare,
+                collaboratorAgentShare,
+                ownerUserId: split === null || split === void 0 ? void 0 : split.ownerUserId,
+                collaboratorUserId: split === null || split === void 0 ? void 0 : split.collaboratorUserId,
+                splitPercentOwner: ownerPct,
+                splitPercentCollaborator: collabPct
+            };
+        }
+    }
+    return result;
+});
+const paymentAuditSnapshot = (payment) => ({
+    _id: String((payment === null || payment === void 0 ? void 0 : payment._id) || ''),
+    amount: Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0),
+    status: String((payment === null || payment === void 0 ? void 0 : payment.status) || ''),
+    postingStatus: String((payment === null || payment === void 0 ? void 0 : payment.postingStatus) || ''),
+    paymentType: String((payment === null || payment === void 0 ? void 0 : payment.paymentType) || ''),
+    paymentDate: (payment === null || payment === void 0 ? void 0 : payment.paymentDate) || null,
+    paymentMethod: String((payment === null || payment === void 0 ? void 0 : payment.paymentMethod) || ''),
+    propertyId: String((payment === null || payment === void 0 ? void 0 : payment.propertyId) || ''),
+    tenantId: String((payment === null || payment === void 0 ? void 0 : payment.tenantId) || ''),
+    leaseId: (payment === null || payment === void 0 ? void 0 : payment.leaseId) ? String(payment.leaseId) : null,
+    companyId: String((payment === null || payment === void 0 ? void 0 : payment.companyId) || ''),
+    referenceNumber: String((payment === null || payment === void 0 ? void 0 : payment.referenceNumber) || ''),
+    reversalOfPaymentId: (payment === null || payment === void 0 ? void 0 : payment.reversalOfPaymentId) ? String(payment.reversalOfPaymentId) : null,
+    reversalPaymentId: (payment === null || payment === void 0 ? void 0 : payment.reversalPaymentId) ? String(payment.reversalPaymentId) : null,
+    correctedPaymentId: (payment === null || payment === void 0 ? void 0 : payment.correctedPaymentId) ? String(payment.correctedPaymentId) : null,
+});
+const logPaymentAudit = (input) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        yield PaymentAuditLog_1.PaymentAuditLog.create({
+            paymentId: new mongoose_1.default.Types.ObjectId(input.paymentId),
+            companyId: new mongoose_1.default.Types.ObjectId(input.companyId),
+            action: input.action,
+            oldValues: input.oldValues,
+            newValues: input.newValues,
+            reason: input.reason,
+            userId: input.userId ? new mongoose_1.default.Types.ObjectId(input.userId) : undefined,
+        });
+    }
+    catch (e) {
+        console.warn('Non-fatal: failed to write payment audit log', e);
+    }
+});
 // List sales-only payments for a company
 const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -519,6 +659,14 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // Generate reference number after save (using payment._id)
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
+        yield logPaymentAudit({
+            paymentId: String(payment._id),
+            companyId: String(payment.companyId),
+            action: String(payment.status || '') === 'completed' ? 'post' : 'create',
+            newValues: paymentAuditSnapshot(payment),
+            reason: 'Initial payment creation',
+            userId: req.user.userId
+        });
         // If depositAmount > 0, record in rentaldeposits
         if (payment.depositAmount && payment.depositAmount > 0) {
             const { RentalDeposit } = require('../models/rentalDeposit');
@@ -602,6 +750,12 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         // Email agent with payment details (fire-and-forget)
         void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
+        // Non-blocking accounting sync hook.
+        if (payment.status === 'completed') {
+            yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: req.user.userId });
+        }
+        // Primary event-driven trigger for trust posting.
+        yield emitPaymentConfirmedIfNeeded(payment, 'payment.create');
         res.status(201).json({
             message: 'Payment processed successfully',
             payment,
@@ -618,6 +772,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.createPayment = createPayment;
 // Create a new payment (for accountant dashboard - handles PaymentFormData structure)
 const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
     if (!req.user) {
         return res.status(401).json({ message: 'Authentication required' });
     }
@@ -909,6 +1064,14 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         });
         // Save and related updates (with or without session)
         yield payment.save(session ? { session } : undefined);
+        yield logPaymentAudit({
+            paymentId: String(payment._id),
+            companyId: String(payment.companyId),
+            action: String(payment.status || '') === 'completed' ? 'post' : 'create',
+            newValues: paymentAuditSnapshot(payment),
+            reason: payment.isProvisional ? 'Manual provisional entry' : 'Accountant payment creation',
+            userId: user.userId
+        });
         // If depositAmount > 0, record in rentaldeposits (ledger)
         if (payment.depositAmount && payment.depositAmount > 0) {
             const { RentalDeposit } = yield Promise.resolve().then(() => __importStar(require('../models/rentalDeposit')));
@@ -1052,6 +1215,10 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             yield session.commitTransaction();
         }
         if ('payment' in result) {
+            if (((_a = result.payment) === null || _a === void 0 ? void 0 : _a.status) === 'completed' && !((_b = result.payment) === null || _b === void 0 ? void 0 : _b.isProvisional)) {
+                yield accountingIntegrationService_1.default.syncPaymentReceived(result.payment, { createdBy: currentUser.userId });
+                yield emitPaymentConfirmedIfNeeded(result.payment, 'payment.create.accountant');
+            }
             return res.status(201).json({
                 message: 'Payment processed successfully',
                 payment: result.payment,
@@ -1064,7 +1231,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             try {
                 yield session.abortTransaction();
             }
-            catch (_a) { }
+            catch (_e) { }
         }
         // Fallback: if error is due to transactions not supported, retry without session
         if ((error === null || error === void 0 ? void 0 : error.code) === 20 /* IllegalOperation */ || /Transaction numbers are only allowed/.test(String(error === null || error === void 0 ? void 0 : error.message))) {
@@ -1074,6 +1241,10 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                     return res.status(result.error.status).json({ message: result.error.message });
                 }
                 if ('payment' in result) {
+                    if (((_c = result.payment) === null || _c === void 0 ? void 0 : _c.status) === 'completed' && !((_d = result.payment) === null || _d === void 0 ? void 0 : _d.isProvisional)) {
+                        yield accountingIntegrationService_1.default.syncPaymentReceived(result.payment, { createdBy: currentUser.userId });
+                        yield emitPaymentConfirmedIfNeeded(result.payment, 'payment.create.accountant');
+                    }
                     return res.status(201).json({
                         message: 'Payment processed successfully',
                         payment: result.payment,
@@ -1100,7 +1271,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             try {
                 session.endSession();
             }
-            catch (_b) { }
+            catch (_f) { }
         }
     }
 });
@@ -1113,7 +1284,12 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
     }
     try {
         const user = req.user;
-        const { paymentDate, paymentMethod, amount, referenceNumber, notes, currency, commissionDetails, manualPropertyAddress, manualTenantName, buyerName, sellerName, propertyId, tenantId, agentId, processedBy, saleId, rentalPeriodMonth, rentalPeriodYear, saleMode, developmentId, developmentUnitId } = req.body;
+        const { paymentDate, paymentMethod, amount, referenceNumber, notes, currency, commissionDetails, manualPropertyAddress, manualTenantName, buyerName, sellerName, propertyId, tenantId, agentId, processedBy, saleId, rentalPeriodMonth, rentalPeriodYear, saleMode, developmentId, developmentUnitId, vatIncluded, vatRate } = req.body;
+        const normalizedVatIncluded = Boolean(vatIncluded);
+        const saleVatRate = Math.max(0, Math.min(1, Number(vatRate !== null && vatRate !== void 0 ? vatRate : 0.155)));
+        const grossAmount = Number(amount || 0);
+        const vatAmount = normalizedVatIncluded ? Number((grossAmount - (grossAmount / (1 + saleVatRate))).toFixed(2)) : 0;
+        const taxableAmountForAllocation = Number((grossAmount - vatAmount).toFixed(2));
         if (!amount || !paymentDate || !paymentMethod) {
             return res.status(400).json({ message: 'Missing required fields: amount, paymentDate, paymentMethod' });
         }
@@ -1189,10 +1365,10 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
                     const prop = yield Property_1.Property.findById(propId);
                     percent = typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number' ? prop.commission : 15;
                 }
-                finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
+                finalCommissionDetails = (yield commissionService_1.CommissionService.calculate(taxableAmountForAllocation, percent, new mongoose_1.default.Types.ObjectId(user.companyId)));
             }
             catch (_f) {
-                const fallback = (yield Promise.resolve().then(() => __importStar(require('../utils/money')))).computeCommissionFallback(amount, 15);
+                const fallback = (yield Promise.resolve().then(() => __importStar(require('../utils/money')))).computeCommissionFallback(taxableAmountForAllocation, 15);
                 finalCommissionDetails = {
                     totalCommission: fallback.totalCommission,
                     preaFee: fallback.preaFee,
@@ -1210,7 +1386,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             const commissionBase = Number((finalCommissionDetails === null || finalCommissionDetails === void 0 ? void 0 : finalCommissionDetails.totalCommission) || 0);
             const vatOnCommission = Number((commissionBase * vatRate).toFixed(2));
             finalCommissionDetails.vatOnCommission = vatOnCommission;
-            finalCommissionDetails.ownerAmount = Number((amount - commissionBase - vatOnCommission).toFixed(2));
+            finalCommissionDetails.ownerAmount = Number((taxableAmountForAllocation - commissionBase - vatOnCommission).toFixed(2));
         }
         // If development and agent are provided, and the agent is a collaborator on that development,
         // split the agentShare between development owner (creator) and the collaborator using development's split config.
@@ -1295,6 +1471,9 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             notes: notes || '',
             processedBy: procBy,
             commissionDetails: finalCommissionDetails,
+            vatIncluded: normalizedVatIncluded,
+            vatRate: normalizedVatIncluded ? saleVatRate : 0,
+            vatAmount,
             status: 'completed',
             currency: currency || 'USD',
             rentalPeriodMonth: periodMonth,
@@ -1330,6 +1509,8 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             catch (_h) { }
             console.warn('Non-fatal: property account record failed (sales), enqueued for retry', e);
         }
+        yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: user.userId });
+        yield emitPaymentConfirmedIfNeeded(payment, 'payment.create.sales');
         // Notify the primary agent and split participants for completed sale payment
         try {
             const recipientIds = new Set();
@@ -1374,16 +1555,110 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
 });
 exports.createSalesPaymentAccountant = createSalesPaymentAccountant;
 const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const payment = yield Payment_1.Payment.findOneAndUpdate({
+        const payment = yield Payment_1.Payment.findOne({
             _id: req.params.id,
             companyId: req.user.companyId
-        }, req.body, { new: true });
+        });
         if (!payment) {
             return res.status(404).json({ message: 'Payment not found' });
+        }
+        if (String(payment.postingStatus || '') !== 'draft') {
+            return res.status(409).json({ message: 'Only draft payments can be edited. Reverse posted payments instead.' });
+        }
+        if (isAccountingPeriodLocked(payment.paymentDate)) {
+            return res.status(409).json({ message: 'Accounting period is locked. Post an adjustment entry instead.' });
+        }
+        const before = paymentAuditSnapshot(payment);
+        const previousStatus = String(payment.status || '').toLowerCase();
+        const editableFields = new Set([
+            'paymentDate', 'paymentMethod', 'amount', 'depositAmount', 'referenceNumber', 'notes', 'currency',
+            'rentalPeriodMonth', 'rentalPeriodYear', 'advanceMonthsPaid', 'advancePeriodStart', 'advancePeriodEnd',
+            'manualPropertyAddress', 'manualTenantName', 'buyerName', 'sellerName', 'status', 'postingStatus',
+            'commissionDetails', 'vatIncluded', 'vatRate', 'vatAmount'
+        ]);
+        for (const [k, v] of Object.entries(req.body || {})) {
+            if (!editableFields.has(k))
+                continue;
+            payment[k] = v;
+        }
+        if (payment.paymentType === 'sale') {
+            const grossAmount = Math.max(0, Number(payment.amount || 0));
+            const rawDetails = payment.commissionDetails || {};
+            const totalCommission = Number((rawDetails === null || rawDetails === void 0 ? void 0 : rawDetails.totalCommission) || 0);
+            const explicitCommissionPercent = Number((_a = req.body) === null || _a === void 0 ? void 0 : _a.commissionPercent) > 0
+                ? Number((_b = req.body) === null || _b === void 0 ? void 0 : _b.commissionPercent)
+                : (() => {
+                    var _a;
+                    const saleVatRate = Math.max(0, Math.min(1, Number((_a = payment.vatRate) !== null && _a !== void 0 ? _a : 0.155)));
+                    const saleVatAmount = Boolean(payment.vatIncluded)
+                        ? Number((grossAmount - grossAmount / (1 + saleVatRate)).toFixed(2))
+                        : 0;
+                    const commissionBase = Math.max(0, Number((grossAmount - saleVatAmount).toFixed(2)));
+                    return commissionBase > 0
+                        ? Number(((totalCommission / commissionBase) * 100).toFixed(4))
+                        : undefined;
+                })();
+            const recomputed = yield buildSaleCommissionDetails({
+                amount: grossAmount,
+                companyId: String(payment.companyId || req.user.companyId),
+                propertyId: payment.propertyId,
+                vatIncluded: Boolean(payment.vatIncluded),
+                vatRate: Number((_c = payment.vatRate) !== null && _c !== void 0 ? _c : 0.155),
+                existingSplit: rawDetails === null || rawDetails === void 0 ? void 0 : rawDetails.agentSplit,
+                commissionPercentOverride: explicitCommissionPercent
+            });
+            payment.commissionDetails = recomputed;
+        }
+        const nextStatus = String(payment.status || '').toLowerCase();
+        if (nextStatus === 'completed') {
+            payment.postingStatus = 'posted';
+        }
+        else if (nextStatus === 'pending') {
+            payment.postingStatus = 'draft';
+        }
+        else if (nextStatus === 'failed') {
+            payment.postingStatus = 'voided';
+        }
+        yield payment.save();
+        if (previousStatus !== 'completed' && nextStatus === 'completed') {
+            yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: req.user.userId });
+            yield agentAccountService_1.default.syncCommissionForPayment(String(payment._id));
+            try {
+                yield propertyAccountService_1.default.recordIncomeFromPayment(String(payment._id));
+            }
+            catch (e) {
+                try {
+                    const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
+                    yield ledgerEventService.enqueueOwnerIncomeEvent(String(payment._id));
+                }
+                catch (_f) { }
+            }
+            yield emitPaymentConfirmedIfNeeded(payment, 'payment.update');
+            yield logPaymentAudit({
+                paymentId: String(payment._id),
+                companyId: String(payment.companyId),
+                action: 'post',
+                oldValues: before,
+                newValues: paymentAuditSnapshot(payment),
+                reason: typeof ((_d = req.body) === null || _d === void 0 ? void 0 : _d.reason) === 'string' ? req.body.reason : 'Draft correction completed',
+                userId: req.user.userId
+            });
+        }
+        else {
+            yield logPaymentAudit({
+                paymentId: String(payment._id),
+                companyId: String(payment.companyId),
+                action: 'edit',
+                oldValues: before,
+                newValues: paymentAuditSnapshot(payment),
+                reason: typeof ((_e = req.body) === null || _e === void 0 ? void 0 : _e.reason) === 'string' ? req.body.reason : undefined,
+                userId: req.user.userId
+            });
         }
         res.json(payment);
     }
@@ -1394,17 +1669,36 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 });
 exports.updatePayment = updatePayment;
 const deletePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const payment = yield Payment_1.Payment.findOneAndDelete({
+        const payment = yield Payment_1.Payment.findOne({
             _id: req.params.id,
             companyId: req.user.companyId
         });
         if (!payment) {
             return res.status(404).json({ message: 'Payment not found' });
         }
+        const postingStatus = String(payment.postingStatus || '');
+        const legacyPosted = String(payment.status || '') === 'completed';
+        if (postingStatus === 'posted' || postingStatus === 'reversed' || postingStatus === 'voided' || legacyPosted) {
+            return res.status(409).json({ message: 'Posted payments cannot be deleted. Use reversal workflow.' });
+        }
+        if (isAccountingPeriodLocked(payment.paymentDate)) {
+            return res.status(409).json({ message: 'Accounting period is locked. Draft cannot be deleted in this period.' });
+        }
+        const before = paymentAuditSnapshot(payment);
+        yield Payment_1.Payment.deleteOne({ _id: payment._id });
+        yield logPaymentAudit({
+            paymentId: String(payment._id),
+            companyId: String(payment.companyId),
+            action: 'delete',
+            oldValues: before,
+            reason: typeof ((_a = req.body) === null || _a === void 0 ? void 0 : _a.reason) === 'string' ? req.body.reason : undefined,
+            userId: req.user.userId
+        });
         res.json({ message: 'Payment deleted successfully' });
     }
     catch (error) {
@@ -1442,6 +1736,10 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // Status filter
         if (req.query.status) {
             query.status = req.query.status;
+        }
+        // Payment type filter (e.g., rental-only accountant list)
+        if (req.query.paymentType && typeof req.query.paymentType === 'string') {
+            query.paymentType = req.query.paymentType;
         }
         // Payment method filter
         if (req.query.paymentMethod) {
@@ -1712,8 +2010,8 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
         return res.status(401).json({ message: 'Unauthorized' });
     }
     try {
-        const { status } = req.body;
-        if (!['pending', 'completed', 'failed'].includes(status)) {
+        const { status, reason } = req.body;
+        if (!['pending', 'completed', 'failed', 'reversed'].includes(status)) {
             return res.status(400).json({
                 message: 'Invalid status',
             });
@@ -1730,8 +2028,53 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
                 message: 'Access denied',
             });
         }
+        if (isAccountingPeriodLocked(payment.paymentDate) && status !== 'reversed') {
+            return res.status(409).json({ message: 'Accounting period is locked. Post an adjustment entry instead.' });
+        }
+        if (status === 'reversed') {
+            return res.status(400).json({ message: 'Use /payments/:id/reverse endpoint for reversals.' });
+        }
+        const previousStatus = payment.status;
+        const previousPostingStatus = payment.postingStatus;
+        const before = paymentAuditSnapshot(payment);
         payment.status = status;
+        if (status === 'completed') {
+            payment.postingStatus = 'posted';
+        }
+        else if (status === 'pending') {
+            payment.postingStatus = 'draft';
+        }
+        else if (status === 'failed') {
+            payment.postingStatus = 'voided';
+            payment.voidedAt = new Date();
+            payment.voidedBy = new mongoose_1.default.Types.ObjectId(req.user.userId);
+            payment.voidReason = reason || '';
+        }
         yield payment.save();
+        if (previousStatus !== 'completed' && status === 'completed') {
+            yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: req.user.userId });
+            yield emitPaymentConfirmedIfNeeded(payment, 'payment.status.updated');
+            yield logPaymentAudit({
+                paymentId: String(payment._id),
+                companyId: String(payment.companyId),
+                action: 'post',
+                oldValues: Object.assign(Object.assign({}, before), { previousPostingStatus }),
+                newValues: paymentAuditSnapshot(payment),
+                reason: typeof reason === 'string' ? reason : undefined,
+                userId: req.user.userId
+            });
+        }
+        else {
+            yield logPaymentAudit({
+                paymentId: String(payment._id),
+                companyId: String(payment.companyId),
+                action: status === 'failed' ? 'void' : 'edit',
+                oldValues: before,
+                newValues: paymentAuditSnapshot(payment),
+                reason: typeof reason === 'string' ? reason : undefined,
+                userId: req.user.userId
+            });
+        }
         res.json({
             message: 'Payment status updated successfully',
             payment,
@@ -1746,6 +2089,233 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.updatePaymentStatus = updatePaymentStatus;
+const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    if (!req.user) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+    if (!hasFinancePrivileges(req.user)) {
+        return res.status(403).json({ message: 'Only finance/admin roles can reverse posted payments.' });
+    }
+    const reason = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.reason) || '').trim();
+    if (!reason) {
+        return res.status(400).json({ message: 'Reversal reason is required.' });
+    }
+    const session = yield mongoose_1.default.startSession();
+    try {
+        let resultPayload = null;
+        const applyReversal = (opts) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b;
+            const dbSession = opts === null || opts === void 0 ? void 0 : opts.session;
+            const originalQuery = Payment_1.Payment.findOne({
+                _id: req.params.id,
+                companyId: req.user.companyId
+            });
+            const original = dbSession ? yield originalQuery.session(dbSession) : yield originalQuery;
+            if (!original) {
+                throw new errorHandler_1.AppError('Payment not found', 404);
+            }
+            if (isAccountingPeriodLocked(original.paymentDate)) {
+                throw new errorHandler_1.AppError('Accounting period is locked. Only adjustment entries are allowed.', 409);
+            }
+            const postingStatus = String(original.postingStatus || '');
+            const isPosted = postingStatus === 'posted' || String(original.status || '') === 'completed';
+            if (!isPosted) {
+                throw new errorHandler_1.AppError('Only posted payments can be reversed.', 409);
+            }
+            if (String(original.postingStatus || '') === 'reversed' || String(original.status || '') === 'reversed') {
+                throw new errorHandler_1.AppError('Payment is already reversed.', 409);
+            }
+            const before = paymentAuditSnapshot(original);
+            const reversal = new Payment_1.Payment({
+                paymentType: original.paymentType,
+                saleMode: original.saleMode,
+                propertyType: original.propertyType,
+                propertyId: original.propertyId,
+                tenantId: original.tenantId,
+                agentId: original.agentId,
+                companyId: original.companyId,
+                paymentDate: new Date(),
+                paymentMethod: original.paymentMethod,
+                amount: -Math.abs(Number(original.amount || 0)),
+                depositAmount: -Math.abs(Number(original.depositAmount || 0)),
+                referenceNumber: `REV-${String(original.referenceNumber || original._id)}`,
+                rentalPeriodMonth: original.rentalPeriodMonth,
+                rentalPeriodYear: original.rentalPeriodYear,
+                advanceMonthsPaid: original.advanceMonthsPaid,
+                advancePeriodStart: original.advancePeriodStart,
+                advancePeriodEnd: original.advancePeriodEnd,
+                notes: `Reversal of ${String(original.referenceNumber || original._id)}. Reason: ${reason}`,
+                processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                commissionDetails: original.commissionDetails,
+                vatIncluded: original.vatIncluded,
+                vatRate: original.vatRate,
+                vatAmount: original.vatAmount,
+                status: 'completed',
+                postingStatus: 'posted',
+                currency: original.currency,
+                leaseId: original.leaseId,
+                manualPropertyAddress: original.manualPropertyAddress,
+                manualTenantName: original.manualTenantName,
+                buyerName: original.buyerName,
+                sellerName: original.sellerName,
+                reversalOfPaymentId: original._id,
+                isCorrectionEntry: true,
+                isProvisional: false,
+                isInSuspense: false,
+                commissionFinalized: true,
+                developmentId: original.developmentId,
+                developmentUnitId: original.developmentUnitId,
+                saleId: original.saleId,
+            });
+            yield reversal.save(dbSession ? { session: dbSession } : undefined);
+            const correctedCommissionDetails = yield buildSaleCommissionDetails({
+                amount: Math.max(0, Number(original.amount || 0)),
+                companyId: String(original.companyId || ''),
+                propertyId: original.propertyId,
+                vatIncluded: Boolean(original.vatIncluded),
+                vatRate: Number((_a = original.vatRate) !== null && _a !== void 0 ? _a : 0.155),
+                existingSplit: (_b = original === null || original === void 0 ? void 0 : original.commissionDetails) === null || _b === void 0 ? void 0 : _b.agentSplit
+            });
+            // Create a draft correction copy for manual accountant adjustments.
+            const correctedDraft = new Payment_1.Payment({
+                paymentType: original.paymentType,
+                saleMode: original.saleMode,
+                propertyType: original.propertyType,
+                propertyId: original.propertyId,
+                tenantId: original.tenantId,
+                agentId: original.agentId,
+                companyId: original.companyId,
+                paymentDate: original.paymentDate,
+                paymentMethod: original.paymentMethod,
+                amount: Number(original.amount || 0),
+                depositAmount: Number(original.depositAmount || 0),
+                referenceNumber: `CORR-${String(original.referenceNumber || original._id)}`,
+                rentalPeriodMonth: original.rentalPeriodMonth,
+                rentalPeriodYear: original.rentalPeriodYear,
+                advanceMonthsPaid: original.advanceMonthsPaid,
+                advancePeriodStart: original.advancePeriodStart,
+                advancePeriodEnd: original.advancePeriodEnd,
+                notes: `Correction draft for ${String(original.referenceNumber || original._id)}`,
+                processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                commissionDetails: correctedCommissionDetails,
+                vatIncluded: original.vatIncluded,
+                vatRate: original.vatRate,
+                vatAmount: original.vatAmount,
+                status: 'pending',
+                postingStatus: 'draft',
+                currency: original.currency,
+                leaseId: original.leaseId,
+                manualPropertyAddress: original.manualPropertyAddress,
+                manualTenantName: original.manualTenantName,
+                buyerName: original.buyerName,
+                sellerName: original.sellerName,
+                isCorrectionEntry: true,
+                isProvisional: false,
+                isInSuspense: false,
+                commissionFinalized: false,
+                developmentId: original.developmentId,
+                developmentUnitId: original.developmentUnitId,
+                saleId: original.saleId,
+            });
+            yield correctedDraft.save(dbSession ? { session: dbSession } : undefined);
+            original.status = 'reversed';
+            original.postingStatus = 'reversed';
+            original.reversedAt = new Date();
+            original.reversedBy = new mongoose_1.default.Types.ObjectId(req.user.userId);
+            original.reversalReason = reason;
+            original.reversalPaymentId = reversal._id;
+            original.correctedPaymentId = correctedDraft._id;
+            yield original.save(dbSession ? { session: dbSession } : undefined);
+            yield logPaymentAudit({
+                paymentId: String(original._id),
+                companyId: String(original.companyId),
+                action: 'reverse',
+                oldValues: before,
+                newValues: paymentAuditSnapshot(original),
+                reason,
+                userId: req.user.userId
+            });
+            yield logPaymentAudit({
+                paymentId: String(reversal._id),
+                companyId: String(reversal.companyId),
+                action: 'create',
+                newValues: paymentAuditSnapshot(reversal),
+                reason: `Auto-created reversal for ${String(original._id)}`,
+                userId: req.user.userId
+            });
+            yield logPaymentAudit({
+                paymentId: String(correctedDraft._id),
+                companyId: String(correctedDraft.companyId),
+                action: 'create',
+                newValues: paymentAuditSnapshot(correctedDraft),
+                reason: `Auto-created correction draft for ${String(original._id)}`,
+                userId: req.user.userId
+            });
+            resultPayload = { original, reversal, correctedDraft };
+        });
+        // Prefer ACID transaction on replica-set deployments.
+        // Fallback to non-transactional flow for standalone/local Mongo instances.
+        try {
+            yield session.withTransaction(() => __awaiter(void 0, void 0, void 0, function* () {
+                yield applyReversal({ session });
+            }));
+        }
+        catch (txErr) {
+            const txNotSupported = Number(txErr === null || txErr === void 0 ? void 0 : txErr.code) === 20 ||
+                String((txErr === null || txErr === void 0 ? void 0 : txErr.codeName) || '').toLowerCase() === 'illegaloperation' ||
+                String((txErr === null || txErr === void 0 ? void 0 : txErr.message) || '').toLowerCase().includes('transaction numbers are only allowed');
+            if (!txNotSupported)
+                throw txErr;
+            console.warn('Mongo transactions unavailable; running reversal without DB transaction.');
+            yield applyReversal();
+        }
+        // Domain propagation after DB commit (idempotent operations).
+        const original = resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.original;
+        const reversal = resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.reversal;
+        if (original) {
+            yield accountingIntegrationService_1.default.syncPaymentReversed(original, { createdBy: req.user.userId, reason });
+            yield propertyAccountService_1.default.reverseIncomeFromPayment(String(original._id), { processedBy: req.user.userId, reason });
+            yield agentAccountService_1.default.reverseCommissionForPayment(String(original._id), reason);
+            try {
+                yield (0, eventBus_1.emitEvent)('payment.reversed', {
+                    eventId: `payment.reversed:${String(original._id)}`,
+                    paymentId: String(original._id),
+                    reversalPaymentId: String((reversal === null || reversal === void 0 ? void 0 : reversal._id) || ''),
+                    companyId: String(original.companyId || ''),
+                    reason,
+                    performedBy: String(req.user.userId)
+                });
+            }
+            catch (emitErr) {
+                yield trustEventRetryService_1.default.enqueueFailure('payment.reversed', {
+                    paymentId: String(original._id),
+                    reversalPaymentId: String((reversal === null || reversal === void 0 ? void 0 : reversal._id) || ''),
+                    companyId: String(original.companyId || ''),
+                    reason,
+                    performedBy: String(req.user.userId),
+                }, (emitErr === null || emitErr === void 0 ? void 0 : emitErr.message) || 'failed to emit payment.reversed', String(original.companyId || ''));
+            }
+        }
+        return res.json({
+            message: 'Payment reversed. Draft correction created.',
+            originalPayment: resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.original,
+            reversalPayment: resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.reversal,
+            correctedPayment: resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.correctedDraft
+        });
+    }
+    catch (error) {
+        const status = Number((error === null || error === void 0 ? void 0 : error.statusCode) || (error === null || error === void 0 ? void 0 : error.status) || 500);
+        console.error('Error reversing payment:', error);
+        return res.status(status >= 400 && status < 600 ? status : 500).json({
+            message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to reverse payment'
+        });
+    }
+    finally {
+        yield session.endSession();
+    }
+});
+exports.reversePayment = reversePayment;
 // Public endpoint for admin dashboard - no authentication required
 const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -2582,6 +3152,8 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
             console.error('Failed to record income in property account during finalize; enqueued for retry:', err);
         }
         // Return populated payment so the UI can immediately show property/tenant details
+        yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: req.user.userId });
+        yield emitPaymentConfirmedIfNeeded(payment, 'payment.finalized');
         const populated = yield Payment_1.Payment.findById(payment._id)
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName')

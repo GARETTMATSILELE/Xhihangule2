@@ -67,7 +67,7 @@ const BillingUpgradePage: React.FC = () => {
       pricingUSD: { monthly: 10, yearly: 120 }
     },
     SME: {
-      propertyLimit: 25,
+      propertyLimit: 120,
       featureFlags: {
         commissionEnabled: true,
         agentAccounts: true,

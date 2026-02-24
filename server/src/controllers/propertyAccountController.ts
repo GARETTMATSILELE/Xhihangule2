@@ -7,6 +7,7 @@ import PropertyAccount from '../models/PropertyAccount';
 import { Payment } from '../models/Payment';
 import { User } from '../models/User';
 import propertyAccountService from '../services/propertyAccountService';
+import accountingIntegrationService from '../services/accountingIntegrationService';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { reconcilePropertyLedgerDuplicates } from '../services/propertyAccountService';
@@ -285,6 +286,18 @@ export const addExpense = async (req: Request, res: Response) => {
     };
 
     const account = await propertyAccountService.addExpense(propertyId, expenseData, ledger);
+    if (req.user?.companyId) {
+      await accountingIntegrationService.syncExpenseCreated({
+        companyId: String(req.user.companyId),
+        sourceId: `property:${propertyId}:${Date.now()}`,
+        reference: `PROP-EXP-${Date.now()}`,
+        amount: Number(amount),
+        description: description || category || 'Property expense',
+        date: date ? new Date(date) : new Date(),
+        createdBy: req.user.userId,
+        propertyId
+      });
+    }
     // Echo back idempotency key for client-side caching (header and body)
     if (idempotencyKey) {
       try { res.setHeader('Idempotency-Key', idempotencyKey); } catch {}

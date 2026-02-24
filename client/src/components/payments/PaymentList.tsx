@@ -30,7 +30,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Download as DownloadIcon, Edit as EditIcon, Print as PrintIcon } from '@mui/icons-material';
+import { Download as DownloadIcon, Edit as EditIcon, Print as PrintIcon, Undo as UndoIcon } from '@mui/icons-material';
 import { Payment, PaymentFilter, PAYMENT_METHODS } from '../../types/payment';
 // removed unused Lease
 import { Tenant } from '../../types/tenant';
@@ -45,6 +45,7 @@ export interface PaymentListProps {
   onEdit?: (payment: Payment) => void;
   onDownloadReceipt?: (payment: Payment) => Promise<void>;
   onFinalize?: (payment: Payment) => void;
+  onReverse?: (payment: Payment) => void;
   onFilterChange?: (newFilters: PaymentFilter) => void;
   isMobile?: boolean;
   filters?: PaymentFilter;
@@ -65,6 +66,7 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     onEdit,
     onDownloadReceipt,
     onFinalize,
+    onReverse,
     onFilterChange,
     isMobile = false,
     filters = {},
@@ -225,6 +227,10 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     switch (status) {
       case 'completed':
         return 'success';
+      case 'reversed':
+        return 'info';
+      case 'voided':
+        return 'default';
       case 'pending':
         return 'warning';
       case 'failed':
@@ -488,13 +494,22 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
               Finalize
             </Button>
           )}
-          {onEdit && (
+          {onEdit && String((payment as any).status || '').toLowerCase() === 'pending' && (
             <IconButton
               size="small"
               onClick={() => onEdit(payment)}
               disabled={downloadingReceipt === payment._id}
             >
               <EditIcon />
+            </IconButton>
+          )}
+          {onReverse && (String((payment as any).postingStatus || '') === 'posted' || String(payment.status || '') === 'completed') && String(payment.status || '') !== 'reversed' && (
+            <IconButton
+              size="small"
+              onClick={() => onReverse(payment)}
+              disabled={downloadingReceipt === payment._id}
+            >
+              <UndoIcon />
             </IconButton>
           )}
           {onDownloadReceipt && (
@@ -610,6 +625,8 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
               <MenuItem value="completed">Completed</MenuItem>
               <MenuItem value="pending">Pending</MenuItem>
               <MenuItem value="failed">Failed</MenuItem>
+              <MenuItem value="reversed">Reversed</MenuItem>
+              <MenuItem value="voided">Voided</MenuItem>
             </Select>
           </FormControl>
         </Grid>
@@ -785,13 +802,22 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
                         Finalize
                       </Button>
                     )}
-                    {onEdit && (
+                    {onEdit && String((payment as any).status || '').toLowerCase() === 'pending' && (
                       <IconButton
                         size="small"
                         onClick={() => onEdit(payment)}
                         disabled={downloadingReceipt === payment._id}
                       >
                         <EditIcon />
+                      </IconButton>
+                    )}
+                    {onReverse && (String((payment as any).postingStatus || '') === 'posted' || String(payment.status || '') === 'completed') && String(payment.status || '') !== 'reversed' && (
+                      <IconButton
+                        size="small"
+                        onClick={() => onReverse(payment)}
+                        disabled={downloadingReceipt === payment._id}
+                      >
+                        <UndoIcon />
                       </IconButton>
                     )}
                     {onDownloadReceipt && (

@@ -1,11 +1,12 @@
 import express from 'express';
+import { redactHeaders } from '../utils/requestSecurity';
 
 const router = express.Router();
 
 // Debug middleware to log all requests
 router.use((req, res, next) => {
   console.log(`[Public Report Routes] ${req.method} ${req.path}`);
-  console.log('Request headers:', req.headers);
+  console.log('Request headers:', redactHeaders(req.headers));
   console.log('Request query:', req.query);
   console.log('Request body:', req.body);
   next();

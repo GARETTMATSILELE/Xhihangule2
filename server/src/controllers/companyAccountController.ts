@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { CompanyAccount } from '../models/CompanyAccount';
+import accountingIntegrationService from '../services/accountingIntegrationService';
 
 export const getCompanyAccountSummary = async (req: Request, res: Response) => {
   try {
@@ -78,6 +79,18 @@ export const createCompanyTransaction = async (req: Request, res: Response) => {
     account.lastUpdated = now;
 
     await account.save();
+
+    if (tx.type === 'expense') {
+      await accountingIntegrationService.syncExpenseCreated({
+        companyId: String(companyId),
+        sourceId: String((tx as any)?._id || `${Date.now()}`),
+        reference: reference || `EXP-${Date.now()}`,
+        amount,
+        description: description || category || 'Company expense',
+        date: tx.date,
+        createdBy: (req as any).user?.userId
+      });
+    }
 
     return res.status(201).json({ message: 'Transaction recorded', account, transaction: tx });
   } catch (err: any) {

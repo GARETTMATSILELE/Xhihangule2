@@ -90,6 +90,10 @@ const inspectionRoutes_1 = __importDefault(require("./routes/inspectionRoutes"))
 const salesFileRoutes_1 = __importDefault(require("./routes/salesFileRoutes"));
 const paynowRoutes_1 = __importDefault(require("./routes/paynowRoutes"));
 const diagnosticsRoutes_1 = __importDefault(require("./routes/diagnosticsRoutes"));
+const accountingRoutes_1 = __importDefault(require("./routes/accountingRoutes"));
+const trustAccountRoutes_1 = __importDefault(require("./routes/trustAccountRoutes"));
+const webhookRoutes_1 = __importDefault(require("./routes/webhookRoutes"));
+const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const database_1 = require("./config/database");
 const errorHandler_1 = require("./middleware/errorHandler");
 const http_1 = require("http");
@@ -102,9 +106,12 @@ const propertyAccountService_1 = require("./services/propertyAccountService");
 const SystemSetting_1 = __importDefault(require("./models/SystemSetting"));
 const propertyAccountService_2 = require("./services/propertyAccountService");
 const systemAdminRoutes_1 = __importDefault(require("./routes/systemAdminRoutes"));
+const trustEventListener_1 = require("./services/trustEventListener");
+const trustReconciliationJob_1 = require("./jobs/trustReconciliationJob");
 // Removed legacy bootstrap imports
 const User_1 = require("./models/User");
 const emailService_1 = require("./services/emailService");
+const requestSecurity_1 = require("./utils/requestSecurity");
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
@@ -264,6 +271,8 @@ app.use((0, cors_1.default)({
         'X-Requested-With',
         'Accept',
         'Origin',
+        'x-refresh-csrf',
+        'X-Refresh-Csrf',
         'Idempotency-Key',
         'idempotency-key'
     ],
@@ -282,6 +291,7 @@ app.use((0, compression_1.default)());
 const authLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
     max: 10,
+    keyGenerator: (req) => (0, requestSecurity_1.getClientIpForRateLimit)(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { status: 'error', message: 'Too many attempts, please try again later.' }
@@ -289,6 +299,7 @@ const authLimiter = (0, express_rate_limit_1.default)({
 const refreshLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
     max: 20,
+    keyGenerator: (req) => (0, requestSecurity_1.getClientIpForRateLimit)(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { status: 'error', message: 'Too many refresh attempts, slow down.' }
@@ -296,6 +307,7 @@ const refreshLimiter = (0, express_rate_limit_1.default)({
 const fileLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
     max: 30,
+    keyGenerator: (req) => (0, requestSecurity_1.getClientIpForRateLimit)(req),
     standardHeaders: true,
     legacyHeaders: false
 });
@@ -303,6 +315,7 @@ const fileLimiter = (0, express_rate_limit_1.default)({
 const forgotLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
     max: 5,
+    keyGenerator: (req) => (0, requestSecurity_1.getClientIpForRateLimit)(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { status: 'error', message: 'Too many password reset requests, please try again later.' }
@@ -310,6 +323,7 @@ const forgotLimiter = (0, express_rate_limit_1.default)({
 const resetLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000,
     max: 10,
+    keyGenerator: (req) => (0, requestSecurity_1.getClientIpForRateLimit)(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { status: 'error', message: 'Too many reset attempts, please try again later.' }
@@ -317,14 +331,13 @@ const resetLimiter = (0, express_rate_limit_1.default)({
 // Debug middleware only in development
 if (process.env.NODE_ENV !== 'production') {
     app.use((req, res, next) => {
-        const redactedHeaders = Object.assign(Object.assign({}, req.headers), { authorization: req.headers.authorization ? '[redacted]' : undefined, cookie: req.headers.cookie ? '[redacted]' : undefined });
         console.log('Incoming request:', {
             method: req.method,
             url: req.url,
             path: req.path,
             baseUrl: req.baseUrl,
             originalUrl: req.originalUrl,
-            headers: redactedHeaders,
+            headers: (0, requestSecurity_1.redactHeaders)(req.headers),
             body: req.body
         });
         next();
@@ -335,6 +348,7 @@ app.use('/api/properties', propertyRoutes_1.default);
 app.use('/api/tenants', tenantRoutes_1.default);
 app.use('/api/leases', leaseRoutes_1.default);
 app.use('/api/payments', paymentRoutes_1.default);
+app.use('/api/webhooks', webhookRoutes_1.default);
 app.use('/api/charts', chartRoutes_1.default);
 // Apply targeted rate limits to sensitive endpoints
 app.use('/api/auth/login', authLimiter);
@@ -354,6 +368,8 @@ app.use('/api/property-owners', propertyOwnerRoutes_1.default);
 app.use('/api/sales-owners', salesOwnerRoutes_1.default);
 app.use('/api/owners', ownerRoutes_1.default);
 app.use('/api/health', healthRoutes_1.default);
+// Root health aliases for platform probes (e.g., Azure App Service)
+app.use('/health', healthRoutes_1.default);
 app.use('/api/maintenance', maintenanceRequestRoutes_1.default);
 app.use('/api/deals', dealRoutes_1.default);
 app.use('/api/buyers', buyerRoutes_1.default);
@@ -385,12 +401,16 @@ app.use('/api/public/reports', publicReportRoutes_1.default);
 app.use('/api/reports', reportRoutes_1.default);
 // System Admin (global)
 app.use('/api/system-admin', systemAdminRoutes_1.default);
+app.use('/api/admin', adminRoutes_1.default);
+app.use('/api/accounting', accountingRoutes_1.default);
+app.use('/api/trust-accounts', trustAccountRoutes_1.default);
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express_1.default.Router();
 sessionRouter.use('/properties', propertyRoutes_1.default);
 sessionRouter.use('/tenants', tenantRoutes_1.default);
 sessionRouter.use('/leases', leaseRoutes_1.default);
 sessionRouter.use('/payments', paymentRoutes_1.default);
+sessionRouter.use('/webhooks', webhookRoutes_1.default);
 sessionRouter.use('/charts', chartRoutes_1.default);
 sessionRouter.use('/auth', auth_1.default);
 sessionRouter.use('/companies', companyRoutes_1.default);
@@ -418,6 +438,9 @@ sessionRouter.use('/notifications', notificationRoutes_1.default);
 sessionRouter.use('/invoices', invoiceRoutes_1.default);
 sessionRouter.use('/sync', syncRoutes_1.default);
 sessionRouter.use('/fiscal', fiscalRoutes_1.default);
+sessionRouter.use('/accounting', accountingRoutes_1.default);
+sessionRouter.use('/trust-accounts', trustAccountRoutes_1.default);
+sessionRouter.use('/admin', adminRoutes_1.default);
 app.use('/api/s/:sessionId', sessionRouter);
 // Serve client build in production
 if (process.env.NODE_ENV === 'production') {
@@ -466,6 +489,9 @@ httpServer.listen(PORT, () => {
     .then(() => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Connected to MongoDB');
     try {
+        // Start trust event listeners and reconciliation safety layer.
+        (0, trustEventListener_1.startTrustEventListener)();
+        (0, trustReconciliationJob_1.startTrustReconciliationJob)();
         // Ensure a hard-coded System Admin user exists (requested)
         // Creates or updates the user with email/password and system_admin role.
         // Runs in all environments; idempotent.
@@ -582,6 +608,8 @@ process.on('SIGTERM', () => {
     httpServer.close(() => __awaiter(void 0, void 0, void 0, function* () {
         console.log('HTTP server closed');
         try {
+            (0, trustEventListener_1.stopTrustEventListener)();
+            (0, trustReconciliationJob_1.stopTrustReconciliationJob)();
             const { shutdownSyncServices } = yield Promise.resolve().then(() => __importStar(require('./scripts/startSyncServices')));
             yield shutdownSyncServices();
             console.log('Sync services shut down gracefully');

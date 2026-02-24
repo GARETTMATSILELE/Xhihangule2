@@ -12,14 +12,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authorize = exports.authWithCompany = exports.propertyOwnerAuth = exports.auth = void 0;
 const authService_1 = require("../services/authService");
 const authService = authService_1.AuthService.getInstance();
+const getRequestToken = (req) => {
+    var _a, _b;
+    const headerToken = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+    const cookieToken = (_b = req.cookies) === null || _b === void 0 ? void 0 : _b.accessToken;
+    return headerToken || cookieToken;
+};
 // Basic auth middleware that doesn't require companyId
 const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
     try {
-        // Get token from Authorization header (no cookie fallback)
-        const token = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        const token = getRequestToken(req);
         console.log('Auth middleware check:', {
             hasAuthHeader: !!req.headers.authorization,
+            hasAccessTokenCookie: !!((_a = req.cookies) === null || _a === void 0 ? void 0 : _a.accessToken),
             hasToken: !!token,
             url: req.url
         });
@@ -80,10 +86,8 @@ const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () 
 exports.auth = auth;
 // PropertyOwner-specific auth middleware
 const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
     try {
-        // Get token from Authorization header (no cookie fallback)
-        const token = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        const token = getRequestToken(req);
         if (!token) {
             return res.status(401).json({
                 status: 'error',
@@ -145,10 +149,8 @@ const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, 
 exports.propertyOwnerAuth = propertyOwnerAuth;
 // Auth middleware that requires companyId
 const authWithCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
     try {
-        // Get token from Authorization header (no cookie fallback)
-        const token = (_a = req.headers.authorization) === null || _a === void 0 ? void 0 : _a.split(' ')[1];
+        const token = getRequestToken(req);
         if (!token) {
             return res.status(401).json({
                 status: 'error',

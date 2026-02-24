@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Typography, Button, TextField, FormControl, InputLabel, Select, MenuItem, Grid, Dialog, DialogTitle, DialogContent, DialogActions, SelectChangeEvent, IconButton, Tooltip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Divider
+  Box, Typography, Button, TextField, FormControl, InputLabel, Select, MenuItem, Grid, Dialog, DialogTitle, DialogContent, DialogActions, SelectChangeEvent, IconButton, Tooltip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Divider, FormControlLabel, Switch
 } from '@mui/material';
 import { Print as PrintIcon, Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { apiService } from '../../api';
@@ -33,6 +33,7 @@ const WrittenInvoicesPage: React.FC = () => {
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [invoiceType, setInvoiceType] = useState<'rental' | 'sale'>('rental');
+  const [fiscalizeInvoice, setFiscalizeInvoice] = useState(true);
   const [taxPercentage, setTaxPercentage] = useState(15);
   const [discount, setDiscount] = useState(0);
   const [selectedBankAccount, setSelectedBankAccount] = useState<string>('');
@@ -95,6 +96,7 @@ const WrittenInvoicesPage: React.FC = () => {
     setItems([{ description: '', taxPercentage: 15, netPrice: 0 }]);
     setDiscount(0);
     setTaxPercentage(15);
+    setFiscalizeInvoice(true);
     setSelectedBankAccount('');
     setInvoiceCurrency('USD');
   };
@@ -163,6 +165,7 @@ const WrittenInvoicesPage: React.FC = () => {
       const invoiceData = {
         ...form,
         type: invoiceType,
+        fiscalize: fiscalizeInvoice,
         status: 'unpaid',
         client: clientDetails,
         items: itemsForApi,
@@ -265,6 +268,7 @@ const WrittenInvoicesPage: React.FC = () => {
                 <th style={{ borderBottom: '1px solid #ccc', padding: '8px' }}>Total Amount</th>
                 <th style={{ borderBottom: '1px solid #ccc', padding: '8px' }}>Due Date</th>
                 <th style={{ borderBottom: '1px solid #ccc', padding: '8px' }}>Status</th>
+                <th style={{ borderBottom: '1px solid #ccc', padding: '8px' }}>Fiscalization</th>
                 <th style={{ borderBottom: '1px solid #ccc', padding: '8px' }}>Actions</th>
               </tr>
             </thead>
@@ -313,6 +317,17 @@ const WrittenInvoicesPage: React.FC = () => {
                     </FormControl>
                   </td>
                   <td style={{ borderBottom: '1px solid #eee', padding: '8px' }}>
+                    {inv.fiscalize === false ? (
+                      <span style={{ background: '#f5f5f5', color: '#616161', padding: '4px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                        Non-fiscalized
+                      </span>
+                    ) : (
+                      <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '4px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                        Fiscalized
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ borderBottom: '1px solid #eee', padding: '8px' }}>
                     <Tooltip title="Print Tax Invoice">
                       <IconButton
                         size="small"
@@ -349,6 +364,19 @@ const WrittenInvoicesPage: React.FC = () => {
                     <MenuItem value="sale">Property Sale</MenuItem>
                   </Select>
                 </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={fiscalizeInvoice}
+                      onChange={(e) => setFiscalizeInvoice(e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label={fiscalizeInvoice ? 'Fiscalized invoice (send to fiscal device)' : 'Non-fiscalized invoice (do not send to fiscal device)'}
+                  sx={{ mt: 1 }}
+                />
               </Grid>
               <Grid item xs={12} md={3}>
                 <TextField

@@ -11,9 +11,11 @@ import {
   Typography,
   Paper,
   Alert,
-  Autocomplete
+  Autocomplete,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
-import { PaymentFormData, PaymentMethod, Currency } from '../../types/payment';
+import { PaymentFormData, PaymentMethod, Currency, Payment } from '../../types/payment';
 import paymentService from '../../services/paymentService';
 import { salesContractService } from '../../services/accountantService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -27,6 +29,8 @@ type Props = {
   onSubmit: (data: PaymentFormData) => Promise<void> | void;
   onCancel: () => void;
   isInstallment?: boolean;
+  initialData?: Payment;
+  submitLabel?: string;
   prefill?: {
     saleReference?: string;
     sellerName?: string;
@@ -43,8 +47,9 @@ type Props = {
 
 const PAYMENT_METHODS: PaymentMethod[] = ['bank_transfer', 'cash', 'credit_card', 'mobile_money'];
 const CURRENCIES: Currency[] = ['USD', 'ZiG', 'ZAR'];
+const DEFAULT_SALE_VAT_RATE_PERCENT = 15.5;
 
-const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, prefill, onAgentChange }) => {
+const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, initialData, submitLabel, prefill, onAgentChange }) => {
   const { user } = useAuth();
   const { company } = useCompany();
   const [buyerName, setBuyerName] = useState('');
@@ -73,6 +78,85 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
   const [seededProperties, setSeededProperties] = useState<Property[]>([]);
   const [loadingProperties, setLoadingProperties] = useState<boolean>(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
+  const [vatIncluded, setVatIncluded] = useState<boolean>(false);
+  const [vatRatePercent, setVatRatePercent] = useState<number>(DEFAULT_SALE_VAT_RATE_PERCENT);
+  const propertyOptions = useMemo(() => {
+    const out: any[] = [];
+    const seen = new Set<string>();
+    for (const p of (properties || []) as any[]) {
+      const pid = String(p?._id || p?.id || '').trim();
+      const label = `${p?.name || p?.propertyName || ''} ${p?.address || ''}`.trim();
+      const key = pid ? `id:${pid}` : `label:${label.toLowerCase()}`;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  }, [properties]);
+
+  useEffect(() => {
+    if (!initialData) return;
+    setBuyerName(String((initialData as any).buyerName || ''));
+    setSellerName(String((initialData as any).sellerName || ''));
+    setAgentId(String((initialData as any).agentId || ''));
+    setPaymentDate(initialData.paymentDate ? new Date(initialData.paymentDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    setPaymentMethod((initialData.paymentMethod as PaymentMethod) || 'bank_transfer');
+    setCurrency((initialData.currency as Currency) || 'USD');
+    setSaleReference(String((initialData as any).referenceNumber || (initialData as any).manualPropertyAddress || ''));
+    setSaleId(String((initialData as any).saleId || ''));
+    setAmountPaid(String(Math.abs(Number((initialData as any).amount || 0))));
+    setVatIncluded(Boolean((initialData as any).vatIncluded));
+    const vr = Number((initialData as any).vatRate);
+    if (Number.isFinite(vr) && vr >= 0) {
+      setVatRatePercent(vr <= 1 ? vr * 100 : vr);
+    }
+    const totalComm = Number((initialData as any)?.commissionDetails?.totalCommission || 0);
+    const preaFee = Number((initialData as any)?.commissionDetails?.preaFee || 0);
+    const agency = Number((initialData as any)?.commissionDetails?.agencyShare || 0);
+    const agent = Number((initialData as any)?.commissionDetails?.agentShare || 0);
+    if (totalComm > 0) {
+      const grossPaid = Math.abs(Number((initialData as any).amount || 0));
+      const initialVatIncluded = Boolean((initialData as any).vatIncluded);
+      const initialVatRateRaw = Number((initialData as any).vatRate);
+      const initialVatRate = Number.isFinite(initialVatRateRaw)
+        ? (initialVatRateRaw <= 1 ? initialVatRateRaw : initialVatRateRaw / 100)
+        : (DEFAULT_SALE_VAT_RATE_PERCENT / 100);
+      const taxableBase = initialVatIncluded ? grossPaid / (1 + initialVatRate) : grossPaid;
+      setCommissionPercent(Math.max(0, Number((((totalComm / Math.max(1, taxableBase)) * 100)).toFixed(2))));
+      setPreaPercentOfCommission(Math.max(0, Number(((preaFee / totalComm) * 100).toFixed(2))));
+      const rem = Math.max(0, totalComm - preaFee);
+      const agencyPct = rem > 0 ? Math.max(0, Math.min(100, Number(((agency / rem) * 100).toFixed(2)))) : 50;
+      handleAgencyPercentChange(agencyPct);
+    }
+    const notes = String((initialData as any).notes || '');
+    const totalSale = notes.match(/Total\s+Sale\s+Price\s+([0-9,.]+)/i);
+    if (totalSale?.[1]) {
+      const parsed = Number(totalSale[1].replace(/,/g, ''));
+      if (Number.isFinite(parsed) && parsed > 0) setTotalSalePrice(String(parsed));
+    }
+  }, [initialData]);
+
+  // In edit mode, ensure total sale price is hydrated from linked sale when notes do not include it.
+  useEffect(() => {
+    let cancelled = false;
+    const loadLinkedSaleTotal = async () => {
+      const linkedSaleId = String((initialData as any)?.saleId || '');
+      if (!linkedSaleId) return;
+      const current = Number(totalSalePrice);
+      if (Number.isFinite(current) && current > 0) return;
+      try {
+        const sale = await salesContractService.get(linkedSaleId);
+        const total = Number((sale as any)?.totalSalePrice || 0);
+        if (!cancelled && Number.isFinite(total) && total > 0) {
+          setTotalSalePrice(String(total));
+        }
+      } catch {
+        // keep manual/notes-based value if lookup fails
+      }
+    };
+    loadLinkedSaleTotal();
+    return () => { cancelled = true; };
+  }, [initialData, totalSalePrice]);
 
   // Apply prefill values when provided (without clobbering user typing if not provided)
   useEffect(() => {
@@ -227,16 +311,25 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     return () => { cancelled = true; };
   }, [saleReference]);
 
-  // Commission should be calculated from amount paid (not total price) for both quick and installment
-  const totalCommission = useMemo(() => {
-    const price = Number(totalSalePrice) || 0;
-    return (commissionPercent / 100) * price;
-  }, [totalSalePrice, commissionPercent]);
+  const vatRateDecimal = useMemo(() => {
+    const raw = Number(vatRatePercent);
+    const bounded = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : DEFAULT_SALE_VAT_RATE_PERCENT));
+    return bounded / 100;
+  }, [vatRatePercent]);
 
   const commissionOnPaid = useMemo(() => {
     const paid = Number(amountPaid) || 0;
-    return (commissionPercent / 100) * paid;
-  }, [amountPaid, commissionPercent]);
+    // VAT is not income: deduct included VAT first, then apply commission.
+    const taxableBase = vatIncluded ? paid / (1 + vatRateDecimal) : paid;
+    return (commissionPercent / 100) * taxableBase;
+  }, [amountPaid, commissionPercent, vatIncluded, vatRateDecimal]);
+
+  const vatAmountOnPayment = useMemo(() => {
+    if (!vatIncluded) return 0;
+    const paid = Number(amountPaid) || 0;
+    const taxableBase = paid / (1 + vatRateDecimal);
+    return Math.max(0, paid - taxableBase);
+  }, [amountPaid, vatIncluded, vatRateDecimal]);
 
   useEffect(() => {
     // Calculate splits based on configured percentages
@@ -260,17 +353,19 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
 
   const sellerRevenue = useMemo(() => {
     const paid = Number(amountPaid) || 0;
+    const taxableBase = Math.max(0, paid - vatAmountOnPayment);
     const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
     const vatOnCommission = vatRate * commissionOnPaid;
-    return Math.max(0, paid - commissionOnPaid - vatOnCommission);
-  }, [amountPaid, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
+    return Math.max(0, taxableBase - commissionOnPaid - vatOnCommission);
+  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
 
   const ownerAmountForThisPayment = useMemo(() => {
     const paid = Number(amountPaid) || 0;
+    const taxableBase = Math.max(0, paid - vatAmountOnPayment);
     const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
     const vatOnCommission = vatRate * commissionOnPaid;
-    return Math.max(0, paid - commissionOnPaid - vatOnCommission);
-  }, [amountPaid, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
+    return Math.max(0, taxableBase - commissionOnPaid - vatOnCommission);
+  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
 
   const handleSubmit = async () => {
     try {
@@ -303,7 +398,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         amount: paid,
         depositAmount: 0,
         referenceNumber: saleReference || '',
-        notes: `Sale: Buyer ${buyerName}; Seller ${sellerName}; Total Sale Price ${price.toLocaleString()} ${currency}${isInstallment ? `; Installment ${paid.toLocaleString()} ${currency}` : ''}`,
+        notes: `Sale: Buyer ${buyerName}; Seller ${sellerName}; Total Sale Price ${price.toLocaleString()} ${currency}${isInstallment ? `; Installment ${paid.toLocaleString()} ${currency}` : ''}${vatIncluded ? '; VAT Included YES' : '; VAT Included NO'}`,
         currency,
         leaseId: '',
         companyId: user?.companyId || '',
@@ -322,6 +417,9 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         manualTenantName: buyerName,
         // Optional linkage to SalesContract for installments and summaries
         saleId: saleId || undefined,
+        vatIncluded,
+        vatRate: vatIncluded ? vatRateDecimal : undefined,
+        vatAmount: vatIncluded ? Number(vatAmountOnPayment.toFixed(2)) : 0,
         // Explicitly include buyer/seller fields for backend persistence
         buyerName,
         sellerName
@@ -337,7 +435,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
 
   return (
     <Paper elevation={2} sx={{ p: 2 }}>
-      <Typography variant="h6" sx={{ mb: 2 }}>New Sale Payment</Typography>
+      <Typography variant="h6" sx={{ mb: 2 }}>{initialData ? 'Edit Sale Payment' : 'New Sale Payment'}</Typography>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
@@ -379,10 +477,14 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
             id="sale-reference"
             freeSolo
             openOnFocus
-            options={properties}
+            options={propertyOptions}
             loading={loadingProperties}
             loadingText="Searching properties…"
             noOptionsText="No matching properties"
+            isOptionEqualToValue={(option: any, value: any) => {
+              if (typeof option === 'string' || typeof value === 'string') return String(option) === String(value);
+              return String(option?._id || option?.id || '') === String(value?._id || value?.id || '');
+            }}
             getOptionLabel={(option: any) => {
               if (typeof option === 'string') return option;
               const name = option.name || option.propertyName || '';
@@ -401,6 +503,19 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
                 return [state.inputValue, ...list];
               }
               return list as any[];
+            }}
+            renderOption={(props, option: any) => {
+              const key =
+                typeof option === 'string'
+                  ? `manual:${option}`
+                  : `property:${String(option?._id || option?.id || `${option?.name || ''}:${option?.address || ''}`)}`;
+              return (
+                <li {...props} key={key}>
+                  {typeof option === 'string'
+                    ? option
+                    : [option?.name || option?.propertyName || '', option?.address || ''].filter(Boolean).join(' - ')}
+                </li>
+              );
             }}
             value={saleReference}
             onChange={(_, newValue) => {
@@ -475,6 +590,34 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
           <TextField id="amountPaid" name="amountPaid" fullWidth label="Amount Paid" type="number" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} inputProps={{ min: 0, step: '0.01' }} />
         </Grid>
         <Grid item xs={12} md={4}>
+          <FormControlLabel
+            control={<Switch checked={vatIncluded} onChange={(_, checked) => setVatIncluded(checked)} color="primary" />}
+            label={vatIncluded ? 'VAT Included: ON' : 'VAT Included: OFF'}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            When ON, VAT is deducted first.
+          </Typography>
+          {vatIncluded && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              VAT deduction on this payment: {vatAmountOnPayment.toFixed(2)} {currency}
+            </Typography>
+          )}
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <TextField
+            id="vatRatePercent"
+            name="vatRatePercent"
+            fullWidth
+            label="VAT Rate %"
+            type="number"
+            value={vatRatePercent}
+            onChange={(e) => setVatRatePercent(Number(e.target.value))}
+            inputProps={{ min: 0, max: 100, step: '0.1' }}
+            helperText="Default 15.5%"
+            disabled={!vatIncluded}
+          />
+        </Grid>
+        <Grid item xs={12} md={4}>
           <FormControl fullWidth>
             <InputLabel id="currency-label">Currency</InputLabel>
             <Select id="currency" name="currency" labelId="currency-label" value={currency} label="Currency" onChange={(e) => setCurrency(e.target.value as Currency)}>
@@ -507,7 +650,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
             <Typography variant="subtitle1" sx={{ mb: 1 }}>Commission Split</Typography>
             <Grid container spacing={2}>
               <Grid item xs={12} md={3}>
-                <TextField id="totalCommission" name="totalCommission" fullWidth label="Total Commission" value={totalCommission.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="totalCommission" name="totalCommission" fullWidth label="Total Commission (This Payment)" value={commissionOnPaid.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
                 <TextField id="preaPercentOfCommission" name="preaPercentOfCommission" fullWidth label="PREA % of Commission" type="number" value={preaPercentOfCommission} onChange={(e) => setPreaPercentOfCommission(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
@@ -540,7 +683,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         <Grid item xs={12} display="flex" justifyContent="flex-end" gap={2}>
           <Button variant="outlined" onClick={onCancel} disabled={submitting}>Cancel</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save Sale Payment'}
+            {submitting ? 'Saving...' : (submitLabel || 'Save Sale Payment')}
           </Button>
           {!saleId && (
             <Button

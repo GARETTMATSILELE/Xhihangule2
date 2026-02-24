@@ -42,6 +42,7 @@ export interface IInvoice extends Document {
   items: InvoiceItem[];
   type: 'rental' | 'sale';
   saleDetails?: string;
+  fiscalize?: boolean;
   status: 'paid' | 'unpaid' | 'overdue';
   selectedBankAccount?: BankAccount;
   fiscalData?: {
@@ -96,6 +97,7 @@ const InvoiceSchema: Schema = new Schema({
   items: [InvoiceItemSchema],
   type: { type: String, enum: ['rental', 'sale'], required: true },
   saleDetails: { type: String },
+  fiscalize: { type: Boolean, default: true },
   status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
   selectedBankAccount: { type: BankAccountSchema, required: false },
   fiscalData: {

@@ -99,9 +99,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         auth: { token },
         transports: ['websocket'],
         reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000
+        reconnectionAttempts: 10,
+        reconnectionDelay: 3000,
+        reconnectionDelayMax: 20000,
+        randomizationFactor: 0.5,
+        timeout: 10000
       });
       s.on('connect_error', () => {/* no-op */});
       s.on('newNotification', (n: any) => {

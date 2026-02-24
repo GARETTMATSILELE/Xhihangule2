@@ -201,7 +201,7 @@ const LandingPage: React.FC = () => {
 
   const prices = useMemo(() => {
     // Base monthly USD prices
-    const monthly = { INDIVIDUAL: 10, SME: 300, ENTERPRISE: 600 } as const;
+    const monthly = { INDIVIDUAL: 250, SME: 600, ENTERPRISE: 1200 } as const;
     if (cycle === 'monthly') return monthly;
     // Yearly totals (12 months)
     return {
@@ -597,7 +597,7 @@ const LandingPage: React.FC = () => {
                   ${prices.SME} <Typography component="span" variant="subtitle2">{cycle === 'monthly' ? 'per month' : 'per year'}</Typography>
                 </Typography>
                 <List dense sx={{ mt: 2, color: 'primary.contrastText' }}>
-                  {[ 'Up to 25 properties', 'All core features', 'Agent & property accounts', 'Commission enabled', '10GB of storage' ].map((f) => (
+                  {[ 'Up to 120 properties', 'All core features', 'Agent & property accounts', 'Commission enabled', '10GB of storage' ].map((f) => (
                     <ListItem key={f} sx={{ py: 0.5 }}>
                       <ListItemIcon sx={{ minWidth: 28, color: 'primary.contrastText' }}>
                         <CheckCircleOutlineIcon fontSize="small" />

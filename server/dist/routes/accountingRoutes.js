@@ -1,0 +1,26 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const auth_1 = require("../middleware/auth");
+const roles_1 = require("../middleware/roles");
+const accountingController_1 = require("../controllers/accountingController");
+const router = express_1.default.Router();
+router.use(auth_1.auth);
+router.get('/dashboard-summary', roles_1.canViewCommissions, accountingController_1.getDashboardSummary);
+router.get('/revenue-trend', roles_1.canViewCommissions, accountingController_1.getRevenueTrend);
+router.get('/expense-trend', roles_1.canViewCommissions, accountingController_1.getExpenseTrend);
+router.get('/vat-status', roles_1.canViewCommissions, accountingController_1.getVatStatus);
+router.get('/vat-report/export', roles_1.canViewCommissions, accountingController_1.exportVatReport);
+router.get('/commission-liability', roles_1.canViewCommissions, accountingController_1.getCommissionLiability);
+router.get('/profit-loss', roles_1.canViewCommissions, accountingController_1.getProfitAndLoss);
+router.get('/balance-sheet', roles_1.canViewCommissions, accountingController_1.getBalanceSheet);
+router.get('/ledger', roles_1.canViewCommissions, accountingController_1.getLedger);
+router.get('/bank-reconciliation', roles_1.canViewCommissions, accountingController_1.getBankReconciliation);
+router.get('/bank-transactions/:id/suggestions', roles_1.canViewCommissions, accountingController_1.getBankTransactionSuggestions);
+router.patch('/bank-transactions/:id/reconcile', roles_1.isAccountant, accountingController_1.reconcileBankTransaction);
+router.post('/journal/manual', roles_1.isAccountant, accountingController_1.postManualTransaction);
+router.post('/migrations/backfill-balances', roles_1.isAccountant, accountingController_1.backfillBalances);
+exports.default = router;

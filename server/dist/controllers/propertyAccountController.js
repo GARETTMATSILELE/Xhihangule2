@@ -19,6 +19,7 @@ const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
+const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
 const propertyAccountService_2 = require("../services/propertyAccountService");
@@ -235,7 +236,7 @@ exports.getPropertyTransactions = getPropertyTransactions;
  * Add expense to property account
  */
 const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     try {
         const { propertyId } = req.params;
         const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
@@ -265,12 +266,24 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             idempotencyKey
         };
         const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData, ledger);
+        if ((_e = req.user) === null || _e === void 0 ? void 0 : _e.companyId) {
+            yield accountingIntegrationService_1.default.syncExpenseCreated({
+                companyId: String(req.user.companyId),
+                sourceId: `property:${propertyId}:${Date.now()}`,
+                reference: `PROP-EXP-${Date.now()}`,
+                amount: Number(amount),
+                description: description || category || 'Property expense',
+                date: date ? new Date(date) : new Date(),
+                createdBy: req.user.userId,
+                propertyId
+            });
+        }
         // Echo back idempotency key for client-side caching (header and body)
         if (idempotencyKey) {
             try {
                 res.setHeader('Idempotency-Key', idempotencyKey);
             }
-            catch (_e) { }
+            catch (_f) { }
         }
         res.json({
             success: true,

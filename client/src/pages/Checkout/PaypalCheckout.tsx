@@ -7,9 +7,9 @@ type Plan = 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
 type Cycle = 'monthly' | 'yearly';
 
 const PRICES: Record<Plan, { monthly: number; yearly: number }> = {
-  INDIVIDUAL: { monthly: 10, yearly: 120 },
-  SME: { monthly: 300, yearly: 3600 },
-  ENTERPRISE: { monthly: 600, yearly: 7200 }
+  INDIVIDUAL: { monthly: 250, yearly: 3000 },
+  SME: { monthly: 600, yearly: 7200 },
+  ENTERPRISE: { monthly: 1200, yearly: 14400 }
 };
 
 const parseParams = (search: string) => {

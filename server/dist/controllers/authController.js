@@ -266,6 +266,9 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
         const cookieDomain = getCookieDomain();
         res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
          }));
+        // Also set access token cookie so direct browser navigation to protected docs works.
+        res.cookie('accessToken', token, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 24 * 60 * 60 * 1000 // 1 day
+         }));
         // Set a non-HttpOnly CSRF token cookie for refresh protection
         const signupCsrf = crypto_1.default.randomBytes(32).toString('hex');
         res.cookie('refreshCsrf', signupCsrf, Object.assign(Object.assign({ httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
@@ -348,6 +351,8 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
         });
         const cookieDomain = getCookieDomain();
         res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
+        res.cookie('accessToken', token, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 24 * 60 * 60 * 1000 // 1 day
          }));
         // Also set a non-HttpOnly CSRF token cookie for refresh endpoint
         const loginCsrf = crypto_1.default.randomBytes(32).toString('hex');
@@ -490,9 +495,13 @@ const logout = (req, res) => {
     }
     catch (_a) { }
     try {
-        res.clearCookie('refreshCsrf', Object.assign(Object.assign({}, base), { httpOnly: false }));
+        res.clearCookie('accessToken', Object.assign(Object.assign({}, base), { httpOnly: true }));
     }
     catch (_b) { }
+    try {
+        res.clearCookie('refreshCsrf', Object.assign(Object.assign({}, base), { httpOnly: false }));
+    }
+    catch (_c) { }
     res.json({ message: 'Logged out successfully' });
 };
 exports.logout = logout;
@@ -558,6 +567,8 @@ const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
         // Set new refresh token as HttpOnly cookie
         const cookieDomain = getCookieDomain();
         res.cookie('refreshToken', newRefreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+         }));
+        res.cookie('accessToken', newAccessToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 24 * 60 * 60 * 1000 // 1 day
          }));
         // Rotate CSRF cookie
         const rotatedCsrf = crypto_1.default.randomBytes(32).toString('hex');

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Typography,
@@ -21,7 +21,8 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Chip
 } from '@mui/material';
 import PrintIcon from '@mui/icons-material/Print';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -38,11 +39,15 @@ const VATManagementPage: React.FC = () => {
 
   const [loading, setLoading] = useState<boolean>(false);
   const [groups, setGroups] = useState<VatPropertyGroup[]>([]);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [payoutDialog, setPayoutDialog] = useState<{ open: boolean; propertyId?: string; recipientName: string; payoutMethod: string; notes: string }>(
     { open: false, recipientName: '', payoutMethod: 'bank_transfer', notes: '' }
   );
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingReceiptFor, setUploadingReceiptFor] = useState<string | null>(null);
+  const [receiptTargetPayoutId, setReceiptTargetPayoutId] = useState<string | null>(null);
+  const receiptTargetPayoutIdRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [periodStart, periodEnd] = useMemo(() => {
@@ -63,8 +68,10 @@ const VATManagementPage: React.FC = () => {
   const load = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await vatService.getTransactions(periodStart, periodEnd);
       setGroups(Array.isArray(data) ? data : []);
+      setLastRefreshedAt(new Date());
     } catch (e: any) {
       setGroups([]);
       setError(e?.response?.data?.message || e?.message || 'Failed to load VAT transactions');
@@ -78,6 +85,17 @@ const VATManagementPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodStart.getTime(), periodEnd.getTime()]);
 
+  useEffect(() => {
+    const handlePaymentsChanged = () => {
+      void load();
+    };
+    window.addEventListener('payments:changed', handlePaymentsChanged as EventListener);
+    return () => {
+      window.removeEventListener('payments:changed', handlePaymentsChanged as EventListener);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodStart.getTime(), periodEnd.getTime()]);
+
   const toggleExpand = (propertyId: string) => {
     setExpanded(prev => ({ ...prev, [propertyId]: !prev[propertyId] }));
   };
@@ -87,9 +105,14 @@ const VATManagementPage: React.FC = () => {
   return (
     <Box sx={{ width: '100%' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-          VAT Management
-        </Typography>
+        <Box>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
+            VAT Management
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Last refreshed: {lastRefreshedAt ? lastRefreshedAt.toLocaleString() : '—'}
+          </Typography>
+        </Box>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
           <FormControl size="small" sx={{ minWidth: 160 }}>
             <InputLabel>Period</InputLabel>
@@ -151,6 +174,7 @@ const VATManagementPage: React.FC = () => {
         {groups.map((g) => {
           const isOpen = !!expanded[g.property._id];
           const lastPayout = (g.payouts || [])[0];
+          const payoutAlreadyCompleted = lastPayout?.status === 'completed';
           return (
             <Grid item xs={12} key={g.property._id}>
               <Card>
@@ -176,15 +200,48 @@ const VATManagementPage: React.FC = () => {
                       </Box>
                       <Button
                         variant="contained"
-                        color="primary"
+                        color={payoutAlreadyCompleted ? 'success' : 'primary'}
+                        disabled={payoutAlreadyCompleted}
                         onClick={() => setPayoutDialog({ open: true, propertyId: g.property._id, recipientName: '', payoutMethod: 'bank_transfer', notes: '' })}
                       >
-                        Payout
+                        {payoutAlreadyCompleted ? 'Paid' : 'Payout'}
                       </Button>
                       {lastPayout && (
-                        <Button variant="outlined" onClick={() => vatService.openPayoutAck(lastPayout._id)}>Print Ack</Button>
+                        <>
+                          <Chip
+                            size="small"
+                            color={lastPayout.status === 'completed' ? 'success' : 'warning'}
+                            label={lastPayout.status === 'completed' ? 'Paid' : lastPayout.status}
+                          />
+                          <Button
+                            variant="outlined"
+                            disabled={uploadingReceiptFor === lastPayout._id}
+                            onClick={() => {
+                              receiptTargetPayoutIdRef.current = lastPayout._id;
+                              setReceiptTargetPayoutId(lastPayout._id);
+                              const input = document.getElementById('vat-receipt-upload-input') as HTMLInputElement | null;
+                              input?.click();
+                            }}
+                          >
+                            {uploadingReceiptFor === lastPayout._id
+                              ? 'Uploading...'
+                              : (lastPayout.receiptUploadedAt ? 'Replace Receipt' : 'Upload Receipt')}
+                          </Button>
+                          {lastPayout.receiptUploadedAt && (
+                            <Button variant="text" onClick={() => { void vatService.openPayoutReceipt(lastPayout._id); }}>
+                              View Receipt
+                            </Button>
+                          )}
+                        </>
                       )}
-                      <IconButton title="Print Property Summary" onClick={() => vatService.openPropertySummary(g.property._id, periodStart, periodEnd)}>
+                      <IconButton
+                        title="Print Property Summary"
+                        onClick={() => {
+                          void vatService.openPropertySummary(g.property._id, periodStart, periodEnd).catch((e: any) => {
+                            setError(e?.response?.data?.message || e?.message || 'Failed to open VAT report');
+                          });
+                        }}
+                      >
                         <PrintIcon />
                       </IconButton>
                       <IconButton onClick={() => toggleExpand(g.property._id)} title={isOpen ? 'Hide transactions' : 'Show transactions'}>
@@ -290,6 +347,30 @@ const VATManagementPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      <input
+        id="vat-receipt-upload-input"
+        type="file"
+        accept="application/pdf,image/*"
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          const targetPayoutId = receiptTargetPayoutIdRef.current || receiptTargetPayoutId;
+          if (!file || !targetPayoutId) return;
+          try {
+            setError(null);
+            setUploadingReceiptFor(targetPayoutId);
+            await vatService.uploadPayoutReceipt(targetPayoutId, file);
+            await load();
+          } catch (err: any) {
+            setError(err?.response?.data?.message || err?.message || 'Failed to upload receipt');
+          } finally {
+            setUploadingReceiptFor(null);
+            setReceiptTargetPayoutId(null);
+            receiptTargetPayoutIdRef.current = null;
+            e.target.value = '';
+          }
+        }}
+      />
     </Box>
   );
 };

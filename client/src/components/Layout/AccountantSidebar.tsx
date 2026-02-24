@@ -15,8 +15,10 @@ import {
   Receipt as ReceiptIcon,
   AttachMoney as DollarSignIcon,
   Assessment as AssessmentIcon,
+  Description as DescriptionIcon,
   Settings as SettingsIcon,
   AccountBalance as AccountBalanceIcon,
+  ListAlt as LedgerIcon,
   Assignment as TaskIcon,
   Sync as SyncIcon,
 } from '@mui/icons-material';
@@ -37,13 +39,15 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
 
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/accountant-dashboard' },
-    { text: 'Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
+    { text: 'Rent Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
+    { text: 'Ledger', icon: <LedgerIcon />, path: '/accountant-dashboard/ledger' },
     { text: 'Levies', icon: <ReceiptIcon />, path: '/accountant-dashboard/levies' },
     { text: 'Invoices', icon: <ReceiptIcon />, path: '/accountant-dashboard/written-invoices' },
     { text: 'Property Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/property-accounts' },
     { text: 'Agent Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/agent-accounts' },
     { text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
     { text: 'Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },
+    { text: 'Trust A/c Reports', icon: <DescriptionIcon />, path: '/accountant-dashboard/trust-account-reports' },
     { text: 'Data Sync', icon: <SyncIcon />, path: '/accountant-dashboard/data-sync' },
     { text: 'Tasks', icon: <TaskIcon />, path: '/accountant-dashboard/tasks' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' }

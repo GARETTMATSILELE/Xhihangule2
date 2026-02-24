@@ -11,6 +11,8 @@ import { Deal } from '../models/Deal';
 import mongoose from 'mongoose';
 import { hasAnyRole, hasRole } from '../utils/access';
 import { Buyer } from '../models/Buyer';
+import trustAccountService from '../services/trustAccountService';
+import { redactHeaders } from '../utils/requestSecurity';
 
 // Helper function to extract user context from request
 const getUserContext = (req: Request) => {
@@ -288,7 +290,7 @@ export const getPublicProperties = async (req: Request, res: Response) => {
 export const getProperties = async (req: Request, res: Response) => {
   try {
     console.log('getProperties request received:', {
-      headers: req.headers,
+      headers: redactHeaders(req.headers),
       user: req.user,
       query: req.query,
       params: req.params
@@ -672,6 +674,25 @@ export const createSalesProperty = async (req: Request, res: Response) => {
     });
 
     const saved = await property.save();
+
+    // Non-breaking extension: open trust account shell for every sales property listing.
+    try {
+      await trustAccountService.createTrustAccount({
+        companyId: String(req.user.companyId),
+        propertyId: String(saved._id),
+        buyerId: undefined,
+        sellerId: req.user.userId ? String(req.user.userId) : undefined,
+        dealId: undefined,
+        openingBalance: 0,
+        initialWorkflowState: 'LISTED',
+        createdBy: req.user.userId ? String(req.user.userId) : undefined
+      });
+    } catch (trustErr: any) {
+      console.warn('Non-fatal: failed to initialize trust account for sales property', {
+        propertyId: String(saved._id),
+        error: trustErr?.message
+      });
+    }
 
     // Persist valuation -> property lifecycle link (do not overwrite if already linked)
     if (sourceValuationObjectId) {

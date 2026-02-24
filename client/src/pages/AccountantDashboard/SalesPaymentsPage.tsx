@@ -41,6 +41,7 @@ const SalesPaymentsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [mode, setMode] = useState<'quick' | 'installment'>('quick');
   const [filters, setFilters] = useState<PaymentFilter>({ saleMode: 'quick' as any, page: 1 as any, limit: 25 as any });
   const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
@@ -218,6 +219,58 @@ const SalesPaymentsPage: React.FC = () => {
     }
   };
 
+  const handleUpdatePayment = async (data: PaymentFormData) => {
+    if (!selectedPayment) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const payload: any = {
+        ...data,
+        paymentType: 'sale',
+        status: 'completed',
+        postingStatus: 'posted',
+      };
+      const updated = await paymentService.updateSalesPayment(selectedPayment._id, payload);
+      setPayments((prev) => sortSalesPayments(prev.map((p) => (p._id === selectedPayment._id ? (updated as Payment) : p))));
+      setSelectedPayment(null);
+      resetFormState();
+      setShowForm(false);
+      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Failed to update payment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReversePayment = async (payment: Payment) => {
+    try {
+      const reason = window.prompt('Enter reversal reason (required):', 'Incorrect manual posting') || '';
+      if (!reason.trim()) return;
+      setLoading(true);
+      setError(null);
+      const resp = await paymentService.reversePayment(payment._id, reason.trim());
+      const original = (resp as any)?.originalPayment;
+      const reversal = (resp as any)?.reversalPayment;
+      const corrected = (resp as any)?.correctedPayment;
+      setPayments((prev) => {
+        const withoutOriginal = prev.filter((p) => p._id !== payment._id);
+        const next = [
+          ...(corrected ? [corrected as Payment] : []),
+          ...(reversal ? [reversal as Payment] : []),
+          ...(original ? [original as Payment] : []),
+          ...withoutOriginal
+        ];
+        return sortSalesPayments(next);
+      });
+      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Failed to reverse payment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" component="h1" sx={{ fontWeight: 600, mb: 3 }}>
@@ -253,6 +306,7 @@ const SalesPaymentsPage: React.FC = () => {
             color="primary"
             startIcon={<AddIcon />}
             onClick={() => {
+              setSelectedPayment(null);
               setShowForm(true);
             }}
             sx={{ borderRadius: 2 }}
@@ -263,6 +317,7 @@ const SalesPaymentsPage: React.FC = () => {
       )}
       {showForm ? (
         <>
+        {!selectedPayment && (
         <Box sx={{ mb: 2 }}>
           <Grid container spacing={2}>
             <Grid item xs={12} md={4}>
@@ -383,10 +438,15 @@ const SalesPaymentsPage: React.FC = () => {
             </Grid>
           </Grid>
         </Box>
+        )}
         <SalesPaymentForm
           onSubmit={async (data) => {
-            await handleCreatePayment(data);
-            setShowForm(false);
+            if (selectedPayment) {
+              await handleUpdatePayment(data);
+            } else {
+              await handleCreatePayment(data);
+              setShowForm(false);
+            }
           }}
           onAgentChange={(newAgentId) => {
             try {
@@ -408,17 +468,27 @@ const SalesPaymentsPage: React.FC = () => {
           }}
           onCancel={() => {
             // Clear any previous selections/prefill when cancelling
+            setSelectedPayment(null);
             resetFormState();
             setShowForm(false);
           }}
           isInstallment={mode === 'installment'}
+          initialData={selectedPayment || undefined}
+          submitLabel={selectedPayment ? 'Update & Complete Payment' : undefined}
           prefill={prefill}
         />
         </>
       ) : (
         <PaymentList
           payments={payments}
-          onEdit={() => {}}
+          onEdit={(payment) => {
+            if (String((payment as any).status || '').toLowerCase() !== 'pending') return;
+            const saleMode = String((payment as any).saleMode || 'quick');
+            if (saleMode === 'quick' || saleMode === 'installment') setMode(saleMode);
+            setSelectedPayment(payment);
+            setShowForm(true);
+          }}
+          onReverse={handleReversePayment}
           onDownloadReceipt={async () => {}}
           onFilterChange={setFilters}
           isMobile={false}

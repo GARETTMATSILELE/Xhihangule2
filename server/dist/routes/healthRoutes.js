@@ -13,18 +13,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const database_1 = require("../config/database");
 const LedgerEvent_1 = __importDefault(require("../models/LedgerEvent"));
 const router = express_1.default.Router();
-// Debug middleware to log health check requests
+// Optional verbose health logging (disabled by default in production)
 router.use((req, res, next) => {
-    console.log('Health check request received:', {
-        method: req.method,
-        path: req.path,
-        headers: req.headers,
-        cookies: req.cookies,
-        body: req.body
-    });
+    if (process.env.HEALTH_LOG_VERBOSE === 'true') {
+        console.log('Health check request received:', {
+            method: req.method,
+            path: req.path,
+            headers: req.headers,
+            cookies: req.cookies,
+            body: req.body
+        });
+    }
     next();
 });
 // Liveness probe: process is up
@@ -36,20 +39,36 @@ router.head('/live', (req, res) => {
     res.status(200).end();
 });
 // Readiness probe: main DB connected and healthy. Accounting DB is ignored here to avoid false restarts
-router.get('/ready', (req, res) => {
+router.get('/ready', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const dbHealth = (0, database_1.getDatabaseHealth)();
         const uptime = process.uptime();
-        if (!dbHealth.isConnected || !dbHealth.isHealthy) {
-            return res.status(503).json({ status: 'error', reason: 'db_not_ready', database: dbHealth, uptime });
+        if (dbHealth.isConnected && dbHealth.isHealthy) {
+            return res.json({ status: 'ok', timestamp: new Date().toISOString(), database: dbHealth, uptime });
         }
-        res.json({ status: 'ok', timestamp: new Date().toISOString(), database: dbHealth, uptime });
+        // Fallback: run a direct ping before declaring not ready.
+        // This avoids false 503s when cached health state lags transient recoveries.
+        if (mongoose_1.default.connection.readyState === 1) {
+            try {
+                yield mongoose_1.default.connection.db.admin().ping();
+                return res.json({
+                    status: 'ok',
+                    timestamp: new Date().toISOString(),
+                    database: Object.assign(Object.assign({}, dbHealth), { isHealthy: true }),
+                    uptime
+                });
+            }
+            catch (_a) {
+                // Keep readiness failure response below
+            }
+        }
+        return res.status(503).json({ status: 'error', reason: 'db_not_ready', database: dbHealth, uptime });
     }
     catch (error) {
         console.error('Readiness check error:', error);
         res.status(500).json({ status: 'error', message: 'Readiness check failed' });
     }
-});
+}));
 // Comprehensive health (kept for dashboards). Do not cause orchestrator restarts because of accounting DB
 router.get('/', (req, res) => {
     try {

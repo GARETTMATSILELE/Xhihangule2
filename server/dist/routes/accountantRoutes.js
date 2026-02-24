@@ -25,6 +25,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const agentAccountController_1 = require("../controllers/agentAccountController");
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const agentAccountController_2 = require("../controllers/agentAccountController");
+const trustAccountController_1 = require("../controllers/trustAccountController");
 const router = express_1.default.Router();
 // Debug middleware
 router.use((req, res, next) => {
@@ -60,6 +61,24 @@ router.get('/property-accounts/:propertyId/deposits/summary', roles_1.canViewCom
 router.post('/property-accounts/:propertyId/deposits/payout', roles_1.canViewCommissions, accountantController_1.createPropertyDepositPayout);
 // Company trust accounts summary
 router.get('/trust-accounts/deposits', roles_1.canViewCommissions, accountantController_1.getCompanyDepositSummaries);
+router.get('/trust-accounts', roles_1.canViewCommissions, trustAccountController_1.listTrustAccounts);
+router.post('/trust-accounts', roles_1.isAccountant, trustAccountController_1.createTrustAccount);
+router.get('/trust-accounts/property/:propertyId', roles_1.canViewCommissions, trustAccountController_1.getTrustAccountByProperty);
+router.get('/trust-accounts/property/:propertyId/full', roles_1.canViewCommissions, trustAccountController_1.getTrustAccountByPropertyFull);
+router.get('/trust-accounts/:id', roles_1.canViewCommissions, trustAccountController_1.getTrustAccount);
+router.get('/trust-accounts/:id/full', roles_1.canViewCommissions, trustAccountController_1.getTrustAccountFull);
+router.get('/trust-accounts/:id/ledger', roles_1.canViewCommissions, trustAccountController_1.getTrustLedger);
+router.get('/trust-accounts/:id/tax-summary', roles_1.canViewCommissions, trustAccountController_1.getTrustTaxSummary);
+router.get('/trust-accounts/:id/audit-logs', roles_1.canViewCommissions, trustAccountController_1.getTrustAuditLogs);
+router.get('/trust-accounts/:id/reconciliation', roles_1.canViewCommissions, trustAccountController_1.getTrustReconciliation);
+router.post('/trust-accounts/:id/buyer-payments', roles_1.isAccountant, trustAccountController_1.recordBuyerPayment);
+router.post('/trust-accounts/:id/calculate-settlement', roles_1.isAccountant, trustAccountController_1.calculateSettlement);
+router.post('/trust-accounts/:id/apply-tax-deductions', roles_1.isAccountant, trustAccountController_1.applyTaxDeductions);
+router.post('/trust-accounts/:id/transfer-to-seller', roles_1.isAccountant, trustAccountController_1.transferToSeller);
+router.post('/trust-accounts/:id/close', roles_1.isAccountant, trustAccountController_1.closeTrustAccount);
+router.post('/trust-accounts/:id/workflow-transition', roles_1.isAccountant, trustAccountController_1.transitionTrustWorkflow);
+router.get('/trust-accounts/:id/reports/:reportType', roles_1.canViewCommissions, trustAccountController_1.generateTrustReport);
+router.post('/trust-accounts/reconciliation/run', roles_1.isAccountant, trustAccountController_1.runTrustReconciliation);
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', roles_1.canManagePayments, paymentController_1.getCompanyPayments);
 // Sales-specific payment endpoints
@@ -70,6 +89,7 @@ router.put('/sales-payments/:id', roles_1.canManagePayments, paymentController_1
 router.post('/payments', roles_1.canManagePayments, paymentController_1.createPaymentAccountant);
 router.get('/payments/:id', roles_1.canManagePayments, paymentController_1.getPaymentDetails);
 router.put('/payments/:id/status', roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
+router.post('/payments/:id/reverse', roles_1.canManagePayments, paymentController_1.reversePayment);
 router.post('/payments/:id/finalize', roles_1.canManagePayments, paymentController_1.finalizeProvisionalPayment);
 // Provisional auto-match suggestions (admin/accountant)
 router.get('/payments/provisional/suggestions', roles_1.isAccountant, (req, res) => __awaiter(void 0, void 0, void 0, function* () {

@@ -403,6 +403,59 @@ class PropertyAccountService {
             }
         });
     }
+    reconcileReversedPaymentArtifacts(account) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const paymentIds = Array.from(new Set((account.transactions || [])
+                    .map((t) => String((t === null || t === void 0 ? void 0 : t.paymentId) || ''))
+                    .filter(Boolean)));
+                if (!paymentIds.length)
+                    return;
+                const reversedPayments = yield Payment_1.Payment.find({
+                    _id: { $in: paymentIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
+                    status: 'reversed'
+                })
+                    .select('_id reversalPaymentId')
+                    .lean();
+                if (!reversedPayments.length)
+                    return;
+                const reversedSet = new Set(reversedPayments.map((p) => String(p._id)));
+                const reversalSet = new Set(reversedPayments
+                    .map((p) => ((p === null || p === void 0 ? void 0 : p.reversalPaymentId) ? String(p.reversalPaymentId) : ''))
+                    .filter(Boolean));
+                let changed = false;
+                for (const tx of (account.transactions || [])) {
+                    const txPid = String((tx === null || tx === void 0 ? void 0 : tx.paymentId) || '');
+                    if (!txPid)
+                        continue;
+                    const isReversedChain = reversedSet.has(txPid) || reversalSet.has(txPid);
+                    if (!isReversedChain)
+                        continue;
+                    if (tx.type === 'income' && String(tx.status || '') === 'completed') {
+                        tx.status = 'cancelled';
+                        tx.updatedAt = new Date();
+                        tx.notes = tx.notes || 'Auto-cancelled due to payment reversal';
+                        changed = true;
+                    }
+                    if (tx.type === 'expense' &&
+                        String(tx.category || '') === 'payment_reversal' &&
+                        String(tx.status || '') === 'completed') {
+                        tx.status = 'cancelled';
+                        tx.updatedAt = new Date();
+                        tx.notes = tx.notes || 'Auto-cancelled after reversal-chain cleanup';
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    // Bypass immutable ledger middleware for reconciliation maintenance writes.
+                    yield PropertyAccount_1.default.collection.updateOne({ _id: account._id }, { $set: { transactions: account.transactions, lastUpdated: new Date() } });
+                }
+            }
+            catch (e) {
+                logger_1.logger.warn('Failed to reconcile reversed payment artifacts (non-fatal):', e);
+            }
+        });
+    }
     /**
      * Record income from rental payments
      */
@@ -414,6 +467,11 @@ class PropertyAccountService {
                 if (!payment) {
                     throw new errorHandler_1.AppError('Payment not found', 404);
                 }
+                // Reversal rows and correction entries must not be posted as new income.
+                if (payment.reversalOfPaymentId)
+                    return;
+                if (Number(payment.amount || 0) < 0)
+                    return;
                 if (payment.status !== 'completed') {
                     logger_1.logger.info(`Skipping income recording for payment ${paymentId} - status: ${payment.status}`);
                     return;
@@ -528,6 +586,92 @@ class PropertyAccountService {
             }
             catch (error) {
                 logger_1.logger.error('Error recording income from payment:', error);
+                throw error;
+            }
+        });
+    }
+    reverseIncomeFromPayment(paymentId, opts) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const payment = yield Payment_1.Payment.findById(paymentId);
+                if (!payment) {
+                    throw new errorHandler_1.AppError('Payment not found', 404);
+                }
+                const targets = [];
+                const isSale = payment.paymentType === 'sale';
+                let devId = payment === null || payment === void 0 ? void 0 : payment.developmentId;
+                const unitId = payment === null || payment === void 0 ? void 0 : payment.developmentUnitId;
+                if (isSale) {
+                    if (unitId)
+                        targets.push({ id: unitId.toString(), ledger: 'sale' });
+                    if (!devId && unitId) {
+                        try {
+                            const unitDoc = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).select('developmentId');
+                            devId = unitDoc === null || unitDoc === void 0 ? void 0 : unitDoc.developmentId;
+                        }
+                        catch (_a) { }
+                    }
+                    if (devId)
+                        targets.push({ id: devId.toString(), ledger: 'sale' });
+                    if (!unitId && !devId)
+                        targets.push({ id: payment.propertyId.toString(), ledger: 'sale' });
+                }
+                else {
+                    targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
+                }
+                for (const target of targets) {
+                    const account = yield this.getOrCreatePropertyAccount(target.id, target.ledger);
+                    const originalIncomeIds = (account.transactions || [])
+                        .filter((t) => t.type === 'income' &&
+                        String(t.paymentId || '') === String(payment._id || '') &&
+                        String(t.status || '') === 'completed')
+                        .map((t) => t._id)
+                        .filter(Boolean);
+                    // Clean up accidental legacy posting of reversal payment as income.
+                    const reversalPaymentId = payment.reversalPaymentId ? String(payment.reversalPaymentId) : '';
+                    const reversalIncomeIds = (account.transactions || [])
+                        .filter((t) => t.type === 'income' &&
+                        reversalPaymentId &&
+                        String(t.paymentId || '') === reversalPaymentId &&
+                        String(t.status || '') === 'completed')
+                        .map((t) => t._id)
+                        .filter(Boolean);
+                    const idsToCancel = [...originalIncomeIds, ...reversalIncomeIds];
+                    if (idsToCancel.length > 0) {
+                        yield PropertyAccount_1.default.updateOne({ _id: account._id }, {
+                            $set: {
+                                'transactions.$[t].status': 'cancelled',
+                                'transactions.$[t].updatedAt': new Date(),
+                                'transactions.$[t].notes': (opts === null || opts === void 0 ? void 0 : opts.reason) || 'Payment reversed',
+                                lastUpdated: new Date()
+                            }
+                        }, {
+                            arrayFilters: [{ 't._id': { $in: idsToCancel } }]
+                        });
+                    }
+                    // Retire old expense-based reversal rows for this payment to avoid duplicate noise.
+                    yield PropertyAccount_1.default.updateOne({ _id: account._id }, {
+                        $set: {
+                            'transactions.$[t].status': 'cancelled',
+                            'transactions.$[t].updatedAt': new Date(),
+                            lastUpdated: new Date()
+                        }
+                    }, {
+                        arrayFilters: [{
+                                't.type': 'expense',
+                                't.category': 'payment_reversal',
+                                't.paymentId': new mongoose_1.default.Types.ObjectId(paymentId),
+                                't.status': 'completed'
+                            }]
+                    });
+                    const fresh = yield PropertyAccount_1.default.findById(account._id);
+                    if (fresh) {
+                        yield this.recalculateBalance(fresh);
+                    }
+                }
+            }
+            catch (error) {
+                logger_1.logger.error('Error reversing income from payment:', error);
                 throw error;
             }
         });
@@ -940,6 +1084,7 @@ class PropertyAccountService {
                 }
                 // Recalculate balance for the account
                 const finalAccount = account;
+                yield this.reconcileReversedPaymentArtifacts(finalAccount);
                 yield this.recalculateBalance(finalAccount);
                 return finalAccount;
             }

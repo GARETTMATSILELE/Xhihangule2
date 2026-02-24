@@ -1,6 +1,7 @@
 import React from 'react';
 import { leadService } from '../../services/leadService';
 import SalesSidebar from '../../components/Layout/SalesSidebar';
+import { useProperties } from '../../contexts/PropertyContext';
 
 const cls = (...s: any[]) => s.filter(Boolean).join(' ');
 
@@ -21,21 +22,7 @@ const Input = (props: any) => (
 );
 
 export function LeadsPage() {
-  const [properties, setProperties] = React.useState<any[]>([]);
-  React.useEffect(() => {
-    (async () => {
-      try {
-        const mod = await import('../../services/propertyService');
-        const svc = mod.usePropertyService ? mod.usePropertyService() : null;
-        if (svc && svc.getProperties) {
-          const props = await svc.getProperties();
-          setProperties(Array.isArray(props) ? props.filter((p:any)=> (p as any).rentalType === 'sale') : []);
-        }
-      } catch {
-        setProperties([]);
-      }
-    })();
-  }, []);
+  const { properties } = useProperties();
   const [leads, setLeads] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);

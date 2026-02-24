@@ -143,7 +143,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
               SelectProps={{ native: true }}
             >
               <option value="INDIVIDUAL">Individual (up to 10 properties)</option>
-              <option value="SME">SME (up to 25 properties)</option>
+              <option value="SME">SME (up to 120 properties)</option>
               <option value="ENTERPRISE">Enterprise (unlimited)</option>
             </TextField>
           </>

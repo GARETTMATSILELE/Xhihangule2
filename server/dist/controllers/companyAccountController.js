@@ -8,9 +8,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createCompanyTransaction = exports.getCompanyTransactions = exports.getCompanyAccountSummary = void 0;
 const CompanyAccount_1 = require("../models/CompanyAccount");
+const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
 const getCompanyAccountSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -46,7 +50,7 @@ const getCompanyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, f
 });
 exports.getCompanyTransactions = getCompanyTransactions;
 const createCompanyTransaction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.body.companyId;
         if (!companyId) {
@@ -87,6 +91,17 @@ const createCompanyTransaction = (req, res) => __awaiter(void 0, void 0, void 0,
         }
         account.lastUpdated = now;
         yield account.save();
+        if (tx.type === 'expense') {
+            yield accountingIntegrationService_1.default.syncExpenseCreated({
+                companyId: String(companyId),
+                sourceId: String((tx === null || tx === void 0 ? void 0 : tx._id) || `${Date.now()}`),
+                reference: reference || `EXP-${Date.now()}`,
+                amount,
+                description: description || category || 'Company expense',
+                date: tx.date,
+                createdBy: (_c = req.user) === null || _c === void 0 ? void 0 : _c.userId
+            });
+        }
         return res.status(201).json({ message: 'Transaction recorded', account, transaction: tx });
     }
     catch (err) {

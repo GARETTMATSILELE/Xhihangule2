@@ -391,7 +391,17 @@ const ReportsPage: React.FC = () => {
         const vatOnCommission = Number(cd.vatOnCommission || 0);
         const ownerBeforeVat = Number((amount - totalCommission));
         const ownerAfterVat = Number((cd.ownerAmount != null ? cd.ownerAmount : (amount - totalCommission - vatOnCommission)));
-        const pct = amount ? Number(((totalCommission / amount) * 100).toFixed(2)) : 0;
+        const vatIncluded = Boolean((p as any).vatIncluded);
+        const rawVatAmount = Number((p as any).vatAmount || 0);
+        const vatRate = Number((p as any).vatRate || 0);
+        const amountExVat = (() => {
+          if (!vatIncluded) return amount;
+          if (rawVatAmount > 0) return Math.max(0, amount - rawVatAmount);
+          if (vatRate > 0) return amount / (1 + vatRate);
+          return amount;
+        })();
+        const pctBase = amountExVat > 0 ? amountExVat : amount;
+        const pct = pctBase ? Number(((totalCommission / pctBase) * 100).toFixed(2)) : 0;
         const split = (cd.agentSplit || {}) as any;
         const splitOwnerPct = Number(split.splitPercentOwner || 0);
         const splitCollabPct = Number(split.splitPercentCollaborator || 0);
@@ -401,6 +411,15 @@ const ReportsPage: React.FC = () => {
         const collaboratorUserId = split.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
         const ownerAgentName = ownerUserId ? (agentsById[ownerUserId] || ownerUserId) : '';
         const collaboratorAgentName = collaboratorUserId ? (agentsById[collaboratorUserId] || collaboratorUserId) : '';
+        const vatAmount = (() => {
+          if (!vatIncluded) return 0;
+          if (rawVatAmount > 0) return rawVatAmount;
+          if (vatRate > 0) {
+            const taxableBase = amount / (1 + vatRate);
+            return Math.max(0, amount - taxableBase);
+          }
+          return 0;
+        })();
         return {
           id: p._id,
           date: effectiveDate.toISOString().slice(0,10),
@@ -413,6 +432,7 @@ const ReportsPage: React.FC = () => {
           buyer,
           seller,
           amount,
+          vatAmount,
           pct,
           totalCommission,
           preafee,
@@ -477,6 +497,8 @@ const ReportsPage: React.FC = () => {
                 <h2>Sale Summary</h2>
                 <table>
                   <tr><td>Total Sale Amount</td><td class="right">${currency(t.amount)}</td></tr>
+                  <tr><td>VAT (on Sale Amount)</td><td class="right">${currency(t.vatAmount || 0)}</td></tr>
+                  <tr><td>Amount After VAT (Sale Amount)</td><td class="right">${currency(Math.max(0, (t.amount || 0) - (t.vatAmount || 0)))}</td></tr>
                   <tr><td>Commission %</td><td class="right">${t.pct}%</td></tr>
                   <tr><td>Total Commission</td><td class="right">${currency(t.totalCommission)}</td></tr>
                   <tr><td>Prea Fee</td><td class="right">${currency(t.preafee)}</td></tr>
@@ -502,11 +524,11 @@ const ReportsPage: React.FC = () => {
             </div>
 
             <div class="section">
-              <h2>Owner Settlement</h2>
+              <h2>Seller Settlement</h2>
               <table>
-                <tr><td>Owner Amount (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
+                <tr><td>Seller Amount (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
                 <tr><td>VAT on Commission</td><td class="right">${currency(t.vatOnCommission)}</td></tr>
-                <tr class="total"><td>Owner Amount (after VAT on commission)</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
+                <tr class="total"><td>Seller Amount (after VAT on commission)</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
               </table>
             </div>
 

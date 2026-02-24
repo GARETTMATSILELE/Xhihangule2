@@ -11,9 +11,177 @@ import { User } from '../models/User';
 import { Company } from '../models/Company';
 import { SalesContract } from '../models/SalesContract';
 import { Tenant } from '../models/Tenant';
+import { PaymentAuditLog } from '../models/PaymentAuditLog';
 import propertyAccountService from '../services/propertyAccountService';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
+import accountingIntegrationService from '../services/accountingIntegrationService';
+import { emitEvent } from '../events/eventBus';
+import trustEventRetryService from '../services/trustEventRetryService';
+
+const isConfirmedStatus = (status?: string): boolean => {
+  const s = String(status || '').toLowerCase();
+  return s === 'completed' || s === 'confirmed';
+};
+
+const emitPaymentConfirmedIfNeeded = async (payment: any, sourceEvent: string): Promise<void> => {
+  if (!payment || !payment._id || !isConfirmedStatus(payment.status)) return;
+  const updateResult = await Payment.updateOne(
+    {
+      _id: payment._id,
+      companyId: payment.companyId,
+      trustEventEmittedAt: { $exists: false }
+    },
+    { $set: { trustEventEmittedAt: new Date(), lastTrustEventSource: sourceEvent } }
+  );
+
+  if (!Number((updateResult as any).modifiedCount || 0)) return;
+
+  const payload = {
+    eventId: `payment.confirmed:${String(payment._id)}`,
+    paymentId: String(payment._id),
+    propertyId: String(payment.propertyId || ''),
+    payerId: String(payment.tenantId || ''),
+    amount: Number(payment.amount || 0),
+    reference: String(payment.referenceNumber || ''),
+    date: new Date(payment.paymentDate || new Date()).toISOString(),
+    companyId: String(payment.companyId || ''),
+    performedBy: String(payment.processedBy || '')
+  };
+
+  try {
+    await emitEvent('payment.confirmed', payload);
+  } catch (error: any) {
+    await trustEventRetryService.enqueueFailure(
+      'payment.confirmed',
+      payload as unknown as Record<string, unknown>,
+      error?.message || 'failed to emit payment.confirmed',
+      String(payment.companyId || '')
+    );
+  }
+};
+
+const hasFinancePrivileges = (user: any): boolean => {
+  const roles = ((user?.roles as string[] | undefined) || [user?.role]).map((r) => String(r || '').toLowerCase());
+  return roles.some((r) => ['admin', 'accountant', 'principal', 'prea', 'finance'].includes(r));
+};
+
+const isAccountingPeriodLocked = (paymentDate: Date | string | undefined): boolean => {
+  const lockBefore = process.env.ACCOUNTING_PERIOD_LOCK_BEFORE;
+  if (!lockBefore) return false;
+  const cutoff = new Date(lockBefore);
+  const txDate = paymentDate ? new Date(paymentDate) : new Date();
+  if (Number.isNaN(cutoff.getTime()) || Number.isNaN(txDate.getTime())) return false;
+  return txDate < cutoff;
+};
+
+const buildSaleCommissionDetails = async (input: {
+  amount: number;
+  companyId: string;
+  propertyId?: any;
+  vatIncluded?: boolean;
+  vatRate?: number;
+  existingSplit?: any;
+  commissionPercentOverride?: number;
+}) => {
+  const grossAmount = Math.max(0, Number(input.amount || 0));
+  const saleVatRate = Math.max(0, Math.min(1, Number(input.vatRate ?? 0.155)));
+  const saleVatAmount = input.vatIncluded
+    ? Number((grossAmount - grossAmount / (1 + saleVatRate)).toFixed(2))
+    : 0;
+  const commissionBaseAmount = Math.max(0, Number((grossAmount - saleVatAmount).toFixed(2)));
+  const companyObjectId = new mongoose.Types.ObjectId(String(input.companyId));
+  let commissionPercent = Number(input.commissionPercentOverride);
+  if (!Number.isFinite(commissionPercent) || commissionPercent <= 0) {
+    commissionPercent = 5;
+    try {
+      if (input.propertyId && mongoose.Types.ObjectId.isValid(String(input.propertyId))) {
+        const property = await Property.findById(new mongoose.Types.ObjectId(String(input.propertyId))).select('commission').lean();
+        if (typeof (property as any)?.commission === 'number' && Number((property as any).commission) > 0) {
+          commissionPercent = Number((property as any).commission);
+        }
+      }
+    } catch {
+      // keep fallback percent
+    }
+  }
+
+  const computed = await CommissionService.calculate(commissionBaseAmount, commissionPercent, companyObjectId);
+  const company = await Company.findById(companyObjectId).lean();
+  const configuredVat = Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
+  const vatOnCommissionRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
+  const vatOnCommission = Number((Number(computed.totalCommission || 0) * vatOnCommissionRate).toFixed(2));
+  const result: any = {
+    totalCommission: Number(Number(computed.totalCommission || 0).toFixed(2)),
+    preaFee: Number(Number(computed.preaFee || 0).toFixed(2)),
+    agentShare: Number(Number(computed.agentShare || 0).toFixed(2)),
+    agencyShare: Number(Number(computed.agencyShare || 0).toFixed(2)),
+    vatOnCommission,
+    ownerAmount: Number((grossAmount - saleVatAmount - Number(computed.totalCommission || 0) - vatOnCommission).toFixed(2))
+  };
+
+  const split = input.existingSplit;
+  if (split && typeof split === 'object') {
+    const ownerPct = Math.max(0, Math.min(100, Number(split?.splitPercentOwner ?? 0)));
+    const collabPct = Math.max(0, Math.min(100, Number(split?.splitPercentCollaborator ?? (100 - ownerPct))));
+    if (split?.ownerUserId || split?.collaboratorUserId) {
+      const ownerAgentShare = Number((result.agentShare * (ownerPct / 100)).toFixed(2));
+      const collaboratorAgentShare = Number((result.agentShare * (collabPct / 100)).toFixed(2));
+      result.agentSplit = {
+        ownerAgentShare,
+        collaboratorAgentShare,
+        ownerUserId: split?.ownerUserId,
+        collaboratorUserId: split?.collaboratorUserId,
+        splitPercentOwner: ownerPct,
+        splitPercentCollaborator: collabPct
+      };
+    }
+  }
+
+  return result;
+};
+
+const paymentAuditSnapshot = (payment: any): Record<string, any> => ({
+  _id: String(payment?._id || ''),
+  amount: Number(payment?.amount || 0),
+  status: String(payment?.status || ''),
+  postingStatus: String(payment?.postingStatus || ''),
+  paymentType: String(payment?.paymentType || ''),
+  paymentDate: payment?.paymentDate || null,
+  paymentMethod: String(payment?.paymentMethod || ''),
+  propertyId: String(payment?.propertyId || ''),
+  tenantId: String(payment?.tenantId || ''),
+  leaseId: payment?.leaseId ? String(payment.leaseId) : null,
+  companyId: String(payment?.companyId || ''),
+  referenceNumber: String(payment?.referenceNumber || ''),
+  reversalOfPaymentId: payment?.reversalOfPaymentId ? String(payment.reversalOfPaymentId) : null,
+  reversalPaymentId: payment?.reversalPaymentId ? String(payment.reversalPaymentId) : null,
+  correctedPaymentId: payment?.correctedPaymentId ? String(payment.correctedPaymentId) : null,
+});
+
+const logPaymentAudit = async (input: {
+  paymentId: string;
+  companyId: string;
+  action: 'create' | 'edit' | 'post' | 'reverse' | 'delete' | 'void';
+  oldValues?: Record<string, any>;
+  newValues?: Record<string, any>;
+  reason?: string;
+  userId?: string;
+}) => {
+  try {
+    await PaymentAuditLog.create({
+      paymentId: new mongoose.Types.ObjectId(input.paymentId),
+      companyId: new mongoose.Types.ObjectId(input.companyId),
+      action: input.action,
+      oldValues: input.oldValues,
+      newValues: input.newValues,
+      reason: input.reason,
+      userId: input.userId ? new mongoose.Types.ObjectId(input.userId) : undefined,
+    });
+  } catch (e) {
+    console.warn('Non-fatal: failed to write payment audit log', e);
+  }
+};
 
 // List sales-only payments for a company
 export const getCompanySalesPayments = async (req: Request, res: Response) => {
@@ -482,6 +650,14 @@ export const createPayment = async (req: Request, res: Response) => {
     // Generate reference number after save (using payment._id)
     payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
     await payment.save();
+    await logPaymentAudit({
+      paymentId: String(payment._id),
+      companyId: String(payment.companyId),
+      action: String(payment.status || '') === 'completed' ? 'post' : 'create',
+      newValues: paymentAuditSnapshot(payment),
+      reason: 'Initial payment creation',
+      userId: req.user.userId
+    });
 
     // If depositAmount > 0, record in rentaldeposits
     if (payment.depositAmount && payment.depositAmount > 0) {
@@ -572,6 +748,14 @@ export const createPayment = async (req: Request, res: Response) => {
 
     // Email agent with payment details (fire-and-forget)
     void sendAgentPaymentNotificationEmail(payment);
+
+    // Non-blocking accounting sync hook.
+    if (payment.status === 'completed') {
+      await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
+    }
+
+    // Primary event-driven trigger for trust posting.
+    await emitPaymentConfirmedIfNeeded(payment, 'payment.create');
 
     res.status(201).json({
       message: 'Payment processed successfully',
@@ -915,6 +1099,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     });
     // Save and related updates (with or without session)
     await payment.save(session ? { session } : undefined);
+    await logPaymentAudit({
+      paymentId: String(payment._id),
+      companyId: String(payment.companyId),
+      action: String(payment.status || '') === 'completed' ? 'post' : 'create',
+      newValues: paymentAuditSnapshot(payment),
+      reason: payment.isProvisional ? 'Manual provisional entry' : 'Accountant payment creation',
+      userId: user.userId
+    });
 
     // If depositAmount > 0, record in rentaldeposits (ledger)
     if (payment.depositAmount && payment.depositAmount > 0) {
@@ -1067,6 +1259,10 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
 
     if ('payment' in result) {
+      if ((result.payment as any)?.status === 'completed' && !(result.payment as any)?.isProvisional) {
+        await accountingIntegrationService.syncPaymentReceived(result.payment as any, { createdBy: currentUser.userId });
+        await emitPaymentConfirmedIfNeeded(result.payment as any, 'payment.create.accountant');
+      }
       return res.status(201).json({
         message: 'Payment processed successfully',
         payment: result.payment,
@@ -1085,6 +1281,10 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
           return res.status(result.error.status).json({ message: result.error.message });
         }
         if ('payment' in result) {
+          if ((result.payment as any)?.status === 'completed' && !(result.payment as any)?.isProvisional) {
+            await accountingIntegrationService.syncPaymentReceived(result.payment as any, { createdBy: currentUser.userId });
+            await emitPaymentConfirmedIfNeeded(result.payment as any, 'payment.create.accountant');
+          }
           return res.status(201).json({
             message: 'Payment processed successfully',
             payment: result.payment,
@@ -1140,8 +1340,16 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       rentalPeriodYear,
       saleMode,
       developmentId,
-      developmentUnitId
+      developmentUnitId,
+      vatIncluded,
+      vatRate
     } = req.body as any;
+    const normalizedVatIncluded = Boolean(vatIncluded);
+    const saleVatRate = Math.max(0, Math.min(1, Number(vatRate ?? 0.155)));
+    const grossAmount = Number(amount || 0);
+    const vatAmount = normalizedVatIncluded ? Number((grossAmount - (grossAmount / (1 + saleVatRate))).toFixed(2)) : 0;
+    const taxableAmountForAllocation = Number((grossAmount - vatAmount).toFixed(2));
+
 
     if (!amount || !paymentDate || !paymentMethod) {
       return res.status(400).json({ message: 'Missing required fields: amount, paymentDate, paymentMethod' });
@@ -1221,12 +1429,12 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
           percent = typeof prop?.commission === 'number' ? (prop as any).commission : 15;
         }
         finalCommissionDetails = await CommissionService.calculate(
-          amount,
+          taxableAmountForAllocation,
           percent,
           new mongoose.Types.ObjectId(user.companyId)
         ) as any;
       } catch {
-        const fallback = (await import('../utils/money')).computeCommissionFallback(amount, 15);
+        const fallback = (await import('../utils/money')).computeCommissionFallback(taxableAmountForAllocation, 15);
         finalCommissionDetails = {
           totalCommission: fallback.totalCommission,
           preaFee: fallback.preaFee,
@@ -1245,7 +1453,7 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       const commissionBase = Number(((finalCommissionDetails as any)?.totalCommission) || 0);
       const vatOnCommission = Number((commissionBase * vatRate).toFixed(2));
       (finalCommissionDetails as any).vatOnCommission = vatOnCommission;
-      (finalCommissionDetails as any).ownerAmount = Number((amount - commissionBase - vatOnCommission).toFixed(2));
+      (finalCommissionDetails as any).ownerAmount = Number((taxableAmountForAllocation - commissionBase - vatOnCommission).toFixed(2));
     }
 
     // If development and agent are provided, and the agent is a collaborator on that development,
@@ -1332,6 +1540,9 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       notes: notes || '',
       processedBy: procBy,
       commissionDetails: finalCommissionDetails,
+      vatIncluded: normalizedVatIncluded,
+      vatRate: normalizedVatIncluded ? saleVatRate : 0,
+      vatAmount,
       status: 'completed',
       currency: currency || 'USD',
       rentalPeriodMonth: periodMonth,
@@ -1359,6 +1570,9 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
 
     // Record income in property accounts
     try { await propertyAccountService.recordIncomeFromPayment(payment._id.toString()); } catch (e) { try { const ledgerEventService = (await import('../services/ledgerEventService')).default; await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString()); } catch {} console.warn('Non-fatal: property account record failed (sales), enqueued for retry', e); }
+
+    await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: user.userId });
+    await emitPaymentConfirmedIfNeeded(payment, 'payment.create.sales');
 
     // Notify the primary agent and split participants for completed sale payment
     try {
@@ -1404,17 +1618,106 @@ export const updatePayment = async (req: Request, res: Response) => {
   }
 
   try {
-    const payment = await Payment.findOneAndUpdate(
-      { 
-        _id: req.params.id,
-        companyId: req.user.companyId 
-      },
-      req.body,
-      { new: true }
-    );
+    const payment = await Payment.findOne({
+      _id: req.params.id,
+      companyId: req.user.companyId
+    });
     if (!payment) {
       return res.status(404).json({ message: 'Payment not found' });
     }
+
+    if (String((payment as any).postingStatus || '') !== 'draft') {
+      return res.status(409).json({ message: 'Only draft payments can be edited. Reverse posted payments instead.' });
+    }
+    if (isAccountingPeriodLocked(payment.paymentDate)) {
+      return res.status(409).json({ message: 'Accounting period is locked. Post an adjustment entry instead.' });
+    }
+
+    const before = paymentAuditSnapshot(payment);
+    const previousStatus = String(payment.status || '').toLowerCase();
+    const editableFields = new Set([
+      'paymentDate', 'paymentMethod', 'amount', 'depositAmount', 'referenceNumber', 'notes', 'currency',
+      'rentalPeriodMonth', 'rentalPeriodYear', 'advanceMonthsPaid', 'advancePeriodStart', 'advancePeriodEnd',
+      'manualPropertyAddress', 'manualTenantName', 'buyerName', 'sellerName', 'status', 'postingStatus',
+      'commissionDetails', 'vatIncluded', 'vatRate', 'vatAmount'
+    ]);
+    for (const [k, v] of Object.entries(req.body || {})) {
+      if (!editableFields.has(k)) continue;
+      (payment as any)[k] = v;
+    }
+
+    if ((payment as any).paymentType === 'sale') {
+      const grossAmount = Math.max(0, Number((payment as any).amount || 0));
+      const rawDetails = (payment as any).commissionDetails || {};
+      const totalCommission = Number(rawDetails?.totalCommission || 0);
+      const explicitCommissionPercent =
+        Number(req.body?.commissionPercent) > 0
+          ? Number(req.body?.commissionPercent)
+          : (() => {
+              const saleVatRate = Math.max(0, Math.min(1, Number((payment as any).vatRate ?? 0.155)));
+              const saleVatAmount = Boolean((payment as any).vatIncluded)
+                ? Number((grossAmount - grossAmount / (1 + saleVatRate)).toFixed(2))
+                : 0;
+              const commissionBase = Math.max(0, Number((grossAmount - saleVatAmount).toFixed(2)));
+              return commissionBase > 0
+                ? Number(((totalCommission / commissionBase) * 100).toFixed(4))
+                : undefined;
+            })();
+      const recomputed = await buildSaleCommissionDetails({
+        amount: grossAmount,
+        companyId: String((payment as any).companyId || req.user.companyId),
+        propertyId: (payment as any).propertyId,
+        vatIncluded: Boolean((payment as any).vatIncluded),
+        vatRate: Number((payment as any).vatRate ?? 0.155),
+        existingSplit: rawDetails?.agentSplit,
+        commissionPercentOverride: explicitCommissionPercent
+      });
+      (payment as any).commissionDetails = recomputed;
+    }
+
+    const nextStatus = String((payment as any).status || '').toLowerCase();
+    if (nextStatus === 'completed') {
+      (payment as any).postingStatus = 'posted';
+    } else if (nextStatus === 'pending') {
+      (payment as any).postingStatus = 'draft';
+    } else if (nextStatus === 'failed') {
+      (payment as any).postingStatus = 'voided';
+    }
+    await payment.save();
+
+    if (previousStatus !== 'completed' && nextStatus === 'completed') {
+      await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
+      await agentAccountService.syncCommissionForPayment(String(payment._id));
+      try {
+        await propertyAccountService.recordIncomeFromPayment(String(payment._id));
+      } catch (e) {
+        try {
+          const ledgerEventService = (await import('../services/ledgerEventService')).default;
+          await ledgerEventService.enqueueOwnerIncomeEvent(String(payment._id));
+        } catch {}
+      }
+      await emitPaymentConfirmedIfNeeded(payment, 'payment.update');
+      await logPaymentAudit({
+        paymentId: String(payment._id),
+        companyId: String(payment.companyId),
+        action: 'post',
+        oldValues: before,
+        newValues: paymentAuditSnapshot(payment),
+        reason: typeof req.body?.reason === 'string' ? req.body.reason : 'Draft correction completed',
+        userId: req.user.userId
+      });
+    } else {
+      await logPaymentAudit({
+        paymentId: String(payment._id),
+        companyId: String(payment.companyId),
+        action: 'edit',
+        oldValues: before,
+        newValues: paymentAuditSnapshot(payment),
+        reason: typeof req.body?.reason === 'string' ? req.body.reason : undefined,
+        userId: req.user.userId
+      });
+    }
+
     res.json(payment);
   } catch (error) {
     console.error('Error updating payment:', error);
@@ -1428,13 +1731,33 @@ export const deletePayment = async (req: Request, res: Response) => {
   }
 
   try {
-    const payment = await Payment.findOneAndDelete({
+    const payment = await Payment.findOne({
       _id: req.params.id,
       companyId: req.user.companyId
     });
     if (!payment) {
       return res.status(404).json({ message: 'Payment not found' });
     }
+    const postingStatus = String((payment as any).postingStatus || '');
+    const legacyPosted = String(payment.status || '') === 'completed';
+    if (postingStatus === 'posted' || postingStatus === 'reversed' || postingStatus === 'voided' || legacyPosted) {
+      return res.status(409).json({ message: 'Posted payments cannot be deleted. Use reversal workflow.' });
+    }
+    if (isAccountingPeriodLocked(payment.paymentDate)) {
+      return res.status(409).json({ message: 'Accounting period is locked. Draft cannot be deleted in this period.' });
+    }
+
+    const before = paymentAuditSnapshot(payment);
+    await Payment.deleteOne({ _id: payment._id });
+    await logPaymentAudit({
+      paymentId: String(payment._id),
+      companyId: String(payment.companyId),
+      action: 'delete',
+      oldValues: before,
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : undefined,
+      userId: req.user.userId
+    });
+
     res.json({ message: 'Payment deleted successfully' });
   } catch (error) {
     console.error('Error deleting payment:', error);
@@ -1471,6 +1794,10 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     // Status filter
     if (req.query.status) {
       query.status = req.query.status;
+    }
+    // Payment type filter (e.g., rental-only accountant list)
+    if (req.query.paymentType && typeof req.query.paymentType === 'string') {
+      query.paymentType = req.query.paymentType;
     }
     // Payment method filter
     if (req.query.paymentMethod) {
@@ -1736,9 +2063,9 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
   }
 
   try {
-    const { status } = req.body;
+    const { status, reason } = req.body;
 
-    if (!['pending', 'completed', 'failed'].includes(status)) {
+    if (!['pending', 'completed', 'failed', 'reversed'].includes(status)) {
       return res.status(400).json({
         message: 'Invalid status',
       });
@@ -1759,8 +2086,53 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
       });
     }
 
+    if (isAccountingPeriodLocked(payment.paymentDate) && status !== 'reversed') {
+      return res.status(409).json({ message: 'Accounting period is locked. Post an adjustment entry instead.' });
+    }
+
+    if (status === 'reversed') {
+      return res.status(400).json({ message: 'Use /payments/:id/reverse endpoint for reversals.' });
+    }
+
+    const previousStatus = payment.status;
+    const previousPostingStatus = (payment as any).postingStatus;
+    const before = paymentAuditSnapshot(payment);
     payment.status = status;
+    if (status === 'completed') {
+      (payment as any).postingStatus = 'posted';
+    } else if (status === 'pending') {
+      (payment as any).postingStatus = 'draft';
+    } else if (status === 'failed') {
+      (payment as any).postingStatus = 'voided';
+      (payment as any).voidedAt = new Date();
+      (payment as any).voidedBy = new mongoose.Types.ObjectId(req.user.userId);
+      (payment as any).voidReason = reason || '';
+    }
     await payment.save();
+
+    if (previousStatus !== 'completed' && status === 'completed') {
+      await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
+      await emitPaymentConfirmedIfNeeded(payment, 'payment.status.updated');
+      await logPaymentAudit({
+        paymentId: String(payment._id),
+        companyId: String(payment.companyId),
+        action: 'post',
+        oldValues: { ...before, previousPostingStatus },
+        newValues: paymentAuditSnapshot(payment),
+        reason: typeof reason === 'string' ? reason : undefined,
+        userId: req.user.userId
+      });
+    } else {
+      await logPaymentAudit({
+        paymentId: String(payment._id),
+        companyId: String(payment.companyId),
+        action: status === 'failed' ? 'void' : 'edit',
+        oldValues: before,
+        newValues: paymentAuditSnapshot(payment),
+        reason: typeof reason === 'string' ? reason : undefined,
+        userId: req.user.userId
+      });
+    }
 
     res.json({
       message: 'Payment status updated successfully',
@@ -1772,6 +2144,245 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
       message: 'Failed to update payment status',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
+  }
+};
+
+export const reversePayment = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+  if (!hasFinancePrivileges(req.user)) {
+    return res.status(403).json({ message: 'Only finance/admin roles can reverse posted payments.' });
+  }
+
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) {
+    return res.status(400).json({ message: 'Reversal reason is required.' });
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    let resultPayload: any = null;
+    const applyReversal = async (opts?: { session?: any }) => {
+      const dbSession = opts?.session;
+      const originalQuery = Payment.findOne({
+        _id: req.params.id,
+        companyId: req.user!.companyId
+      });
+      const original = dbSession ? await originalQuery.session(dbSession) : await originalQuery;
+      if (!original) {
+        throw new AppError('Payment not found', 404);
+      }
+      if (isAccountingPeriodLocked(original.paymentDate)) {
+        throw new AppError('Accounting period is locked. Only adjustment entries are allowed.', 409);
+      }
+
+      const postingStatus = String((original as any).postingStatus || '');
+      const isPosted = postingStatus === 'posted' || String(original.status || '') === 'completed';
+      if (!isPosted) {
+        throw new AppError('Only posted payments can be reversed.', 409);
+      }
+      if (String((original as any).postingStatus || '') === 'reversed' || String(original.status || '') === 'reversed') {
+        throw new AppError('Payment is already reversed.', 409);
+      }
+
+      const before = paymentAuditSnapshot(original);
+
+      const reversal = new Payment({
+        paymentType: original.paymentType,
+        saleMode: (original as any).saleMode,
+        propertyType: original.propertyType,
+        propertyId: original.propertyId,
+        tenantId: original.tenantId,
+        agentId: original.agentId,
+        companyId: original.companyId,
+        paymentDate: new Date(),
+        paymentMethod: original.paymentMethod,
+        amount: -Math.abs(Number(original.amount || 0)),
+        depositAmount: -Math.abs(Number((original as any).depositAmount || 0)),
+        referenceNumber: `REV-${String(original.referenceNumber || original._id)}`,
+        rentalPeriodMonth: (original as any).rentalPeriodMonth,
+        rentalPeriodYear: (original as any).rentalPeriodYear,
+        advanceMonthsPaid: (original as any).advanceMonthsPaid,
+        advancePeriodStart: (original as any).advancePeriodStart,
+        advancePeriodEnd: (original as any).advancePeriodEnd,
+        notes: `Reversal of ${String(original.referenceNumber || original._id)}. Reason: ${reason}`,
+        processedBy: new mongoose.Types.ObjectId(req.user!.userId),
+        commissionDetails: original.commissionDetails,
+        vatIncluded: (original as any).vatIncluded,
+        vatRate: (original as any).vatRate,
+        vatAmount: (original as any).vatAmount,
+        status: 'completed',
+        postingStatus: 'posted',
+        currency: original.currency,
+        leaseId: (original as any).leaseId,
+        manualPropertyAddress: (original as any).manualPropertyAddress,
+        manualTenantName: (original as any).manualTenantName,
+        buyerName: (original as any).buyerName,
+        sellerName: (original as any).sellerName,
+        reversalOfPaymentId: original._id,
+        isCorrectionEntry: true,
+        isProvisional: false,
+        isInSuspense: false,
+        commissionFinalized: true,
+        developmentId: (original as any).developmentId,
+        developmentUnitId: (original as any).developmentUnitId,
+        saleId: (original as any).saleId,
+      });
+      await reversal.save(dbSession ? { session: dbSession } : undefined);
+
+      const correctedCommissionDetails = await buildSaleCommissionDetails({
+        amount: Math.max(0, Number(original.amount || 0)),
+        companyId: String(original.companyId || ''),
+        propertyId: (original as any).propertyId,
+        vatIncluded: Boolean((original as any).vatIncluded),
+        vatRate: Number((original as any).vatRate ?? 0.155),
+        existingSplit: (original as any)?.commissionDetails?.agentSplit
+      });
+
+      // Create a draft correction copy for manual accountant adjustments.
+      const correctedDraft = new Payment({
+        paymentType: original.paymentType,
+        saleMode: (original as any).saleMode,
+        propertyType: original.propertyType,
+        propertyId: original.propertyId,
+        tenantId: original.tenantId,
+        agentId: original.agentId,
+        companyId: original.companyId,
+        paymentDate: original.paymentDate,
+        paymentMethod: original.paymentMethod,
+        amount: Number(original.amount || 0),
+        depositAmount: Number((original as any).depositAmount || 0),
+        referenceNumber: `CORR-${String(original.referenceNumber || original._id)}`,
+        rentalPeriodMonth: (original as any).rentalPeriodMonth,
+        rentalPeriodYear: (original as any).rentalPeriodYear,
+        advanceMonthsPaid: (original as any).advanceMonthsPaid,
+        advancePeriodStart: (original as any).advancePeriodStart,
+        advancePeriodEnd: (original as any).advancePeriodEnd,
+        notes: `Correction draft for ${String(original.referenceNumber || original._id)}`,
+        processedBy: new mongoose.Types.ObjectId(req.user!.userId),
+        commissionDetails: correctedCommissionDetails,
+        vatIncluded: (original as any).vatIncluded,
+        vatRate: (original as any).vatRate,
+        vatAmount: (original as any).vatAmount,
+        status: 'pending',
+        postingStatus: 'draft',
+        currency: original.currency,
+        leaseId: (original as any).leaseId,
+        manualPropertyAddress: (original as any).manualPropertyAddress,
+        manualTenantName: (original as any).manualTenantName,
+        buyerName: (original as any).buyerName,
+        sellerName: (original as any).sellerName,
+        isCorrectionEntry: true,
+        isProvisional: false,
+        isInSuspense: false,
+        commissionFinalized: false,
+        developmentId: (original as any).developmentId,
+        developmentUnitId: (original as any).developmentUnitId,
+        saleId: (original as any).saleId,
+      });
+      await correctedDraft.save(dbSession ? { session: dbSession } : undefined);
+
+      original.status = 'reversed';
+      (original as any).postingStatus = 'reversed';
+      (original as any).reversedAt = new Date();
+      (original as any).reversedBy = new mongoose.Types.ObjectId(req.user!.userId);
+      (original as any).reversalReason = reason;
+      (original as any).reversalPaymentId = reversal._id;
+      (original as any).correctedPaymentId = correctedDraft._id;
+      await original.save(dbSession ? { session: dbSession } : undefined);
+
+      await logPaymentAudit({
+        paymentId: String(original._id),
+        companyId: String(original.companyId),
+        action: 'reverse',
+        oldValues: before,
+        newValues: paymentAuditSnapshot(original),
+        reason,
+        userId: req.user!.userId
+      });
+      await logPaymentAudit({
+        paymentId: String(reversal._id),
+        companyId: String(reversal.companyId),
+        action: 'create',
+        newValues: paymentAuditSnapshot(reversal),
+        reason: `Auto-created reversal for ${String(original._id)}`,
+        userId: req.user!.userId
+      });
+      await logPaymentAudit({
+        paymentId: String(correctedDraft._id),
+        companyId: String(correctedDraft.companyId),
+        action: 'create',
+        newValues: paymentAuditSnapshot(correctedDraft),
+        reason: `Auto-created correction draft for ${String(original._id)}`,
+        userId: req.user!.userId
+      });
+
+      resultPayload = { original, reversal, correctedDraft };
+    };
+
+    // Prefer ACID transaction on replica-set deployments.
+    // Fallback to non-transactional flow for standalone/local Mongo instances.
+    try {
+      await session.withTransaction(async () => {
+        await applyReversal({ session });
+      });
+    } catch (txErr: any) {
+      const txNotSupported =
+        Number(txErr?.code) === 20 ||
+        String(txErr?.codeName || '').toLowerCase() === 'illegaloperation' ||
+        String(txErr?.message || '').toLowerCase().includes('transaction numbers are only allowed');
+      if (!txNotSupported) throw txErr;
+      console.warn('Mongo transactions unavailable; running reversal without DB transaction.');
+      await applyReversal();
+    }
+
+    // Domain propagation after DB commit (idempotent operations).
+    const original = resultPayload?.original as any;
+    const reversal = resultPayload?.reversal as any;
+    if (original) {
+      await accountingIntegrationService.syncPaymentReversed(original, { createdBy: req.user.userId, reason });
+      await propertyAccountService.reverseIncomeFromPayment(String(original._id), { processedBy: req.user.userId, reason });
+      await agentAccountService.reverseCommissionForPayment(String(original._id), reason);
+      try {
+        await emitEvent('payment.reversed', {
+          eventId: `payment.reversed:${String(original._id)}`,
+          paymentId: String(original._id),
+          reversalPaymentId: String(reversal?._id || ''),
+          companyId: String(original.companyId || ''),
+          reason,
+          performedBy: String(req.user.userId)
+        });
+      } catch (emitErr: any) {
+        await trustEventRetryService.enqueueFailure(
+          'payment.reversed',
+          {
+            paymentId: String(original._id),
+            reversalPaymentId: String(reversal?._id || ''),
+            companyId: String(original.companyId || ''),
+            reason,
+            performedBy: String(req.user.userId),
+          },
+          emitErr?.message || 'failed to emit payment.reversed',
+          String(original.companyId || '')
+        );
+      }
+    }
+
+    return res.json({
+      message: 'Payment reversed. Draft correction created.',
+      originalPayment: resultPayload?.original,
+      reversalPayment: resultPayload?.reversal,
+      correctedPayment: resultPayload?.correctedDraft
+    });
+  } catch (error: any) {
+    const status = Number(error?.statusCode || error?.status || 500);
+    console.error('Error reversing payment:', error);
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      message: error?.message || 'Failed to reverse payment'
+    });
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -2708,6 +3319,9 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     }
 
     // Return populated payment so the UI can immediately show property/tenant details
+    await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
+    await emitPaymentConfirmedIfNeeded(payment, 'payment.finalized');
+
     const populated = await Payment.findById(payment._id)
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName')

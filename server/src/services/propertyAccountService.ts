@@ -376,6 +376,69 @@ export class PropertyAccountService {
     }
   }
 
+  private async reconcileReversedPaymentArtifacts(account: IPropertyAccount): Promise<void> {
+    try {
+      const paymentIds = Array.from(
+        new Set(
+          (account.transactions || [])
+            .map((t: any) => String(t?.paymentId || ''))
+            .filter(Boolean)
+        )
+      );
+      if (!paymentIds.length) return;
+
+      const reversedPayments = await Payment.find({
+        _id: { $in: paymentIds.map((id) => new mongoose.Types.ObjectId(id)) },
+        status: 'reversed'
+      })
+        .select('_id reversalPaymentId')
+        .lean();
+      if (!reversedPayments.length) return;
+
+      const reversedSet = new Set<string>(reversedPayments.map((p: any) => String(p._id)));
+      const reversalSet = new Set<string>(
+        reversedPayments
+          .map((p: any) => (p?.reversalPaymentId ? String(p.reversalPaymentId) : ''))
+          .filter(Boolean)
+      );
+
+      let changed = false;
+      for (const tx of (account.transactions || []) as any[]) {
+        const txPid = String(tx?.paymentId || '');
+        if (!txPid) continue;
+        const isReversedChain = reversedSet.has(txPid) || reversalSet.has(txPid);
+        if (!isReversedChain) continue;
+
+        if (tx.type === 'income' && String(tx.status || '') === 'completed') {
+          tx.status = 'cancelled';
+          tx.updatedAt = new Date();
+          tx.notes = tx.notes || 'Auto-cancelled due to payment reversal';
+          changed = true;
+        }
+        if (
+          tx.type === 'expense' &&
+          String(tx.category || '') === 'payment_reversal' &&
+          String(tx.status || '') === 'completed'
+        ) {
+          tx.status = 'cancelled';
+          tx.updatedAt = new Date();
+          tx.notes = tx.notes || 'Auto-cancelled after reversal-chain cleanup';
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        // Bypass immutable ledger middleware for reconciliation maintenance writes.
+        await (PropertyAccount as any).collection.updateOne(
+          { _id: (account as any)._id },
+          { $set: { transactions: (account as any).transactions, lastUpdated: new Date() } }
+        );
+      }
+    } catch (e) {
+      logger.warn('Failed to reconcile reversed payment artifacts (non-fatal):', e);
+    }
+  }
+
   /**
    * Record income from rental payments
    */
@@ -385,6 +448,10 @@ export class PropertyAccountService {
       if (!payment) {
         throw new AppError('Payment not found', 404);
       }
+
+      // Reversal rows and correction entries must not be posted as new income.
+      if ((payment as any).reversalOfPaymentId) return;
+      if (Number(payment.amount || 0) < 0) return;
 
       if (payment.status !== 'completed') {
         logger.info(`Skipping income recording for payment ${paymentId} - status: ${payment.status}`);
@@ -510,6 +577,102 @@ export class PropertyAccountService {
 
     } catch (error) {
       logger.error('Error recording income from payment:', error);
+      throw error;
+    }
+  }
+
+  async reverseIncomeFromPayment(paymentId: string, opts?: { processedBy?: string; reason?: string }): Promise<void> {
+    try {
+      const payment = await Payment.findById(paymentId);
+      if (!payment) {
+        throw new AppError('Payment not found', 404);
+      }
+
+      const targets: Array<{ id: string; ledger: 'rental' | 'sale' }> = [];
+      const isSale = payment.paymentType === 'sale';
+      let devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
+      const unitId = (payment as any)?.developmentUnitId as mongoose.Types.ObjectId | undefined;
+      if (isSale) {
+        if (unitId) targets.push({ id: unitId.toString(), ledger: 'sale' });
+        if (!devId && unitId) {
+          try { const unitDoc = await DevelopmentUnit.findById(unitId).select('developmentId'); devId = unitDoc?.developmentId as any; } catch {}
+        }
+        if (devId) targets.push({ id: devId.toString(), ledger: 'sale' });
+        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: 'sale' });
+      } else {
+        targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
+      }
+
+      for (const target of targets) {
+        const account = await this.getOrCreatePropertyAccount(target.id, target.ledger);
+        const originalIncomeIds = (account.transactions || [])
+          .filter(
+            (t: any) =>
+              t.type === 'income' &&
+              String(t.paymentId || '') === String(payment._id || '') &&
+              String(t.status || '') === 'completed'
+          )
+          .map((t: any) => t._id)
+          .filter(Boolean);
+
+        // Clean up accidental legacy posting of reversal payment as income.
+        const reversalPaymentId = (payment as any).reversalPaymentId ? String((payment as any).reversalPaymentId) : '';
+        const reversalIncomeIds = (account.transactions || [])
+          .filter(
+            (t: any) =>
+              t.type === 'income' &&
+              reversalPaymentId &&
+              String(t.paymentId || '') === reversalPaymentId &&
+              String(t.status || '') === 'completed'
+          )
+          .map((t: any) => t._id)
+          .filter(Boolean);
+
+        const idsToCancel = [...originalIncomeIds, ...reversalIncomeIds];
+        if (idsToCancel.length > 0) {
+          await PropertyAccount.updateOne(
+            { _id: (account as any)._id },
+            {
+              $set: {
+                'transactions.$[t].status': 'cancelled',
+                'transactions.$[t].updatedAt': new Date(),
+                'transactions.$[t].notes': opts?.reason || 'Payment reversed',
+                lastUpdated: new Date()
+              }
+            },
+            {
+              arrayFilters: [{ 't._id': { $in: idsToCancel } }] as any
+            } as any
+          );
+        }
+
+        // Retire old expense-based reversal rows for this payment to avoid duplicate noise.
+        await PropertyAccount.updateOne(
+          { _id: (account as any)._id },
+          {
+            $set: {
+              'transactions.$[t].status': 'cancelled',
+              'transactions.$[t].updatedAt': new Date(),
+              lastUpdated: new Date()
+            }
+          },
+          {
+            arrayFilters: [{
+              't.type': 'expense',
+              't.category': 'payment_reversal',
+              't.paymentId': new mongoose.Types.ObjectId(paymentId),
+              't.status': 'completed'
+            }] as any
+          } as any
+        );
+
+        const fresh = await PropertyAccount.findById((account as any)._id) as any;
+        if (fresh) {
+          await this.recalculateBalance(fresh as any);
+        }
+      }
+    } catch (error) {
+      logger.error('Error reversing income from payment:', error);
       throw error;
     }
   }
@@ -990,6 +1153,7 @@ export class PropertyAccountService {
       
       // Recalculate balance for the account
       const finalAccount = account as unknown as IPropertyAccount;
+      await this.reconcileReversedPaymentArtifacts(finalAccount);
       await this.recalculateBalance(finalAccount);
       
       return finalAccount;

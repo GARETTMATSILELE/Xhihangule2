@@ -104,6 +104,9 @@ const setTokens = (newAccessToken: string | null, newRefreshToken: string | null
 const getAccessToken = () => accessToken;
 const getRefreshToken = () => refreshToken;
 
+const isTransientNetworkError = (err: unknown) =>
+  err instanceof AxiosError && (!err.response || err.code === 'ECONNABORTED');
+
 // Utility function to clear all tokens and notify app to route to login
 const clearAllTokens = () => {
   setTokens(null, null);
@@ -155,11 +158,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Check if we have tokens in localStorage (for persistence across page reloads)
         const storedAccessToken = localStorage.getItem('accessToken');
         const storedRefreshToken = null; // refresh handled via HttpOnly cookie; do not rely on storage
+        const storedUser = localStorage.getItem('user');
         const storedImpersonating = localStorage.getItem('impersonating') === 'true';
         
         if (storedAccessToken) {
           setTokens(storedAccessToken, null);
           setIsImpersonating(storedImpersonating);
+          if (storedUser) {
+            try {
+              const parsedUser = JSON.parse(storedUser);
+              setUser(parsedUser);
+              setIsAuthenticated(true);
+            } catch {}
+          }
           
           try {
             // Validate the token by fetching user data (fail fast, don't block UI long)
@@ -227,6 +238,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 throw new Error('No new access token received');
               }
             } catch (refreshError) {
+              if (isTransientNetworkError(refreshError)) {
+                console.warn('Token refresh deferred due to temporary network/backend outage');
+                setError('Temporary connection issue. Retrying automatically...');
+                return;
+              }
               console.warn('Token refresh failed, clearing all tokens and redirecting to login:', refreshError);
               
               // Clear all tokens and redirect to login

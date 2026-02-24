@@ -110,6 +110,53 @@ export class AgentAccountService {
     }
   }
 
+  async reverseCommissionForPayment(paymentId: string, reason?: string): Promise<void> {
+    try {
+      const payment = await Payment.findById(paymentId)
+        .select('_id paymentDate referenceNumber')
+        .lean();
+      if (!payment) return;
+
+      const accounts = await AgentAccount.find({ 'transactions.paymentId': String(paymentId) });
+      for (const account of accounts) {
+        const commissionRows = (account.transactions || []).filter(
+          (t: any) => t.type === 'commission' && String((t as any).paymentId || '') === String(paymentId) && String(t.status || '') === 'completed'
+        );
+        if (!commissionRows.length) continue;
+
+        for (const row of commissionRows) {
+          const roleSuffix = String(row.reference || '').includes('-owner')
+            ? 'owner'
+            : String(row.reference || '').includes('-collaborator')
+              ? 'collaborator'
+              : 'agent';
+          const reversalRef = `REV-${paymentId}-${roleSuffix}`;
+          const exists = (account.transactions || []).some(
+            (t: any) => t.type === 'penalty' && String(t.reference || '') === reversalRef
+          );
+          if (exists) continue;
+
+          account.transactions.push({
+            type: 'penalty',
+            amount: Number(row.amount || 0),
+            date: new Date(),
+            description: `Commission reversal for payment ${String((payment as any).referenceNumber || paymentId)}`,
+            reference: reversalRef,
+            status: 'completed',
+            notes: reason || 'Manual payment reversal',
+            paymentId: String(paymentId),
+          } as any);
+        }
+
+        await this.recalculateBalance(account as any);
+        await account.save();
+      }
+    } catch (error) {
+      logger.error('Error reversing commission for payment:', error);
+      throw error;
+    }
+  }
+
   /**
    * Get or create agent account
    */

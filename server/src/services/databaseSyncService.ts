@@ -12,6 +12,8 @@ import SyncFailure from '../models/SyncFailure';
 import { EventEmitter } from 'events';
 import propertyAccountService, { reconcilePropertyLedgerDuplicates } from './propertyAccountService';
 import ledgerEventService from './ledgerEventService';
+import agentAccountService from './agentAccountService';
+import accountingIntegrationService from './accountingIntegrationService';
 
 export interface SyncEvent {
   type: 'payment' | 'property' | 'user' | 'lease' | 'maintenance';
@@ -321,7 +323,12 @@ export class DatabaseSyncService extends EventEmitter {
       }).limit(100);
 
       for (const payment of recentPayments) {
-        if (payment.status === 'completed' && (payment.paymentType === 'rental' || payment.paymentType === 'sale')) {
+        if (
+          payment.status === 'completed' &&
+          (payment.paymentType === 'rental' || payment.paymentType === 'sale') &&
+          !(payment as any).reversalOfPaymentId &&
+          Number((payment as any).amount || 0) >= 0
+        ) {
           try {
             await this.syncPaymentToAccounting(payment);
           } catch (e) {
@@ -379,7 +386,15 @@ export class DatabaseSyncService extends EventEmitter {
     
     try {
       if (operationType === 'insert' || operationType === 'update') {
-        if (fullDocument && fullDocument.status === 'completed' && (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale') && fullDocument.isInSuspense !== true && fullDocument.isProvisional !== true) {
+        if (
+          fullDocument &&
+          fullDocument.status === 'completed' &&
+          (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale') &&
+          fullDocument.isInSuspense !== true &&
+          fullDocument.isProvisional !== true &&
+          !fullDocument.reversalOfPaymentId &&
+          Number(fullDocument.amount || 0) >= 0
+        ) {
           try {
             await this.syncPaymentToAccounting(fullDocument);
             // Reflect to property ledger as well (idempotent)
@@ -399,6 +414,22 @@ export class DatabaseSyncService extends EventEmitter {
             await this.clearFailureRecord('payment', documentId);
           } catch (e) {
             // error recorded in syncPaymentToAccounting
+          }
+        } else if (fullDocument && (fullDocument.status === 'reversed' || String(fullDocument.postingStatus || '') === 'reversed')) {
+          try {
+            await accountingIntegrationService.syncPaymentReversed(fullDocument as any, { reason: String(fullDocument?.reversalReason || '') });
+          } catch (e) {
+            logger.warn('Payment reversal accounting sync failed in databaseSync:', (e as any)?.message || e);
+          }
+          try {
+            await propertyAccountService.reverseIncomeFromPayment(documentId, { reason: String(fullDocument?.reversalReason || '') });
+          } catch (e) {
+            logger.warn('Property ledger reversal sync failed in databaseSync:', (e as any)?.message || e);
+          }
+          try {
+            await agentAccountService.reverseCommissionForPayment(documentId, String(fullDocument?.reversalReason || ''));
+          } catch (e) {
+            logger.warn('Agent commission reversal sync failed in databaseSync:', (e as any)?.message || e);
           }
         }
       } else if (operationType === 'delete') {
@@ -827,7 +858,9 @@ export class DatabaseSyncService extends EventEmitter {
         status: 'completed',
         paymentType: { $in: ['rental', 'sale'] },
         isProvisional: { $ne: true },
-        isInSuspense: { $ne: true }
+        isInSuspense: { $ne: true },
+        reversalOfPaymentId: { $exists: false },
+        amount: { $gte: 0 }
       });
       
       logger.info(`Syncing ${payments.length} completed payments...`);

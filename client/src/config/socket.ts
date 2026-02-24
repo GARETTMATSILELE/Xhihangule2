@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
 let socket: Socket | null = null;
+let lastConnectErrorLogAt = 0;
 
 export const initializeSocket = (token: string) => {
   if (!socket) {
@@ -12,8 +13,11 @@ export const initializeSocket = (token: string) => {
       auth: { token },
       transports: ['websocket'],
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
+      reconnectionAttempts: 10,
+      reconnectionDelay: 3000,
+      reconnectionDelayMax: 20000,
+      randomizationFactor: 0.5,
+      timeout: 10000
     });
 
     socket.on('connect', () => {
@@ -21,7 +25,12 @@ export const initializeSocket = (token: string) => {
     });
 
     socket.on('connect_error', (error) => {
-      console.error('WebSocket connection error:', error);
+      // Throttle noisy errors when backend is briefly unavailable.
+      const now = Date.now();
+      if (now - lastConnectErrorLogAt > 15000) {
+        lastConnectErrorLogAt = now;
+        console.error('WebSocket connection error:', error);
+      }
     });
 
     socket.on('disconnect', (reason) => {

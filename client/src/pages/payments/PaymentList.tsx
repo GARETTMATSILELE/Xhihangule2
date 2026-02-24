@@ -50,7 +50,7 @@ export const PaymentList: React.FC = () => {
     amount: 0,
     paymentDate: new Date(),
     paymentMethod: 'cash' as PaymentMethod,
-    status: 'pending' as 'pending' | 'completed' | 'failed',
+    status: 'pending' as Payment['status'],
     companyId: '',
   });
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
@@ -330,7 +330,7 @@ export const PaymentList: React.FC = () => {
               select
               label="Status"
               value={formData.status}
-              onChange={e => setFormData({ ...formData, status: e.target.value as 'pending' | 'completed' | 'failed' })}
+              onChange={e => setFormData({ ...formData, status: e.target.value as Payment['status'] })}
               margin="normal"
               required
             >

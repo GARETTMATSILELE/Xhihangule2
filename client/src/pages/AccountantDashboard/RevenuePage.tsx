@@ -19,12 +19,18 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField
+  TextField,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow
 } from '@mui/material';
 import paymentService from '../../services/paymentService';
 import companyAccountService, { CompanyAccountSummary } from '../../services/companyAccountService';
 import { Payment } from '../../types/payment';
 import { useNavigate } from 'react-router-dom';
+import accountingService, { DashboardSummary, LedgerRow, TrendPoint, VatStatusPoint } from '../../services/accountingService';
 
 type Period = 'month_range' | 'year';
 
@@ -37,6 +43,21 @@ const RevenuePage: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [companySummary, setCompanySummary] = useState<CompanyAccountSummary | null>(null);
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [revenueTrend, setRevenueTrend] = useState<TrendPoint[]>([]);
+  const [expenseTrend, setExpenseTrend] = useState<TrendPoint[]>([]);
+  const [vatStatus, setVatStatus] = useState<VatStatusPoint[]>([]);
+  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState<boolean>(false);
+  const [ledgerFilters, setLedgerFilters] = useState<{
+    accountCode: string;
+    startDate: string;
+    endDate: string;
+  }>({
+    accountCode: '',
+    startDate: new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 10),
+    endDate: new Date().toISOString().slice(0, 10)
+  });
   const [addExpenseOpen, setAddExpenseOpen] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -77,6 +98,28 @@ const RevenuePage: React.FC = () => {
       }
     };
     load();
+  }, []);
+
+  useEffect(() => {
+    const loadAccounting = async () => {
+      try {
+        const [summary, revenue, expense, vat, ledger] = await Promise.all([
+          accountingService.getDashboardSummary().catch(() => null),
+          accountingService.getRevenueTrend(12).catch(() => []),
+          accountingService.getExpenseTrend(12).catch(() => []),
+          accountingService.getVatStatus().catch(() => []),
+          accountingService.getLedger({ limit: 100 }).catch(() => [])
+        ]);
+        setDashboardSummary(summary);
+        setRevenueTrend(revenue);
+        setExpenseTrend(expense);
+        setVatStatus(vat);
+        setLedgerRows(ledger);
+      } catch {
+        setDashboardSummary(null);
+      }
+    };
+    loadAccounting();
   }, []);
 
   const filtered = useMemo(() => {
@@ -198,12 +241,60 @@ const RevenuePage: React.FC = () => {
     return list;
   }, [companyTransactions, periodStart, periodEnd]);
 
+  const accountingRevenue = useMemo(() => {
+    const summaryRevenue = Number(dashboardSummary?.totalRevenue ?? 0);
+    // Prefer locally computed revenue when accounting summary is still zero.
+    if (summaryRevenue === 0 && totalCommissionRevenue > 0) {
+      return totalCommissionRevenue;
+    }
+    return summaryRevenue || totalCommissionRevenue;
+  }, [dashboardSummary?.totalRevenue, totalCommissionRevenue]);
+  const accountingExpenses = dashboardSummary?.totalExpenses ?? expensesForPeriod;
+  const accountingProfit = dashboardSummary?.netProfit ?? (totalCommissionRevenue - expensesForPeriod);
+  const accountingCash = dashboardSummary?.cashBalance ?? (companySummary?.runningBalance || 0);
+  const accountingVatPayable = dashboardSummary?.vatPayable ?? totalVatCollected;
+  const accountingCommissionLiability = dashboardSummary?.commissionLiability ?? 0;
+
+  const tAccountGroups = useMemo(() => {
+    const grouped = new Map<string, { accountCode: string; accountName: string; rows: LedgerRow[] }>();
+    for (const row of ledgerRows) {
+      const key = `${row.accountCode}::${row.accountName}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, { accountCode: row.accountCode, accountName: row.accountName, rows: [] });
+      }
+      grouped.get(key)!.rows.push(row);
+    }
+
+    const groups = Array.from(grouped.values()).map((group) => {
+      const sorted = [...group.rows].sort((a, b) => {
+        const ad = new Date(a.transactionDate || a.createdAt).getTime();
+        const bd = new Date(b.transactionDate || b.createdAt).getTime();
+        return ad - bd;
+      });
+      const debits = sorted.filter(r => Number(r.debit || 0) > 0);
+      const credits = sorted.filter(r => Number(r.credit || 0) > 0);
+      const debitTotal = debits.reduce((s, r) => s + Number(r.debit || 0), 0);
+      const creditTotal = credits.reduce((s, r) => s + Number(r.credit || 0), 0);
+      return {
+        ...group,
+        debits,
+        credits,
+        debitTotal,
+        creditTotal,
+        netBalance: debitTotal - creditTotal
+      };
+    });
+
+    return groups.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+  }, [ledgerRows]);
+
   const cards = [
-    { title: 'Net Revenue', value: totalCommissionRevenue - expensesForPeriod, color: (totalCommissionRevenue - expensesForPeriod) >= 0 ? 'success.main' : 'error.main' },
-    { title: 'Total Revenue', value: totalCommissionRevenue, color: 'primary.main' },
-    { title: 'Rentals Revenue', value: rentalsCommissionRevenue, color: 'success.main' },
-    { title: 'Sales Revenue', value: salesCommissionRevenue, color: 'info.main' },
-    { title: 'Total Expenses', value: expensesForPeriod, color: 'error.main' }
+    { title: 'Cash Balance', value: accountingCash, color: 'primary.main' },
+    { title: 'Revenue', value: accountingRevenue, color: 'success.main' },
+    { title: 'Expenses', value: accountingExpenses, color: 'error.main' },
+    { title: 'Profit', value: accountingProfit, color: accountingProfit >= 0 ? 'success.main' : 'error.main' },
+    { title: 'VAT Payable', value: accountingVatPayable, color: 'warning.main' },
+    { title: 'Commission Liability', value: accountingCommissionLiability, color: 'info.main' }
   ];
 
   return (
@@ -250,13 +341,13 @@ const RevenuePage: React.FC = () => {
               inputProps={{ min: 1970, max: 9999 }}
             />
           )}
+          <Button variant="outlined" onClick={() => navigate('/accountant-dashboard/ledger')}>Open Ledger Drilldown</Button>
           <Button variant="contained" onClick={() => setAddExpenseOpen(true)}>Add Expense</Button>
         </Box>
       </Box>
 
       <Grid container spacing={2}>
-        {/* First three standard cards */}
-        {cards.slice(0, 3).map((c) => (
+        {cards.map((c) => (
           <Grid item xs={12} sm={6} md={4} key={c.title}>
             <Card sx={{ cursor: 'default', bgcolor: c.color, color: '#fff' }}>
               <CardContent>
@@ -268,20 +359,7 @@ const RevenuePage: React.FC = () => {
             </Card>
           </Grid>
         ))}
-        {/* Remaining standard cards */}
-        {cards.slice(3).map((c) => (
-          <Grid item xs={12} sm={6} md={4} key={c.title}>
-            <Card sx={{ cursor: 'default', bgcolor: c.color, color: '#fff' }}>
-              <CardContent>
-                <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>{c.title}</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                  {`$${Number(c.value || 0).toLocaleString()}`}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-        {/* VAT Management card placed beside 'Total Expenses' on md+ screens */}
+        {/* VAT management shortcut */}
         <Grid item xs={12} sm={6} md={4} key="VAT Management">
           <Card
             sx={{ cursor: 'pointer', bgcolor: 'warning.main', color: '#1a1a1a' }}
@@ -294,6 +372,43 @@ const RevenuePage: React.FC = () => {
               </Typography>
             </CardContent>
           </Card>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={3} sx={{ mt: 1 }}>
+        <Grid item xs={12}>
+          <Paper elevation={2} sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Attention Required</Typography>
+            <List>
+              <ListItem>
+                <ListItemText
+                  primary={`Unreconciled bank transactions: ${dashboardSummary?.unreconciledBankTransactions ?? 0}`}
+                  secondary="Bank reconciliation items still unmatched"
+                />
+              </ListItem>
+              <Divider component="li" />
+              <ListItem>
+                <ListItemText
+                  primary={`VAT due periods: ${dashboardSummary?.vatDuePeriods ?? vatStatus.filter(v => v.status === 'pending').length}`}
+                  secondary="Pending VAT filing periods"
+                />
+              </ListItem>
+              <Divider component="li" />
+              <ListItem>
+                <ListItemText
+                  primary={`Pending expenses: ${dashboardSummary?.pendingExpenses ?? expenseList.length}`}
+                  secondary="Expenses posted and awaiting review/reconciliation"
+                />
+              </ListItem>
+              <Divider component="li" />
+              <ListItem>
+                <ListItemText
+                  primary={`Unpaid commissions: $${Number(dashboardSummary?.unpaidCommissions ?? accountingCommissionLiability).toLocaleString()}`}
+                  secondary="Outstanding commission liability"
+                />
+              </ListItem>
+            </List>
+          </Paper>
         </Grid>
       </Grid>
 
@@ -343,6 +458,182 @@ const RevenuePage: React.FC = () => {
                   </React.Fragment>
                 ))
               )}
+            </List>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={3} sx={{ mt: 1 }}>
+        <Grid item xs={12}>
+          <Paper elevation={2} sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Ledger Viewer</Typography>
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+              <TextField
+                size="small"
+                label="Account Code"
+                value={ledgerFilters.accountCode}
+                onChange={(e) => setLedgerFilters(prev => ({ ...prev, accountCode: e.target.value }))}
+                placeholder="e.g. 4001"
+              />
+              <TextField
+                size="small"
+                label="Start Date"
+                type="date"
+                value={ledgerFilters.startDate}
+                onChange={(e) => setLedgerFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                InputLabelProps={{ shrink: true }}
+              />
+              <TextField
+                size="small"
+                label="End Date"
+                type="date"
+                value={ledgerFilters.endDate}
+                onChange={(e) => setLedgerFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                InputLabelProps={{ shrink: true }}
+              />
+              <Button
+                variant="outlined"
+                disabled={ledgerLoading}
+                onClick={async () => {
+                  try {
+                    setLedgerLoading(true);
+                    const rows = await accountingService.getLedger({
+                      accountCode: ledgerFilters.accountCode || undefined,
+                      startDate: ledgerFilters.startDate || undefined,
+                      endDate: ledgerFilters.endDate || undefined,
+                      limit: 200
+                    });
+                    setLedgerRows(rows);
+                  } finally {
+                    setLedgerLoading(false);
+                  }
+                }}
+              >
+                {ledgerLoading ? 'Loading...' : 'Apply Filters'}
+              </Button>
+            </Box>
+            {tAccountGroups.length === 0 ? (
+              <List>
+                <ListItem>
+                  <ListItemText primary="No ledger rows for selected filters" />
+                </ListItem>
+              </List>
+            ) : (
+              <Grid container spacing={2}>
+                {tAccountGroups.map((account) => {
+                  const rowCount = Math.max(account.debits.length, account.credits.length);
+                  return (
+                    <Grid item xs={12} key={`${account.accountCode}-${account.accountName}`}>
+                      <Paper variant="outlined" sx={{ p: 1.5 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                          {account.accountCode} - {account.accountName}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Standard T-Account
+                        </Typography>
+                        <Table size="small" sx={{ mt: 1 }}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 700, width: '50%' }}>Debit</TableCell>
+                              <TableCell sx={{ fontWeight: 700, width: '50%', borderLeft: '1px solid', borderColor: 'divider' }}>Credit</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {Array.from({ length: rowCount }).map((_, i) => {
+                              const dr = account.debits[i];
+                              const cr = account.credits[i];
+                              return (
+                                <TableRow key={`${account.accountCode}-line-${i}`}>
+                                  <TableCell sx={{ verticalAlign: 'top' }}>
+                                    {dr ? (
+                                      <>
+                                        <Typography variant="body2">
+                                          {new Date(dr.transactionDate || dr.createdAt).toLocaleDateString()} • {dr.reference || '-'}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {dr.sourceModule}
+                                        </Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                          ${Number(dr.debit || 0).toLocaleString()}
+                                        </Typography>
+                                      </>
+                                    ) : '—'}
+                                  </TableCell>
+                                  <TableCell sx={{ borderLeft: '1px solid', borderColor: 'divider', verticalAlign: 'top' }}>
+                                    {cr ? (
+                                      <>
+                                        <Typography variant="body2">
+                                          {new Date(cr.transactionDate || cr.createdAt).toLocaleDateString()} • {cr.reference || '-'}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {cr.sourceModule}
+                                        </Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                          ${Number(cr.credit || 0).toLocaleString()}
+                                        </Typography>
+                                      </>
+                                    ) : '—'}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 700 }}>
+                                Total Debit: ${Number(account.debitTotal || 0).toLocaleString()}
+                              </TableCell>
+                              <TableCell sx={{ borderLeft: '1px solid', borderColor: 'divider', fontWeight: 700 }}>
+                                Total Credit: ${Number(account.creditTotal || 0).toLocaleString()}
+                              </TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell colSpan={2} sx={{ fontWeight: 700 }}>
+                                Balance: {account.netBalance >= 0 ? 'Debit' : 'Credit'} ${Math.abs(Number(account.netBalance || 0)).toLocaleString()}
+                              </TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </Paper>
+                    </Grid>
+                  );
+                })}
+              </Grid>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={3} sx={{ mt: 1 }}>
+        <Grid item xs={12} md={6}>
+          <Paper elevation={2} sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Revenue Trend (12 months)</Typography>
+            <List>
+              {revenueTrend.length === 0 ? (
+                <ListItem><ListItemText primary="No revenue trend data" /></ListItem>
+              ) : revenueTrend.map((point, idx) => (
+                <React.Fragment key={`${point.month}-${idx}`}>
+                  <ListItem>
+                    <ListItemText primary={`${point.month} - $${Number(point.total || 0).toLocaleString()}`} />
+                  </ListItem>
+                  {idx < revenueTrend.length - 1 && <Divider component="li" />}
+                </React.Fragment>
+              ))}
+            </List>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper elevation={2} sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Expense Trend (12 months)</Typography>
+            <List>
+              {expenseTrend.length === 0 ? (
+                <ListItem><ListItemText primary="No expense trend data" /></ListItem>
+              ) : expenseTrend.map((point, idx) => (
+                <React.Fragment key={`${point.month}-${idx}`}>
+                  <ListItem>
+                    <ListItemText primary={`${point.month} - $${Number(point.total || 0).toLocaleString()}`} />
+                  </ListItem>
+                  {idx < expenseTrend.length - 1 && <Divider component="li" />}
+                </React.Fragment>
+              ))}
             </List>
           </Paper>
         </Grid>

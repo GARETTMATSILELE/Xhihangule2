@@ -634,7 +634,7 @@ const SettingsPage: React.FC = () => {
                   label="Plan"
                 >
                   <MenuItem value="INDIVIDUAL">Individual (up to 10 properties)</MenuItem>
-                  <MenuItem value="SME">SME (up to 25 properties)</MenuItem>
+                  <MenuItem value="SME">SME (up to 120 properties)</MenuItem>
                   <MenuItem value="ENTERPRISE">Enterprise (unlimited)</MenuItem>
                 </Select>
               </FormControl>

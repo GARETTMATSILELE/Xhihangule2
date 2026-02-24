@@ -30,7 +30,9 @@ import {
   MenuItem,
   IconButton,
   Tooltip,
-  Divider
+  Divider,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -119,6 +121,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showAuditRows, setShowAuditRows] = useState(false);
 
   // Levies state and payout controls (moved before any early returns to satisfy Hooks rules)
   const [levyRows, setLevyRows] = useState<any[]>([]);
@@ -822,6 +825,10 @@ const PropertyAccountDetailPage: React.FC = () => {
     }
     return result;
   }, [transactions]);
+  const visibleTransactions: Transaction[] = React.useMemo(() => {
+    if (showAuditRows) return uniqueTransactions;
+    return uniqueTransactions.filter((t) => String((t as any)?.status || '').toLowerCase() !== 'cancelled');
+  }, [uniqueTransactions, showAuditRows]);
 
   if (loading) {
     return (
@@ -1023,6 +1030,18 @@ const PropertyAccountDetailPage: React.FC = () => {
 
       {/* Transactions Tab */}
       <TabPanel value={tabValue} index={0}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={showAuditRows}
+                onChange={(_, checked) => setShowAuditRows(checked)}
+              />
+            }
+            label="Show audit rows"
+          />
+        </Box>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
@@ -1036,7 +1055,7 @@ const PropertyAccountDetailPage: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {uniqueTransactions.map((transaction, index) => (
+              {visibleTransactions.map((transaction, index) => (
                 <TableRow key={String((transaction as any)?._id || (transaction as any)?.paymentId || index)}>
                   <TableCell>{new Date(transaction.date).toLocaleDateString()}</TableCell>
                   <TableCell>
@@ -1079,6 +1098,15 @@ const PropertyAccountDetailPage: React.FC = () => {
                   </TableCell>
                 </TableRow>
               ))}
+              {visibleTransactions.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">
+                    <Typography variant="body2" color="text.secondary">
+                      No active transactions to show.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </TableContainer>

@@ -19,7 +19,8 @@ import {
   getPaymentDetails,
   updatePayment,
   updatePaymentStatus,
-  finalizeProvisionalPayment
+  finalizeProvisionalPayment,
+  reversePayment
 } from '../controllers/paymentController';
 import {
   getPropertyTransactions,
@@ -55,6 +56,26 @@ import {
 } from '../controllers/agentAccountController';
 import AgentAccountService from '../services/agentAccountService';
 import { compareAgentCommissionTotals } from '../controllers/agentAccountController';
+import {
+  listTrustAccounts as listFullTrustAccounts,
+  createTrustAccount as createFullTrustAccount,
+  getTrustAccountByProperty,
+  getTrustAccountByPropertyFull,
+  getTrustAccount,
+  getTrustAccountFull,
+  getTrustLedger,
+  getTrustTaxSummary,
+  getTrustAuditLogs,
+  getTrustReconciliation,
+  recordBuyerPayment as recordTrustBuyerPayment,
+  calculateSettlement as calculateTrustSettlement,
+  applyTaxDeductions as applyTrustTaxDeductions,
+  transferToSeller as transferTrustToSeller,
+  closeTrustAccount as closeFullTrustAccount,
+  transitionTrustWorkflow,
+  generateTrustReport,
+  runTrustReconciliation
+} from '../controllers/trustAccountController';
 
 const router = express.Router();
 
@@ -98,6 +119,24 @@ router.get('/property-accounts/:propertyId/deposits/summary', canViewCommissions
 router.post('/property-accounts/:propertyId/deposits/payout', canViewCommissions, createPropertyDepositPayout);
 // Company trust accounts summary
 router.get('/trust-accounts/deposits', canViewCommissions, getCompanyDepositSummaries);
+router.get('/trust-accounts', canViewCommissions, listFullTrustAccounts);
+router.post('/trust-accounts', isAccountant, createFullTrustAccount);
+router.get('/trust-accounts/property/:propertyId', canViewCommissions, getTrustAccountByProperty);
+router.get('/trust-accounts/property/:propertyId/full', canViewCommissions, getTrustAccountByPropertyFull);
+router.get('/trust-accounts/:id', canViewCommissions, getTrustAccount);
+router.get('/trust-accounts/:id/full', canViewCommissions, getTrustAccountFull);
+router.get('/trust-accounts/:id/ledger', canViewCommissions, getTrustLedger);
+router.get('/trust-accounts/:id/tax-summary', canViewCommissions, getTrustTaxSummary);
+router.get('/trust-accounts/:id/audit-logs', canViewCommissions, getTrustAuditLogs);
+router.get('/trust-accounts/:id/reconciliation', canViewCommissions, getTrustReconciliation);
+router.post('/trust-accounts/:id/buyer-payments', isAccountant, recordTrustBuyerPayment);
+router.post('/trust-accounts/:id/calculate-settlement', isAccountant, calculateTrustSettlement);
+router.post('/trust-accounts/:id/apply-tax-deductions', isAccountant, applyTrustTaxDeductions);
+router.post('/trust-accounts/:id/transfer-to-seller', isAccountant, transferTrustToSeller);
+router.post('/trust-accounts/:id/close', isAccountant, closeFullTrustAccount);
+router.post('/trust-accounts/:id/workflow-transition', isAccountant, transitionTrustWorkflow);
+router.get('/trust-accounts/:id/reports/:reportType', canViewCommissions, generateTrustReport);
+router.post('/trust-accounts/reconciliation/run', isAccountant, runTrustReconciliation);
 
 // Payment routes - allow admin, accountant, and agent roles
 router.get('/payments', canManagePayments, getCompanyPayments);
@@ -109,6 +148,7 @@ router.put('/sales-payments/:id', canManagePayments, updatePayment);
 router.post('/payments', canManagePayments, createPaymentAccountant);
 router.get('/payments/:id', canManagePayments, getPaymentDetails);
 router.put('/payments/:id/status', canManagePayments, updatePaymentStatus);
+router.post('/payments/:id/reverse', canManagePayments, reversePayment);
 router.post('/payments/:id/finalize', canManagePayments, finalizeProvisionalPayment);
 
 // Provisional auto-match suggestions (admin/accountant)

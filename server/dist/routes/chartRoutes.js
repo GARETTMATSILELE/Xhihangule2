@@ -21,11 +21,12 @@ const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const User_1 = require("../models/User");
 const Payment_1 = require("../models/Payment");
+const requestSecurity_1 = require("../utils/requestSecurity");
 const router = express_1.default.Router();
 // Debug middleware to log all requests
 router.use((req, res, next) => {
     console.log(`[Chart Routes] ${req.method} ${req.path}`);
-    console.log('Request headers:', req.headers);
+    console.log('Request headers:', (0, requestSecurity_1.redactHeaders)(req.headers));
     console.log('Request query:', req.query);
     console.log('Request body:', req.body);
     next();

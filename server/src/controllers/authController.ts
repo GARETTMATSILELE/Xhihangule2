@@ -256,6 +256,15 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
+    // Also set access token cookie so direct browser navigation to protected docs works.
+    res.cookie('accessToken', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    });
     // Set a non-HttpOnly CSRF token cookie for refresh protection
     const signupCsrf = crypto.randomBytes(32).toString('hex');
     res.cookie('refreshCsrf', signupCsrf, {
@@ -355,6 +364,14 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       path: '/',
       ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    res.cookie('accessToken', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
     });
 
     // Also set a non-HttpOnly CSRF token cookie for refresh endpoint
@@ -514,6 +531,7 @@ export const logout = (req: Request, res: Response) => {
     ...(prod && d ? { domain: d } : {})
   };
   try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
+  try { res.clearCookie('accessToken', { ...base, httpOnly: true }); } catch {}
   try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
   res.json({ message: 'Logged out successfully' });
 };
@@ -609,6 +627,14 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       path: '/',
       ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      path: '/',
+      ...(process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {}),
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
     });
 
     // Rotate CSRF cookie

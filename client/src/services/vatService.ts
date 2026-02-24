@@ -18,7 +18,12 @@ export interface VatPayoutItem {
   date: string;
   status: 'pending' | 'completed' | 'cancelled';
   recipientName?: string;
+  payoutMethod?: 'cash' | 'bank_transfer' | 'mobile_money' | 'cheque';
+  notes?: string;
   referenceNumber: string;
+  receiptFileName?: string;
+  receiptContentType?: string;
+  receiptUploadedAt?: string;
 }
 
 export interface VatPropertyGroup {
@@ -35,6 +40,24 @@ export interface VatPropertyGroup {
 
 function toISODateString(d: Date): string {
   return new Date(d).toISOString();
+}
+
+function getApiBaseUrl(): string {
+  const configured = (api as any)?.defaults?.baseURL;
+  return String(configured || '/api').replace(/\/+$/, '');
+}
+
+function openApiUrl(path: string): void {
+  const base = getApiBaseUrl();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  window.open(`${base}${normalizedPath}`, '_blank');
+}
+
+function openBlobInNewTab(blob: Blob): void {
+  const objectUrl = window.URL.createObjectURL(blob);
+  window.open(objectUrl, '_blank');
+  // Revoke after a short delay to avoid breaking new tab load.
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 const vatService = {
@@ -61,11 +84,28 @@ const vatService = {
     return (res as any)?.data || res;
   },
   openPayoutAck(payoutId: string) {
-    window.open(`/api/vat/payouts/${encodeURIComponent(payoutId)}/ack`, '_blank');
+    openApiUrl(`/vat/payouts/${encodeURIComponent(payoutId)}/ack`);
   },
-  openPropertySummary(propertyId: string, start: Date, end: Date) {
-    const url = `/api/vat/properties/${encodeURIComponent(propertyId)}/summary?start=${encodeURIComponent(toISODateString(start))}&end=${encodeURIComponent(toISODateString(end))}`;
-    window.open(url, '_blank');
+  async uploadPayoutReceipt(payoutId: string, file: File) {
+    const formData = new FormData();
+    formData.append('receipt', file);
+    const res = await api.post(`/vat/payouts/${encodeURIComponent(payoutId)}/receipt`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    } as any);
+    return (res as any)?.data || res;
+  },
+  async openPayoutReceipt(payoutId: string) {
+    const res = await api.get(`/vat/payouts/${encodeURIComponent(payoutId)}/receipt`, {
+      responseType: 'blob'
+    } as any);
+    const blob = (res as any)?.data instanceof Blob ? (res as any).data : new Blob([(res as any)?.data]);
+    openBlobInNewTab(blob);
+  },
+  async openPropertySummary(propertyId: string, start: Date, end: Date) {
+    const url = `/vat/properties/${encodeURIComponent(propertyId)}/summary?start=${encodeURIComponent(toISODateString(start))}&end=${encodeURIComponent(toISODateString(end))}`;
+    const res = await api.get(url, { responseType: 'blob' } as any);
+    const blob = (res as any)?.data instanceof Blob ? (res as any).data : new Blob([(res as any)?.data]);
+    openBlobInNewTab(blob);
   }
 };
 

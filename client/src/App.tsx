@@ -52,6 +52,7 @@ const DashboardOverview = lazyWithRetry(() => import('./pages/AccountantDashboar
 const AccountantPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AccountantPaymentsPage'));
 const SalesPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/SalesPaymentsPage'));
 const RevenuePage = lazyWithRetry(() => import('./pages/AccountantDashboard/RevenuePage'));
+const LedgerDrilldownPage = lazyWithRetry(() => import('./pages/AccountantDashboard/LedgerDrilldownPage'));
 const CommissionsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/CommissionsPage'));
 const SettingsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/SettingsPage'));
 const ReportsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/ReportsPage'));
@@ -66,6 +67,8 @@ const LevyPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard
 const VATManagementPage = lazyWithRetry(() => import('./pages/AccountantDashboard/VATManagementPage'));
 const TasksPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TasksPage'));
 const DatabaseSyncDashboard = lazyWithRetry(() => import('./components/admin/DatabaseSyncDashboard'));
+const TrustAccountReportsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TrustAccountReportsPage'));
+const TrustAccountPropertyReportPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TrustAccountPropertyReportPage'));
 
 // Create a theme instance with proper configuration
 const theme = createTheme({
@@ -207,6 +210,7 @@ const App: React.FC = () => {
                 <Route path="payments" element={<AccountantPaymentsPage />} />
                 <Route path="sales" element={<SalesPaymentsPage />} />
                 <Route path="revenue" element={<RevenuePage />} />
+                <Route path="ledger" element={<LedgerDrilldownPage />} />
                 <Route path="vat" element={<VATManagementPage />} />
                 <Route path="property-accounts" element={<PropertyAccountsPage />} />
                 <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
@@ -218,6 +222,8 @@ const App: React.FC = () => {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="levies" element={<LevyPaymentsPage />} />
                 <Route path="reports" element={<ReportsPage />} />
+                <Route path="trust-account-reports" element={<TrustAccountReportsPage />} />
+                <Route path="trust-account-reports/:propertyId" element={<TrustAccountPropertyReportPage />} />
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="data-sync" element={<DatabaseSyncDashboard />} />
               </Route>

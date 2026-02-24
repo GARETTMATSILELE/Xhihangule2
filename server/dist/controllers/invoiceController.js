@@ -64,7 +64,7 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const _d = req.body, { items, discount = 0, taxPercentage = 15, client, currency = 'USD' } = _d, otherData = __rest(_d, ["items", "discount", "taxPercentage", "client", "currency"]);
+        const _d = req.body, { items, discount = 0, taxPercentage = 15, client, currency = 'USD', fiscalize = true } = _d, otherData = __rest(_d, ["items", "discount", "taxPercentage", "client", "currency", "fiscalize"]);
         // Validate client details
         const validatedClient = validateClientDetails(client);
         // Generate codes for items if not provided
@@ -80,23 +80,25 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // Calculate tax breakdown
         const breakdown = (0, money_1.calculateTaxBreakdown)(processedItems, discount, taxPercentage);
         const invoiceData = Object.assign(Object.assign(Object.assign(Object.assign({}, otherData), { client: validatedClient, currency, items: processedItems, discount,
-            taxPercentage }), breakdown), { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+            taxPercentage }), breakdown), { fiscalize: fiscalize !== false, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         const invoice = new Invoice_1.Invoice(invoiceData);
-        // Try to fiscalize; fail-open
-        try {
-            const fiscal = yield (0, fiscalizationService_1.tryFiscalizeInvoice)(req.user.companyId, {
-                _id: (_c = (_b = invoice._id) === null || _b === void 0 ? void 0 : _b.toString) === null || _c === void 0 ? void 0 : _c.call(_b),
-                totalAmount: invoice.totalAmount,
-                taxAmount: invoice.taxAmount,
-                taxPercentage: invoice.taxPercentage,
-                amountExcludingTax: invoice.amountExcludingTax,
-                createdAt: invoice.createdAt
-            });
-            if (fiscal) {
-                invoice.fiscalData = fiscal;
+        // Try to fiscalize only when requested; fail-open on device/service errors.
+        if (invoice.fiscalize) {
+            try {
+                const fiscal = yield (0, fiscalizationService_1.tryFiscalizeInvoice)(req.user.companyId, {
+                    _id: (_c = (_b = invoice._id) === null || _b === void 0 ? void 0 : _b.toString) === null || _c === void 0 ? void 0 : _c.call(_b),
+                    totalAmount: invoice.totalAmount,
+                    taxAmount: invoice.taxAmount,
+                    taxPercentage: invoice.taxPercentage,
+                    amountExcludingTax: invoice.amountExcludingTax,
+                    createdAt: invoice.createdAt
+                });
+                if (fiscal) {
+                    invoice.fiscalData = fiscal;
+                }
             }
+            catch (_e) { }
         }
-        catch (_e) { }
         yield invoice.save();
         res.status(201).json(invoice);
     }

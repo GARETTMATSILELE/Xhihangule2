@@ -44,6 +44,10 @@ import salesFileRoutes from './routes/salesFileRoutes';
 import paypalRoutes from './routes/paypalRoutes';
 import paynowRoutes from './routes/paynowRoutes';
 import diagnosticsRoutes from './routes/diagnosticsRoutes';
+import accountingRoutes from './routes/accountingRoutes';
+import trustAccountRoutes from './routes/trustAccountRoutes';
+import webhookRoutes from './routes/webhookRoutes';
+import adminRoutes from './routes/adminRoutes';
 import { connectDatabase, closeDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
@@ -56,9 +60,12 @@ import { initializePropertyAccountIndexes } from './services/propertyAccountServ
 import SystemSetting from './models/SystemSetting';
 import { runPropertyLedgerMaintenance } from './services/propertyAccountService';
 import systemAdminRoutes from './routes/systemAdminRoutes';
+import { startTrustEventListener, stopTrustEventListener } from './services/trustEventListener';
+import { startTrustReconciliationJob, stopTrustReconciliationJob } from './jobs/trustReconciliationJob';
 // Removed legacy bootstrap imports
 import { User } from './models/User';
 import { getEmailConfigStatus, verifySmtpConnection } from './services/emailService';
+import { getClientIpForRateLimit, redactHeaders } from './utils/requestSecurity';
 
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
@@ -222,6 +229,8 @@ app.use(cors({
     'X-Requested-With',
     'Accept',
     'Origin',
+    'x-refresh-csrf',
+    'X-Refresh-Csrf',
     'Idempotency-Key',
     'idempotency-key'
   ],
@@ -244,6 +253,7 @@ app.use(compression());
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
+  keyGenerator: (req) => getClientIpForRateLimit(req),
   standardHeaders: true,
   legacyHeaders: false,
   message: { status: 'error', message: 'Too many attempts, please try again later.' }
@@ -251,6 +261,7 @@ const authLimiter = rateLimit({
 const refreshLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
+  keyGenerator: (req) => getClientIpForRateLimit(req),
   standardHeaders: true,
   legacyHeaders: false,
   message: { status: 'error', message: 'Too many refresh attempts, slow down.' }
@@ -258,6 +269,7 @@ const refreshLimiter = rateLimit({
 const fileLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
+  keyGenerator: (req) => getClientIpForRateLimit(req),
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -266,6 +278,7 @@ const fileLimiter = rateLimit({
 const forgotLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
+  keyGenerator: (req) => getClientIpForRateLimit(req),
   standardHeaders: true,
   legacyHeaders: false,
   message: { status: 'error', message: 'Too many password reset requests, please try again later.' }
@@ -273,6 +286,7 @@ const forgotLimiter = rateLimit({
 const resetLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
+  keyGenerator: (req) => getClientIpForRateLimit(req),
   standardHeaders: true,
   legacyHeaders: false,
   message: { status: 'error', message: 'Too many reset attempts, please try again later.' }
@@ -281,18 +295,13 @@ const resetLimiter = rateLimit({
 // Debug middleware only in development
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
-    const redactedHeaders = {
-      ...req.headers,
-      authorization: req.headers.authorization ? '[redacted]' : undefined,
-      cookie: req.headers.cookie ? '[redacted]' : undefined
-    };
     console.log('Incoming request:', {
       method: req.method,
       url: req.url,
       path: req.path,
       baseUrl: req.baseUrl,
       originalUrl: req.originalUrl,
-      headers: redactedHeaders,
+      headers: redactHeaders(req.headers),
       body: req.body
     });
     next();
@@ -304,6 +313,7 @@ app.use('/api/properties', propertyRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/leases', leaseRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/webhooks', webhookRoutes);
 app.use('/api/charts', chartRoutes);
 // Apply targeted rate limits to sensitive endpoints
 app.use('/api/auth/login', authLimiter);
@@ -357,6 +367,9 @@ app.use('/api/public/reports', publicReportRoutes);
 app.use('/api/reports', reportRoutes);
 // System Admin (global)
 app.use('/api/system-admin', systemAdminRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/accounting', accountingRoutes);
+app.use('/api/trust-accounts', trustAccountRoutes);
 
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express.Router();
@@ -364,6 +377,7 @@ sessionRouter.use('/properties', propertyRoutes);
 sessionRouter.use('/tenants', tenantRoutes);
 sessionRouter.use('/leases', leaseRoutes);
 sessionRouter.use('/payments', paymentRoutes);
+sessionRouter.use('/webhooks', webhookRoutes);
 sessionRouter.use('/charts', chartRoutes);
 sessionRouter.use('/auth', authRoutes);
 sessionRouter.use('/companies', companyRoutes);
@@ -391,6 +405,9 @@ sessionRouter.use('/notifications', notificationRoutes);
 sessionRouter.use('/invoices', invoiceRoutes);
 sessionRouter.use('/sync', syncRoutes);
 sessionRouter.use('/fiscal', fiscalRoutes);
+sessionRouter.use('/accounting', accountingRoutes);
+sessionRouter.use('/trust-accounts', trustAccountRoutes);
+sessionRouter.use('/admin', adminRoutes);
 
 app.use('/api/s/:sessionId', sessionRouter);
 
@@ -453,6 +470,10 @@ connectDatabase()
     console.log('Connected to MongoDB');
 
     try {
+      // Start trust event listeners and reconciliation safety layer.
+      startTrustEventListener();
+      startTrustReconciliationJob();
+
       // Ensure a hard-coded System Admin user exists (requested)
       // Creates or updates the user with email/password and system_admin role.
       // Runs in all environments; idempotent.
@@ -578,6 +599,8 @@ process.on('SIGTERM', () => {
   httpServer.close(async () => {
     console.log('HTTP server closed');
     try {
+      stopTrustEventListener();
+      stopTrustReconciliationJob();
       const { shutdownSyncServices } = await import('./scripts/startSyncServices');
       await shutdownSyncServices();
       console.log('Sync services shut down gracefully');

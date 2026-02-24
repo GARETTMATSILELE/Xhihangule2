@@ -16,6 +16,11 @@ export interface IVATPayout extends Document {
   status: 'pending' | 'completed' | 'cancelled';
   date: Date;
   notes?: string;
+  receiptFileName?: string;
+  receiptContentType?: string;
+  receiptData?: Buffer;
+  receiptUploadedAt?: Date;
+  receiptUploadedBy?: mongoose.Types.ObjectId;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -37,6 +42,11 @@ const VATPayoutSchema: Schema<IVATPayout> = new Schema(
     status: { type: String, enum: ['pending', 'completed', 'cancelled'], default: 'completed' },
     date: { type: Date, default: () => new Date() },
     notes: { type: String },
+    receiptFileName: { type: String },
+    receiptContentType: { type: String },
+    receiptData: { type: Buffer, select: false },
+    receiptUploadedAt: { type: Date },
+    receiptUploadedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }

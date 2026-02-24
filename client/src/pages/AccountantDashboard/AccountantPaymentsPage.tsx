@@ -207,7 +207,7 @@ const AccountantPaymentsPage: React.FC = () => {
             fields: 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
           }),
           tenantService.getAll(),
-          paymentService.getPaymentsPage({ page, limit, includeProvisional: 'true' } as any)
+          paymentService.getPaymentsPage({ page, limit, includeProvisional: 'true', paymentType: 'rental' as any } as any)
         ]);
         if (!isMounted) return;
         let properties: Property[] = [];
@@ -292,7 +292,7 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
         if ((debouncedFilters as any).search) filterParams.search = (debouncedFilters as any).search;
         // Include provisional payments on accountant view
-        const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true' } as any);
+        const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true', paymentType: 'rental' as any } as any);
         setPayments(sortPayments(items as any[]));
         setTotalCount(total);
         persistCache({ items: items as any[], total, page, limit, filters });
@@ -340,13 +340,48 @@ const AccountantPaymentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await paymentService.updatePayment(id, data);
+      const payload: any = {
+        ...data,
+        status: 'completed',
+        postingStatus: 'posted'
+      };
+      const response = await paymentService.updatePayment(id, payload);
       setPayments(prev => prev.map(p => p._id === id ? response : p));
       setShowForm(false);
       setSelectedPayment(undefined);
-      setSuccessMessage('Payment updated successfully');
+      setSuccessMessage('Payment updated and completed successfully');
+      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to update payment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReversePayment = async (payment: Payment) => {
+    try {
+      const reason = window.prompt('Enter reversal reason (required):', 'Incorrect manual posting') || '';
+      if (!reason.trim()) return;
+      setLoading(true);
+      setError(null);
+      const resp = await paymentService.reversePayment(payment._id, reason.trim());
+      const original = (resp as any)?.originalPayment;
+      const reversal = (resp as any)?.reversalPayment;
+      const corrected = (resp as any)?.correctedPayment;
+      setPayments((prev) => {
+        const withoutOriginal = prev.filter((p) => p._id !== payment._id);
+        const next = [
+          ...(corrected ? [corrected as Payment] : []),
+          ...(reversal ? [reversal as Payment] : []),
+          ...(original ? [original as Payment] : []),
+          ...withoutOriginal
+        ];
+        return sortPayments(next);
+      });
+      setSuccessMessage((resp as any)?.message || 'Payment reversed and correction draft created');
+      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err?.message || 'Failed to reverse payment');
     } finally {
       setLoading(false);
     }
@@ -408,6 +443,7 @@ const AccountantPaymentsPage: React.FC = () => {
             setFinalizePayment(payment);
             setFinalizeOpen(true);
           }}
+          onReverse={handleReversePayment}
           onDownloadReceipt={async (payment) => {
             try {
               const blob = await paymentService.downloadReceipt(payment._id, user?.companyId);

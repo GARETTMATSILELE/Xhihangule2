@@ -176,10 +176,34 @@ const PaymentSchema = new mongoose_1.Schema({
             splitPercentCollaborator: { type: Number, required: false, min: 0, max: 100 },
         }
     },
+    vatIncluded: {
+        type: Boolean,
+        required: false,
+        default: false
+    },
+    vatRate: {
+        type: Number,
+        required: false,
+        min: 0,
+        max: 1,
+        default: 0
+    },
+    vatAmount: {
+        type: Number,
+        required: false,
+        min: 0,
+        default: 0
+    },
     status: {
         type: String,
         enum: ['pending', 'completed', 'failed', 'reversed', 'refunded'],
         default: 'pending',
+    },
+    postingStatus: {
+        type: String,
+        enum: ['draft', 'posted', 'reversed', 'voided'],
+        default: 'draft',
+        index: true,
     },
     currency: {
         type: String,
@@ -261,10 +285,73 @@ const PaymentSchema = new mongoose_1.Schema({
         ref: 'DevelopmentUnit',
         required: false
     },
+    trustEventEmittedAt: {
+        type: Date,
+        required: false
+    },
+    lastTrustEventSource: {
+        type: String,
+        required: false
+    },
+    externalProvider: {
+        type: String,
+        required: false
+    },
+    externalTransactionId: {
+        type: String,
+        required: false
+    },
     idempotencyKey: {
         type: String,
         required: false,
         index: true
+    },
+    reversalOfPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Payment',
+        index: true,
+        required: false,
+    },
+    reversalPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Payment',
+        required: false,
+    },
+    correctedPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Payment',
+        required: false,
+    },
+    reversedBy: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+    },
+    reversedAt: {
+        type: Date,
+        required: false,
+    },
+    reversalReason: {
+        type: String,
+        required: false,
+    },
+    voidedBy: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+    },
+    voidedAt: {
+        type: Date,
+        required: false,
+    },
+    voidReason: {
+        type: String,
+        required: false,
+    },
+    isCorrectionEntry: {
+        type: Boolean,
+        default: false,
+        index: true,
     },
 }, {
     timestamps: true
@@ -284,7 +371,16 @@ PaymentSchema.index({ saleId: 1 });
 PaymentSchema.index({ developmentId: 1 });
 PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
+PaymentSchema.index({ reversalOfPaymentId: 1 });
+PaymentSchema.index({ companyId: 1, postingStatus: 1, paymentDate: -1 });
 PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
+PaymentSchema.index({ companyId: 1, externalProvider: 1, externalTransactionId: 1 }, {
+    unique: true,
+    partialFilterExpression: {
+        externalProvider: { $exists: true, $type: 'string', $ne: '' },
+        externalTransactionId: { $exists: true, $type: 'string', $ne: '' }
+    }
+});
 // Ensure a payment reference cannot repeat within a company (guards manual edits/imports)
 PaymentSchema.index({ companyId: 1, referenceNumber: 1 }, {
     unique: true,
@@ -311,7 +407,9 @@ function isIllegalPaymentUpdate(update) {
             if ([
                 'status', 'isProvisional', 'isInSuspense', 'commissionFinalized', 'provisionalRelationshipType',
                 'finalizedAt', 'finalizedBy', 'idempotencyKey', 'manualPropertyAddress', 'manualTenantName',
-                'buyerName', 'sellerName', 'saleId', 'developmentId', 'developmentUnitId', 'notes'
+                'buyerName', 'sellerName', 'saleId', 'developmentId', 'developmentUnitId', 'notes',
+                'postingStatus', 'reversalOfPaymentId', 'reversalPaymentId', 'correctedPaymentId',
+                'reversedBy', 'reversedAt', 'reversalReason', 'voidedBy', 'voidedAt', 'voidReason', 'isCorrectionEntry'
             ].includes(key))
                 continue;
             if (protectedKeys.has(key))
@@ -320,6 +418,25 @@ function isIllegalPaymentUpdate(update) {
     }
     return false;
 }
+PaymentSchema.pre('save', function (next) {
+    try {
+        if (!this.postingStatus) {
+            const status = String(this.status || '').toLowerCase();
+            if (status === 'completed')
+                this.postingStatus = 'posted';
+            else if (status === 'reversed')
+                this.postingStatus = 'reversed';
+            else if (status === 'failed')
+                this.postingStatus = 'voided';
+            else
+                this.postingStatus = 'draft';
+        }
+        return next();
+    }
+    catch (e) {
+        return next(e);
+    }
+});
 PaymentSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
     var _a, _b;
     try {

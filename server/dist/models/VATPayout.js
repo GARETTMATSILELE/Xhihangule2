@@ -51,6 +51,11 @@ const VATPayoutSchema = new mongoose_1.Schema({
     status: { type: String, enum: ['pending', 'completed', 'cancelled'], default: 'completed' },
     date: { type: Date, default: () => new Date() },
     notes: { type: String },
+    receiptFileName: { type: String },
+    receiptContentType: { type: String },
+    receiptData: { type: Buffer, select: false },
+    receiptUploadedAt: { type: Date },
+    receiptUploadedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
     createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true });
 // Compound index to speed property/company scoped queries

@@ -13,11 +13,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const requestSecurity_1 = require("../utils/requestSecurity");
 const router = express_1.default.Router();
 // Debug middleware to log all requests
 router.use((req, res, next) => {
     console.log(`[Public Report Routes] ${req.method} ${req.path}`);
-    console.log('Request headers:', req.headers);
+    console.log('Request headers:', (0, requestSecurity_1.redactHeaders)(req.headers));
     console.log('Request query:', req.query);
     console.log('Request body:', req.body);
     next();

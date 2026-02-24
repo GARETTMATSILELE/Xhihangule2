@@ -41,8 +41,22 @@ export interface IPayment extends Document {
       splitPercentCollaborator?: number; // percent applied to agentShare for collaborator
     };
   };
+  vatIncluded?: boolean;
+  vatRate?: number;
+  vatAmount?: number;
   status: 'pending' | 'completed' | 'failed' | 'reversed' | 'refunded';
+  postingStatus?: 'draft' | 'posted' | 'reversed' | 'voided';
   currency: 'USD' | 'ZWL';
+  reversalOfPaymentId?: mongoose.Types.ObjectId;
+  reversalPaymentId?: mongoose.Types.ObjectId;
+  correctedPaymentId?: mongoose.Types.ObjectId;
+  reversedBy?: mongoose.Types.ObjectId;
+  reversedAt?: Date;
+  reversalReason?: string;
+  voidedBy?: mongoose.Types.ObjectId;
+  voidedAt?: Date;
+  voidReason?: string;
+  isCorrectionEntry?: boolean;
   leaseId?: mongoose.Types.ObjectId;
   recipientId?: mongoose.Types.ObjectId | string;
   recipientType?: string;
@@ -66,6 +80,10 @@ export interface IPayment extends Document {
   // Optional linkage to development/unit for sales
   developmentId?: mongoose.Types.ObjectId;
   developmentUnitId?: mongoose.Types.ObjectId;
+  trustEventEmittedAt?: Date;
+  lastTrustEventSource?: string;
+  externalProvider?: string;
+  externalTransactionId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -210,10 +228,34 @@ const PaymentSchema: Schema = new Schema({
       splitPercentCollaborator: { type: Number, required: false, min: 0, max: 100 },
     }
   },
+  vatIncluded: {
+    type: Boolean,
+    required: false,
+    default: false
+  },
+  vatRate: {
+    type: Number,
+    required: false,
+    min: 0,
+    max: 1,
+    default: 0
+  },
+  vatAmount: {
+    type: Number,
+    required: false,
+    min: 0,
+    default: 0
+  },
   status: {
     type: String,
     enum: ['pending', 'completed', 'failed', 'reversed', 'refunded'],
     default: 'pending',
+  },
+  postingStatus: {
+    type: String,
+    enum: ['draft', 'posted', 'reversed', 'voided'],
+    default: 'draft',
+    index: true,
   },
   currency: {
     type: String,
@@ -295,10 +337,73 @@ const PaymentSchema: Schema = new Schema({
     ref: 'DevelopmentUnit',
     required: false
   },
+  trustEventEmittedAt: {
+    type: Date,
+    required: false
+  },
+  lastTrustEventSource: {
+    type: String,
+    required: false
+  },
+  externalProvider: {
+    type: String,
+    required: false
+  },
+  externalTransactionId: {
+    type: String,
+    required: false
+  },
   idempotencyKey: {
     type: String,
     required: false,
     index: true
+  },
+  reversalOfPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Payment',
+    index: true,
+    required: false,
+  },
+  reversalPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Payment',
+    required: false,
+  },
+  correctedPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Payment',
+    required: false,
+  },
+  reversedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+  },
+  reversedAt: {
+    type: Date,
+    required: false,
+  },
+  reversalReason: {
+    type: String,
+    required: false,
+  },
+  voidedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+  },
+  voidedAt: {
+    type: Date,
+    required: false,
+  },
+  voidReason: {
+    type: String,
+    required: false,
+  },
+  isCorrectionEntry: {
+    type: Boolean,
+    default: false,
+    index: true,
   },
 }, {
   timestamps: true
@@ -319,7 +424,19 @@ PaymentSchema.index({ saleId: 1 });
 PaymentSchema.index({ developmentId: 1 });
 PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
+PaymentSchema.index({ reversalOfPaymentId: 1 });
+PaymentSchema.index({ companyId: 1, postingStatus: 1, paymentDate: -1 });
 PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
+PaymentSchema.index(
+  { companyId: 1, externalProvider: 1, externalTransactionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      externalProvider: { $exists: true, $type: 'string', $ne: '' },
+      externalTransactionId: { $exists: true, $type: 'string', $ne: '' }
+    }
+  }
+);
 // Ensure a payment reference cannot repeat within a company (guards manual edits/imports)
 PaymentSchema.index(
   { companyId: 1, referenceNumber: 1 },
@@ -348,13 +465,30 @@ function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
       if ([
         'status','isProvisional','isInSuspense','commissionFinalized','provisionalRelationshipType',
         'finalizedAt','finalizedBy','idempotencyKey','manualPropertyAddress','manualTenantName',
-        'buyerName','sellerName','saleId','developmentId','developmentUnitId','notes'
+        'buyerName','sellerName','saleId','developmentId','developmentUnitId','notes',
+        'postingStatus','reversalOfPaymentId','reversalPaymentId','correctedPaymentId',
+        'reversedBy','reversedAt','reversalReason','voidedBy','voidedAt','voidReason','isCorrectionEntry'
       ].includes(key)) continue;
       if (protectedKeys.has(key)) return true;
     }
   }
   return false;
 }
+
+PaymentSchema.pre('save', function(next) {
+  try {
+    if (!(this as any).postingStatus) {
+      const status = String((this as any).status || '').toLowerCase();
+      if (status === 'completed') (this as any).postingStatus = 'posted';
+      else if (status === 'reversed') (this as any).postingStatus = 'reversed';
+      else if (status === 'failed') (this as any).postingStatus = 'voided';
+      else (this as any).postingStatus = 'draft';
+    }
+    return next();
+  } catch (e) {
+    return next(e as any);
+  }
+});
 
 PaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
   try {
