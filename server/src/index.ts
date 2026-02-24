@@ -66,6 +66,7 @@ import { startTrustReconciliationJob, stopTrustReconciliationJob } from './jobs/
 import { User } from './models/User';
 import { getEmailConfigStatus, verifySmtpConnection } from './services/emailService';
 import { getClientIpForRateLimit, redactHeaders } from './utils/requestSecurity';
+import { getRuntimeFeatures } from './config/runtimeRole';
 
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
@@ -74,6 +75,15 @@ const ENV_PATH = path.resolve(__dirname, '..', ENV_FILE);
 dotenv.config({ path: ENV_PATH });
 
 const app = express();
+const runtimeFeatures = getRuntimeFeatures();
+
+console.log('Runtime role configuration:', {
+  role: runtimeFeatures.role,
+  runHttpServer: runtimeFeatures.runHttpServer,
+  runSyncSchedules: runtimeFeatures.runSyncSchedules,
+  runTrustBackground: runtimeFeatures.runTrustBackground,
+  runStartupMaintenance: runtimeFeatures.runStartupMaintenance
+});
 
 // Trust proxy (so req.protocol reflects https behind reverse proxies)
 app.set('trust proxy', 1);
@@ -460,9 +470,13 @@ const httpServer = createServer(app);
 const { io } = initializeSocket(httpServer);
 
 // Start the server first so /api/health/live responds even if DB is down
-httpServer.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+if (runtimeFeatures.runHttpServer) {
+  httpServer.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+} else {
+  console.log('HTTP server disabled for this runtime role (worker mode).');
+}
 
 // Connect to MongoDB (non-fatal if it fails; readiness will report not ready)
 connectDatabase()
@@ -470,9 +484,13 @@ connectDatabase()
     console.log('Connected to MongoDB');
 
     try {
-      // Start trust event listeners and reconciliation safety layer.
-      startTrustEventListener();
-      startTrustReconciliationJob();
+      if (runtimeFeatures.runTrustBackground) {
+        // Trust listeners/reconciliation are background workloads and should run on worker/all roles.
+        startTrustEventListener();
+        startTrustReconciliationJob();
+      } else {
+        console.log('Trust background services disabled for this runtime role.');
+      }
 
       // Ensure a hard-coded System Admin user exists (requested)
       // Creates or updates the user with email/password and system_admin role.
@@ -546,11 +564,15 @@ connectDatabase()
         console.warn('Failed to ensure property account indexes:', idxErr);
       }
 
-      await initializeSyncServices();
-      console.log('Database synchronization services initialized');
+      if (runtimeFeatures.runSyncSchedules) {
+        await initializeSyncServices();
+        console.log('Database synchronization services initialized');
+      } else {
+        console.log('Scheduled synchronization services disabled for this runtime role.');
+      }
 
       // One-time ledger maintenance at boot (production only)
-      if (process.env.NODE_ENV === 'production') {
+      if (process.env.NODE_ENV === 'production' && runtimeFeatures.runStartupMaintenance) {
         (async () => {
           const maintenanceKey = 'ledger_maintenance_v1';
           try {
@@ -583,14 +605,18 @@ connectDatabase()
             } catch {}
           }
         })().catch(() => {});
+      } else if (process.env.NODE_ENV === 'production') {
+        console.log('Startup ledger maintenance skipped for this runtime role.');
       }
     } catch (error) {
       console.error('Failed to initialize sync services:', error);
     }
   })
   .catch((error) => {
-    console.error('Failed to connect to MongoDB (server remains up for /health/live):', error);
-    // Do not exit; /api/health/ready will be 503 until DB is healthy
+    console.error('Failed to connect to MongoDB:', error);
+    if (runtimeFeatures.runHttpServer) {
+      console.error('Server remains up for /health/live; /api/health/ready will be 503 until DB is healthy');
+    }
   });
 
 // Handle graceful shutdown

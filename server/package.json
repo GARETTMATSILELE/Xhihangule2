@@ -5,10 +5,13 @@
   "main": "dist/app.js",
   "scripts": {
     "start": "node dist/index.js",
+    "start:worker": "cross-env APP_ROLE=worker node dist/worker.js",
     "dev": "ts-node-dev --respawn --transpile-only --ignore-watch node_modules --ignore-watch dist --watch src src/index.ts",
+    "dev:worker": "cross-env APP_ROLE=worker ts-node-dev --respawn --transpile-only --ignore-watch node_modules --ignore-watch dist --watch src src/worker.ts",
     "dev:prod-env": "cross-env ENV_FILE=.env.production ts-node-dev --respawn --transpile-only --ignore-watch node_modules --ignore-watch dist --watch src src/index.ts",
     "build": "tsc",
     "start:prod": "cross-env NODE_ENV=production ENV_FILE=.env.production node dist/index.js",
+    "start:prod:worker": "cross-env NODE_ENV=production ENV_FILE=.env.production APP_ROLE=worker node dist/worker.js",
     "reconcile:dry": "npm run build && node dist/scripts/reconcile.js --dry-run",
     "reconcile:apply": "npm run build && node dist/scripts/reconcile.js --apply",
     "ledger:maintain": "npm run build && node dist/scripts/ledgerMaintenance.js",

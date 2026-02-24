@@ -112,12 +112,21 @@ const trustReconciliationJob_1 = require("./jobs/trustReconciliationJob");
 const User_1 = require("./models/User");
 const emailService_1 = require("./services/emailService");
 const requestSecurity_1 = require("./utils/requestSecurity");
+const runtimeRole_1 = require("./config/runtimeRole");
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
 const ENV_PATH = path_1.default.resolve(__dirname, '..', ENV_FILE);
 dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
+const runtimeFeatures = (0, runtimeRole_1.getRuntimeFeatures)();
+console.log('Runtime role configuration:', {
+    role: runtimeFeatures.role,
+    runHttpServer: runtimeFeatures.runHttpServer,
+    runSyncSchedules: runtimeFeatures.runSyncSchedules,
+    runTrustBackground: runtimeFeatures.runTrustBackground,
+    runStartupMaintenance: runtimeFeatures.runStartupMaintenance
+});
 // Trust proxy (so req.protocol reflects https behind reverse proxies)
 app.set('trust proxy', 1);
 // Perform a one-time SMTP verification at startup (non-blocking)
@@ -481,17 +490,27 @@ const httpServer = (0, http_1.createServer)(app);
 // Initialize Socket.IO
 const { io } = (0, socket_1.initializeSocket)(httpServer);
 // Start the server first so /api/health/live responds even if DB is down
-httpServer.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+if (runtimeFeatures.runHttpServer) {
+    httpServer.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+}
+else {
+    console.log('HTTP server disabled for this runtime role (worker mode).');
+}
 // Connect to MongoDB (non-fatal if it fails; readiness will report not ready)
 (0, database_1.connectDatabase)()
     .then(() => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Connected to MongoDB');
     try {
-        // Start trust event listeners and reconciliation safety layer.
-        (0, trustEventListener_1.startTrustEventListener)();
-        (0, trustReconciliationJob_1.startTrustReconciliationJob)();
+        if (runtimeFeatures.runTrustBackground) {
+            // Trust listeners/reconciliation are background workloads and should run on worker/all roles.
+            (0, trustEventListener_1.startTrustEventListener)();
+            (0, trustReconciliationJob_1.startTrustReconciliationJob)();
+        }
+        else {
+            console.log('Trust background services disabled for this runtime role.');
+        }
         // Ensure a hard-coded System Admin user exists (requested)
         // Creates or updates the user with email/password and system_admin role.
         // Runs in all environments; idempotent.
@@ -565,10 +584,15 @@ httpServer.listen(PORT, () => {
         catch (idxErr) {
             console.warn('Failed to ensure property account indexes:', idxErr);
         }
-        yield (0, startSyncServices_1.initializeSyncServices)();
-        console.log('Database synchronization services initialized');
+        if (runtimeFeatures.runSyncSchedules) {
+            yield (0, startSyncServices_1.initializeSyncServices)();
+            console.log('Database synchronization services initialized');
+        }
+        else {
+            console.log('Scheduled synchronization services disabled for this runtime role.');
+        }
         // One-time ledger maintenance at boot (production only)
-        if (process.env.NODE_ENV === 'production') {
+        if (process.env.NODE_ENV === 'production' && runtimeFeatures.runStartupMaintenance) {
             (() => __awaiter(void 0, void 0, void 0, function* () {
                 const maintenanceKey = 'ledger_maintenance_v1';
                 try {
@@ -593,14 +617,19 @@ httpServer.listen(PORT, () => {
                 }
             }))().catch(() => { });
         }
+        else if (process.env.NODE_ENV === 'production') {
+            console.log('Startup ledger maintenance skipped for this runtime role.');
+        }
     }
     catch (error) {
         console.error('Failed to initialize sync services:', error);
     }
 }))
     .catch((error) => {
-    console.error('Failed to connect to MongoDB (server remains up for /health/live):', error);
-    // Do not exit; /api/health/ready will be 503 until DB is healthy
+    console.error('Failed to connect to MongoDB:', error);
+    if (runtimeFeatures.runHttpServer) {
+        console.error('Server remains up for /health/live; /api/health/ready will be 503 until DB is healthy');
+    }
 });
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
