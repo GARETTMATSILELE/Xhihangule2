@@ -596,9 +596,8 @@ else {
             (() => __awaiter(void 0, void 0, void 0, function* () {
                 const maintenanceKey = 'ledger_maintenance_v1';
                 try {
-                    // Create run record if not present
-                    yield SystemSetting_1.default.updateOne({ key: maintenanceKey, startedAt: { $exists: false } }, { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } }, { upsert: true });
-                    const record = yield SystemSetting_1.default.findOne({ key: maintenanceKey }).lean();
+                    // Single-key lock record to avoid duplicate-key upsert races.
+                    const record = yield SystemSetting_1.default.findOneAndUpdate({ key: maintenanceKey }, { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } }, { upsert: true, new: true }).lean();
                     if (record && record.completedAt) {
                         console.log('Startup ledger maintenance already completed previously - skipping.');
                         return;

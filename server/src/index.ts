@@ -576,13 +576,12 @@ connectDatabase()
         (async () => {
           const maintenanceKey = 'ledger_maintenance_v1';
           try {
-            // Create run record if not present
-            await SystemSetting.updateOne(
-              { key: maintenanceKey, startedAt: { $exists: false } },
+            // Single-key lock record to avoid duplicate-key upsert races.
+            const record = await SystemSetting.findOneAndUpdate(
+              { key: maintenanceKey },
               { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } },
-              { upsert: true }
-            );
-            const record = await SystemSetting.findOne({ key: maintenanceKey }).lean();
+              { upsert: true, new: true }
+            ).lean();
             if (record && record.completedAt) {
               console.log('Startup ledger maintenance already completed previously - skipping.');
               return;

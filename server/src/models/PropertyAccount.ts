@@ -270,7 +270,7 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
 // Enforce uniqueness only for non-archived ledgers (partial index)
 PropertyAccountSchema.index(
   { propertyId: 1, ledgerType: 1 },
-  { unique: true, partialFilterExpression: { isArchived: { $ne: true } } }
+  { unique: true, partialFilterExpression: { isArchived: false } }
 );
 // Accelerate list queries that filter by propertyId and sort by lastUpdated
 PropertyAccountSchema.index({ propertyId: 1, lastUpdated: -1 });

@@ -204,7 +204,7 @@ const PropertyAccountSchema = new mongoose_1.Schema({
 });
 // Indexes for better query performance
 // Enforce uniqueness only for non-archived ledgers (partial index)
-PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true } } });
+PropertyAccountSchema.index({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: false } });
 // Accelerate list queries that filter by propertyId and sort by lastUpdated
 PropertyAccountSchema.index({ propertyId: 1, lastUpdated: -1 });
 // Speed up lookups by embedded transaction paymentId

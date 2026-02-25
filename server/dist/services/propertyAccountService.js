@@ -265,6 +265,19 @@ class PropertyAccountService {
             if (!ledgerIndexUpgradePromise) {
                 ledgerIndexUpgradePromise = (() => __awaiter(this, void 0, void 0, function* () {
                     try {
+                        // Cosmos Mongo partial indexes do not support `$ne` in filter expressions.
+                        // Normalize legacy docs so active records are explicitly `isArchived: false`.
+                        try {
+                            yield PropertyAccount_1.default.collection.updateMany({
+                                $or: [
+                                    { isArchived: { $exists: false } },
+                                    { isArchived: null }
+                                ]
+                            }, { $set: { isArchived: false } });
+                        }
+                        catch (normalizeErr) {
+                            console.warn('Could not normalize isArchived defaults before index migration:', (normalizeErr === null || normalizeErr === void 0 ? void 0 : normalizeErr.message) || normalizeErr);
+                        }
                         const indexes = yield PropertyAccount_1.default.collection.indexes();
                         const legacyUniqueByProperty = indexes.find((idx) => idx.name === 'propertyId_1' && idx.unique === true);
                         if (legacyUniqueByProperty) {
@@ -292,8 +305,7 @@ class PropertyAccountService {
                         const compoundIsGood = compound &&
                             compound.unique === true &&
                             compound.partialFilterExpression &&
-                            compound.partialFilterExpression.isArchived &&
-                            compound.partialFilterExpression.isArchived.$ne === true;
+                            compound.partialFilterExpression.isArchived === false;
                         if (!compoundIsGood) {
                             try {
                                 if (compound) {
@@ -305,7 +317,7 @@ class PropertyAccountService {
                                 console.warn('Could not drop compound index:', (dropErr === null || dropErr === void 0 ? void 0 : dropErr.message) || dropErr);
                             }
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true } } });
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: false } });
                                 console.log('Created partial unique compound index propertyId_1_ledgerType_1 on PropertyAccount.');
                             }
                             catch (createErr) {
@@ -314,7 +326,7 @@ class PropertyAccountService {
                         }
                         // Ensure owner payouts unique index includes ledgerType and uses partial filter (no sparse)
                         const opIdx = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1');
-                        const opGood = opIdx && opIdx.unique === true && opIdx.partialFilterExpression && opIdx.partialFilterExpression.isArchived && opIdx.partialFilterExpression.isArchived.$ne === true && opIdx.partialFilterExpression['ownerPayouts.referenceNumber'];
+                        const opGood = opIdx && opIdx.unique === true && opIdx.partialFilterExpression && opIdx.partialFilterExpression.isArchived === false && opIdx.partialFilterExpression['ownerPayouts.referenceNumber'];
                         if (!opGood) {
                             try {
                                 if (opIdx)
@@ -322,7 +334,7 @@ class PropertyAccountService {
                             }
                             catch (_a) { }
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true }, 'ownerPayouts.referenceNumber': { $exists: true, $type: 'string' } } });
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, partialFilterExpression: { isArchived: false, 'ownerPayouts.referenceNumber': { $exists: true, $type: 'string' } } });
                                 console.log('Created partial unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
                             }
                             catch (createErr) {
@@ -341,7 +353,7 @@ class PropertyAccountService {
                             }
                         }
                         const txIdx = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1');
-                        const txGood = txIdx && txIdx.unique === true && txIdx.partialFilterExpression && txIdx.partialFilterExpression.isArchived && txIdx.partialFilterExpression.isArchived.$ne === true && txIdx.partialFilterExpression['transactions.paymentId'];
+                        const txGood = txIdx && txIdx.unique === true && txIdx.partialFilterExpression && txIdx.partialFilterExpression.isArchived === false && txIdx.partialFilterExpression['transactions.paymentId'];
                         if (!txGood) {
                             try {
                                 if (txIdx)
@@ -349,7 +361,7 @@ class PropertyAccountService {
                             }
                             catch (_b) { }
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, partialFilterExpression: { isArchived: { $ne: true }, 'transactions.paymentId': { $exists: true } } });
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, partialFilterExpression: { isArchived: false, 'transactions.paymentId': { $exists: true } } });
                                 console.log('Created partial unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
                             }
                             catch (createErr) {
