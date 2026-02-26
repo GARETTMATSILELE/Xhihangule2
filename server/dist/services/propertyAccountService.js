@@ -37,6 +37,37 @@ class PropertyAccountService {
         }
         return PropertyAccountService.instance;
     }
+    isDuplicateKeyError(error) {
+        return ((error === null || error === void 0 ? void 0 : error.code) === 11000 ||
+            /duplicate key/i.test(String((error === null || error === void 0 ? void 0 : error.message) || '')));
+    }
+    isCosmosMongoEndpoint() {
+        return /cosmos\.azure\.com/i.test(String(process.env.MONGODB_URI || ''));
+    }
+    // Keep one active ledger per (propertyId, normalized ledgerType), archive the rest.
+    archiveDuplicateActiveLedgers() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const active = yield PropertyAccount_1.default.find({ isArchived: false })
+                .select('_id propertyId ledgerType lastUpdated createdAt')
+                .sort({ lastUpdated: -1, createdAt: -1 });
+            const seen = new Set();
+            const archiveIds = [];
+            for (const account of active) {
+                const normalizedLedger = account.ledgerType === 'sale' ? 'sale' : 'rental';
+                const key = `${String(account.propertyId)}|${normalizedLedger}`;
+                if (seen.has(key)) {
+                    archiveIds.push(account._id);
+                }
+                else {
+                    seen.add(key);
+                }
+            }
+            if (archiveIds.length === 0)
+                return 0;
+            const result = yield PropertyAccount_1.default.updateMany({ _id: { $in: archiveIds } }, { $set: { isArchived: true, lastUpdated: new Date() } });
+            return Number((result === null || result === void 0 ? void 0 : result.modifiedCount) || 0);
+        });
+    }
     /**
      * Infer ledger type strictly from the entity itself.
      * - Property.rentalType:
@@ -265,6 +296,7 @@ class PropertyAccountService {
             if (!ledgerIndexUpgradePromise) {
                 ledgerIndexUpgradePromise = (() => __awaiter(this, void 0, void 0, function* () {
                     try {
+                        const cosmosMongo = this.isCosmosMongoEndpoint();
                         // Cosmos Mongo partial indexes do not support `$ne` in filter expressions.
                         // Normalize legacy docs so active records are explicitly `isArchived: false`.
                         try {
@@ -300,6 +332,16 @@ class PropertyAccountService {
                                 console.warn('Could not drop legacy ownerPayout index:', (dropErr === null || dropErr === void 0 ? void 0 : dropErr.message) || dropErr);
                             }
                         }
+                        // Proactively archive duplicate active ledgers so unique index creation can succeed.
+                        try {
+                            const archived = yield this.archiveDuplicateActiveLedgers();
+                            if (archived > 0) {
+                                console.log(`Archived ${archived} duplicate active PropertyAccount ledger records before index creation.`);
+                            }
+                        }
+                        catch (archiveErr) {
+                            console.warn('Could not archive duplicate active ledgers before index migration:', (archiveErr === null || archiveErr === void 0 ? void 0 : archiveErr.message) || archiveErr);
+                        }
                         // Ensure unique compound index exists and is partial on non-archived docs
                         const compound = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1');
                         const compoundIsGood = compound &&
@@ -321,12 +363,36 @@ class PropertyAccountService {
                                 console.log('Created partial unique compound index propertyId_1_ledgerType_1 on PropertyAccount.');
                             }
                             catch (createErr) {
-                                console.warn('Could not create partial compound index:', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
+                                // If duplicates still exist, archive and retry once.
+                                if (this.isDuplicateKeyError(createErr)) {
+                                    try {
+                                        const archived = yield this.archiveDuplicateActiveLedgers();
+                                        if (archived > 0) {
+                                            yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1 }, { unique: true, partialFilterExpression: { isArchived: false } });
+                                            console.log('Created partial unique compound index propertyId_1_ledgerType_1 on retry after archiving duplicates.');
+                                        }
+                                        else {
+                                            console.warn('Could not create partial compound index (duplicate keys remain):', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
+                                        }
+                                    }
+                                    catch (retryErr) {
+                                        console.warn('Could not create partial compound index on retry:', (retryErr === null || retryErr === void 0 ? void 0 : retryErr.message) || retryErr);
+                                    }
+                                }
+                                else {
+                                    console.warn('Could not create partial compound index:', (createErr === null || createErr === void 0 ? void 0 : createErr.message) || createErr);
+                                }
                             }
                         }
                         // Ensure owner payouts unique index includes ledgerType and uses partial filter (no sparse)
                         const opIdx = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1');
-                        const opGood = opIdx && opIdx.unique === true && opIdx.partialFilterExpression && opIdx.partialFilterExpression.isArchived === false && opIdx.partialFilterExpression['ownerPayouts.referenceNumber'];
+                        const opGood = opIdx &&
+                            opIdx.unique === true &&
+                            ((cosmosMongo && opIdx.sparse === true) ||
+                                (!cosmosMongo &&
+                                    opIdx.partialFilterExpression &&
+                                    opIdx.partialFilterExpression.isArchived === false &&
+                                    opIdx.partialFilterExpression['ownerPayouts.referenceNumber']));
                         if (!opGood) {
                             try {
                                 if (opIdx)
@@ -334,7 +400,11 @@ class PropertyAccountService {
                             }
                             catch (_a) { }
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, { unique: true, partialFilterExpression: { isArchived: false, 'ownerPayouts.referenceNumber': { $exists: true, $type: 'string' } } });
+                                const options = cosmosMongo
+                                    // Cosmos Mongo has limitations on nested partial expressions.
+                                    ? { unique: true, sparse: true }
+                                    : { unique: true, partialFilterExpression: { isArchived: false, 'ownerPayouts.referenceNumber': { $exists: true, $type: 'string' } } };
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 }, options);
                                 console.log('Created partial unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
                             }
                             catch (createErr) {
@@ -353,7 +423,13 @@ class PropertyAccountService {
                             }
                         }
                         const txIdx = indexes.find((idx) => idx.name === 'propertyId_1_ledgerType_1_transactions.paymentId_1');
-                        const txGood = txIdx && txIdx.unique === true && txIdx.partialFilterExpression && txIdx.partialFilterExpression.isArchived === false && txIdx.partialFilterExpression['transactions.paymentId'];
+                        const txGood = txIdx &&
+                            txIdx.unique === true &&
+                            ((cosmosMongo && txIdx.sparse === true) ||
+                                (!cosmosMongo &&
+                                    txIdx.partialFilterExpression &&
+                                    txIdx.partialFilterExpression.isArchived === false &&
+                                    txIdx.partialFilterExpression['transactions.paymentId']));
                         if (!txGood) {
                             try {
                                 if (txIdx)
@@ -361,7 +437,11 @@ class PropertyAccountService {
                             }
                             catch (_b) { }
                             try {
-                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, { unique: true, partialFilterExpression: { isArchived: false, 'transactions.paymentId': { $exists: true } } });
+                                const options = cosmosMongo
+                                    // Cosmos Mongo has limitations on nested partial expressions.
+                                    ? { unique: true, sparse: true }
+                                    : { unique: true, partialFilterExpression: { isArchived: false, 'transactions.paymentId': { $exists: true } } };
+                                yield PropertyAccount_1.default.collection.createIndex({ propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 }, options);
                                 console.log('Created partial unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
                             }
                             catch (createErr) {
