@@ -72,6 +72,9 @@ const ensurePositive = (value?: number): number => {
 
 class AccountingService {
   private indexesEnsured = false;
+  private readonly dashboardSummaryCache = new Map<string, { expiresAt: number; value: Record<string, number | string> }>();
+  private readonly dashboardSummaryInFlight = new Map<string, Promise<Record<string, number | string>>>();
+  private readonly dashboardSummaryTtlMs = Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_CACHE_TTL_MS || 15000));
 
   private async ensureIndexes(): Promise<void> {
     if (this.indexesEnsured) return;
@@ -373,70 +376,97 @@ class AccountingService {
   }
 
   async getDashboardSummary(companyId: string): Promise<Record<string, number | string>> {
-    const companyObjectId = toObjectId(companyId);
-    await this.ensureCompanyBalance(companyId);
-    const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue] = await Promise.all([
-      CompanyBalance.findOne({ companyId: companyObjectId }).lean(),
-      BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]),
-      BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }),
-      VatRecord.countDocuments({ companyId: companyObjectId, status: 'pending' }),
-      JournalEntry.countDocuments({ companyId: companyObjectId, sourceModule: 'expense' }),
-      JournalLine.aggregate([
-        {
-          $lookup: {
-            from: 'chartofaccounts',
-            localField: 'accountId',
-            foreignField: '_id',
-            as: 'account'
-          }
-        },
-        { $unwind: '$account' },
-        { $match: { companyId: companyObjectId, 'account.code': '2102' } },
-        { $group: { _id: null, amount: { $sum: { $subtract: ['$credit', '$debit'] } } } }
-      ]),
-      Payment.aggregate([
-        { $match: { companyId: companyObjectId, status: 'completed' } },
-        { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
-      ])
-    ]);
-
-    const cashBalance = toMoney(cash[0]?.total || 0);
-    const vatDueAmount = toMoney(balance?.vatPayable || 0);
-    const ledgerRevenue = toMoney(balance?.totalRevenue || 0);
-    const paymentRevenue = toMoney(completedPaymentRevenue[0]?.amount || 0);
-    const totalRevenue = toMoney(Math.max(ledgerRevenue, paymentRevenue));
-    const totalExpenses = toMoney(balance?.totalExpenses || 0);
-    const netProfit = toMoney(totalRevenue - totalExpenses);
-
-    // Self-heal stale dashboard snapshots so subsequent calls stay stable.
-    if (totalRevenue !== ledgerRevenue || netProfit !== toMoney(balance?.netProfit || 0)) {
-      await CompanyBalance.updateOne(
-        { companyId: companyObjectId },
-        {
-          $set: {
-            _id: getCompanyBalanceId(companyId),
-            totalRevenue,
-            netProfit,
-            lastUpdated: new Date()
-          }
-        },
-        { upsert: true }
-      );
+    const now = Date.now();
+    const cached = this.dashboardSummaryCache.get(companyId);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
     }
 
-    return {
-      totalRevenue,
-      totalExpenses,
-      netProfit,
-      vatPayable: vatDueAmount,
-      commissionLiability: toMoney(balance?.commissionLiability || unpaidCommissions[0]?.amount || 0),
-      cashBalance,
-      unreconciledBankTransactions: unreconciledBank,
-      vatDuePeriods: pendingVat,
-      pendingExpenses: pendingExpense,
-      unpaidCommissions: Math.max(0, toMoney(unpaidCommissions[0]?.amount || 0)),
-      lastUpdated: balance?.lastUpdated?.toISOString() || new Date().toISOString()
-    };
+    const existingInFlight = this.dashboardSummaryInFlight.get(companyId);
+    if (existingInFlight) {
+      return existingInFlight;
+    }
+
+    const loader = (async (): Promise<Record<string, number | string>> => {
+      const companyObjectId = toObjectId(companyId);
+      await this.ensureCompanyBalance(companyId);
+      const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue] = await Promise.all([
+        CompanyBalance.findOne({ companyId: companyObjectId }).maxTimeMS(10000).lean(),
+        BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]).option({ maxTimeMS: 10000 }),
+        BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }).maxTimeMS(10000),
+        VatRecord.countDocuments({ companyId: companyObjectId, status: 'pending' }).maxTimeMS(10000),
+        JournalEntry.countDocuments({ companyId: companyObjectId, sourceModule: 'expense' }).maxTimeMS(10000),
+        JournalLine.aggregate([
+          {
+            $lookup: {
+              from: 'chartofaccounts',
+              localField: 'accountId',
+              foreignField: '_id',
+              as: 'account'
+            }
+          },
+          { $unwind: '$account' },
+          { $match: { companyId: companyObjectId, 'account.code': '2102' } },
+          { $group: { _id: null, amount: { $sum: { $subtract: ['$credit', '$debit'] } } } }
+        ]).option({ maxTimeMS: 15000 }),
+        Payment.aggregate([
+          { $match: { companyId: companyObjectId, status: 'completed' } },
+          { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
+        ]).option({ maxTimeMS: 10000 })
+      ]);
+
+      const cashBalance = toMoney(cash[0]?.total || 0);
+      const vatDueAmount = toMoney(balance?.vatPayable || 0);
+      const ledgerRevenue = toMoney(balance?.totalRevenue || 0);
+      const paymentRevenue = toMoney(completedPaymentRevenue[0]?.amount || 0);
+      const totalRevenue = toMoney(Math.max(ledgerRevenue, paymentRevenue));
+      const totalExpenses = toMoney(balance?.totalExpenses || 0);
+      const netProfit = toMoney(totalRevenue - totalExpenses);
+
+      // Self-heal stale dashboard snapshots so subsequent calls stay stable.
+      if (totalRevenue !== ledgerRevenue || netProfit !== toMoney(balance?.netProfit || 0)) {
+        await CompanyBalance.updateOne(
+          { companyId: companyObjectId },
+          {
+            $set: {
+              _id: getCompanyBalanceId(companyId),
+              totalRevenue,
+              netProfit,
+              lastUpdated: new Date()
+            }
+          },
+          { upsert: true }
+        );
+      }
+
+      const summary = {
+        totalRevenue,
+        totalExpenses,
+        netProfit,
+        vatPayable: vatDueAmount,
+        commissionLiability: toMoney(balance?.commissionLiability || unpaidCommissions[0]?.amount || 0),
+        cashBalance,
+        unreconciledBankTransactions: unreconciledBank,
+        vatDuePeriods: pendingVat,
+        pendingExpenses: pendingExpense,
+        unpaidCommissions: Math.max(0, toMoney(unpaidCommissions[0]?.amount || 0)),
+        lastUpdated: balance?.lastUpdated?.toISOString() || new Date().toISOString()
+      };
+
+      this.dashboardSummaryCache.set(companyId, {
+        value: summary,
+        expiresAt: Date.now() + this.dashboardSummaryTtlMs
+      });
+
+      return summary;
+    })();
+
+    this.dashboardSummaryInFlight.set(companyId, loader);
+    try {
+      return await loader;
+    } finally {
+      this.dashboardSummaryInFlight.delete(companyId);
+    }
   }
 
   async getTrend(companyId: string, accountType: 'revenue' | 'expense', months = 12): Promise<Array<{ month: string; total: number }>> {

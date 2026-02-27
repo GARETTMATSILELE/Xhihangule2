@@ -48,6 +48,9 @@ const ensurePositive = (value) => {
 class AccountingService {
     constructor() {
         this.indexesEnsured = false;
+        this.dashboardSummaryCache = new Map();
+        this.dashboardSummaryInFlight = new Map();
+        this.dashboardSummaryTtlMs = Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_CACHE_TTL_MS || 15000));
     }
     ensureIndexes() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -327,64 +330,87 @@ class AccountingService {
     }
     getDashboardSummary(companyId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e;
-            const companyObjectId = toObjectId(companyId);
-            yield this.ensureCompanyBalance(companyId);
-            const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue] = yield Promise.all([
-                CompanyBalance_1.CompanyBalance.findOne({ companyId: companyObjectId }).lean(),
-                BankAccount_1.BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]),
-                BankTransaction_1.BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }),
-                VatRecord_1.VatRecord.countDocuments({ companyId: companyObjectId, status: 'pending' }),
-                JournalEntry_1.JournalEntry.countDocuments({ companyId: companyObjectId, sourceModule: 'expense' }),
-                JournalLine_1.JournalLine.aggregate([
-                    {
-                        $lookup: {
-                            from: 'chartofaccounts',
-                            localField: 'accountId',
-                            foreignField: '_id',
-                            as: 'account'
-                        }
-                    },
-                    { $unwind: '$account' },
-                    { $match: { companyId: companyObjectId, 'account.code': '2102' } },
-                    { $group: { _id: null, amount: { $sum: { $subtract: ['$credit', '$debit'] } } } }
-                ]),
-                Payment_1.Payment.aggregate([
-                    { $match: { companyId: companyObjectId, status: 'completed' } },
-                    { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
-                ])
-            ]);
-            const cashBalance = toMoney(((_a = cash[0]) === null || _a === void 0 ? void 0 : _a.total) || 0);
-            const vatDueAmount = toMoney((balance === null || balance === void 0 ? void 0 : balance.vatPayable) || 0);
-            const ledgerRevenue = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalRevenue) || 0);
-            const paymentRevenue = toMoney(((_b = completedPaymentRevenue[0]) === null || _b === void 0 ? void 0 : _b.amount) || 0);
-            const totalRevenue = toMoney(Math.max(ledgerRevenue, paymentRevenue));
-            const totalExpenses = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalExpenses) || 0);
-            const netProfit = toMoney(totalRevenue - totalExpenses);
-            // Self-heal stale dashboard snapshots so subsequent calls stay stable.
-            if (totalRevenue !== ledgerRevenue || netProfit !== toMoney((balance === null || balance === void 0 ? void 0 : balance.netProfit) || 0)) {
-                yield CompanyBalance_1.CompanyBalance.updateOne({ companyId: companyObjectId }, {
-                    $set: {
-                        _id: (0, CompanyBalance_1.getCompanyBalanceId)(companyId),
-                        totalRevenue,
-                        netProfit,
-                        lastUpdated: new Date()
-                    }
-                }, { upsert: true });
+            const now = Date.now();
+            const cached = this.dashboardSummaryCache.get(companyId);
+            if (cached && cached.expiresAt > now) {
+                return cached.value;
             }
-            return {
-                totalRevenue,
-                totalExpenses,
-                netProfit,
-                vatPayable: vatDueAmount,
-                commissionLiability: toMoney((balance === null || balance === void 0 ? void 0 : balance.commissionLiability) || ((_c = unpaidCommissions[0]) === null || _c === void 0 ? void 0 : _c.amount) || 0),
-                cashBalance,
-                unreconciledBankTransactions: unreconciledBank,
-                vatDuePeriods: pendingVat,
-                pendingExpenses: pendingExpense,
-                unpaidCommissions: Math.max(0, toMoney(((_d = unpaidCommissions[0]) === null || _d === void 0 ? void 0 : _d.amount) || 0)),
-                lastUpdated: ((_e = balance === null || balance === void 0 ? void 0 : balance.lastUpdated) === null || _e === void 0 ? void 0 : _e.toISOString()) || new Date().toISOString()
-            };
+            const existingInFlight = this.dashboardSummaryInFlight.get(companyId);
+            if (existingInFlight) {
+                return existingInFlight;
+            }
+            const loader = (() => __awaiter(this, void 0, void 0, function* () {
+                var _a, _b, _c, _d, _e;
+                const companyObjectId = toObjectId(companyId);
+                yield this.ensureCompanyBalance(companyId);
+                const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue] = yield Promise.all([
+                    CompanyBalance_1.CompanyBalance.findOne({ companyId: companyObjectId }).maxTimeMS(10000).lean(),
+                    BankAccount_1.BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]).option({ maxTimeMS: 10000 }),
+                    BankTransaction_1.BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }).maxTimeMS(10000),
+                    VatRecord_1.VatRecord.countDocuments({ companyId: companyObjectId, status: 'pending' }).maxTimeMS(10000),
+                    JournalEntry_1.JournalEntry.countDocuments({ companyId: companyObjectId, sourceModule: 'expense' }).maxTimeMS(10000),
+                    JournalLine_1.JournalLine.aggregate([
+                        {
+                            $lookup: {
+                                from: 'chartofaccounts',
+                                localField: 'accountId',
+                                foreignField: '_id',
+                                as: 'account'
+                            }
+                        },
+                        { $unwind: '$account' },
+                        { $match: { companyId: companyObjectId, 'account.code': '2102' } },
+                        { $group: { _id: null, amount: { $sum: { $subtract: ['$credit', '$debit'] } } } }
+                    ]).option({ maxTimeMS: 15000 }),
+                    Payment_1.Payment.aggregate([
+                        { $match: { companyId: companyObjectId, status: 'completed' } },
+                        { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
+                    ]).option({ maxTimeMS: 10000 })
+                ]);
+                const cashBalance = toMoney(((_a = cash[0]) === null || _a === void 0 ? void 0 : _a.total) || 0);
+                const vatDueAmount = toMoney((balance === null || balance === void 0 ? void 0 : balance.vatPayable) || 0);
+                const ledgerRevenue = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalRevenue) || 0);
+                const paymentRevenue = toMoney(((_b = completedPaymentRevenue[0]) === null || _b === void 0 ? void 0 : _b.amount) || 0);
+                const totalRevenue = toMoney(Math.max(ledgerRevenue, paymentRevenue));
+                const totalExpenses = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalExpenses) || 0);
+                const netProfit = toMoney(totalRevenue - totalExpenses);
+                // Self-heal stale dashboard snapshots so subsequent calls stay stable.
+                if (totalRevenue !== ledgerRevenue || netProfit !== toMoney((balance === null || balance === void 0 ? void 0 : balance.netProfit) || 0)) {
+                    yield CompanyBalance_1.CompanyBalance.updateOne({ companyId: companyObjectId }, {
+                        $set: {
+                            _id: (0, CompanyBalance_1.getCompanyBalanceId)(companyId),
+                            totalRevenue,
+                            netProfit,
+                            lastUpdated: new Date()
+                        }
+                    }, { upsert: true });
+                }
+                const summary = {
+                    totalRevenue,
+                    totalExpenses,
+                    netProfit,
+                    vatPayable: vatDueAmount,
+                    commissionLiability: toMoney((balance === null || balance === void 0 ? void 0 : balance.commissionLiability) || ((_c = unpaidCommissions[0]) === null || _c === void 0 ? void 0 : _c.amount) || 0),
+                    cashBalance,
+                    unreconciledBankTransactions: unreconciledBank,
+                    vatDuePeriods: pendingVat,
+                    pendingExpenses: pendingExpense,
+                    unpaidCommissions: Math.max(0, toMoney(((_d = unpaidCommissions[0]) === null || _d === void 0 ? void 0 : _d.amount) || 0)),
+                    lastUpdated: ((_e = balance === null || balance === void 0 ? void 0 : balance.lastUpdated) === null || _e === void 0 ? void 0 : _e.toISOString()) || new Date().toISOString()
+                };
+                this.dashboardSummaryCache.set(companyId, {
+                    value: summary,
+                    expiresAt: Date.now() + this.dashboardSummaryTtlMs
+                });
+                return summary;
+            }))();
+            this.dashboardSummaryInFlight.set(companyId, loader);
+            try {
+                return yield loader;
+            }
+            finally {
+                this.dashboardSummaryInFlight.delete(companyId);
+            }
         });
     }
     getTrend(companyId_1, accountType_1) {

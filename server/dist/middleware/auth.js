@@ -20,46 +20,26 @@ const getRequestToken = (req) => {
 };
 // Basic auth middleware that doesn't require companyId
 const auth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
     try {
         const token = getRequestToken(req);
-        console.log('Auth middleware check:', {
-            hasAuthHeader: !!req.headers.authorization,
-            hasAccessTokenCookie: !!((_a = req.cookies) === null || _a === void 0 ? void 0 : _a.accessToken),
-            hasToken: !!token,
-            url: req.url
-        });
         if (!token) {
-            console.log('No token found in request');
             return res.status(401).json({
                 status: 'error',
                 message: 'Authentication required',
                 code: 'AUTH_REQUIRED'
             });
         }
-        // Verify token using auth service
-        console.log('Verifying token...');
-        const userData = yield authService.verifyToken(token);
-        console.log('Token verification successful:', {
-            userId: userData.userId,
-            role: userData.role,
-            companyId: userData.companyId
-        });
+        // Use claim-only verification to avoid DB dependency on every request.
+        const userData = authService.verifyAccessTokenClaims(token);
         req.user = {
             userId: userData.userId,
             role: userData.role,
             roles: userData.roles,
             companyId: userData.companyId
         };
-        console.log('User object set in request:', {
-            userId: (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId,
-            role: (_c = req.user) === null || _c === void 0 ? void 0 : _c.role,
-            companyId: (_d = req.user) === null || _d === void 0 ? void 0 : _d.companyId
-        });
         next();
     }
     catch (error) {
-        console.error('Auth middleware error:', error);
         if (error instanceof Error) {
             if (error.message.includes('expired')) {
                 return res.status(401).json({
@@ -95,8 +75,8 @@ const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, 
                 code: 'AUTH_REQUIRED'
             });
         }
-        // Verify token using auth service
-        const userData = yield authService.verifyToken(token);
+        // Claim-only verification avoids turning transient DB outages into blanket auth failures.
+        const userData = authService.verifyAccessTokenClaims(token);
         // Ensure this is a PropertyOwner
         if (userData.role !== 'owner') {
             return res.status(403).json({
@@ -122,7 +102,6 @@ const propertyOwnerAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, 
         next();
     }
     catch (error) {
-        console.error('PropertyOwner auth middleware error:', error);
         if (error instanceof Error) {
             if (error.message.includes('expired')) {
                 return res.status(401).json({
@@ -158,8 +137,8 @@ const authWithCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
                 code: 'AUTH_REQUIRED'
             });
         }
-        // Verify token using auth service
-        const userData = yield authService.verifyToken(token);
+        // Claim-only verification avoids turning transient DB outages into blanket auth failures.
+        const userData = authService.verifyAccessTokenClaims(token);
         if (!userData.companyId) {
             return res.status(403).json({
                 status: 'error',
@@ -176,7 +155,6 @@ const authWithCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         next();
     }
     catch (error) {
-        console.error('Auth middleware error:', error);
         if (error instanceof Error) {
             if (error.message.includes('expired')) {
                 return res.status(401).json({

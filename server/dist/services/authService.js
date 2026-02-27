@@ -26,6 +26,7 @@ const REFRESH_TOKEN_EXPIRY = jwt_1.JWT_CONFIG.REFRESH_TOKEN_EXPIRY;
 class AuthService {
     constructor() {
         this.isInitialized = false;
+        this.userVerificationCache = new Map();
     }
     static getInstance() {
         if (!AuthService.instance) {
@@ -53,6 +54,32 @@ class AuthService {
             }
             this.isInitialized = true;
         });
+    }
+    decodeAccessToken(token) {
+        const decoded = jsonwebtoken_1.default.verify(token, jwt_1.JWT_CONFIG.SECRET, {
+            issuer: jwt_1.JWT_CONFIG.ISSUER,
+            audience: jwt_1.JWT_CONFIG.AUDIENCE
+        });
+        if (!(decoded === null || decoded === void 0 ? void 0 : decoded.userId) || !(decoded === null || decoded === void 0 ? void 0 : decoded.role)) {
+            throw new Error('Invalid access token payload');
+        }
+        if (decoded.type && decoded.type !== 'access') {
+            throw new Error('Invalid access token type');
+        }
+        return decoded;
+    }
+    /**
+     * Fast token verification path for request middleware.
+     * This validates token integrity/expiry and extracts claims without requiring a DB round-trip.
+     */
+    verifyAccessTokenClaims(token) {
+        const decoded = this.decodeAccessToken(token);
+        return {
+            userId: decoded.userId,
+            role: decoded.role,
+            roles: decoded.roles,
+            companyId: decoded.companyId
+        };
     }
     getUserById(userId) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -107,21 +134,25 @@ class AuthService {
     }
     refreshToken(refreshToken) {
         return __awaiter(this, void 0, void 0, function* () {
-            yield this.initialize();
             try {
-                console.log('AuthService: Starting token refresh');
-                const decoded = jsonwebtoken_1.default.verify(refreshToken, jwt_1.JWT_CONFIG.REFRESH_SECRET);
-                console.log('AuthService: Token decoded successfully, userId:', decoded.userId);
+                const decoded = jsonwebtoken_1.default.verify(refreshToken, jwt_1.JWT_CONFIG.REFRESH_SECRET, {
+                    issuer: jwt_1.JWT_CONFIG.ISSUER,
+                    audience: jwt_1.JWT_CONFIG.AUDIENCE
+                });
+                if (!(decoded === null || decoded === void 0 ? void 0 : decoded.userId)) {
+                    throw new Error('Invalid refresh token payload');
+                }
+                if (decoded.type && decoded.type !== 'refresh') {
+                    throw new Error('Invalid refresh token type');
+                }
+                yield this.initialize();
                 const userResult = yield this.getUserById(decoded.userId);
                 if (!userResult) {
-                    console.log('AuthService: User not found for userId:', decoded.userId);
                     throw new Error('User not found');
                 }
                 const { user, type } = userResult;
-                console.log('AuthService: User found:', { userId: user._id, role: type === 'user' ? user.role : 'owner' });
                 // Check if user is still active (only for User model)
                 if (type === 'user' && !user.isActive) {
-                    console.log('AuthService: User is inactive');
                     throw new Error('Account is inactive');
                 }
                 // Invalidate refresh token if password changed after token was issued
@@ -129,7 +160,6 @@ class AuthService {
                     const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
                     const pwdChangedAt = user.passwordChangedAt;
                     if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
-                        console.log('AuthService: Rejecting refresh token due to password change after token issuance');
                         throw new Error('Refresh token invalid due to password change');
                     }
                 }
@@ -138,14 +168,12 @@ class AuthService {
                 }
                 const newToken = this.generateAccessToken(user, type);
                 const newRefreshToken = this.generateRefreshToken(user, type);
-                console.log('AuthService: New tokens generated successfully');
                 return {
                     token: newToken,
                     refreshToken: newRefreshToken
                 };
             }
             catch (error) {
-                console.error('AuthService: Token refresh failed:', error);
                 if (error instanceof jsonwebtoken_1.default.TokenExpiredError) {
                     throw new Error('Refresh token expired');
                 }
@@ -158,10 +186,16 @@ class AuthService {
     }
     verifyToken(token) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             yield this.initialize();
             try {
-                const decoded = jsonwebtoken_1.default.verify(token, jwt_1.JWT_CONFIG.SECRET);
-                console.log('AuthService: Token decoded:', decoded);
+                const decoded = this.decodeAccessToken(token);
+                const cacheKey = `${decoded.userId}:${(_a = decoded.iat) !== null && _a !== void 0 ? _a : 'na'}`;
+                const now = Date.now();
+                const cached = this.userVerificationCache.get(cacheKey);
+                if (cached && cached.expiresAt > now) {
+                    return cached.user;
+                }
                 const userResult = yield this.getUserById(decoded.userId);
                 if (!userResult) {
                     throw new Error('User not found');
@@ -172,18 +206,12 @@ class AuthService {
                     const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
                     const pwdChangedAt = user.passwordChangedAt;
                     if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
-                        console.log('AuthService: Rejecting access token due to password change after token issuance');
                         throw new Error('Access token invalid due to password change');
                     }
                 }
                 catch (cmpErr) {
                     throw cmpErr;
                 }
-                console.log('AuthService: User found in database:', {
-                    userId: user._id,
-                    role: type === 'user' ? user.role : 'owner',
-                    companyId: user.companyId ? user.companyId.toString() : undefined
-                });
                 // Check if user is still active (only for User model)
                 if (type === 'user' && !user.isActive) {
                     throw new Error('Account is inactive');
@@ -195,7 +223,10 @@ class AuthService {
                     roles: type === 'user' ? ((Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined) : undefined,
                     companyId: user.companyId ? user.companyId.toString() : undefined
                 };
-                console.log('AuthService: Returning user data:', result);
+                this.userVerificationCache.set(cacheKey, {
+                    user: result,
+                    expiresAt: now + AuthService.DB_VERIFY_CACHE_TTL_MS
+                });
                 return result;
             }
             catch (error) {
@@ -247,3 +278,4 @@ class AuthService {
     }
 }
 exports.AuthService = AuthService;
+AuthService.DB_VERIFY_CACHE_TTL_MS = Number(process.env.AUTH_USER_CACHE_TTL_MS || 120000);

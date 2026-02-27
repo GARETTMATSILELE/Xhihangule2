@@ -414,6 +414,12 @@ PaymentSchema.index({ companyId: 1, paymentDate: -1 });
 PaymentSchema.index({ companyId: 1, paymentType: 1, paymentDate: -1 });
 // Optimize sales queries by mode and development linkage
 PaymentSchema.index({ companyId: 1, paymentType: 1, saleMode: 1, developmentId: 1, paymentDate: -1 });
+// Support accountant dashboard/collections where paid-to-date is grouped by saleId
+PaymentSchema.index({ companyId: 1, paymentType: 1, status: 1, saleId: 1 });
+// Support rental outstanding aggregation by company + period + tenant/property
+PaymentSchema.index({ companyId: 1, paymentType: 1, status: 1, propertyId: 1, tenantId: 1, rentalPeriodYear: 1, rentalPeriodMonth: 1 });
+// Support provisional suggestion lookups in accountant workflows
+PaymentSchema.index({ companyId: 1, isProvisional: 1, createdAt: -1 });
 PaymentSchema.index({ propertyId: 1 });
 PaymentSchema.index({ tenantId: 1 });
 PaymentSchema.index({ agentId: 1 });

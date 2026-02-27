@@ -9,6 +9,7 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
+import SystemSetting from '../models/SystemSetting';
 import { v4 as uuidv4 } from 'uuid';
 
 // Upgrade legacy indexes: allow separate ledgers per property
@@ -16,6 +17,7 @@ let ledgerIndexUpgradePromise: Promise<void> | null = null;
 
 export class PropertyAccountService {
   private static instance: PropertyAccountService;
+  private static readonly ONE_TIME_DUPLICATE_CLEANUP_KEY = 'property_account_duplicate_cleanup_v1';
 
   public static getInstance(): PropertyAccountService {
     if (!PropertyAccountService.instance) {
@@ -31,12 +33,136 @@ export class PropertyAccountService {
     );
   }
 
+  private getFirstEnv(keys: string[]): string {
+    for (const key of keys) {
+      const value = process.env[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    return '';
+  }
+
+  private getResolvedMongoUris(): { mainUri: string; accountingUri: string } {
+    const mainUri = this.getFirstEnv([
+      'MONGODB_URI',
+      'MONGODB_URI_PROPERTY',
+      'CUSTOMCONNSTR_MONGODB_URI',
+      'CUSTOMCONNSTR_MONGODB_URI_PROPERTY',
+      'AZURE_COSMOS_CONNECTIONSTRING',
+    ]);
+    const accountingUri = this.getFirstEnv([
+      'ACCOUNTING_DB_URI',
+      'MONGODB_URI_ACCOUNTING',
+      'CUSTOMCONNSTR_ACCOUNTING_DB_URI',
+      'CUSTOMCONNSTR_MONGODB_URI_ACCOUNTING',
+    ]);
+    return { mainUri, accountingUri };
+  }
+
   private isCosmosMongoEndpoint(): boolean {
-    return /cosmos\.azure\.com/i.test(String(process.env.MONGODB_URI || ''));
+    const { mainUri, accountingUri } = this.getResolvedMongoUris();
+    return /cosmos\.azure\.com/i.test(`${mainUri} ${accountingUri}`);
+  }
+
+  private isCosmosPartialFilterUnsupported(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      message.includes('partialfilterexpression') ||
+      message.includes('$and only supported in partialfilterexpression at top level')
+    );
+  }
+
+  private normalizeLedgerType(value: any): 'rental' | 'sale' {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'sale' ? 'sale' : 'rental';
+  }
+
+  private async shouldRunOneTimeDuplicateCleanup(): Promise<boolean> {
+    try {
+      const key = PropertyAccountService.ONE_TIME_DUPLICATE_CLEANUP_KEY;
+      const existing = await SystemSetting.findOne({ key }).lean();
+      if (existing?.completedAt) return false;
+      if (existing?.startedAt && !existing?.completedAt) {
+        // Another instance likely started this already; skip to avoid duplicate heavy scans.
+        return false;
+      }
+      await SystemSetting.updateOne(
+        { key },
+        { $setOnInsert: { key, version: 1, startedAt: new Date() } },
+        { upsert: true }
+      );
+      return true;
+    } catch (e: any) {
+      console.warn('Could not evaluate one-time duplicate cleanup state; proceeding defensively without heavy cleanup:', e?.message || e);
+      return false;
+    }
+  }
+
+  private async markOneTimeDuplicateCleanupComplete(result: { archived: number; normalized: number }): Promise<void> {
+    try {
+      const key = PropertyAccountService.ONE_TIME_DUPLICATE_CLEANUP_KEY;
+      await SystemSetting.updateOne(
+        { key },
+        {
+          $set: {
+            completedAt: new Date(),
+            value: result,
+            lastError: undefined
+          },
+          $setOnInsert: { key, version: 1, startedAt: new Date() }
+        },
+        { upsert: true }
+      );
+    } catch (e: any) {
+      console.warn('Could not mark one-time duplicate cleanup as complete:', e?.message || e);
+    }
+  }
+
+  private async markOneTimeDuplicateCleanupError(error: any): Promise<void> {
+    try {
+      const key = PropertyAccountService.ONE_TIME_DUPLICATE_CLEANUP_KEY;
+      await SystemSetting.updateOne(
+        { key },
+        {
+          $set: {
+            lastError: String(error?.message || error),
+            startedAt: new Date()
+          },
+          $setOnInsert: { key, version: 1 }
+        },
+        { upsert: true }
+      );
+    } catch {}
+  }
+
+  private async normalizeActiveLedgerTypes(): Promise<number> {
+    const result = await PropertyAccount.updateMany(
+      {
+        isArchived: false,
+        $or: [
+          { ledgerType: { $exists: false } },
+          { ledgerType: null as any },
+          { ledgerType: '' as any },
+          { ledgerType: { $nin: ['rental', 'sale'] } as any }
+        ]
+      } as any,
+      { $set: { ledgerType: 'rental', lastUpdated: new Date() } } as any
+    );
+    return Number((result as any)?.modifiedCount || 0);
   }
 
   // Keep one active ledger per (propertyId, normalized ledgerType), archive the rest.
   private async archiveDuplicateActiveLedgers(): Promise<number> {
+    try {
+      const normalized = await this.normalizeActiveLedgerTypes();
+      if (normalized > 0) {
+        console.log(`Normalized ${normalized} PropertyAccount ledgerType values to canonical values before duplicate cleanup.`);
+      }
+    } catch (normalizeErr: any) {
+      console.warn('Could not normalize active ledgerType values before duplicate cleanup:', normalizeErr?.message || normalizeErr);
+    }
+
     const active = await PropertyAccount.find({ isArchived: false })
       .select('_id propertyId ledgerType lastUpdated createdAt')
       .sort({ lastUpdated: -1, createdAt: -1 });
@@ -45,7 +171,7 @@ export class PropertyAccountService {
     const archiveIds: mongoose.Types.ObjectId[] = [];
 
     for (const account of active as any[]) {
-      const normalizedLedger = account.ledgerType === 'sale' ? 'sale' : 'rental';
+      const normalizedLedger = this.normalizeLedgerType((account as any).ledgerType);
       const key = `${String(account.propertyId)}|${normalizedLedger}`;
       if (seen.has(key)) {
         archiveIds.push(account._id);
@@ -277,6 +403,9 @@ export class PropertyAccountService {
       ledgerIndexUpgradePromise = (async () => {
         try {
           const cosmosMongo = this.isCosmosMongoEndpoint();
+          const runOneTimeDuplicateCleanup = await this.shouldRunOneTimeDuplicateCleanup();
+          let normalizedForCleanup = 0;
+          let archivedForCleanup = 0;
           // Cosmos Mongo partial indexes do not support `$ne` in filter expressions.
           // Normalize legacy docs so active records are explicitly `isArchived: false`.
           try {
@@ -313,14 +442,24 @@ export class PropertyAccountService {
               console.warn('Could not drop legacy ownerPayout index:', dropErr?.message || dropErr);
             }
           }
-          // Proactively archive duplicate active ledgers so unique index creation can succeed.
-          try {
-            const archived = await this.archiveDuplicateActiveLedgers();
-            if (archived > 0) {
-              console.log(`Archived ${archived} duplicate active PropertyAccount ledger records before index creation.`);
+          // Run heavy duplicate cleanup only once (persisted via SystemSetting) to avoid load on every restart.
+          if (runOneTimeDuplicateCleanup) {
+            try {
+              normalizedForCleanup = await this.normalizeActiveLedgerTypes();
+              archivedForCleanup = await this.archiveDuplicateActiveLedgers();
+              console.log(
+                `One-time PropertyAccount duplicate cleanup completed (normalized=${normalizedForCleanup}, archived=${archivedForCleanup}).`
+              );
+              await this.markOneTimeDuplicateCleanupComplete({
+                normalized: normalizedForCleanup,
+                archived: archivedForCleanup
+              });
+            } catch (archiveErr: any) {
+              await this.markOneTimeDuplicateCleanupError(archiveErr);
+              console.warn('One-time duplicate cleanup failed before index migration:', archiveErr?.message || archiveErr);
             }
-          } catch (archiveErr: any) {
-            console.warn('Could not archive duplicate active ledgers before index migration:', archiveErr?.message || archiveErr);
+          } else {
+            console.log('Skipping heavy duplicate cleanup (already completed or in progress).');
           }
           // Ensure unique compound index exists and is partial on non-archived docs
           const compound = indexes.find((idx: any) => idx.name === 'propertyId_1_ledgerType_1');
@@ -338,32 +477,40 @@ export class PropertyAccountService {
             } catch (dropErr: any) {
               console.warn('Could not drop compound index:', dropErr?.message || dropErr);
             }
-            try {
-              await PropertyAccount.collection.createIndex(
-                { propertyId: 1, ledgerType: 1 },
-                { unique: true, partialFilterExpression: { isArchived: false } }
-              );
-              console.log('Created partial unique compound index propertyId_1_ledgerType_1 on PropertyAccount.');
-            } catch (createErr: any) {
-              // If duplicates still exist, archive and retry once.
-              if (this.isDuplicateKeyError(createErr)) {
-                try {
-                  const archived = await this.archiveDuplicateActiveLedgers();
-                  if (archived > 0) {
-                    await PropertyAccount.collection.createIndex(
-                      { propertyId: 1, ledgerType: 1 },
-                      { unique: true, partialFilterExpression: { isArchived: false } }
-                    );
-                    console.log('Created partial unique compound index propertyId_1_ledgerType_1 on retry after archiving duplicates.');
+            let createdCompound = false;
+            let lastCompoundError: any = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                await PropertyAccount.collection.createIndex(
+                  { propertyId: 1, ledgerType: 1 },
+                  { unique: true, partialFilterExpression: { isArchived: false } }
+                );
+                console.log(`Created partial unique compound index propertyId_1_ledgerType_1 on attempt ${attempt}.`);
+                createdCompound = true;
+                break;
+              } catch (createErr: any) {
+                lastCompoundError = createErr;
+                if (this.isDuplicateKeyError(createErr)) {
+                  if (runOneTimeDuplicateCleanup) {
+                    try {
+                      const archived = await this.archiveDuplicateActiveLedgers();
+                      console.warn(
+                        `Compound index attempt ${attempt} hit duplicate keys; archived ${archived} duplicate active ledger records before retry.`
+                      );
+                    } catch (archiveErr: any) {
+                      console.warn('Could not archive duplicate active ledgers during compound index retry:', archiveErr?.message || archiveErr);
+                    }
                   } else {
-                    console.warn('Could not create partial compound index (duplicate keys remain):', createErr?.message || createErr);
+                    console.warn('Compound index hit duplicate keys but one-time duplicate cleanup is disabled/already completed; skipping additional heavy archival.');
+                    break;
                   }
-                } catch (retryErr: any) {
-                  console.warn('Could not create partial compound index on retry:', retryErr?.message || retryErr);
+                } else {
+                  break;
                 }
-              } else {
-                console.warn('Could not create partial compound index:', createErr?.message || createErr);
               }
+            }
+            if (!createdCompound) {
+              console.warn('Could not create partial compound index after cleanup retries:', lastCompoundError?.message || lastCompoundError);
             }
           }
           // Ensure owner payouts unique index includes ledgerType and uses partial filter (no sparse)
@@ -390,7 +537,19 @@ export class PropertyAccountService {
               );
               console.log('Created partial unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1.');
             } catch (createErr: any) {
-              console.warn('Could not create owner payout compound index:', createErr?.message || createErr);
+              if (!cosmosMongo && this.isCosmosPartialFilterUnsupported(createErr)) {
+                try {
+                  await PropertyAccount.collection.createIndex(
+                    { propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 },
+                    { unique: true, sparse: true } as any
+                  );
+                  console.log('Created sparse unique owner payout index propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1 after partial filter rejection.');
+                } catch (retryErr: any) {
+                  console.warn('Could not create owner payout compound index (including sparse fallback):', retryErr?.message || retryErr);
+                }
+              } else {
+                console.warn('Could not create owner payout compound index:', createErr?.message || createErr);
+              }
             }
           }
           // Ensure transactions.paymentId uniqueness is scoped per property ledger
@@ -426,7 +585,19 @@ export class PropertyAccountService {
               );
               console.log('Created partial unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1.');
             } catch (createErr: any) {
-              console.warn('Could not create transactions compound index:', createErr?.message || createErr);
+              if (!cosmosMongo && this.isCosmosPartialFilterUnsupported(createErr)) {
+                try {
+                  await PropertyAccount.collection.createIndex(
+                    { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
+                    { unique: true, sparse: true } as any
+                  );
+                  console.log('Created sparse unique transactions index propertyId_1_ledgerType_1_transactions.paymentId_1 after partial filter rejection.');
+                } catch (retryErr: any) {
+                  console.warn('Could not create transactions compound index (including sparse fallback):', retryErr?.message || retryErr);
+                }
+              } else {
+                console.warn('Could not create transactions compound index:', createErr?.message || createErr);
+              }
             }
           }
         } catch (e) {

@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { JwtPayload, IPropertyOwner, UserRole } from '../types/auth';
-import { AppError } from './errorHandler';
 import { AuthService } from '../services/authService';
 
 const authService = AuthService.getInstance();
@@ -30,15 +29,7 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
   try {
     const token = getRequestToken(req);
 
-    console.log('Auth middleware check:', {
-      hasAuthHeader: !!req.headers.authorization,
-      hasAccessTokenCookie: !!req.cookies?.accessToken,
-      hasToken: !!token,
-      url: req.url
-    });
-
     if (!token) {
-      console.log('No token found in request');
       return res.status(401).json({ 
         status: 'error',
         message: 'Authentication required',
@@ -46,15 +37,8 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
       });
     }
 
-    // Verify token using auth service
-    console.log('Verifying token...');
-    const userData = await authService.verifyToken(token);
-    
-    console.log('Token verification successful:', {
-      userId: userData.userId,
-      role: userData.role,
-      companyId: userData.companyId
-    });
+    // Use claim-only verification to avoid DB dependency on every request.
+    const userData = authService.verifyAccessTokenClaims(token);
     
     req.user = {
       userId: userData.userId,
@@ -63,16 +47,8 @@ export const auth = async (req: AuthRequest, res: Response, next: NextFunction) 
       companyId: userData.companyId
     } as any;
 
-    console.log('User object set in request:', {
-      userId: (req.user as any)?.userId,
-      role: (req.user as any)?.role,
-      companyId: (req.user as any)?.companyId
-    });
-
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error);
-    
     if (error instanceof Error) {
       if (error.message.includes('expired')) {
         return res.status(401).json({
@@ -110,8 +86,8 @@ export const propertyOwnerAuth = async (req: AuthRequest, res: Response, next: N
       });
     }
 
-    // Verify token using auth service
-    const userData = await authService.verifyToken(token);
+    // Claim-only verification avoids turning transient DB outages into blanket auth failures.
+    const userData = authService.verifyAccessTokenClaims(token);
     
     // Ensure this is a PropertyOwner
     if (userData.role !== 'owner') {
@@ -140,8 +116,6 @@ export const propertyOwnerAuth = async (req: AuthRequest, res: Response, next: N
 
     next();
   } catch (error) {
-    console.error('PropertyOwner auth middleware error:', error);
-    
     if (error instanceof Error) {
       if (error.message.includes('expired')) {
         return res.status(401).json({
@@ -179,8 +153,8 @@ export const authWithCompany = async (req: AuthRequest, res: Response, next: Nex
       });
     }
 
-    // Verify token using auth service
-    const userData = await authService.verifyToken(token);
+    // Claim-only verification avoids turning transient DB outages into blanket auth failures.
+    const userData = authService.verifyAccessTokenClaims(token);
     
     if (!userData.companyId) {
       return res.status(403).json({
@@ -199,8 +173,6 @@ export const authWithCompany = async (req: AuthRequest, res: Response, next: Nex
 
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error);
-    
     if (error instanceof Error) {
       if (error.message.includes('expired')) {
         return res.status(401).json({

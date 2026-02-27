@@ -81,7 +81,9 @@ const router = express.Router();
 
 // Debug middleware
 router.use((req, res, next) => {
-  console.log('Accountant route accessed:', req.method, req.path);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Accountant route accessed:', req.method, req.path);
+  }
   next();
 });
 
@@ -156,16 +158,18 @@ router.get('/payments/provisional/suggestions', isAccountant, async (req: Reques
   try {
     const { q } = req.query as { q?: string };
     const companyId = req.user!.companyId as string;
+    const suggestionLimit = Math.max(1, Math.min(100, Number((req.query as any).limit || 50)));
     const query: any = { companyId: new mongoose.Types.ObjectId(companyId), isProvisional: true };
     if (q && q.trim()) {
-      const regex = new RegExp(q.trim(), 'i');
+      const needle = q.trim().slice(0, 80);
+      const regex = new RegExp(needle, 'i');
       query.$or = [
         { manualPropertyAddress: { $regex: regex } },
         { manualTenantName: { $regex: regex } },
         { referenceNumber: { $regex: regex } }
       ];
     }
-    const payments = await Payment.find(query).sort({ createdAt: -1 }).limit(50);
+    const payments = await Payment.find(query).sort({ createdAt: -1 }).limit(suggestionLimit).maxTimeMS(10000);
     res.json({ status: 'success', data: payments });
   } catch (err: any) {
     console.error('Error fetching provisional suggestions:', err);

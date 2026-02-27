@@ -29,7 +29,9 @@ const trustAccountController_1 = require("../controllers/trustAccountController"
 const router = express_1.default.Router();
 // Debug middleware
 router.use((req, res, next) => {
-    console.log('Accountant route accessed:', req.method, req.path);
+    if (process.env.NODE_ENV !== 'production') {
+        console.log('Accountant route accessed:', req.method, req.path);
+    }
     next();
 });
 // Test route to verify routes are working
@@ -96,16 +98,18 @@ router.get('/payments/provisional/suggestions', roles_1.isAccountant, (req, res)
     try {
         const { q } = req.query;
         const companyId = req.user.companyId;
+        const suggestionLimit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
         const query = { companyId: new mongoose_1.default.Types.ObjectId(companyId), isProvisional: true };
         if (q && q.trim()) {
-            const regex = new RegExp(q.trim(), 'i');
+            const needle = q.trim().slice(0, 80);
+            const regex = new RegExp(needle, 'i');
             query.$or = [
                 { manualPropertyAddress: { $regex: regex } },
                 { manualTenantName: { $regex: regex } },
                 { referenceNumber: { $regex: regex } }
             ];
         }
-        const payments = yield Payment_1.Payment.find(query).sort({ createdAt: -1 }).limit(50);
+        const payments = yield Payment_1.Payment.find(query).sort({ createdAt: -1 }).limit(suggestionLimit).maxTimeMS(10000);
         res.json({ status: 'success', data: payments });
     }
     catch (err) {

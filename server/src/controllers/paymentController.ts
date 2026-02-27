@@ -75,6 +75,12 @@ const isAccountingPeriodLocked = (paymentDate: Date | string | undefined): boole
   return txDate < cutoff;
 };
 
+const LIST_QUERY_MAX_TIME_MS = Math.max(1000, Number(process.env.PAYMENTS_LIST_MAX_TIME_MS || 15000));
+const NON_PAGINATED_PAYMENTS_LIMIT = Math.max(
+  50,
+  Math.min(1000, Number(process.env.PAYMENTS_NON_PAGINATED_LIMIT || 200))
+);
+
 const buildSaleCommissionDetails = async (input: {
   amount: number;
   companyId: string;
@@ -288,10 +294,15 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName')
       .sort({ paymentDate: -1 })
+      .maxTimeMS(LIST_QUERY_MAX_TIME_MS)
       .lean();
 
     if (!paginate) {
-      const payments = await base.exec();
+      const unpaginatedLimit = Math.max(
+        1,
+        Math.min(NON_PAGINATED_PAYMENTS_LIMIT, Number(req.query.limit || NON_PAGINATED_PAYMENTS_LIMIT))
+      );
+      const payments = await base.limit(unpaginatedLimit).exec();
       // Annotate outstanding for sales payments in-memory
       try {
         const companyId = (req.user as any).companyId;
@@ -311,7 +322,7 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
           const agg = await Payment.aggregate([
             { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), paymentType: 'sale', status: 'completed', saleId: { $in: Array.from(saleIdKeys).map(id => new mongoose.Types.ObjectId(String(id))) } } },
             { $group: { _id: '$saleId', totalPaid: { $sum: '$amount' } } }
-          ]);
+          ]).option({ maxTimeMS: LIST_QUERY_MAX_TIME_MS });
           for (const row of agg) {
             paidBySaleId[String(row._id)] = Number(row.totalPaid || 0);
           }
@@ -326,7 +337,7 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
             paymentType: 'sale',
             status: 'completed',
             $or: or
-          }).select('referenceNumber manualPropertyAddress amount').lean();
+          }).select('referenceNumber manualPropertyAddress amount').maxTimeMS(LIST_QUERY_MAX_TIME_MS).lean();
           for (const p of related as any[]) {
             const key = p.referenceNumber || p.manualPropertyAddress || '';
             if (!key) continue;
@@ -358,12 +369,15 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
       } catch (calcErr) {
         console.warn('Failed to compute outstanding for sales payments:', (calcErr as any)?.message || calcErr);
       }
+      if (payments.length === unpaginatedLimit) {
+        res.setHeader('X-Result-Limit-Applied', String(unpaginatedLimit));
+      }
       return res.json(payments);
     }
 
     const [items, total] = await Promise.all([
       base.skip(skip).limit(limit).exec(),
-      Payment.countDocuments(query)
+      Payment.countDocuments(query).maxTimeMS(LIST_QUERY_MAX_TIME_MS)
     ]);
     // Compute outstanding per page
     try {
@@ -384,7 +398,7 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
         const agg = await Payment.aggregate([
           { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), paymentType: 'sale', status: 'completed', saleId: { $in: Array.from(saleIdKeys).map(id => new mongoose.Types.ObjectId(String(id))) } } },
           { $group: { _id: '$saleId', totalPaid: { $sum: '$amount' } } }
-        ]);
+        ]).option({ maxTimeMS: LIST_QUERY_MAX_TIME_MS });
         for (const row of agg) {
           paidBySaleId[String(row._id)] = Number(row.totalPaid || 0);
         }
@@ -399,7 +413,7 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
           paymentType: 'sale',
           status: 'completed',
           $or: or
-        }).select('referenceNumber manualPropertyAddress amount').lean();
+        }).select('referenceNumber manualPropertyAddress amount').maxTimeMS(LIST_QUERY_MAX_TIME_MS).lean();
         for (const p of related as any[]) {
           const key = p.referenceNumber || p.manualPropertyAddress || '';
           if (!key) continue;
@@ -1836,7 +1850,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const limit = Math.max(1, Math.min(200, parseInt(String(req.query.limit || '25'), 10)));
 
-    const baseQuery = Payment.find(query).sort({ paymentDate: -1 });
+    const baseQuery = Payment.find(query).sort({ paymentDate: -1 }).maxTimeMS(LIST_QUERY_MAX_TIME_MS);
 
     if (paginate) {
       const [items, total] = await Promise.all([
@@ -1846,7 +1860,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
           .lean()
           .skip((page - 1) * limit)
           .limit(limit),
-        Payment.countDocuments(query),
+        Payment.countDocuments(query).maxTimeMS(LIST_QUERY_MAX_TIME_MS),
       ]);
       // Compute outstanding amounts for current page
       try {
@@ -1893,7 +1907,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
           const agg = await Payment.aggregate([
             { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), paymentType: 'sale', status: 'completed', saleId: { $in: Array.from(saleIdKeys).map(id => new mongoose.Types.ObjectId(String(id))) } } },
             { $group: { _id: '$saleId', totalPaid: { $sum: '$amount' } } }
-          ]);
+          ]).option({ maxTimeMS: LIST_QUERY_MAX_TIME_MS });
           for (const row of agg) {
             paidBySaleId[String(row._id)] = Number(row.totalPaid || 0);
           }
@@ -1909,7 +1923,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
             paymentType: 'sale',
             status: 'completed',
             $or: or
-          }).select('referenceNumber manualPropertyAddress amount').lean();
+          }).select('referenceNumber manualPropertyAddress amount').maxTimeMS(LIST_QUERY_MAX_TIME_MS).lean();
           for (const p of related as any[]) {
             const key = p.referenceNumber || p.manualPropertyAddress || '';
             if (!key) continue;
@@ -1942,7 +1956,7 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
           const agg = await Payment.aggregate([
             { $match: { $or: orPeriods, status: { $in: ['completed', 'pending'] } } },
             { $group: { _id: { propertyId: '$propertyId', tenantId: '$tenantId', year: '$rentalPeriodYear', month: '$rentalPeriodMonth' }, totalPaid: { $sum: '$amount' } } }
-          ]);
+          ]).option({ maxTimeMS: LIST_QUERY_MAX_TIME_MS });
           for (const row of agg) {
             const pid = String(row._id?.propertyId);
             const tid = String(row._id?.tenantId);
@@ -2005,10 +2019,19 @@ export const getCompanyPayments = async (req: Request, res: Response) => {
     }
 
     // Non-paginated fallback (legacy)
+    const unpaginatedLimit = Math.max(
+      1,
+      Math.min(NON_PAGINATED_PAYMENTS_LIMIT, Number(req.query.limit || NON_PAGINATED_PAYMENTS_LIMIT))
+    );
     const payments = await baseQuery
       .populate('propertyId', 'name')
       .populate('tenantId', 'firstName lastName')
-      .populate('agentId', 'name');
+      .populate('agentId', 'name')
+      .limit(unpaginatedLimit);
+
+    if (payments.length === unpaginatedLimit) {
+      res.setHeader('X-Result-Limit-Applied', String(unpaginatedLimit));
+    }
 
     return res.json(payments);
   } catch (error) {

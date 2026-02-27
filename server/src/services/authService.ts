@@ -12,14 +12,27 @@ const ACCESS_TOKEN_EXPIRY = JWT_CONFIG.ACCESS_TOKEN_EXPIRY;
 const REFRESH_TOKEN_EXPIRY = JWT_CONFIG.REFRESH_TOKEN_EXPIRY;
 
 export interface JwtUser extends JwtPayload {
-  email: string;
+  email?: string;
 }
+
+type AccessTokenClaims = {
+  userId: string;
+  role: UserRole;
+  roles?: UserRole[];
+  companyId?: string;
+  type?: string;
+  iat?: number;
+  exp?: number;
+};
 
 export class AuthService {
   private static instance: AuthService;
   private isInitialized = false;
 
   private constructor() {}
+
+  private static readonly DB_VERIFY_CACHE_TTL_MS = Number(process.env.AUTH_USER_CACHE_TTL_MS || 120000);
+  private readonly userVerificationCache = new Map<string, { expiresAt: number; user: JwtUser }>();
 
   public static getInstance(): AuthService {
     if (!AuthService.instance) {
@@ -45,6 +58,36 @@ export class AuthService {
     }
 
     this.isInitialized = true;
+  }
+
+  private decodeAccessToken(token: string): AccessTokenClaims {
+    const decoded = jwt.verify(token, JWT_CONFIG.SECRET, {
+      issuer: JWT_CONFIG.ISSUER,
+      audience: JWT_CONFIG.AUDIENCE
+    }) as AccessTokenClaims;
+
+    if (!decoded?.userId || !decoded?.role) {
+      throw new Error('Invalid access token payload');
+    }
+    if (decoded.type && decoded.type !== 'access') {
+      throw new Error('Invalid access token type');
+    }
+
+    return decoded;
+  }
+
+  /**
+   * Fast token verification path for request middleware.
+   * This validates token integrity/expiry and extracts claims without requiring a DB round-trip.
+   */
+  public verifyAccessTokenClaims(token: string): JwtPayload {
+    const decoded = this.decodeAccessToken(token);
+    return {
+      userId: decoded.userId,
+      role: decoded.role,
+      roles: decoded.roles,
+      companyId: decoded.companyId
+    };
   }
 
   public async getUserById(userId: string) {
@@ -105,26 +148,30 @@ export class AuthService {
   }
 
   public async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
-    await this.initialize();
-
     try {
-      console.log('AuthService: Starting token refresh');
-      
-      const decoded = jwt.verify(refreshToken, JWT_CONFIG.REFRESH_SECRET) as { userId: string; type?: string; iat?: number };
-      console.log('AuthService: Token decoded successfully, userId:', decoded.userId);
+      const decoded = jwt.verify(refreshToken, JWT_CONFIG.REFRESH_SECRET, {
+        issuer: JWT_CONFIG.ISSUER,
+        audience: JWT_CONFIG.AUDIENCE
+      }) as { userId: string; type?: string; iat?: number };
+
+      if (!decoded?.userId) {
+        throw new Error('Invalid refresh token payload');
+      }
+      if (decoded.type && decoded.type !== 'refresh') {
+        throw new Error('Invalid refresh token type');
+      }
+
+      await this.initialize();
       
       const userResult = await this.getUserById(decoded.userId);
       if (!userResult) {
-        console.log('AuthService: User not found for userId:', decoded.userId);
         throw new Error('User not found');
       }
 
       const { user, type } = userResult;
-      console.log('AuthService: User found:', { userId: user._id, role: type === 'user' ? (user as IUser).role : 'owner' });
 
       // Check if user is still active (only for User model)
       if (type === 'user' && !(user as IUser).isActive) {
-        console.log('AuthService: User is inactive');
         throw new Error('Account is inactive');
       }
 
@@ -133,7 +180,6 @@ export class AuthService {
         const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
         const pwdChangedAt: Date | undefined = (user as any).passwordChangedAt;
         if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
-          console.log('AuthService: Rejecting refresh token due to password change after token issuance');
           throw new Error('Refresh token invalid due to password change');
         }
       } catch (cmpErr) {
@@ -143,14 +189,11 @@ export class AuthService {
       const newToken = this.generateAccessToken(user, type);
       const newRefreshToken = this.generateRefreshToken(user, type);
 
-      console.log('AuthService: New tokens generated successfully');
-
       return {
         token: newToken,
         refreshToken: newRefreshToken
       };
     } catch (error) {
-      console.error('AuthService: Token refresh failed:', error);
       if (error instanceof jwt.TokenExpiredError) {
         throw new Error('Refresh token expired');
       } else if (error instanceof jwt.JsonWebTokenError) {
@@ -164,8 +207,13 @@ export class AuthService {
     await this.initialize();
 
     try {
-      const decoded = jwt.verify(token, JWT_CONFIG.SECRET) as { userId: string; type?: string; iat?: number };
-      console.log('AuthService: Token decoded:', decoded);
+      const decoded = this.decodeAccessToken(token);
+      const cacheKey = `${decoded.userId}:${decoded.iat ?? 'na'}`;
+      const now = Date.now();
+      const cached = this.userVerificationCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        return cached.user;
+      }
       
       const userResult = await this.getUserById(decoded.userId);
       if (!userResult) {
@@ -179,18 +227,11 @@ export class AuthService {
         const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
         const pwdChangedAt: Date | undefined = (user as any).passwordChangedAt;
         if (iatSec && pwdChangedAt && pwdChangedAt.getTime() > iatSec * 1000) {
-          console.log('AuthService: Rejecting access token due to password change after token issuance');
           throw new Error('Access token invalid due to password change');
         }
       } catch (cmpErr) {
         throw cmpErr;
       }
-
-      console.log('AuthService: User found in database:', {
-        userId: user._id,
-        role: type === 'user' ? (user as IUser).role : 'owner',
-        companyId: (user as any).companyId ? (user as any).companyId.toString() : undefined
-      });
 
       // Check if user is still active (only for User model)
       if (type === 'user' && !(user as IUser).isActive) {
@@ -205,7 +246,10 @@ export class AuthService {
         companyId: (user as any).companyId ? (user as any).companyId.toString() : undefined
       };
 
-      console.log('AuthService: Returning user data:', result);
+      this.userVerificationCache.set(cacheKey, {
+        user: result,
+        expiresAt: now + AuthService.DB_VERIFY_CACHE_TTL_MS
+      });
 
       return result;
     } catch (error) {

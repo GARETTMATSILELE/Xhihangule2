@@ -74,7 +74,7 @@ exports.accountingConnection = mongoose_1.default.createConnection();
 const connectionOptions = {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-    maxPoolSize: 10,
+    maxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE || 20),
     minPoolSize: 0,
     serverSelectionTimeoutMS: 30000,
     socketTimeoutMS: 120000,
@@ -87,9 +87,9 @@ const connectionOptions = {
     // Heartbeat settings
     heartbeatFrequencyMS: 10000, // 10 seconds
     // Add recommended settings
-    maxIdleTimeMS: 30000, // Close idle connections after 30 seconds
+    maxIdleTimeMS: Number(process.env.MONGODB_MAX_IDLE_TIME_MS || 120000), // Keep warm sockets longer to reduce churn under bursty traffic
     waitQueueTimeoutMS: 10000, // Fail fast under pool starvation to avoid request pileups
-    maxConnecting: 2, // Limit concurrent connection establishment during outages
+    maxConnecting: Number(process.env.MONGODB_MAX_CONNECTING || 4), // Limit concurrent connection establishment during outages
     family: 4, // Prefer IPv4 to avoid occasional dual-stack route issues
     compressors: ['zlib'], // Enable compression with correct type
 };
@@ -105,7 +105,11 @@ let circuitBreakerState = {
 let healthCheckState = {
     isHealthy: true,
     lastCheck: new Date(),
-    checkInterval: 30000, // 30 seconds for faster readiness recovery
+    checkInterval: Number(process.env.DB_HEALTH_CHECK_INTERVAL_MS || 60000), // 60s default to reduce probe pressure
+    consecutiveFailures: 0,
+    consecutiveSuccesses: 0,
+    failureThreshold: Number(process.env.DB_HEALTH_FAILURE_THRESHOLD || 3),
+    successThreshold: Number(process.env.DB_HEALTH_SUCCESS_THRESHOLD || 1),
 };
 let healthCheckInterval = null;
 let connectionHandlersAttached = false;
@@ -286,17 +290,31 @@ const startHealthCheck = () => {
     const performHealthCheck = () => __awaiter(void 0, void 0, void 0, function* () {
         try {
             if (mongoose_1.default.connection.readyState !== 1) {
-                healthCheckState.isHealthy = false;
+                healthCheckState.consecutiveFailures += 1;
+                healthCheckState.consecutiveSuccesses = 0;
+                if (healthCheckState.consecutiveFailures >= healthCheckState.failureThreshold) {
+                    healthCheckState.isHealthy = false;
+                }
                 return;
             }
             // Simple ping to verify connection
             yield mongoose_1.default.connection.db.admin().ping();
-            healthCheckState.isHealthy = true;
+            healthCheckState.consecutiveFailures = 0;
+            healthCheckState.consecutiveSuccesses += 1;
+            if (healthCheckState.consecutiveSuccesses >= healthCheckState.successThreshold) {
+                healthCheckState.isHealthy = true;
+            }
             healthCheckState.lastCheck = new Date();
         }
         catch (error) {
-            console.error('Health check failed:', error);
-            healthCheckState.isHealthy = false;
+            healthCheckState.consecutiveFailures += 1;
+            healthCheckState.consecutiveSuccesses = 0;
+            if (healthCheckState.consecutiveFailures >= healthCheckState.failureThreshold) {
+                healthCheckState.isHealthy = false;
+            }
+            if (healthCheckState.consecutiveFailures === healthCheckState.failureThreshold) {
+                console.error('Health check failed repeatedly; marking DB unhealthy:', error);
+            }
         }
     });
     // Clear any existing interval
