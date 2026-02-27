@@ -17,19 +17,51 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const indexes_1 = require("../models/indexes");
 const LOCAL_MAIN_URI = 'mongodb://localhost:27017/property-management';
 const LOCAL_ACCOUNTING_URI = 'mongodb://localhost:27017/accounting';
-const getEffectiveUri = (envValue, localFallback) => {
-    // In production, prefer env value; otherwise safely fall back to local (server startup will fail fast in index.ts)
-    if (process.env.NODE_ENV === 'production') {
-        return envValue && envValue.trim() ? envValue : localFallback;
+const isProduction = process.env.NODE_ENV === 'production';
+const getFirstEnv = (keys) => {
+    for (const key of keys) {
+        const value = process.env[key];
+        if (typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+    }
+    return undefined;
+};
+const resolveMainUri = () => {
+    const envUri = getFirstEnv([
+        'MONGODB_URI',
+        'MONGODB_URI_PROPERTY',
+        'CUSTOMCONNSTR_MONGODB_URI',
+        'CUSTOMCONNSTR_MONGODB_URI_PROPERTY',
+        'AZURE_COSMOS_CONNECTIONSTRING',
+    ]);
+    if (envUri)
+        return envUri;
+    if (isProduction) {
+        throw new Error('Missing required MongoDB URI. Set one of: MONGODB_URI, MONGODB_URI_PROPERTY, CUSTOMCONNSTR_MONGODB_URI, AZURE_COSMOS_CONNECTIONSTRING.');
     }
     // In development, default to local unless explicitly forced
     if (process.env.FORCE_DB_URI === 'true') {
-        return envValue && envValue.trim() ? envValue : localFallback;
+        return LOCAL_MAIN_URI;
     }
-    return localFallback;
+    return LOCAL_MAIN_URI;
 };
-const MONGODB_URI = getEffectiveUri(process.env.MONGODB_URI, LOCAL_MAIN_URI);
-const ACCOUNTING_DB_URI = getEffectiveUri(process.env.ACCOUNTING_DB_URI, LOCAL_ACCOUNTING_URI);
+const resolveAccountingUri = () => {
+    const envUri = getFirstEnv([
+        'ACCOUNTING_DB_URI',
+        'MONGODB_URI_ACCOUNTING',
+        'CUSTOMCONNSTR_ACCOUNTING_DB_URI',
+        'CUSTOMCONNSTR_MONGODB_URI_ACCOUNTING',
+    ]);
+    if (envUri)
+        return envUri;
+    if (isProduction) {
+        throw new Error('Missing required accounting MongoDB URI. Set one of: ACCOUNTING_DB_URI, MONGODB_URI_ACCOUNTING, CUSTOMCONNSTR_ACCOUNTING_DB_URI.');
+    }
+    return LOCAL_ACCOUNTING_URI;
+};
+const MONGODB_URI = resolveMainUri();
+const ACCOUNTING_DB_URI = resolveAccountingUri();
 const IS_COSMOS_MONGO = /cosmos\.azure\.com/i.test(MONGODB_URI) || /cosmos\.azure\.com/i.test(ACCOUNTING_DB_URI);
 const RETRY_WRITES = typeof process.env.MONGODB_RETRY_WRITES === 'string'
     ? process.env.MONGODB_RETRY_WRITES.toLowerCase() === 'true'
@@ -43,9 +75,9 @@ const connectionOptions = {
     useNewUrlParser: true,
     useUnifiedTopology: true,
     maxPoolSize: 10,
-    minPoolSize: 5,
+    minPoolSize: 0,
     serverSelectionTimeoutMS: 30000,
-    socketTimeoutMS: 45000,
+    socketTimeoutMS: 120000,
     connectTimeoutMS: 30000,
     retryWrites: RETRY_WRITES,
     retryReads: true,
@@ -55,8 +87,10 @@ const connectionOptions = {
     // Heartbeat settings
     heartbeatFrequencyMS: 10000, // 10 seconds
     // Add recommended settings
-    maxIdleTimeMS: 60000, // Close idle connections after 1 minute
-    waitQueueTimeoutMS: 30000, // Wait queue timeout
+    maxIdleTimeMS: 30000, // Close idle connections after 30 seconds
+    waitQueueTimeoutMS: 10000, // Fail fast under pool starvation to avoid request pileups
+    maxConnecting: 2, // Limit concurrent connection establishment during outages
+    family: 4, // Prefer IPv4 to avoid occasional dual-stack route issues
     compressors: ['zlib'], // Enable compression with correct type
 };
 // Circuit breaker state
@@ -74,6 +108,7 @@ let healthCheckState = {
     checkInterval: 30000, // 30 seconds for faster readiness recovery
 };
 let healthCheckInterval = null;
+let connectionHandlersAttached = false;
 // Retry configuration
 const retryConfig = {
     maxRetries: 5, // Increased from 3
@@ -88,7 +123,7 @@ const getRetryDelay = (retryCount) => {
 // Connect to MongoDB
 const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        if (mongoose_1.default.connection.readyState === 1) {
+        if (mongoose_1.default.connection.readyState === 1 || mongoose_1.default.connection.readyState === 2) {
             console.log('Already connected to MongoDB');
             return;
         }
@@ -97,29 +132,32 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
                 retryWrites: RETRY_WRITES
             });
         }
-        // Set up connection event handlers before connecting
-        mongoose_1.default.connection.on('error', (error) => {
-            console.error('MongoDB connection error:', error);
-            circuitBreakerState.failureCount++;
-            circuitBreakerState.lastFailureTime = new Date();
-            if (circuitBreakerState.failureCount >= circuitBreakerState.threshold) {
-                circuitBreakerState.isOpen = true;
-                console.error('Circuit breaker opened due to repeated failures');
-            }
-        });
-        mongoose_1.default.connection.on('disconnected', () => {
-            console.warn('MongoDB disconnected');
-            healthCheckState.isHealthy = false;
-        });
-        mongoose_1.default.connection.on('reconnected', () => {
-            // Only log reconnection if we were previously disconnected
-            if (!healthCheckState.isHealthy) {
-                console.log('MongoDB reconnected');
-            }
-            healthCheckState.isHealthy = true;
-            circuitBreakerState.isOpen = false;
-            circuitBreakerState.failureCount = 0;
-        });
+        // Set up connection event handlers once to avoid duplicate listeners on reconnect attempts
+        if (!connectionHandlersAttached) {
+            mongoose_1.default.connection.on('error', (error) => {
+                console.error('MongoDB connection error:', error);
+                circuitBreakerState.failureCount++;
+                circuitBreakerState.lastFailureTime = new Date();
+                if (circuitBreakerState.failureCount >= circuitBreakerState.threshold) {
+                    circuitBreakerState.isOpen = true;
+                    console.error('Circuit breaker opened due to repeated failures');
+                }
+            });
+            mongoose_1.default.connection.on('disconnected', () => {
+                console.warn('MongoDB disconnected');
+                healthCheckState.isHealthy = false;
+            });
+            mongoose_1.default.connection.on('reconnected', () => {
+                // Only log reconnection if we were previously disconnected
+                if (!healthCheckState.isHealthy) {
+                    console.log('MongoDB reconnected');
+                }
+                healthCheckState.isHealthy = true;
+                circuitBreakerState.isOpen = false;
+                circuitBreakerState.failureCount = 0;
+            });
+            connectionHandlersAttached = true;
+        }
         // Connect default mongoose connection (primary)
         yield mongoose_1.default.connect(MONGODB_URI, connectionOptions);
         // Open named connections (non-fatal if they fail; they will retry on next start)
@@ -135,18 +173,23 @@ const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
         catch (e) {
             console.error('Failed to open accountingConnection (non-fatal):', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
-        // Create indexes only if they don't exist
-        try {
-            yield (0, indexes_1.createIndexes)();
+        // Create indexes only when primary connection is still healthy.
+        if (Number(mongoose_1.default.connection.readyState) === 1) {
+            try {
+                yield (0, indexes_1.createIndexes)();
+            }
+            catch (error) {
+                if (error.code === 85) { // Index already exists
+                    // Suppress the message for existing indexes
+                }
+                else {
+                    console.error('Error creating indexes:', error);
+                    // Don't throw error, continue without indexes
+                }
+            }
         }
-        catch (error) {
-            if (error.code === 85) { // Index already exists
-                // Suppress the message for existing indexes
-            }
-            else {
-                console.error('Error creating indexes:', error);
-                // Don't throw error, continue without indexes
-            }
+        else {
+            console.warn('Skipping createIndexes because primary connection is not ready');
         }
         // Migrate accounting PropertyAccount legacy indexes (drop-only; creation is handled by model/service)
         try {
