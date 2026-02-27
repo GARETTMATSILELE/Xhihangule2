@@ -3,9 +3,14 @@
 # ---------- Base with system deps (for puppeteer/chromium etc.) ----------
 FROM node:20-bullseye AS base
 
+ARG APT_RETRIES=5
+
 # Install fonts and chromium for puppeteer compatibility
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends --fix-missing \
+       -o Acquire::Retries=${APT_RETRIES} \
+       -o Acquire::http::Timeout=30 \
+       -o Acquire::https::Timeout=30 \
        chromium \
        fonts-liberation \
        libatk-bridge2.0-0 \
@@ -40,9 +45,14 @@ RUN npm run build
 # ---------- Production runtime ----------
 FROM node:20-bullseye-slim AS runtime
 
+ARG APT_RETRIES=5
+
 # Install chromium and minimal deps for runtime puppeteer usage
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends --fix-missing \
+       -o Acquire::Retries=${APT_RETRIES} \
+       -o Acquire::http::Timeout=30 \
+       -o Acquire::https::Timeout=30 \
        chromium \
        fonts-liberation \
        libnss3 \
