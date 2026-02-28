@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+  AZURE_WEBAPP_NAME_API: ${{ secrets.AZURE_WEBAPP_NAME_API }}
+  AZURE_WEBAPP_NAME_WORKER: ${{ secrets.AZURE_WEBAPP_NAME_WORKER }}
+  AZURE_WEBAPP_PUBLISH_PROFILE_API: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_API }}
+  AZURE_WEBAPP_PUBLISH_PROFILE_WORKER: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_WORKER }}
+  ACR_IMAGE_REPO: ${{ secrets.ACR_IMAGE_REPO }}
   NODE_VERSION: '18.x'
 
 jobs:
@@ -36,7 +40,7 @@ jobs:
       - name: Preflight – required secrets
         shell: bash
         run: |
-          required=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_WEBAPP_NAME REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD AZURE_ACR_NAME)
+          required=(AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_WEBAPP_NAME_API AZURE_WEBAPP_NAME_WORKER AZURE_WEBAPP_PUBLISH_PROFILE_API AZURE_WEBAPP_PUBLISH_PROFILE_WORKER REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD AZURE_ACR_NAME)
           for n in "${required[@]}"; do
             if [ -z "${!n}" ]; then
               echo "::error::Missing $n" && exit 1
@@ -116,7 +120,8 @@ jobs:
         id: compute_repo
         shell: bash
         run: |
-          IMAGE_REPO="${AZURE_WEBAPP_NAME,,}"
+          IMAGE_REPO_INPUT="${ACR_IMAGE_REPO:-${GITHUB_REPOSITORY##*/}}"
+          IMAGE_REPO="$(echo "$IMAGE_REPO_INPUT" | tr '[:upper:]' '[:lower:]')"
           echo "IMAGE_REPO=$IMAGE_REPO" >> "$GITHUB_ENV"
           echo "image_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
 
@@ -154,12 +159,24 @@ jobs:
         with:
           inlineScript: |
             az webapp config appsettings set \
-              --name ${{ env.AZURE_WEBAPP_NAME }} \
+              --name ${{ env.AZURE_WEBAPP_NAME_API }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --settings WEBSITES_PORT=8080
+            az webapp config appsettings set \
+              --name ${{ env.AZURE_WEBAPP_NAME_WORKER }} \
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
               --settings WEBSITES_PORT=8080
 
-      - name: Deploy to Azure App Service
+      - name: Deploy API to Azure App Service
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          app-name: ${{ env.AZURE_WEBAPP_NAME_API }}
+          publish-profile: ${{ env.AZURE_WEBAPP_PUBLISH_PROFILE_API }}
+          images: ${{ env.REGISTRY_LOGIN_SERVER }}/${{ steps.compute_repo.outputs.image_repo }}:${{ github.sha }}
+
+      - name: Deploy Worker to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME_WORKER }}
+          publish-profile: ${{ env.AZURE_WEBAPP_PUBLISH_PROFILE_WORKER }}
           images: ${{ env.REGISTRY_LOGIN_SERVER }}/${{ steps.compute_repo.outputs.image_repo }}:${{ github.sha }}
