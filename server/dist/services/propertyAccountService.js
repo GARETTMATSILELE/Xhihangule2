@@ -29,6 +29,7 @@ const Development_1 = require("../models/Development");
 const DevelopmentUnit_1 = require("../models/DevelopmentUnit");
 const SystemSetting_1 = __importDefault(require("../models/SystemSetting"));
 const uuid_1 = require("uuid");
+const database_1 = require("../config/database");
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise = null;
 class PropertyAccountService {
@@ -68,8 +69,21 @@ class PropertyAccountService {
         return { mainUri, accountingUri };
     }
     isCosmosMongoEndpoint() {
+        var _a;
         const { mainUri, accountingUri } = this.getResolvedMongoUris();
-        return /cosmos\.azure\.com/i.test(`${mainUri} ${accountingUri}`);
+        if (/cosmos\.azure\.com/i.test(`${mainUri} ${accountingUri}`)) {
+            return true;
+        }
+        // Fallback to active runtime connections in case env URIs are masked or transformed by platform settings.
+        try {
+            const defaultHost = String(((_a = mongoose_1.default.connection) === null || _a === void 0 ? void 0 : _a.host) || '');
+            const mainHost = String((database_1.mainConnection === null || database_1.mainConnection === void 0 ? void 0 : database_1.mainConnection.host) || '');
+            const accountingHost = String((database_1.accountingConnection === null || database_1.accountingConnection === void 0 ? void 0 : database_1.accountingConnection.host) || '');
+            return /cosmos\.azure\.com/i.test(`${defaultHost} ${mainHost} ${accountingHost}`);
+        }
+        catch (_b) {
+            return false;
+        }
     }
     isCosmosPartialFilterUnsupported(error) {
         const message = String((error === null || error === void 0 ? void 0 : error.message) || '').toLowerCase();

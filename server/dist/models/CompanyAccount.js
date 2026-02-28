@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CompanyAccount = void 0;
 const mongoose_1 = require("mongoose");
 const database_1 = require("../config/database");
+const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTrigger");
 const CompanyTransactionSchema = new mongoose_1.Schema({
     type: { type: String, enum: ['income', 'expense'], required: true },
     source: { type: String, enum: ['rental_commission', 'sales_commission', 'other'], required: false },
@@ -76,5 +77,22 @@ CompanyAccountSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], functi
     catch (e) {
         return next(e);
     }
+});
+const resolveCompanyId = (value) => {
+    if (!value)
+        return null;
+    if (typeof value === 'string')
+        return value;
+    if (typeof (value === null || value === void 0 ? void 0 : value.toString) === 'function')
+        return value.toString();
+    return null;
+};
+CompanyAccountSchema.post('save', function () {
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId(this.companyId));
+});
+CompanyAccountSchema.post('findOneAndUpdate', function (doc) {
+    var _a, _b;
+    const queryCompanyId = (_b = (_a = this === null || this === void 0 ? void 0 : this.getQuery) === null || _a === void 0 ? void 0 : _a.call(this)) === null || _b === void 0 ? void 0 : _b.companyId;
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId((doc === null || doc === void 0 ? void 0 : doc.companyId) || queryCompanyId));
 });
 exports.CompanyAccount = database_1.accountingConnection.model('CompanyAccount', CompanyAccountSchema, 'companyaccounts');

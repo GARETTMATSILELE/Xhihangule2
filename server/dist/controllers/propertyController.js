@@ -24,7 +24,6 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const access_1 = require("../utils/access");
 const Buyer_1 = require("../models/Buyer");
 const trustAccountService_1 = __importDefault(require("../services/trustAccountService"));
-const requestSecurity_1 = require("../utils/requestSecurity");
 // Helper function to extract user context from request
 const getUserContext = (req) => {
     // Try to get user context from query parameters first
@@ -42,6 +41,9 @@ const getUserContext = (req) => {
     };
 };
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const PROPERTY_LIST_MAX_TIME_MS = Math.max(3000, Number(process.env.PROPERTY_LIST_QUERY_MAX_TIME_MS || 12000));
+const PROPERTY_LIST_DEFAULT_LIMIT = Math.max(20, Number(process.env.PROPERTY_LIST_DEFAULT_LIMIT || 100));
+const PROPERTY_LIST_MAX_LIMIT = Math.max(PROPERTY_LIST_DEFAULT_LIMIT, Number(process.env.PROPERTY_LIST_MAX_LIMIT || 250));
 const isRetryableMongoConnectionError = (error) => {
     const labels = error === null || error === void 0 ? void 0 : error[Symbol.for('errorLabels')];
     const hasRetryLabel = (labels instanceof Set && (labels.has('ResetPool') || labels.has('RetryableWriteError'))) ||
@@ -95,16 +97,9 @@ function syncValuationOnPropertySold(params) {
 // Public endpoint for getting properties with user-based filtering
 const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        console.log('getPublicProperties request received:', {
-            headers: req.headers,
-            query: req.query,
-            params: req.params
-        });
         const userContext = getUserContext(req);
-        console.log('User context extracted:', userContext);
         // If no user context provided, return all properties (for admin dashboard)
         if (!userContext.userId && !userContext.companyId) {
-            console.log('No user context provided, returning all properties');
             const allProperties = yield Property_1.Property.find({})
                 .populate('ownerId', 'firstName lastName email')
                 .sort({ createdAt: -1 });
@@ -122,17 +117,11 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
             });
         }
         if (!userContext.companyId) {
-            console.log('User has no company ID, returning empty array');
             return res.json({
                 status: 'success',
                 data: []
             });
         }
-        console.log('Fetching properties for user context:', {
-            userId: userContext.userId,
-            companyId: userContext.companyId,
-            userRole: userContext.userRole
-        });
         // Build query based on user role
         const query = {
             companyId: new mongoose_1.default.Types.ObjectId(userContext.companyId)
@@ -142,15 +131,11 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!companyWideRoles.includes(userContext.userRole)) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(userContext.userId);
         }
-        console.log('Executing property query:', {
-            query,
-            queryString: JSON.stringify(query)
-        });
         // Optional lightweight search and projection for fast autocomplete
         const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
         const saleOnly = String(req.query.saleOnly) === 'true';
         const fields = typeof req.query.fields === 'string' ? req.query.fields : '';
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+        const limit = Math.max(1, Math.min(PROPERTY_LIST_MAX_LIMIT, Number(req.query.limit || PROPERTY_LIST_DEFAULT_LIMIT)));
         const page = Math.max(1, Number(req.query.page || 1));
         if (saleOnly) {
             query.rentalType = 'sale';
@@ -190,6 +175,7 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
             try {
                 properties = yield Property_1.Property.find(query)
                     .select(projection)
+                    .maxTimeMS(PROPERTY_LIST_MAX_TIME_MS)
                     .sort({ createdAt: -1 })
                     .skip((page - 1) * limit)
                     .limit(limit)
@@ -208,18 +194,6 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
                 yield wait(200);
             }
         }
-        console.log('Found properties:', {
-            count: properties.length,
-            properties: properties.map(p => ({
-                id: p._id,
-                name: p.name,
-                address: p.address,
-                type: p.type,
-                ownerId: p.ownerId,
-                companyId: p.companyId,
-                status: p.status
-            }))
-        });
         return res.json({
             status: 'success',
             data: properties
@@ -264,14 +238,7 @@ exports.getPublicProperties = getPublicProperties;
 const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e;
     try {
-        console.log('getProperties request received:', {
-            headers: (0, requestSecurity_1.redactHeaders)(req.headers),
-            user: req.user,
-            query: req.query,
-            params: req.params
-        });
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
-            console.error('No user ID in request');
             return res.status(401).json({
                 status: 'error',
                 message: 'Authentication required',
@@ -280,18 +247,14 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         // Check if user has a company ID
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
-            console.log('User has no company ID:', {
-                userId: req.user.userId,
-                role: req.user.role
-            });
             return res.json([]); // Return empty array for users without a company
         }
-        console.log('Fetching properties for company:', {
-            companyId: req.user.companyId,
-            userId: req.user.userId,
-            role: req.user.role,
-            companyIdType: typeof req.user.companyId
-        });
+        const requestedLimitRaw = Number(req.query.limit || PROPERTY_LIST_DEFAULT_LIMIT);
+        const limit = Number.isFinite(requestedLimitRaw)
+            ? Math.max(1, Math.min(PROPERTY_LIST_MAX_LIMIT, Math.floor(requestedLimitRaw)))
+            : PROPERTY_LIST_DEFAULT_LIMIT;
+        const requestedPageRaw = Number(req.query.page || 1);
+        const page = Number.isFinite(requestedPageRaw) ? Math.max(1, Math.floor(requestedPageRaw)) : 1;
         // Build query based on user role
         const query = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
@@ -316,18 +279,18 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             // Other non-admin/accountant users only see properties assigned to them as agent
             query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        console.log('Executing property query:', {
-            query,
-            queryString: JSON.stringify(query)
-        });
         // Get properties with populated owner information.
         // Retry once for transient connection resets from managed Mongo services.
         let properties = [];
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 properties = yield Property_1.Property.find(query)
+                    .maxTimeMS(PROPERTY_LIST_MAX_TIME_MS)
                     .populate('ownerId', 'firstName lastName email')
-                    .sort({ createdAt: -1 }); // Sort by newest first
+                    .sort({ createdAt: -1 }) // Sort by newest first
+                    .skip((page - 1) * limit)
+                    .limit(limit)
+                    .lean();
                 break;
             }
             catch (queryError) {
@@ -342,21 +305,13 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 yield wait(200);
             }
         }
-        console.log('Found properties:', {
-            count: properties.length,
-            properties: properties.map(p => ({
-                id: p._id,
-                name: p.name,
-                address: p.address,
-                type: p.type,
-                ownerId: p.ownerId,
-                companyId: p.companyId,
-                status: p.status
-            }))
-        });
         return res.json({
             status: 'success',
-            data: properties
+            data: properties,
+            meta: {
+                page,
+                limit
+            }
         });
     }
     catch (error) {

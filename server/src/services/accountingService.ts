@@ -8,6 +8,7 @@ import { BankAccount } from '../models/BankAccount';
 import { BankTransaction } from '../models/BankTransaction';
 import { AccountingEventLog } from '../models/AccountingEventLog';
 import { Payment } from '../models/Payment';
+import dashboardKpiService from './dashboardKpiService';
 
 export interface PostJournalLineInput {
   accountCode: string;
@@ -72,9 +73,25 @@ const ensurePositive = (value?: number): number => {
 
 class AccountingService {
   private indexesEnsured = false;
-  private readonly dashboardSummaryCache = new Map<string, { expiresAt: number; value: Record<string, number | string> }>();
+  private readonly dashboardSummaryCache = new Map<string, { expiresAt: number; cachedAt: number; value: Record<string, number | string> }>();
   private readonly dashboardSummaryInFlight = new Map<string, Promise<Record<string, number | string>>>();
   private readonly dashboardSummaryTtlMs = Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_CACHE_TTL_MS || 15000));
+  private readonly dashboardSummaryStaleMaxAgeMs = Math.max(
+    this.dashboardSummaryTtlMs,
+    Number(process.env.ACCOUNTING_DASHBOARD_STALE_MAX_AGE_MS || 600000)
+  );
+
+  private isTransientSummaryError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    const name = String(error?.name || '').toLowerCase();
+    return (
+      name.includes('mongonetwork') ||
+      name.includes('mongoserverselection') ||
+      message.includes('timed out') ||
+      (message.includes('connection') && message.includes('closed')) ||
+      message.includes('gateway timeout')
+    );
+  }
 
   private async ensureIndexes(): Promise<void> {
     if (this.indexesEnsured) return;
@@ -390,7 +407,7 @@ class AccountingService {
     const loader = (async (): Promise<Record<string, number | string>> => {
       const companyObjectId = toObjectId(companyId);
       await this.ensureCompanyBalance(companyId);
-      const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue] = await Promise.all([
+      const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis] = await Promise.all([
         CompanyBalance.findOne({ companyId: companyObjectId }).maxTimeMS(10000).lean(),
         BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]).option({ maxTimeMS: 10000 }),
         BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }).maxTimeMS(10000),
@@ -412,7 +429,8 @@ class AccountingService {
         Payment.aggregate([
           { $match: { companyId: companyObjectId, status: 'completed' } },
           { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
-        ]).option({ maxTimeMS: 10000 })
+        ]).option({ maxTimeMS: 10000 }),
+        dashboardKpiService.getCompanySnapshot(companyId)
       ]);
 
       const cashBalance = toMoney(cash[0]?.total || 0);
@@ -450,11 +468,16 @@ class AccountingService {
         vatDuePeriods: pendingVat,
         pendingExpenses: pendingExpense,
         unpaidCommissions: Math.max(0, toMoney(unpaidCommissions[0]?.amount || 0)),
+        expenses: toMoney(Number(dashboardKpis?.expenses || 0)),
+        invoices: toMoney(Number(dashboardKpis?.invoices || 0)),
+        outstandingRentals: toMoney(Number(dashboardKpis?.outstandingRentals || 0)),
+        outstandingLevies: toMoney(Number((dashboardKpis as any)?.outstandingLevies || 0)),
         lastUpdated: balance?.lastUpdated?.toISOString() || new Date().toISOString()
       };
 
       this.dashboardSummaryCache.set(companyId, {
         value: summary,
+        cachedAt: Date.now(),
         expiresAt: Date.now() + this.dashboardSummaryTtlMs
       });
 
@@ -464,6 +487,17 @@ class AccountingService {
     this.dashboardSummaryInFlight.set(companyId, loader);
     try {
       return await loader;
+    } catch (error: any) {
+      const fallback = this.dashboardSummaryCache.get(companyId);
+      const fallbackAgeMs = fallback ? now - fallback.cachedAt : Number.POSITIVE_INFINITY;
+      if (fallback && fallbackAgeMs <= this.dashboardSummaryStaleMaxAgeMs && this.isTransientSummaryError(error)) {
+        return {
+          ...fallback.value,
+          cacheMode: 'stale-fallback',
+          staleAgeMs: Math.max(0, fallbackAgeMs)
+        };
+      }
+      throw error;
     } finally {
       this.dashboardSummaryInFlight.delete(companyId);
     }

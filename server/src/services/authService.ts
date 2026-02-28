@@ -10,9 +10,17 @@ import { JWT_CONFIG } from '../config/jwt';
 // Token expiry times
 const ACCESS_TOKEN_EXPIRY = JWT_CONFIG.ACCESS_TOKEN_EXPIRY;
 const REFRESH_TOKEN_EXPIRY = JWT_CONFIG.REFRESH_TOKEN_EXPIRY;
+const AUTH_QUERY_MAX_TIME_MS = Math.max(5000, Number(process.env.AUTH_QUERY_MAX_TIME_MS || 15000));
 
 export interface JwtUser extends JwtPayload {
   email?: string;
+  firstName?: string;
+  lastName?: string;
+  isActive?: boolean;
+  lastLogin?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
+  avatarUrl?: string;
 }
 
 type AccessTokenClaims = {
@@ -32,7 +40,9 @@ export class AuthService {
   private constructor() {}
 
   private static readonly DB_VERIFY_CACHE_TTL_MS = Number(process.env.AUTH_USER_CACHE_TTL_MS || 120000);
+  private static readonly USER_CONTEXT_CACHE_TTL_MS = Number(process.env.AUTH_USER_CONTEXT_CACHE_TTL_MS || 120000);
   private readonly userVerificationCache = new Map<string, { expiresAt: number; user: JwtUser }>();
+  private readonly userContextCache = new Map<string, { expiresAt: number; user: JwtUser }>();
 
   public static getInstance(): AuthService {
     if (!AuthService.instance) {
@@ -94,13 +104,13 @@ export class AuthService {
     await this.initialize();
     
     // First try to find in PropertyOwner collection
-    let propertyOwner = await PropertyOwner.findById(userId).maxTimeMS(5000);
+    let propertyOwner = await PropertyOwner.findById(userId).maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
     if (propertyOwner) {
       return { user: propertyOwner, type: 'propertyOwner' as const };
     }
     
     // If not found, try User collection
-    let user = await User.findById(userId).maxTimeMS(5000);
+    let user = await User.findById(userId).maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
     if (user) {
       return { user, type: 'user' as const };
     }
@@ -108,10 +118,51 @@ export class AuthService {
     return null;
   }
 
+  public async getUserContext(userId: string): Promise<JwtUser | null> {
+    await this.initialize();
+    const now = Date.now();
+    const cached = this.userContextCache.get(userId);
+    if (cached && cached.expiresAt > now) {
+      return cached.user;
+    }
+
+    const user = await User.findById(userId)
+      .select('_id email firstName lastName role roles companyId isActive lastLogin createdAt updatedAt avatar avatarMimeType')
+      .maxTimeMS(AUTH_QUERY_MAX_TIME_MS)
+      .lean();
+    if (!user) return null;
+
+    const context: JwtUser = {
+      userId: String((user as any)._id),
+      email: String((user as any).email || ''),
+      firstName: String((user as any).firstName || ''),
+      lastName: String((user as any).lastName || ''),
+      role: (user as any).role as UserRole,
+      roles: Array.isArray((user as any).roles) && (user as any).roles.length > 0 ? (user as any).roles : undefined,
+      companyId: (user as any).companyId ? String((user as any).companyId) : undefined,
+      isActive: Boolean((user as any).isActive),
+      lastLogin: (user as any).lastLogin,
+      createdAt: (user as any).createdAt,
+      updatedAt: (user as any).updatedAt,
+      avatarUrl: (user as any).avatar
+        ? `data:${String((user as any).avatarMimeType || 'image/png')};base64,${String((user as any).avatar)}`
+        : undefined
+    };
+
+    this.userContextCache.set(userId, {
+      user: context,
+      expiresAt: now + AuthService.USER_CONTEXT_CACHE_TTL_MS
+    });
+    return context;
+  }
+
   public async login(email: string, password: string): Promise<{ user: JwtUser; token: string; refreshToken: string }> {
     await this.initialize();
     // Check only the User collection
-    let user = await User.findOne({ email }).maxTimeMS(5000);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    let user = await User.findOne({ email: normalizedEmail })
+      .select('_id email password firstName lastName role roles companyId isActive lastLogin createdAt updatedAt')
+      .maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
     if (!user) {
       throw new AppError('Invalid credentials', 401, 'AUTH_ERROR');
     }
@@ -127,21 +178,32 @@ export class AuthService {
       throw new AppError('Invalid credentials', 401, 'AUTH_ERROR');
     }
 
-    // Update last login
-    user.lastLogin = new Date();
-    await user.save();
+    // Update last login without blocking authentication response path.
+    const newLastLogin = new Date();
+    void User.updateOne({ _id: user._id }, { $set: { lastLogin: newLastLogin } }).catch(() => {});
 
     const token = this.generateAccessToken(user, 'user');
     const refreshToken = this.generateRefreshToken(user, 'user');
+    const resultUser: JwtUser = {
+      userId: user._id.toString(),
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role as UserRole,
+      roles: Array.isArray((user as any).roles) && (user as any).roles!.length > 0 ? (user as any).roles : undefined,
+      companyId: user.companyId ? user.companyId.toString() : undefined,
+      isActive: user.isActive,
+      lastLogin: newLastLogin,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
+    this.userContextCache.set(resultUser.userId, {
+      user: resultUser,
+      expiresAt: Date.now() + AuthService.USER_CONTEXT_CACHE_TTL_MS
+    });
 
     return {
-      user: {
-        userId: user._id.toString(),
-        email: user.email,
-        role: user.role as UserRole,
-        roles: Array.isArray((user as any).roles) && (user as any).roles!.length > 0 ? (user as any).roles : undefined,
-        companyId: user.companyId ? user.companyId.toString() : undefined
-      },
+      user: resultUser,
       token,
       refreshToken
     };

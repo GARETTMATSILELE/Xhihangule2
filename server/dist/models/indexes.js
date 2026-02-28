@@ -31,6 +31,8 @@ const VatRecord_1 = require("./VatRecord");
 const CompanyBalance_1 = require("./CompanyBalance");
 const BankAccount_1 = require("./BankAccount");
 const BankTransaction_1 = require("./BankTransaction");
+const MaintenanceJob_1 = require("./MaintenanceJob");
+const DashboardKpiSnapshot_1 = __importDefault(require("./DashboardKpiSnapshot"));
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const isRetryableMongoConnectionError = (error) => {
     const labels = error === null || error === void 0 ? void 0 : error[Symbol.for('errorLabels')];
@@ -85,11 +87,12 @@ exports.optimizePaymentQueries = {
             .sort({ occupancyRate: -1 });
     })
 };
-// Index Creation Function - Now only logs existing indexes
+// Ensure indexes for all core models at startup.
+// This is critical in environments where autoIndex is disabled.
 function createIndexes() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            // Ensure collections exist, then log existing indexes for all models
+            // Ensure collections exist, create indexes, then log current index state.
             const models = [
                 { model: User_1.User, name: 'User' },
                 { model: Company_1.Company, name: 'Company' },
@@ -107,7 +110,9 @@ function createIndexes() {
                 { model: VatRecord_1.VatRecord, name: 'VatRecord' },
                 { model: CompanyBalance_1.CompanyBalance, name: 'CompanyBalance' },
                 { model: BankAccount_1.BankAccount, name: 'BankAccount' },
-                { model: BankTransaction_1.BankTransaction, name: 'BankTransaction' }
+                { model: BankTransaction_1.BankTransaction, name: 'BankTransaction' },
+                { model: MaintenanceJob_1.MaintenanceJob, name: 'MaintenanceJob' },
+                { model: DashboardKpiSnapshot_1.default, name: 'DashboardKpiSnapshot' }
             ];
             for (const { model, name } of models) {
                 // Try to create the collection if it doesn't exist yet
@@ -118,6 +123,26 @@ function createIndexes() {
                     // Ignore "namespace exists" errors (code 48) and proceed
                     if (createErr && createErr.code !== 48) {
                         console.warn(`Could not ensure collection for ${name}:`, createErr);
+                    }
+                }
+                // Create indexes declared in schemas (does not drop existing indexes).
+                // Avoid throwing hard on duplicate-key/index-conflict issues so the app can still boot.
+                try {
+                    yield withTransientRetry(() => model.createIndexes());
+                }
+                catch (indexCreateErr) {
+                    const code = Number(indexCreateErr === null || indexCreateErr === void 0 ? void 0 : indexCreateErr.code);
+                    const message = String((indexCreateErr === null || indexCreateErr === void 0 ? void 0 : indexCreateErr.message) || '');
+                    const isNonFatalIndexConflict = code === 85 || // IndexOptionsConflict
+                        code === 86 || // IndexKeySpecsConflict
+                        code === 11000 || // Duplicate key when creating unique index
+                        message.toLowerCase().includes('duplicate key') ||
+                        message.toLowerCase().includes('already exists');
+                    if (isNonFatalIndexConflict) {
+                        console.warn(`Non-fatal index creation issue for ${name}:`, message);
+                    }
+                    else {
+                        console.error(`Error creating indexes for ${name}:`, indexCreateErr);
                     }
                 }
                 // Now attempt to read indexes, but ignore NamespaceNotFound (code 26)

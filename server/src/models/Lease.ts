@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 export interface ILease extends Document {
   propertyId: mongoose.Types.ObjectId;
@@ -67,5 +68,21 @@ const LeaseSchema: Schema = new Schema({
 
 // Add index for ownerId for faster filtering
 LeaseSchema.index({ ownerId: 1 });
+
+const resolveCompanyId = (value: any): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value?.toString === 'function') return value.toString();
+  return null;
+};
+
+LeaseSchema.post('save', function () {
+  triggerDashboardKpiRefresh(resolveCompanyId((this as any).companyId));
+});
+
+LeaseSchema.post('findOneAndUpdate', function (doc: any) {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(doc?.companyId || queryCompanyId));
+});
 
 export const Lease = mongoose.model<ILease>('Lease', LeaseSchema, COLLECTIONS.LEASES); 

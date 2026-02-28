@@ -7,9 +7,15 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const roles_1 = require("../middleware/roles");
 const accountingController_1 = require("../controllers/accountingController");
+const companyLoadShedding_1 = require("../middleware/companyLoadShedding");
 const router = express_1.default.Router();
+const dashboardSummaryLimiter = (0, companyLoadShedding_1.createPerCompanyRateLimiter)({
+    operation: 'dashboard-summary',
+    maxRequests: Math.max(5, Number(process.env.ACCOUNTING_DASHBOARD_RATE_LIMIT_MAX || 40)),
+    windowMs: Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_RATE_LIMIT_WINDOW_MS || 30000))
+});
 router.use(auth_1.auth);
-router.get('/dashboard-summary', roles_1.canViewCommissions, accountingController_1.getDashboardSummary);
+router.get('/dashboard-summary', roles_1.canViewCommissions, dashboardSummaryLimiter, accountingController_1.getDashboardSummary);
 router.get('/revenue-trend', roles_1.canViewCommissions, accountingController_1.getRevenueTrend);
 router.get('/expense-trend', roles_1.canViewCommissions, accountingController_1.getExpenseTrend);
 router.get('/vat-status', roles_1.canViewCommissions, accountingController_1.getVatStatus);

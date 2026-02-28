@@ -11,6 +11,7 @@ import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
 import SystemSetting from '../models/SystemSetting';
 import { v4 as uuidv4 } from 'uuid';
+import { mainConnection, accountingConnection } from '../config/database';
 
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise: Promise<void> | null = null;
@@ -62,7 +63,18 @@ export class PropertyAccountService {
 
   private isCosmosMongoEndpoint(): boolean {
     const { mainUri, accountingUri } = this.getResolvedMongoUris();
-    return /cosmos\.azure\.com/i.test(`${mainUri} ${accountingUri}`);
+    if (/cosmos\.azure\.com/i.test(`${mainUri} ${accountingUri}`)) {
+      return true;
+    }
+    // Fallback to active runtime connections in case env URIs are masked or transformed by platform settings.
+    try {
+      const defaultHost = String((mongoose.connection as any)?.host || '');
+      const mainHost = String((mainConnection as any)?.host || '');
+      const accountingHost = String((accountingConnection as any)?.host || '');
+      return /cosmos\.azure\.com/i.test(`${defaultHost} ${mainHost} ${accountingHost}`);
+    } catch {
+      return false;
+    }
   }
 
   private isCosmosPartialFilterUnsupported(error: any): boolean {

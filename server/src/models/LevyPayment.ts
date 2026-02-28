@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 export interface ILevyPayment extends Document {
   paymentType: 'levy';
@@ -193,6 +194,22 @@ LevyPaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(ne
   } catch (e) {
     return next(e as any);
   }
+});
+
+const resolveCompanyId = (value: any): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value?.toString === 'function') return value.toString();
+  return null;
+};
+
+LevyPaymentSchema.post('save', function () {
+  triggerDashboardKpiRefresh(resolveCompanyId((this as any).companyId));
+});
+
+LevyPaymentSchema.post('findOneAndUpdate', function (doc: any) {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(doc?.companyId || queryCompanyId));
 });
 
 export const LevyPayment = mongoose.model<ILevyPayment>('LevyPayment', LevyPaymentSchema, COLLECTIONS.LEVY_PAYMENTS); 

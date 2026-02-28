@@ -168,4 +168,5 @@ userSchema.methods.canAccessRole = function(role: UserRole): boolean {
 };
 
 // Create and export the model
+userSchema.index({ email: 1 });
 export const User = mongoose.model<IUser>('User', userSchema, COLLECTIONS.USERS); 

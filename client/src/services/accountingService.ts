@@ -3,6 +3,10 @@ import api from '../api/axios';
 export interface DashboardSummary {
   totalRevenue: number;
   totalExpenses: number;
+  expenses?: number;
+  invoices?: number;
+  outstandingRentals?: number;
+  outstandingLevies?: number;
   netProfit: number;
   vatPayable: number;
   commissionLiability: number;

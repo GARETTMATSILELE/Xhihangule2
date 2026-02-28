@@ -16,6 +16,8 @@ import { VatRecord } from './VatRecord';
 import { CompanyBalance } from './CompanyBalance';
 import { BankAccount } from './BankAccount';
 import { BankTransaction } from './BankTransaction';
+import { MaintenanceJob } from './MaintenanceJob';
+import DashboardKpiSnapshot from './DashboardKpiSnapshot';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -80,10 +82,11 @@ export const optimizePaymentQueries = {
   }
 };
 
-// Index Creation Function - Now only logs existing indexes
+// Ensure indexes for all core models at startup.
+// This is critical in environments where autoIndex is disabled.
 export async function createIndexes() {
   try {
-    // Ensure collections exist, then log existing indexes for all models
+    // Ensure collections exist, create indexes, then log current index state.
     const models = [
       { model: User, name: 'User' },
       { model: Company, name: 'Company' },
@@ -101,7 +104,9 @@ export async function createIndexes() {
       { model: VatRecord, name: 'VatRecord' },
       { model: CompanyBalance, name: 'CompanyBalance' },
       { model: BankAccount, name: 'BankAccount' },
-      { model: BankTransaction, name: 'BankTransaction' }
+      { model: BankTransaction, name: 'BankTransaction' },
+      { model: MaintenanceJob, name: 'MaintenanceJob' },
+      { model: DashboardKpiSnapshot, name: 'DashboardKpiSnapshot' }
     ];
 
     for (const { model, name } of models) {
@@ -112,6 +117,27 @@ export async function createIndexes() {
         // Ignore "namespace exists" errors (code 48) and proceed
         if (createErr && createErr.code !== 48) {
           console.warn(`Could not ensure collection for ${name}:`, createErr);
+        }
+      }
+
+      // Create indexes declared in schemas (does not drop existing indexes).
+      // Avoid throwing hard on duplicate-key/index-conflict issues so the app can still boot.
+      try {
+        await withTransientRetry(() => model.createIndexes());
+      } catch (indexCreateErr: any) {
+        const code = Number(indexCreateErr?.code);
+        const message = String(indexCreateErr?.message || '');
+        const isNonFatalIndexConflict =
+          code === 85 || // IndexOptionsConflict
+          code === 86 || // IndexKeySpecsConflict
+          code === 11000 || // Duplicate key when creating unique index
+          message.toLowerCase().includes('duplicate key') ||
+          message.toLowerCase().includes('already exists');
+
+        if (isNonFatalIndexConflict) {
+          console.warn(`Non-fatal index creation issue for ${name}:`, message);
+        } else {
+          console.error(`Error creating indexes for ${name}:`, indexCreateErr);
         }
       }
 

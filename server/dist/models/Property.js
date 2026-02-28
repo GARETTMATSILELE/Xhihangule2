@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Property = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTrigger");
 const PropertySchema = new mongoose_1.Schema({
     name: {
         type: String,
@@ -235,4 +236,21 @@ PropertySchema.index({ status: 1 });
 // Speed up name/address searches within a company
 PropertySchema.index({ companyId: 1, name: 1 });
 PropertySchema.index({ companyId: 1, address: 1 });
+const resolveCompanyId = (value) => {
+    if (!value)
+        return null;
+    if (typeof value === 'string')
+        return value;
+    if (typeof (value === null || value === void 0 ? void 0 : value.toString) === 'function')
+        return value.toString();
+    return null;
+};
+PropertySchema.post('save', function () {
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId(this.companyId));
+});
+PropertySchema.post('findOneAndUpdate', function (doc) {
+    var _a, _b;
+    const queryCompanyId = (_b = (_a = this === null || this === void 0 ? void 0 : this.getQuery) === null || _a === void 0 ? void 0 : _a.call(this)) === null || _b === void 0 ? void 0 : _b.companyId;
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId((doc === null || doc === void 0 ? void 0 : doc.companyId) || queryCompanyId));
+});
 exports.Property = mongoose_1.default.model('Property', PropertySchema, collections_1.COLLECTIONS.PROPERTIES);

@@ -120,6 +120,24 @@ const ENV_PATH = path_1.default.resolve(__dirname, '..', ENV_FILE);
 dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
 const runtimeFeatures = (0, runtimeRole_1.getRuntimeFeatures)();
+// Lightweight request latency instrumentation for endpoint profiling.
+app.use((req, res, next) => {
+    const startNs = process.hrtime.bigint();
+    const originalEnd = res.end.bind(res);
+    res.end = ((chunk, encoding, cb) => {
+        const elapsedMs = Number(process.hrtime.bigint() - startNs) / 1000000;
+        try {
+            if (!res.headersSent) {
+                res.setHeader('X-Response-Time', `${elapsedMs.toFixed(1)}ms`);
+            }
+        }
+        catch (_a) {
+            // no-op: never block response on telemetry
+        }
+        return originalEnd(chunk, encoding, cb);
+    });
+    next();
+});
 console.log('Runtime role configuration:', {
     role: runtimeFeatures.role,
     runHttpServer: runtimeFeatures.runHttpServer,

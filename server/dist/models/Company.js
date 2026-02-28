@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Company = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTrigger");
 const bankAccountSchema = new mongoose_1.Schema({
     accountNumber: {
         type: String,
@@ -223,6 +224,16 @@ companySchema.pre('validate', function (next) {
         }
     }
     next();
+});
+companySchema.post('save', function () {
+    var _a, _b;
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)((_b = (_a = this === null || this === void 0 ? void 0 : this._id) === null || _a === void 0 ? void 0 : _a.toString) === null || _b === void 0 ? void 0 : _b.call(_a));
+});
+companySchema.post('findOneAndUpdate', function (doc) {
+    var _a, _b, _c;
+    const queryId = (_b = (_a = this === null || this === void 0 ? void 0 : this.getQuery) === null || _a === void 0 ? void 0 : _a.call(this)) === null || _b === void 0 ? void 0 : _b._id;
+    const id = (doc === null || doc === void 0 ? void 0 : doc._id) || queryId;
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)((_c = id === null || id === void 0 ? void 0 : id.toString) === null || _c === void 0 ? void 0 : _c.call(id));
 });
 // Remove index definitions as they are now handled in indexes.ts
 exports.Company = mongoose_1.default.model('Company', companySchema, collections_1.COLLECTIONS.COMPANIES);

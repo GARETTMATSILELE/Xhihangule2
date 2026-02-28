@@ -40,6 +40,7 @@ import { useLeaseService } from '../../services/leaseService';
 import companyAccountService from '../../services/companyAccountService';
 import { apiService } from '../../api';
 import { Payment } from '../../types/payment';
+import accountingService, { DashboardSummary } from '../../services/accountingService';
 
 const DashboardOverview: React.FC = () => {
   const { user } = useAuth();
@@ -55,6 +56,7 @@ const DashboardOverview: React.FC = () => {
   const [period, setPeriod] = useState<'month' | 'quarter' | 'year'>('month');
   const [payments, setPayments] = useState<Payment[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [companySummary, setCompanySummary] = useState<{ runningBalance: number; totalIncome: number; totalExpenses: number } | null>(null);
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [properties, setProperties] = useState<any[]>([]);
@@ -138,14 +140,16 @@ const DashboardOverview: React.FC = () => {
   const loadCore = async () => {
     try {
       setLoading(true);
-      const [prRes, paymentsData, summary] = await Promise.all([
+      const [prRes, paymentsData, summary, acctSummary] = await Promise.all([
         paymentRequestService.getPaymentRequests(),
         paymentService.getPayments(),
-        (async () => { try { return await companyAccountService.getSummary(); } catch { return null; } })()
+        (async () => { try { return await companyAccountService.getSummary(); } catch { return null; } })(),
+        (async () => { try { return await accountingService.getDashboardSummary(); } catch { return null; } })()
       ]);
       setPaymentRequests(prRes.data || []);
       setPayments(Array.isArray(paymentsData) ? paymentsData : []);
       if (summary) setCompanySummary(summary);
+      if (acctSummary) setDashboardSummary(acctSummary);
     } catch (err: any) {
       console.error('Error loading core dashboard data:', err);
       setError('Failed to load dashboard');
@@ -463,11 +467,11 @@ const DashboardOverview: React.FC = () => {
   const stats = [
     { title: 'Rental Revenue + Company Account', value: rentalRevenue, icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' },
     { title: 'Total Revenue', value: totalRevenue, icon: <TrendingUpIcon />, color: 'secondary.main', path: '/accountant-dashboard/revenue' },
-    { title: 'Invoices', value: invoicesTotal, icon: <ReceiptIcon />, color: 'info.main', path: '/accountant-dashboard/written-invoices' },
+    { title: 'Invoices', value: (dashboardSummary?.invoices ?? invoicesTotal), icon: <ReceiptIcon />, color: 'info.main', path: '/accountant-dashboard/written-invoices' },
     { title: 'Sales + Sales Payments', value: salesRevenue, icon: <TrendingUpIcon />, color: 'primary.main', path: '/accountant-dashboard/sales' },
-    { title: 'Expenses', value: expensesForPeriod, icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/revenue' },
-    { title: 'Outstanding rentals', value: (computedOutstandingRentals ?? 0), icon: <PaymentIcon />, color: 'error.main', path: '' },
-    { title: 'Outstanding levies', value: (computedOutstandingLevies ?? 0), icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
+    { title: 'Expenses', value: (dashboardSummary?.expenses ?? expensesForPeriod), icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/revenue' },
+    { title: 'Outstanding rentals', value: (dashboardSummary?.outstandingRentals ?? computedOutstandingRentals ?? 0), icon: <PaymentIcon />, color: 'error.main', path: '' },
+    { title: 'Outstanding levies', value: (dashboardSummary?.outstandingLevies ?? computedOutstandingLevies ?? 0), icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
     { title: 'Bank Revenue', value: periodFilteredPayments.filter(p => p.paymentMethod === 'bank_transfer').reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' }
   ];
 
@@ -509,8 +513,14 @@ const DashboardOverview: React.FC = () => {
             'Expenses',
             'Invoices'
           ].includes(stat.title);
+          const hasPrecomputedSummaryValue = (
+            (stat.title === 'Expenses' && typeof dashboardSummary?.expenses === 'number') ||
+            (stat.title === 'Invoices' && typeof dashboardSummary?.invoices === 'number') ||
+            (stat.title === 'Outstanding rentals' && typeof dashboardSummary?.outstandingRentals === 'number') ||
+            (stat.title === 'Outstanding levies' && typeof dashboardSummary?.outstandingLevies === 'number')
+          );
           const isCardLoading =
-            (loading && isCoreDataCard) || (deferredLoading && isDeferredDataCard);
+            (loading && isCoreDataCard) || (deferredLoading && isDeferredDataCard && !hasPrecomputedSummaryValue);
 
           return (
             <Grid item xs={12} sm={6} md={3} key={index}>

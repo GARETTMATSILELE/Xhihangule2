@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Invoice = void 0;
 const mongoose_1 = require("mongoose");
 const database_1 = require("../config/database");
+const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTrigger");
 const InvoiceItemSchema = new mongoose_1.Schema({
     code: { type: String, required: true },
     description: { type: String, required: true },
@@ -52,4 +53,21 @@ const InvoiceSchema = new mongoose_1.Schema({
         signature: { type: String }
     }
 }, { timestamps: true });
+const resolveCompanyId = (value) => {
+    if (!value)
+        return null;
+    if (typeof value === 'string')
+        return value;
+    if (typeof (value === null || value === void 0 ? void 0 : value.toString) === 'function')
+        return value.toString();
+    return null;
+};
+InvoiceSchema.post('save', function () {
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId(this.companyId));
+});
+InvoiceSchema.post('findOneAndUpdate', function (doc) {
+    var _a, _b;
+    const queryCompanyId = (_b = (_a = this === null || this === void 0 ? void 0 : this.getQuery) === null || _a === void 0 ? void 0 : _a.call(this)) === null || _b === void 0 ? void 0 : _b.companyId;
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId((doc === null || doc === void 0 ? void 0 : doc.companyId) || queryCompanyId));
+});
 exports.Invoice = database_1.accountingConnection.model('Invoice', InvoiceSchema, 'invoices');

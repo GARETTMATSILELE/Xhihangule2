@@ -1,5 +1,6 @@
 import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 /**
  * SECURITY NOTE
@@ -114,6 +115,22 @@ CompanyAccountSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function
   } catch (e) {
     return next(e as any);
   }
+});
+
+const resolveCompanyId = (value: any): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value?.toString === 'function') return value.toString();
+  return null;
+};
+
+CompanyAccountSchema.post('save', function () {
+  triggerDashboardKpiRefresh(resolveCompanyId((this as any).companyId));
+});
+
+CompanyAccountSchema.post('findOneAndUpdate', function (doc: any) {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(doc?.companyId || queryCompanyId));
 });
 
 export const CompanyAccount = accountingConnection.model<ICompanyAccount>('CompanyAccount', CompanyAccountSchema, 'companyaccounts');

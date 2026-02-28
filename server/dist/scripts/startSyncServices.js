@@ -16,6 +16,7 @@ exports.checkSyncServicesHealth = exports.shutdownSyncServices = exports.initial
 const databaseSyncService_1 = __importDefault(require("../services/databaseSyncService"));
 const scheduledSyncService_1 = __importDefault(require("../services/scheduledSyncService"));
 const logger_1 = require("../utils/logger");
+const maintenanceJobQueueService_1 = __importDefault(require("../services/maintenanceJobQueueService"));
 /**
  * Initialize and start database synchronization services
  */
@@ -26,6 +27,7 @@ const initializeSyncServices = () => __awaiter(void 0, void 0, void 0, function*
         const scheduledService = scheduledSyncService_1.default.getInstance();
         // Start all enabled schedules
         scheduledService.startAllSchedules();
+        maintenanceJobQueueService_1.default.start();
         logger_1.logger.info('✅ Scheduled synchronization services started');
         // Optionally start real-time sync (can be controlled via API)
         // const realTimeService = DatabaseSyncService.getInstance();
@@ -50,6 +52,7 @@ const shutdownSyncServices = () => __awaiter(void 0, void 0, void 0, function* (
         // Stop all scheduled sync jobs
         const scheduledService = scheduledSyncService_1.default.getInstance();
         scheduledService.stopAllSchedules();
+        maintenanceJobQueueService_1.default.stop();
         logger_1.logger.info('✅ Database synchronization services shut down successfully');
     }
     catch (error) {

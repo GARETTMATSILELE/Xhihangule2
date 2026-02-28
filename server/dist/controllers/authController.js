@@ -316,39 +316,14 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
     var _a;
     try {
         const { email, password } = req.body;
-        console.log('Login attempt for email:', email);
         // Use auth service for login
         const { user: userData, token, refreshToken } = yield authService.login(email, password);
-        // Get full user data from database
-        const fullUser = yield User_1.User.findById(userData.userId).maxTimeMS(5000);
-        if (!fullUser) {
-            throw new errorHandler_1.AppError('User not found after login', 404);
-        }
         // Get company details if user has a company
         let company = null;
         if (userData.companyId) {
             company = yield Company_1.Company.findById(userData.companyId).maxTimeMS(5000);
-            console.log('Found company:', {
-                id: company === null || company === void 0 ? void 0 : company._id,
-                name: company === null || company === void 0 ? void 0 : company.name,
-                ownerId: company === null || company === void 0 ? void 0 : company.ownerId
-            });
         }
-        else {
-            console.log('No company found for user');
-        }
-        console.log('Login successful:', {
-            userId: userData.userId,
-            role: userData.role,
-            companyId: userData.companyId,
-            hasCompany: !!company
-        });
         // Set refresh token as HttpOnly cookie
-        console.log('Setting refresh token cookie:', {
-            hasRefreshToken: !!refreshToken,
-            refreshTokenLength: refreshToken === null || refreshToken === void 0 ? void 0 : refreshToken.length,
-            environment: process.env.NODE_ENV
-        });
         const cookieDomain = getCookieDomain();
         res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
          }));
@@ -357,20 +332,19 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
         // Also set a non-HttpOnly CSRF token cookie for refresh endpoint
         const loginCsrf = crypto_1.default.randomBytes(32).toString('hex');
         res.cookie('refreshCsrf', loginCsrf, Object.assign(Object.assign({ httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
-        console.log('Refresh token cookie set successfully');
         res.json({
             user: {
-                _id: fullUser._id,
-                email: fullUser.email,
-                firstName: fullUser.firstName,
-                lastName: fullUser.lastName,
-                role: fullUser.role,
-                roles: (Array.isArray(fullUser.roles) && fullUser.roles.length > 0) ? fullUser.roles : undefined,
-                companyId: (_a = fullUser.companyId) === null || _a === void 0 ? void 0 : _a.toString(),
-                isActive: fullUser.isActive,
-                lastLogin: fullUser.lastLogin,
-                createdAt: fullUser.createdAt,
-                updatedAt: fullUser.updatedAt
+                _id: userData.userId,
+                email: userData.email,
+                firstName: userData.firstName,
+                lastName: userData.lastName,
+                role: userData.role,
+                roles: (Array.isArray(userData.roles) && userData.roles.length > 0) ? userData.roles : undefined,
+                companyId: (_a = userData.companyId) === null || _a === void 0 ? void 0 : _a.toString(),
+                isActive: userData.isActive,
+                lastLogin: userData.lastLogin,
+                createdAt: userData.createdAt,
+                updatedAt: userData.updatedAt
             },
             company: company ? {
                 _id: company._id,
@@ -511,7 +485,7 @@ const getCurrentUser = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
         if (!req.user) {
             throw new errorHandler_1.AppError('Not authenticated', 401);
         }
-        const user = yield User_1.User.findById(req.user.userId).select('-password');
+        const user = yield authService.getUserContext(req.user.userId);
         if (!user) {
             throw new errorHandler_1.AppError('User not found', 404);
         }
@@ -519,22 +493,9 @@ const getCurrentUser = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
         let company = null;
         if (user.companyId) {
             company = yield Company_1.Company.findById(user.companyId);
-            console.log('Current user company:', {
-                id: company === null || company === void 0 ? void 0 : company._id,
-                name: company === null || company === void 0 ? void 0 : company.name,
-                ownerId: company === null || company === void 0 ? void 0 : company.ownerId
-            });
         }
-        console.log('Current user:', {
-            id: user._id,
-            role: user.role,
-            companyId: user.companyId,
-            hasCompany: !!company
-        });
         res.json({
-            user: Object.assign({ _id: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName, role: user.role, roles: (Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined, companyId: user.companyId, isActive: user.isActive, lastLogin: user.lastLogin, createdAt: user.createdAt, updatedAt: user.updatedAt }, user.avatar ? {
-                avatarUrl: `data:${user.avatarMimeType || 'image/png'};base64,${user.avatar}`
-            } : {}),
+            user: Object.assign({ _id: user.userId, email: user.email, firstName: user.firstName, lastName: user.lastName, role: user.role, roles: (Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined, companyId: user.companyId, isActive: user.isActive, lastLogin: user.lastLogin, createdAt: user.createdAt, updatedAt: user.updatedAt }, (user.avatarUrl ? { avatarUrl: user.avatarUrl } : {})),
             company
         });
     }

@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Lease = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTrigger");
 const LeaseSchema = new mongoose_1.Schema({
     propertyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Property', required: true },
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', required: true },
@@ -72,4 +73,21 @@ const LeaseSchema = new mongoose_1.Schema({
 });
 // Add index for ownerId for faster filtering
 LeaseSchema.index({ ownerId: 1 });
+const resolveCompanyId = (value) => {
+    if (!value)
+        return null;
+    if (typeof value === 'string')
+        return value;
+    if (typeof (value === null || value === void 0 ? void 0 : value.toString) === 'function')
+        return value.toString();
+    return null;
+};
+LeaseSchema.post('save', function () {
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId(this.companyId));
+});
+LeaseSchema.post('findOneAndUpdate', function (doc) {
+    var _a, _b;
+    const queryCompanyId = (_b = (_a = this === null || this === void 0 ? void 0 : this.getQuery) === null || _a === void 0 ? void 0 : _a.call(this)) === null || _b === void 0 ? void 0 : _b.companyId;
+    (0, dashboardKpiRefreshTrigger_1.triggerDashboardKpiRefresh)(resolveCompanyId((doc === null || doc === void 0 ? void 0 : doc.companyId) || queryCompanyId));
+});
 exports.Lease = mongoose_1.default.model('Lease', LeaseSchema, collections_1.COLLECTIONS.LEASES);

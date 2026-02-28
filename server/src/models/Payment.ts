@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 export interface IPayment extends Document {
   paymentType: 'sale' | 'rental' | 'introduction';
@@ -506,6 +507,27 @@ PaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) 
   } catch (e) {
     return next(e as any);
   }
+});
+
+const resolveCompanyId = (value: any): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value?.toString === 'function') return value.toString();
+  return null;
+};
+
+PaymentSchema.post('save', function () {
+  triggerDashboardKpiRefresh(resolveCompanyId((this as any).companyId));
+});
+
+PaymentSchema.post('findOneAndUpdate', function (doc: any) {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(doc?.companyId || queryCompanyId));
+});
+
+PaymentSchema.post('updateOne', function () {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(queryCompanyId));
 });
 
 export const Payment = mongoose.model<IPayment>('Payment', PaymentSchema, COLLECTIONS.PAYMENTS); 

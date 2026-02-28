@@ -28,6 +28,7 @@ exports.COLLECTIONS = {
     COMPANY_BALANCES: 'companybalances',
     BANK_ACCOUNTS: 'bankaccounts',
     BANK_TRANSACTIONS: 'banktransactions',
+    DASHBOARD_KPI_SNAPSHOTS: 'dashboardkpisnapshots',
     ACCOUNTING_EVENT_LOGS: 'accountingeventlogs',
     TRUST_ACCOUNTS: 'trustaccounts',
     TRUST_TRANSACTIONS: 'trusttransactions',

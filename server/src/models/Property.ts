@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 export interface IProperty extends Document {
   name: string;
@@ -247,5 +248,21 @@ PropertySchema.index({ status: 1 });
 // Speed up name/address searches within a company
 PropertySchema.index({ companyId: 1, name: 1 });
 PropertySchema.index({ companyId: 1, address: 1 });
+
+const resolveCompanyId = (value: any): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value?.toString === 'function') return value.toString();
+  return null;
+};
+
+PropertySchema.post('save', function () {
+  triggerDashboardKpiRefresh(resolveCompanyId((this as any).companyId));
+});
+
+PropertySchema.post('findOneAndUpdate', function (doc: any) {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(doc?.companyId || queryCompanyId));
+});
 
 export const Property = mongoose.model<IProperty>('Property', PropertySchema, COLLECTIONS.PROPERTIES); 

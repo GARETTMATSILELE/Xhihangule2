@@ -31,6 +31,12 @@ const getDashboardSummary = (req, res) => __awaiter(void 0, void 0, void 0, func
             return res.status(400).json({ message: 'companyId is required' });
         yield accountingService_1.default.initializeForCompany(companyId);
         const summary = yield accountingService_1.default.getDashboardSummary(companyId);
+        if ((summary === null || summary === void 0 ? void 0 : summary.cacheMode) === 'stale-fallback') {
+            res.setHeader('X-Dashboard-Cache', 'stale-fallback');
+        }
+        else {
+            res.setHeader('X-Dashboard-Cache', 'fresh');
+        }
         return res.json(summary);
     }
     catch (error) {

@@ -77,6 +77,24 @@ dotenv.config({ path: ENV_PATH });
 const app = express();
 const runtimeFeatures = getRuntimeFeatures();
 
+// Lightweight request latency instrumentation for endpoint profiling.
+app.use((req, res, next) => {
+  const startNs = process.hrtime.bigint();
+  const originalEnd = res.end.bind(res) as any;
+  (res as any).end = ((chunk?: any, encoding?: any, cb?: any) => {
+    const elapsedMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
+    try {
+      if (!res.headersSent) {
+        res.setHeader('X-Response-Time', `${elapsedMs.toFixed(1)}ms`);
+      }
+    } catch {
+      // no-op: never block response on telemetry
+    }
+    return originalEnd(chunk, encoding, cb);
+  }) as any;
+  next();
+});
+
 console.log('Runtime role configuration:', {
   role: runtimeFeatures.role,
   runHttpServer: runtimeFeatures.runHttpServer,

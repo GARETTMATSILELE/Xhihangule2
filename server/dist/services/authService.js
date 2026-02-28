@@ -23,10 +23,12 @@ const jwt_1 = require("../config/jwt");
 // Token expiry times
 const ACCESS_TOKEN_EXPIRY = jwt_1.JWT_CONFIG.ACCESS_TOKEN_EXPIRY;
 const REFRESH_TOKEN_EXPIRY = jwt_1.JWT_CONFIG.REFRESH_TOKEN_EXPIRY;
+const AUTH_QUERY_MAX_TIME_MS = Math.max(5000, Number(process.env.AUTH_QUERY_MAX_TIME_MS || 15000));
 class AuthService {
     constructor() {
         this.isInitialized = false;
         this.userVerificationCache = new Map();
+        this.userContextCache = new Map();
     }
     static getInstance() {
         if (!AuthService.instance) {
@@ -85,23 +87,63 @@ class AuthService {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.initialize();
             // First try to find in PropertyOwner collection
-            let propertyOwner = yield PropertyOwner_1.PropertyOwner.findById(userId).maxTimeMS(5000);
+            let propertyOwner = yield PropertyOwner_1.PropertyOwner.findById(userId).maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
             if (propertyOwner) {
                 return { user: propertyOwner, type: 'propertyOwner' };
             }
             // If not found, try User collection
-            let user = yield User_1.User.findById(userId).maxTimeMS(5000);
+            let user = yield User_1.User.findById(userId).maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
             if (user) {
                 return { user, type: 'user' };
             }
             return null;
         });
     }
+    getUserContext(userId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield this.initialize();
+            const now = Date.now();
+            const cached = this.userContextCache.get(userId);
+            if (cached && cached.expiresAt > now) {
+                return cached.user;
+            }
+            const user = yield User_1.User.findById(userId)
+                .select('_id email firstName lastName role roles companyId isActive lastLogin createdAt updatedAt avatar avatarMimeType')
+                .maxTimeMS(AUTH_QUERY_MAX_TIME_MS)
+                .lean();
+            if (!user)
+                return null;
+            const context = {
+                userId: String(user._id),
+                email: String(user.email || ''),
+                firstName: String(user.firstName || ''),
+                lastName: String(user.lastName || ''),
+                role: user.role,
+                roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : undefined,
+                companyId: user.companyId ? String(user.companyId) : undefined,
+                isActive: Boolean(user.isActive),
+                lastLogin: user.lastLogin,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt,
+                avatarUrl: user.avatar
+                    ? `data:${String(user.avatarMimeType || 'image/png')};base64,${String(user.avatar)}`
+                    : undefined
+            };
+            this.userContextCache.set(userId, {
+                user: context,
+                expiresAt: now + AuthService.USER_CONTEXT_CACHE_TTL_MS
+            });
+            return context;
+        });
+    }
     login(email, password) {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.initialize();
             // Check only the User collection
-            let user = yield User_1.User.findOne({ email }).maxTimeMS(5000);
+            const normalizedEmail = String(email || '').trim().toLowerCase();
+            let user = yield User_1.User.findOne({ email: normalizedEmail })
+                .select('_id email password firstName lastName role roles companyId isActive lastLogin createdAt updatedAt')
+                .maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
             if (!user) {
                 throw new errorHandler_1.AppError('Invalid credentials', 401, 'AUTH_ERROR');
             }
@@ -114,19 +156,30 @@ class AuthService {
             if (!isValidPassword) {
                 throw new errorHandler_1.AppError('Invalid credentials', 401, 'AUTH_ERROR');
             }
-            // Update last login
-            user.lastLogin = new Date();
-            yield user.save();
+            // Update last login without blocking authentication response path.
+            const newLastLogin = new Date();
+            void User_1.User.updateOne({ _id: user._id }, { $set: { lastLogin: newLastLogin } }).catch(() => { });
             const token = this.generateAccessToken(user, 'user');
             const refreshToken = this.generateRefreshToken(user, 'user');
+            const resultUser = {
+                userId: user._id.toString(),
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                role: user.role,
+                roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : undefined,
+                companyId: user.companyId ? user.companyId.toString() : undefined,
+                isActive: user.isActive,
+                lastLogin: newLastLogin,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
+            };
+            this.userContextCache.set(resultUser.userId, {
+                user: resultUser,
+                expiresAt: Date.now() + AuthService.USER_CONTEXT_CACHE_TTL_MS
+            });
             return {
-                user: {
-                    userId: user._id.toString(),
-                    email: user.email,
-                    role: user.role,
-                    roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : undefined,
-                    companyId: user.companyId ? user.companyId.toString() : undefined
-                },
+                user: resultUser,
                 token,
                 refreshToken
             };
@@ -279,3 +332,4 @@ class AuthService {
 }
 exports.AuthService = AuthService;
 AuthService.DB_VERIFY_CACHE_TTL_MS = Number(process.env.AUTH_USER_CACHE_TTL_MS || 120000);
+AuthService.USER_CONTEXT_CACHE_TTL_MS = Number(process.env.AUTH_USER_CONTEXT_CACHE_TTL_MS || 120000);

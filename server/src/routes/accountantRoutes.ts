@@ -36,7 +36,9 @@ import {
   getCompanyPropertyAccounts,
   ensureDevelopmentLedgers,
   migrateLegacyLedgerTypes,
-  mergePropertyAccountDuplicatesForProperty
+  mergePropertyAccountDuplicatesForProperty,
+  getPropertyMaintenanceJobStatus,
+  listPropertyMaintenanceJobs
 } from '../controllers/propertyAccountController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
 import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
@@ -76,8 +78,11 @@ import {
   generateTrustReport,
   runTrustReconciliation
 } from '../controllers/trustAccountController';
+import { createPerCompanyConcurrencyGuard } from '../middleware/companyLoadShedding';
 
 const router = express.Router();
+const syncConcurrencyGuard = createPerCompanyConcurrencyGuard({ operation: 'property-account-sync', maxConcurrent: 1 });
+const ledgerEnsureConcurrencyGuard = createPerCompanyConcurrencyGuard({ operation: 'ensure-development-ledgers', maxConcurrent: 1 });
 
 // Debug middleware
 router.use((req, res, next) => {
@@ -100,20 +105,11 @@ router.get('/test', (req, res) => {
 router.use(auth);
 
 // Commission routes - allow admin and accountant to view
-router.get('/agent-commissions', canViewCommissions, (req, res) => {
-  console.log('Agent commissions route hit');
-  getAgentCommissions(req, res);
-});
+router.get('/agent-commissions', canViewCommissions, getAgentCommissions);
 
-router.get('/agency-commission', canViewCommissions, (req, res) => {
-  console.log('Agency commission route hit');
-  getAgencyCommission(req, res);
-});
+router.get('/agency-commission', canViewCommissions, getAgencyCommission);
 
-router.get('/prea-commission', canViewCommissions, (req, res) => {
-  console.log('PREA commission route hit');
-  getPREACommission(req, res);
-});
+router.get('/prea-commission', canViewCommissions, getPREACommission);
 
 // Deposit ledger routes - allow admin and accountant
 router.get('/property-accounts/:propertyId/deposits', canViewCommissions, getPropertyDepositLedger);
@@ -203,19 +199,17 @@ router.post('/payments/finalize-bulk', canManagePayments, async (req: Request, r
 // Property Account routes - allow admin and accountant
 router.get('/property-accounts', canViewCommissions, getCompanyPropertyAccounts);
 router.post('/property-accounts/migrate-legacy-ledgers', canViewCommissions, migrateLegacyLedgerTypes);
-router.get('/property-accounts/:propertyId', canViewCommissions, (req, res) => {
-  console.log('Property account detail route hit:', req.params.propertyId);
-  console.log('User role:', req.user?.role);
-  getPropertyAccount(req, res);
-});
+router.get('/property-accounts/:propertyId', canViewCommissions, getPropertyAccount);
 router.get('/property-accounts/:propertyId/transactions', canViewCommissions, getPropertyTransactions);
 router.post('/property-accounts/:propertyId/expense', canViewCommissions, addExpense);
 router.post('/property-accounts/:propertyId/payout', canViewCommissions, createOwnerPayout);
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', canViewCommissions, updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', canViewCommissions, getPayoutHistory);
-router.post('/property-accounts/sync', canViewCommissions, syncPropertyAccounts);
+router.post('/property-accounts/sync', canViewCommissions, syncConcurrencyGuard, syncPropertyAccounts);
+router.get('/property-accounts/jobs', canViewCommissions, listPropertyMaintenanceJobs);
+router.get('/property-accounts/jobs/:jobId', canViewCommissions, getPropertyMaintenanceJobStatus);
 // Ensure development ledgers and backfill sales payments into them (idempotent)
-router.post('/property-accounts/developments/ensure-ledgers', canViewCommissions, ensureDevelopmentLedgers);
+router.post('/property-accounts/developments/ensure-ledgers', canViewCommissions, ledgerEnsureConcurrencyGuard, ensureDevelopmentLedgers);
 // Maintenance: remove duplicate income transactions for a property ledger (idempotent)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', canViewCommissions, reconcilePropertyDuplicates);
 // Maintenance: clean-merge legacy + new ledgers for a specific property, then reconcile
@@ -237,11 +231,7 @@ router.get('/sales/:id', isAccountant, getSalesContract);
 router.get('/agent-accounts', canViewAgentAccounts, getCompanyAgentAccounts);
 router.get('/agent-accounts/commission-compare', canViewAgentAccounts, compareAgentCommissionTotals);
 router.get('/agent-accounts/top-agents', canViewAgentAccounts, getTopAgentsForMonth);
-router.get('/agent-accounts/:agentId', canViewAgentAccounts, (req, res) => {
-  console.log('Agent account detail route hit:', req.params.agentId);
-  console.log('User role:', req.user?.role);
-  getAgentAccount(req, res);
-});
+router.get('/agent-accounts/:agentId', canViewAgentAccounts, getAgentAccount);
 // Write operations remain accountant-only
 router.post('/agent-accounts/:agentId/penalty', isAccountant, addPenalty);
 router.post('/agent-accounts/:agentId/payout', isAccountant, createAgentPayout);

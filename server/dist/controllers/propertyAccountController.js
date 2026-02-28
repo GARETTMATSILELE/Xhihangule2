@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.mergePropertyAccountDuplicatesForProperty = exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
+exports.mergePropertyAccountDuplicatesForProperty = exports.listPropertyMaintenanceJobs = exports.getPropertyMaintenanceJobStatus = exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Property_1 = require("../models/Property");
 const Development_1 = require("../models/Development");
@@ -23,6 +23,7 @@ const accountingIntegrationService_1 = __importDefault(require("../services/acco
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
 const propertyAccountService_2 = require("../services/propertyAccountService");
+const maintenanceJobQueueService_1 = __importDefault(require("../services/maintenanceJobQueueService"));
 /**
  * Get property account with summary
  */
@@ -30,12 +31,9 @@ const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, funct
     try {
         const { propertyId } = req.params;
         const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
-        console.log('getPropertyAccount controller called with propertyId:', propertyId);
-        console.log('User:', req.user);
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
-        console.log('Calling propertyAccountService.getPropertyAccount...');
         // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
         const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
         res.json({
@@ -167,11 +165,25 @@ const getCompanyPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 
                 }
             });
         }
-        // Full payload mode (backward compatible; includes transactions/payouts and performs maintenance)
-        const accounts = yield propertyAccountService_1.default.getCompanyPropertyAccounts(req.user.companyId);
+        // Full payload mode can get very large; keep bounded by default with opt-in paging.
+        const rawPage = Number(req.query.page || 1);
+        const rawLimit = Number(req.query.limit || Number(process.env.PROPERTY_ACCOUNT_FULL_DEFAULT_LIMIT || 100));
+        const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+        const limit = Math.min(Math.max(Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 100, 1), Math.max(100, Number(process.env.PROPERTY_ACCOUNT_FULL_MAX_LIMIT || 250)));
+        const allAccounts = yield propertyAccountService_1.default.getCompanyPropertyAccounts(req.user.companyId);
+        const start = (page - 1) * limit;
+        const end = start + limit;
+        const accounts = allAccounts.slice(start, end);
+        const hasMore = allAccounts.length > end;
         res.json({
             success: true,
-            data: accounts
+            data: accounts,
+            meta: {
+                page,
+                limit,
+                hasMore,
+                nextPage: hasMore ? page + 1 : null
+            }
         });
     }
     catch (error) {
@@ -329,26 +341,16 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
             return res.status(401).json({ message: 'User authentication required' });
         }
         // Get the property account to access owner information
-        console.log('Getting property account for propertyId:', propertyId);
         const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
-        console.log('Property account retrieved:', {
-            accountId: account._id,
-            ownerId: account.ownerId,
-            ownerName: account.ownerName,
-            runningBalance: account.runningBalance
-        });
         // Use provided recipientId or fall back to property owner
         let finalRecipientId = recipientId;
         let finalRecipientName = recipientName;
         if (!finalRecipientId || finalRecipientId.trim() === '') {
-            console.log('RecipientId is empty, using property owner');
             if (!account.ownerId) {
-                console.log('Property has no owner assigned');
                 return res.status(400).json({ message: 'Property has no owner assigned' });
             }
             finalRecipientId = account.ownerId.toString();
             finalRecipientName = account.ownerName || 'Property Owner';
-            console.log('Using owner as recipient:', { finalRecipientId, finalRecipientName });
         }
         if (!finalRecipientName) {
             return res.status(400).json({ message: 'Recipient name is required' });
@@ -492,15 +494,60 @@ exports.reconcilePropertyDuplicates = reconcilePropertyDuplicates;
  * Sync property accounts with payments
  */
 const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
+        const allowBusinessHoursSync = String(process.env.ALLOW_SYNC_DURING_BUSINESS_HOURS || '').toLowerCase() === 'true' ||
+            String(req.query.force || '').toLowerCase() === 'true';
+        if (!allowBusinessHoursSync) {
+            // Default business window: 08:00-17:59 in configured local timezone.
+            const businessStartHour = Number(process.env.PROPERTY_SYNC_BUSINESS_START_HOUR || 8);
+            const businessEndHour = Number(process.env.PROPERTY_SYNC_BUSINESS_END_HOUR || 18); // exclusive
+            const timeZone = process.env.PROPERTY_SYNC_TIMEZONE || 'Africa/Harare';
+            const now = new Date();
+            const localHour = Number(new Intl.DateTimeFormat('en-US', {
+                hour: 'numeric',
+                hour12: false,
+                timeZone
+            }).format(now));
+            if (Number.isFinite(localHour) && localHour >= businessStartHour && localHour < businessEndHour) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'SYNC_BLOCKED_BUSINESS_HOURS',
+                    message: `Property account sync is blocked during business hours (${businessStartHour}:00-${businessEndHour}:00 ${timeZone}). Run off-peak or pass ?force=true for an emergency run.`
+                });
+            }
+        }
+        const waitForCompletion = String(req.query.wait || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.wait) || '').toLowerCase() === 'true';
+        if (!waitForCompletion) {
+            const companyId = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) ? String(req.user.companyId) : '';
+            const requestedBy = ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? String(req.user.userId) : '';
+            const queued = yield maintenanceJobQueueService_1.default.enqueue('sync_property_accounts', {
+                companyId,
+                requestedBy
+            });
+            return res.status(202).json({
+                success: true,
+                queued: true,
+                deduplicated: queued.deduplicated,
+                message: queued.deduplicated
+                    ? 'A property account sync job is already pending/running for this company.'
+                    : 'Property account sync has been queued.',
+                job: {
+                    id: String(queued.job._id),
+                    status: queued.job.status,
+                    operation: queued.job.operation,
+                    createdAt: queued.job.createdAt
+                }
+            });
+        }
         yield propertyAccountService_1.default.syncPropertyAccountsWithPayments();
         // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
         try {
             const result = yield propertyAccountService_1.default.migrateSalesLedgerForCompany();
-            console.log('Sales ledger migration result:', result);
+            logger_1.logger.info('Sales ledger migration completed after property-account sync', result);
         }
         catch (e) {
-            console.warn('Sales ledger migration skipped/failed:', e);
+            logger_1.logger.warn('Sales ledger migration skipped/failed after property-account sync', e);
         }
         res.json({
             success: true,
@@ -638,9 +685,31 @@ exports.getAcknowledgementDocument = getAcknowledgementDocument;
  * Scoped to the current user's company if available.
  */
 const ensureDevelopmentLedgers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     try {
         const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : undefined;
+        const waitForCompletion = String(req.query.wait || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.wait) || '').toLowerCase() === 'true';
+        if (!waitForCompletion) {
+            const requestedBy = ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? String(req.user.userId) : '';
+            const queued = yield maintenanceJobQueueService_1.default.enqueue('ensure_development_ledgers', {
+                companyId: companyId || '',
+                requestedBy
+            });
+            return res.status(202).json({
+                success: true,
+                queued: true,
+                deduplicated: queued.deduplicated,
+                message: queued.deduplicated
+                    ? 'An ensure-ledgers job is already pending/running for this company.'
+                    : 'Ensure-ledgers job has been queued.',
+                job: {
+                    id: String(queued.job._id),
+                    status: queued.job.status,
+                    operation: queued.job.operation,
+                    createdAt: queued.job.createdAt
+                }
+            });
+        }
         const result = yield propertyAccountService_1.default.ensureDevelopmentLedgersAndBackfillPayments({
             companyId
         });
@@ -655,6 +724,47 @@ const ensureDevelopmentLedgers = (req, res) => __awaiter(void 0, void 0, void 0,
     }
 });
 exports.ensureDevelopmentLedgers = ensureDevelopmentLedgers;
+const getPropertyMaintenanceJobStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : '';
+        const { jobId } = req.params;
+        if (!jobId) {
+            return res.status(400).json({ success: false, message: 'jobId is required' });
+        }
+        const job = yield maintenanceJobQueueService_1.default.getJobById(jobId, companyId || undefined);
+        if (!job) {
+            return res.status(404).json({ success: false, message: 'Maintenance job not found' });
+        }
+        return res.json({ success: true, data: job });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in getPropertyMaintenanceJobStatus:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+exports.getPropertyMaintenanceJobStatus = getPropertyMaintenanceJobStatus;
+const listPropertyMaintenanceJobs = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : '';
+        if (!companyId) {
+            return res.status(400).json({ success: false, message: 'Company ID is required' });
+        }
+        const operationRaw = String(req.query.operation || '').trim().toLowerCase();
+        const operation = operationRaw === 'sync_property_accounts' || operationRaw === 'ensure_development_ledgers'
+            ? operationRaw
+            : undefined;
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+        const jobs = yield maintenanceJobQueueService_1.default.listRecentJobs(companyId, operation, limit);
+        return res.json({ success: true, data: jobs });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in listPropertyMaintenanceJobs:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+exports.listPropertyMaintenanceJobs = listPropertyMaintenanceJobs;
 /**
  * Merge duplicate ledgers for a single property (clean merge of legacy + new),
  * then reconcile duplicate income transactions. Keeps one active ledger and

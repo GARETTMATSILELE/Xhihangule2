@@ -26,7 +26,10 @@ const agentAccountController_1 = require("../controllers/agentAccountController"
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const agentAccountController_2 = require("../controllers/agentAccountController");
 const trustAccountController_1 = require("../controllers/trustAccountController");
+const companyLoadShedding_1 = require("../middleware/companyLoadShedding");
 const router = express_1.default.Router();
+const syncConcurrencyGuard = (0, companyLoadShedding_1.createPerCompanyConcurrencyGuard)({ operation: 'property-account-sync', maxConcurrent: 1 });
+const ledgerEnsureConcurrencyGuard = (0, companyLoadShedding_1.createPerCompanyConcurrencyGuard)({ operation: 'ensure-development-ledgers', maxConcurrent: 1 });
 // Debug middleware
 router.use((req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
@@ -45,18 +48,9 @@ router.get('/test', (req, res) => {
 // Apply authentication middleware to all routes
 router.use(auth_1.auth);
 // Commission routes - allow admin and accountant to view
-router.get('/agent-commissions', roles_1.canViewCommissions, (req, res) => {
-    console.log('Agent commissions route hit');
-    (0, accountantController_1.getAgentCommissions)(req, res);
-});
-router.get('/agency-commission', roles_1.canViewCommissions, (req, res) => {
-    console.log('Agency commission route hit');
-    (0, accountantController_1.getAgencyCommission)(req, res);
-});
-router.get('/prea-commission', roles_1.canViewCommissions, (req, res) => {
-    console.log('PREA commission route hit');
-    (0, accountantController_1.getPREACommission)(req, res);
-});
+router.get('/agent-commissions', roles_1.canViewCommissions, accountantController_1.getAgentCommissions);
+router.get('/agency-commission', roles_1.canViewCommissions, accountantController_1.getAgencyCommission);
+router.get('/prea-commission', roles_1.canViewCommissions, accountantController_1.getPREACommission);
 // Deposit ledger routes - allow admin and accountant
 router.get('/property-accounts/:propertyId/deposits', roles_1.canViewCommissions, accountantController_1.getPropertyDepositLedger);
 router.get('/property-accounts/:propertyId/deposits/summary', roles_1.canViewCommissions, accountantController_1.getPropertyDepositSummary);
@@ -145,20 +139,17 @@ router.post('/payments/finalize-bulk', roles_1.canManagePayments, (req, res) => 
 // Property Account routes - allow admin and accountant
 router.get('/property-accounts', roles_1.canViewCommissions, propertyAccountController_1.getCompanyPropertyAccounts);
 router.post('/property-accounts/migrate-legacy-ledgers', roles_1.canViewCommissions, propertyAccountController_1.migrateLegacyLedgerTypes);
-router.get('/property-accounts/:propertyId', roles_1.canViewCommissions, (req, res) => {
-    var _a;
-    console.log('Property account detail route hit:', req.params.propertyId);
-    console.log('User role:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.role);
-    (0, propertyAccountController_1.getPropertyAccount)(req, res);
-});
+router.get('/property-accounts/:propertyId', roles_1.canViewCommissions, propertyAccountController_1.getPropertyAccount);
 router.get('/property-accounts/:propertyId/transactions', roles_1.canViewCommissions, propertyAccountController_1.getPropertyTransactions);
 router.post('/property-accounts/:propertyId/expense', roles_1.canViewCommissions, propertyAccountController_1.addExpense);
 router.post('/property-accounts/:propertyId/payout', roles_1.canViewCommissions, propertyAccountController_1.createOwnerPayout);
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.canViewCommissions, propertyAccountController_1.updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', roles_1.canViewCommissions, propertyAccountController_1.getPayoutHistory);
-router.post('/property-accounts/sync', roles_1.canViewCommissions, propertyAccountController_1.syncPropertyAccounts);
+router.post('/property-accounts/sync', roles_1.canViewCommissions, syncConcurrencyGuard, propertyAccountController_1.syncPropertyAccounts);
+router.get('/property-accounts/jobs', roles_1.canViewCommissions, propertyAccountController_1.listPropertyMaintenanceJobs);
+router.get('/property-accounts/jobs/:jobId', roles_1.canViewCommissions, propertyAccountController_1.getPropertyMaintenanceJobStatus);
 // Ensure development ledgers and backfill sales payments into them (idempotent)
-router.post('/property-accounts/developments/ensure-ledgers', roles_1.canViewCommissions, propertyAccountController_1.ensureDevelopmentLedgers);
+router.post('/property-accounts/developments/ensure-ledgers', roles_1.canViewCommissions, ledgerEnsureConcurrencyGuard, propertyAccountController_1.ensureDevelopmentLedgers);
 // Maintenance: remove duplicate income transactions for a property ledger (idempotent)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', roles_1.canViewCommissions, propertyAccountController_1.reconcilePropertyDuplicates);
 // Maintenance: clean-merge legacy + new ledgers for a specific property, then reconcile
@@ -177,12 +168,7 @@ router.get('/sales/:id', roles_1.isAccountant, salesContractController_1.getSale
 router.get('/agent-accounts', roles_1.canViewAgentAccounts, agentAccountController_1.getCompanyAgentAccounts);
 router.get('/agent-accounts/commission-compare', roles_1.canViewAgentAccounts, agentAccountController_2.compareAgentCommissionTotals);
 router.get('/agent-accounts/top-agents', roles_1.canViewAgentAccounts, agentAccountController_1.getTopAgentsForMonth);
-router.get('/agent-accounts/:agentId', roles_1.canViewAgentAccounts, (req, res) => {
-    var _a;
-    console.log('Agent account detail route hit:', req.params.agentId);
-    console.log('User role:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.role);
-    (0, agentAccountController_1.getAgentAccount)(req, res);
-});
+router.get('/agent-accounts/:agentId', roles_1.canViewAgentAccounts, agentAccountController_1.getAgentAccount);
 // Write operations remain accountant-only
 router.post('/agent-accounts/:agentId/penalty', roles_1.isAccountant, agentAccountController_1.addPenalty);
 router.post('/agent-accounts/:agentId/payout', roles_1.isAccountant, agentAccountController_1.createAgentPayout);

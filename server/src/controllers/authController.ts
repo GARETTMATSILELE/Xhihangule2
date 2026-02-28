@@ -318,44 +318,17 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    console.log('Login attempt for email:', email);
 
     // Use auth service for login
     const { user: userData, token, refreshToken } = await authService.login(email, password);
-
-    // Get full user data from database
-    const fullUser = await User.findById(userData.userId).maxTimeMS(5000);
-    if (!fullUser) {
-      throw new AppError('User not found after login', 404);
-    }
 
     // Get company details if user has a company
     let company = null;
     if (userData.companyId) {
       company = await Company.findById(userData.companyId).maxTimeMS(5000);
-      console.log('Found company:', {
-        id: company?._id,
-        name: company?.name,
-        ownerId: company?.ownerId
-      });
-    } else {
-      console.log('No company found for user');
     }
 
-    console.log('Login successful:', {
-      userId: userData.userId,
-      role: userData.role,
-      companyId: userData.companyId,
-      hasCompany: !!company
-    });
-
     // Set refresh token as HttpOnly cookie
-    console.log('Setting refresh token cookie:', {
-      hasRefreshToken: !!refreshToken,
-      refreshTokenLength: refreshToken?.length,
-      environment: process.env.NODE_ENV
-    });
-    
     const cookieDomain = getCookieDomain();
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
@@ -385,21 +358,19 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    console.log('Refresh token cookie set successfully');
-
     res.json({
       user: {
-        _id: fullUser._id,
-        email: fullUser.email,
-        firstName: fullUser.firstName,
-        lastName: fullUser.lastName,
-        role: fullUser.role,
-        roles: (Array.isArray((fullUser as any).roles) && (fullUser as any).roles!.length > 0) ? (fullUser as any).roles : undefined,
-        companyId: fullUser.companyId?.toString(),
-        isActive: fullUser.isActive,
-        lastLogin: fullUser.lastLogin,
-        createdAt: fullUser.createdAt,
-        updatedAt: fullUser.updatedAt
+        _id: userData.userId,
+        email: userData.email,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        role: userData.role,
+        roles: (Array.isArray((userData as any).roles) && (userData as any).roles!.length > 0) ? (userData as any).roles : undefined,
+        companyId: userData.companyId?.toString(),
+        isActive: userData.isActive,
+        lastLogin: userData.lastLogin,
+        createdAt: userData.createdAt,
+        updatedAt: userData.updatedAt
       },
       company: company ? {
         _id: company._id,
@@ -543,7 +514,7 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
       throw new AppError('Not authenticated', 401);
     }
 
-    const user = await User.findById(req.user.userId).select('-password');
+    const user = await authService.getUserContext(req.user.userId);
     if (!user) {
       throw new AppError('User not found', 404);
     }
@@ -552,23 +523,11 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
     let company = null;
     if (user.companyId) {
       company = await Company.findById(user.companyId);
-      console.log('Current user company:', {
-        id: company?._id,
-        name: company?.name,
-        ownerId: company?.ownerId
-      });
     }
-
-    console.log('Current user:', {
-      id: user._id,
-      role: user.role,
-      companyId: user.companyId,
-      hasCompany: !!company
-    });
 
     res.json({
       user: {
-        _id: user._id,
+        _id: user.userId,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -579,10 +538,7 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
         lastLogin: user.lastLogin,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
-        // Provide avatar as a data URL if present
-        ...(user as any).avatar ? {
-          avatarUrl: `data:${(user as any).avatarMimeType || 'image/png'};base64,${(user as any).avatar}`
-        } : {}
+        ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {})
       },
       company
     });

@@ -11,6 +11,7 @@ import accountingIntegrationService from '../services/accountingIntegrationServi
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { reconcilePropertyLedgerDuplicates } from '../services/propertyAccountService';
+import maintenanceJobQueueService from '../services/maintenanceJobQueueService';
 
 /**
  * Get property account with summary
@@ -20,14 +21,10 @@ export const getPropertyAccount = async (req: Request, res: Response) => {
     const { propertyId } = req.params;
     const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
     
-    console.log('getPropertyAccount controller called with propertyId:', propertyId);
-    console.log('User:', req.user);
-    
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
     }
 
-    console.log('Calling propertyAccountService.getPropertyAccount...');
     // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
     const account = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
     
@@ -168,12 +165,30 @@ export const getCompanyPropertyAccounts = async (req: Request, res: Response) =>
       });
     }
 
-    // Full payload mode (backward compatible; includes transactions/payouts and performs maintenance)
-    const accounts = await propertyAccountService.getCompanyPropertyAccounts(req.user.companyId);
+    // Full payload mode can get very large; keep bounded by default with opt-in paging.
+    const rawPage = Number(req.query.page || 1);
+    const rawLimit = Number(req.query.limit || Number(process.env.PROPERTY_ACCOUNT_FULL_DEFAULT_LIMIT || 100));
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+    const limit = Math.min(
+      Math.max(Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 100, 1),
+      Math.max(100, Number(process.env.PROPERTY_ACCOUNT_FULL_MAX_LIMIT || 250))
+    );
+
+    const allAccounts = await propertyAccountService.getCompanyPropertyAccounts(req.user.companyId);
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const accounts = allAccounts.slice(start, end);
+    const hasMore = allAccounts.length > end;
     
     res.json({
       success: true,
-      data: accounts
+      data: accounts,
+      meta: {
+        page,
+        limit,
+        hasMore,
+        nextPage: hasMore ? page + 1 : null
+      }
     });
   } catch (error) {
     logger.error('Error in getCompanyPropertyAccounts:', error);
@@ -362,28 +377,18 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
     }
 
     // Get the property account to access owner information
-    console.log('Getting property account for propertyId:', propertyId);
     const account = await propertyAccountService.getPropertyAccount(propertyId, ledger);
-    console.log('Property account retrieved:', {
-      accountId: account._id,
-      ownerId: account.ownerId,
-      ownerName: account.ownerName,
-      runningBalance: account.runningBalance
-    });
     
     // Use provided recipientId or fall back to property owner
     let finalRecipientId = recipientId;
     let finalRecipientName = recipientName;
     
     if (!finalRecipientId || finalRecipientId.trim() === '') {
-      console.log('RecipientId is empty, using property owner');
       if (!account.ownerId) {
-        console.log('Property has no owner assigned');
         return res.status(400).json({ message: 'Property has no owner assigned' });
       }
       finalRecipientId = account.ownerId.toString();
       finalRecipientName = account.ownerName || 'Property Owner';
-      console.log('Using owner as recipient:', { finalRecipientId, finalRecipientName });
     }
 
     if (!finalRecipientName) {
@@ -545,13 +550,62 @@ export const reconcilePropertyDuplicates = async (req: Request, res: Response) =
  */
 export const syncPropertyAccounts = async (req: Request, res: Response) => {
   try {
+    const allowBusinessHoursSync =
+      String(process.env.ALLOW_SYNC_DURING_BUSINESS_HOURS || '').toLowerCase() === 'true' ||
+      String(req.query.force || '').toLowerCase() === 'true';
+    if (!allowBusinessHoursSync) {
+      // Default business window: 08:00-17:59 in configured local timezone.
+      const businessStartHour = Number(process.env.PROPERTY_SYNC_BUSINESS_START_HOUR || 8);
+      const businessEndHour = Number(process.env.PROPERTY_SYNC_BUSINESS_END_HOUR || 18); // exclusive
+      const timeZone = process.env.PROPERTY_SYNC_TIMEZONE || 'Africa/Harare';
+      const now = new Date();
+      const localHour = Number(
+        new Intl.DateTimeFormat('en-US', {
+          hour: 'numeric',
+          hour12: false,
+          timeZone
+        }).format(now)
+      );
+      if (Number.isFinite(localHour) && localHour >= businessStartHour && localHour < businessEndHour) {
+        return res.status(409).json({
+          success: false,
+          code: 'SYNC_BLOCKED_BUSINESS_HOURS',
+          message: `Property account sync is blocked during business hours (${businessStartHour}:00-${businessEndHour}:00 ${timeZone}). Run off-peak or pass ?force=true for an emergency run.`
+        });
+      }
+    }
+
+    const waitForCompletion = String(req.query.wait || req.body?.wait || '').toLowerCase() === 'true';
+    if (!waitForCompletion) {
+      const companyId = req.user?.companyId ? String(req.user.companyId) : '';
+      const requestedBy = req.user?.userId ? String(req.user.userId) : '';
+      const queued = await maintenanceJobQueueService.enqueue('sync_property_accounts', {
+        companyId,
+        requestedBy
+      });
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        deduplicated: queued.deduplicated,
+        message: queued.deduplicated
+          ? 'A property account sync job is already pending/running for this company.'
+          : 'Property account sync has been queued.',
+        job: {
+          id: String((queued.job as any)._id),
+          status: queued.job.status,
+          operation: queued.job.operation,
+          createdAt: queued.job.createdAt
+        }
+      });
+    }
+
     await propertyAccountService.syncPropertyAccountsWithPayments();
     // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
     try {
       const result = await propertyAccountService.migrateSalesLedgerForCompany();
-      console.log('Sales ledger migration result:', result);
+      logger.info('Sales ledger migration completed after property-account sync', result as any);
     } catch (e) {
-      console.warn('Sales ledger migration skipped/failed:', e);
+      logger.warn('Sales ledger migration skipped/failed after property-account sync', e as any);
     }
     
     res.json({
@@ -705,6 +759,29 @@ export const getAcknowledgementDocument = async (req: Request, res: Response) =>
 export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId ? String(req.user.companyId) : undefined;
+    const waitForCompletion = String(req.query.wait || req.body?.wait || '').toLowerCase() === 'true';
+    if (!waitForCompletion) {
+      const requestedBy = req.user?.userId ? String(req.user.userId) : '';
+      const queued = await maintenanceJobQueueService.enqueue('ensure_development_ledgers', {
+        companyId: companyId || '',
+        requestedBy
+      });
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        deduplicated: queued.deduplicated,
+        message: queued.deduplicated
+          ? 'An ensure-ledgers job is already pending/running for this company.'
+          : 'Ensure-ledgers job has been queued.',
+        job: {
+          id: String((queued.job as any)._id),
+          status: queued.job.status,
+          operation: queued.job.operation,
+          createdAt: queued.job.createdAt
+        }
+      });
+    }
+
     const result = await propertyAccountService.ensureDevelopmentLedgersAndBackfillPayments({
       companyId
     });
@@ -714,6 +791,44 @@ export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const getPropertyMaintenanceJobStatus = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId ? String(req.user.companyId) : '';
+    const { jobId } = req.params;
+    if (!jobId) {
+      return res.status(400).json({ success: false, message: 'jobId is required' });
+    }
+    const job = await maintenanceJobQueueService.getJobById(jobId, companyId || undefined);
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Maintenance job not found' });
+    }
+    return res.json({ success: true, data: job });
+  } catch (error) {
+    logger.error('Error in getPropertyMaintenanceJobStatus:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const listPropertyMaintenanceJobs = async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId ? String(req.user.companyId) : '';
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'Company ID is required' });
+    }
+    const operationRaw = String(req.query.operation || '').trim().toLowerCase();
+    const operation =
+      operationRaw === 'sync_property_accounts' || operationRaw === 'ensure_development_ledgers'
+        ? (operationRaw as 'sync_property_accounts' | 'ensure_development_ledgers')
+        : undefined;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+    const jobs = await maintenanceJobQueueService.listRecentJobs(companyId, operation, limit);
+    return res.json({ success: true, data: jobs });
+  } catch (error) {
+    logger.error('Error in listPropertyMaintenanceJobs:', error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };

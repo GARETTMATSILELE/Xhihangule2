@@ -179,4 +179,5 @@ userSchema.methods.canAccessRole = function (role) {
     return list.includes(role);
 };
 // Create and export the model
+userSchema.index({ email: 1 });
 exports.User = mongoose_1.default.model('User', userSchema, collections_1.COLLECTIONS.USERS);

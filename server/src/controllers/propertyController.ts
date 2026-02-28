@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Property, IProperty } from '../models/Property';
+import { Property } from '../models/Property';
 import { SalesOwner } from '../models/SalesOwner';
 import { ChartData } from '../models/ChartData';
 import { JwtPayload } from '../types/auth';
@@ -12,7 +12,6 @@ import mongoose from 'mongoose';
 import { hasAnyRole, hasRole } from '../utils/access';
 import { Buyer } from '../models/Buyer';
 import trustAccountService from '../services/trustAccountService';
-import { redactHeaders } from '../utils/requestSecurity';
 
 // Helper function to extract user context from request
 const getUserContext = (req: Request) => {
@@ -34,6 +33,9 @@ const getUserContext = (req: Request) => {
 };
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const PROPERTY_LIST_MAX_TIME_MS = Math.max(3000, Number(process.env.PROPERTY_LIST_QUERY_MAX_TIME_MS || 12000));
+const PROPERTY_LIST_DEFAULT_LIMIT = Math.max(20, Number(process.env.PROPERTY_LIST_DEFAULT_LIMIT || 100));
+const PROPERTY_LIST_MAX_LIMIT = Math.max(PROPERTY_LIST_DEFAULT_LIMIT, Number(process.env.PROPERTY_LIST_MAX_LIMIT || 250));
 
 const isRetryableMongoConnectionError = (error: any): boolean => {
   const labels: Set<string> | undefined = error?.[Symbol.for('errorLabels')];
@@ -105,18 +107,10 @@ async function syncValuationOnPropertySold(params: {
 // Public endpoint for getting properties with user-based filtering
 export const getPublicProperties = async (req: Request, res: Response) => {
   try {
-    console.log('getPublicProperties request received:', {
-      headers: req.headers,
-      query: req.query,
-      params: req.params
-    });
-
     const userContext = getUserContext(req);
-    console.log('User context extracted:', userContext);
 
     // If no user context provided, return all properties (for admin dashboard)
     if (!userContext.userId && !userContext.companyId) {
-      console.log('No user context provided, returning all properties');
       const allProperties = await Property.find({})
         .populate('ownerId', 'firstName lastName email')
         .sort({ createdAt: -1 });
@@ -137,19 +131,12 @@ export const getPublicProperties = async (req: Request, res: Response) => {
     }
 
     if (!userContext.companyId) {
-      console.log('User has no company ID, returning empty array');
       return res.json({
         status: 'success',
         data: []
       });
     }
 
-    console.log('Fetching properties for user context:', {
-      userId: userContext.userId,
-      companyId: userContext.companyId,
-      userRole: userContext.userRole
-    });
-    
     // Build query based on user role
     const query: any = { 
       companyId: new mongoose.Types.ObjectId(userContext.companyId)
@@ -161,16 +148,11 @@ export const getPublicProperties = async (req: Request, res: Response) => {
       query.ownerId = new mongoose.Types.ObjectId(userContext.userId);
     }
     
-    console.log('Executing property query:', {
-      query,
-      queryString: JSON.stringify(query)
-    });
-
     // Optional lightweight search and projection for fast autocomplete
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const saleOnly = String(req.query.saleOnly) === 'true';
     const fields = typeof req.query.fields === 'string' ? req.query.fields : '';
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+    const limit = Math.max(1, Math.min(PROPERTY_LIST_MAX_LIMIT, Number(req.query.limit || PROPERTY_LIST_DEFAULT_LIMIT)));
     const page = Math.max(1, Number(req.query.page || 1));
 
     if (saleOnly) {
@@ -212,6 +194,7 @@ export const getPublicProperties = async (req: Request, res: Response) => {
       try {
         properties = await Property.find(query)
           .select(projection)
+          .maxTimeMS(PROPERTY_LIST_MAX_TIME_MS)
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
@@ -229,19 +212,6 @@ export const getPublicProperties = async (req: Request, res: Response) => {
         await wait(200);
       }
     }
-
-    console.log('Found properties:', {
-      count: properties.length,
-      properties: properties.map(p => ({
-        id: p._id,
-        name: p.name,
-        address: p.address,
-        type: p.type,
-        ownerId: p.ownerId,
-        companyId: p.companyId,
-        status: p.status
-      }))
-    });
 
     return res.json({
       status: 'success',
@@ -289,15 +259,7 @@ export const getPublicProperties = async (req: Request, res: Response) => {
 
 export const getProperties = async (req: Request, res: Response) => {
   try {
-    console.log('getProperties request received:', {
-      headers: redactHeaders(req.headers),
-      user: req.user,
-      query: req.query,
-      params: req.params
-    });
-
     if (!req.user?.userId) {
-      console.error('No user ID in request');
       return res.status(401).json({ 
         status: 'error',
         message: 'Authentication required',
@@ -307,19 +269,15 @@ export const getProperties = async (req: Request, res: Response) => {
 
     // Check if user has a company ID
     if (!req.user?.companyId) {
-      console.log('User has no company ID:', {
-        userId: req.user.userId,
-        role: req.user.role
-      });
       return res.json([]); // Return empty array for users without a company
     }
 
-    console.log('Fetching properties for company:', {
-      companyId: req.user.companyId,
-      userId: req.user.userId,
-      role: req.user.role,
-      companyIdType: typeof req.user.companyId
-    });
+    const requestedLimitRaw = Number(req.query.limit || PROPERTY_LIST_DEFAULT_LIMIT);
+    const limit = Number.isFinite(requestedLimitRaw)
+      ? Math.max(1, Math.min(PROPERTY_LIST_MAX_LIMIT, Math.floor(requestedLimitRaw)))
+      : PROPERTY_LIST_DEFAULT_LIMIT;
+    const requestedPageRaw = Number(req.query.page || 1);
+    const page = Number.isFinite(requestedPageRaw) ? Math.max(1, Math.floor(requestedPageRaw)) : 1;
     
     // Build query based on user role
     const query: any = { 
@@ -346,19 +304,18 @@ export const getProperties = async (req: Request, res: Response) => {
       query.agentId = new mongoose.Types.ObjectId(req.user.userId);
     }
     
-    console.log('Executing property query:', {
-      query,
-      queryString: JSON.stringify(query)
-    });
-
     // Get properties with populated owner information.
     // Retry once for transient connection resets from managed Mongo services.
-    let properties: IProperty[] = [];
+    let properties: any[] = [];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         properties = await Property.find(query)
+          .maxTimeMS(PROPERTY_LIST_MAX_TIME_MS)
           .populate('ownerId', 'firstName lastName email')
-          .sort({ createdAt: -1 }); // Sort by newest first
+          .sort({ createdAt: -1 }) // Sort by newest first
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .lean();
         break;
       } catch (queryError: any) {
         const shouldRetry = attempt === 0 && isRetryableMongoConnectionError(queryError);
@@ -373,22 +330,13 @@ export const getProperties = async (req: Request, res: Response) => {
       }
     }
 
-    console.log('Found properties:', {
-      count: properties.length,
-      properties: properties.map(p => ({
-        id: p._id,
-        name: p.name,
-        address: p.address,
-        type: p.type,
-        ownerId: p.ownerId,
-        companyId: p.companyId,
-        status: p.status
-      }))
-    });
-
     return res.json({
       status: 'success',
-      data: properties
+      data: properties,
+      meta: {
+        page,
+        limit
+      }
     });
 
   } catch (error) {

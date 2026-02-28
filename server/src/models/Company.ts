@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 // Bank Account interface
 export interface IBankAccount {
@@ -251,6 +252,16 @@ companySchema.pre('validate', function(next) {
     }
   }
   next();
+});
+
+companySchema.post('save', function () {
+  triggerDashboardKpiRefresh((this as any)?._id?.toString?.());
+});
+
+companySchema.post('findOneAndUpdate', function (doc: any) {
+  const queryId = (this as any)?.getQuery?.()?._id;
+  const id = doc?._id || queryId;
+  triggerDashboardKpiRefresh(id?.toString?.());
 });
 
 // Remove index definitions as they are now handled in indexes.ts

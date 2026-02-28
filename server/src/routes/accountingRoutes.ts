@@ -17,12 +17,18 @@ import {
   postManualTransaction,
   backfillBalances
 } from '../controllers/accountingController';
+import { createPerCompanyRateLimiter } from '../middleware/companyLoadShedding';
 
 const router = express.Router();
+const dashboardSummaryLimiter = createPerCompanyRateLimiter({
+  operation: 'dashboard-summary',
+  maxRequests: Math.max(5, Number(process.env.ACCOUNTING_DASHBOARD_RATE_LIMIT_MAX || 40)),
+  windowMs: Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_RATE_LIMIT_WINDOW_MS || 30000))
+});
 
 router.use(auth);
 
-router.get('/dashboard-summary', canViewCommissions, getDashboardSummary);
+router.get('/dashboard-summary', canViewCommissions, dashboardSummaryLimiter, getDashboardSummary);
 router.get('/revenue-trend', canViewCommissions, getRevenueTrend);
 router.get('/expense-trend', canViewCommissions, getExpenseTrend);
 router.get('/vat-status', canViewCommissions, getVatStatus);

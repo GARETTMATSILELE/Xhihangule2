@@ -1,5 +1,6 @@
 import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
+import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
 
 interface InvoiceItem {
   code: string;
@@ -108,5 +109,21 @@ const InvoiceSchema: Schema = new Schema({
     signature: { type: String }
   }
 }, { timestamps: true });
+
+const resolveCompanyId = (value: any): string | null => {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value?.toString === 'function') return value.toString();
+  return null;
+};
+
+InvoiceSchema.post('save', function () {
+  triggerDashboardKpiRefresh(resolveCompanyId((this as any).companyId));
+});
+
+InvoiceSchema.post('findOneAndUpdate', function (doc: any) {
+  const queryCompanyId = (this as any)?.getQuery?.()?.companyId;
+  triggerDashboardKpiRefresh(resolveCompanyId(doc?.companyId || queryCompanyId));
+});
 
 export const Invoice = accountingConnection.model<IInvoice>('Invoice', InvoiceSchema, 'invoices'); 

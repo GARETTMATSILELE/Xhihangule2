@@ -22,6 +22,7 @@ const BankAccount_1 = require("../models/BankAccount");
 const BankTransaction_1 = require("../models/BankTransaction");
 const AccountingEventLog_1 = require("../models/AccountingEventLog");
 const Payment_1 = require("../models/Payment");
+const dashboardKpiService_1 = __importDefault(require("./dashboardKpiService"));
 const DEFAULT_ACCOUNTS = [
     { code: '1001', name: 'Main Bank Account', type: 'asset' },
     { code: '1002', name: 'Cash On Hand', type: 'asset' },
@@ -51,6 +52,16 @@ class AccountingService {
         this.dashboardSummaryCache = new Map();
         this.dashboardSummaryInFlight = new Map();
         this.dashboardSummaryTtlMs = Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_CACHE_TTL_MS || 15000));
+        this.dashboardSummaryStaleMaxAgeMs = Math.max(this.dashboardSummaryTtlMs, Number(process.env.ACCOUNTING_DASHBOARD_STALE_MAX_AGE_MS || 600000));
+    }
+    isTransientSummaryError(error) {
+        const message = String((error === null || error === void 0 ? void 0 : error.message) || '').toLowerCase();
+        const name = String((error === null || error === void 0 ? void 0 : error.name) || '').toLowerCase();
+        return (name.includes('mongonetwork') ||
+            name.includes('mongoserverselection') ||
+            message.includes('timed out') ||
+            (message.includes('connection') && message.includes('closed')) ||
+            message.includes('gateway timeout'));
     }
     ensureIndexes() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -343,7 +354,7 @@ class AccountingService {
                 var _a, _b, _c, _d, _e;
                 const companyObjectId = toObjectId(companyId);
                 yield this.ensureCompanyBalance(companyId);
-                const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue] = yield Promise.all([
+                const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis] = yield Promise.all([
                     CompanyBalance_1.CompanyBalance.findOne({ companyId: companyObjectId }).maxTimeMS(10000).lean(),
                     BankAccount_1.BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]).option({ maxTimeMS: 10000 }),
                     BankTransaction_1.BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }).maxTimeMS(10000),
@@ -365,7 +376,8 @@ class AccountingService {
                     Payment_1.Payment.aggregate([
                         { $match: { companyId: companyObjectId, status: 'completed' } },
                         { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
-                    ]).option({ maxTimeMS: 10000 })
+                    ]).option({ maxTimeMS: 10000 }),
+                    dashboardKpiService_1.default.getCompanySnapshot(companyId)
                 ]);
                 const cashBalance = toMoney(((_a = cash[0]) === null || _a === void 0 ? void 0 : _a.total) || 0);
                 const vatDueAmount = toMoney((balance === null || balance === void 0 ? void 0 : balance.vatPayable) || 0);
@@ -396,10 +408,15 @@ class AccountingService {
                     vatDuePeriods: pendingVat,
                     pendingExpenses: pendingExpense,
                     unpaidCommissions: Math.max(0, toMoney(((_d = unpaidCommissions[0]) === null || _d === void 0 ? void 0 : _d.amount) || 0)),
+                    expenses: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.expenses) || 0)),
+                    invoices: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.invoices) || 0)),
+                    outstandingRentals: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.outstandingRentals) || 0)),
+                    outstandingLevies: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.outstandingLevies) || 0)),
                     lastUpdated: ((_e = balance === null || balance === void 0 ? void 0 : balance.lastUpdated) === null || _e === void 0 ? void 0 : _e.toISOString()) || new Date().toISOString()
                 };
                 this.dashboardSummaryCache.set(companyId, {
                     value: summary,
+                    cachedAt: Date.now(),
                     expiresAt: Date.now() + this.dashboardSummaryTtlMs
                 });
                 return summary;
@@ -407,6 +424,14 @@ class AccountingService {
             this.dashboardSummaryInFlight.set(companyId, loader);
             try {
                 return yield loader;
+            }
+            catch (error) {
+                const fallback = this.dashboardSummaryCache.get(companyId);
+                const fallbackAgeMs = fallback ? now - fallback.cachedAt : Number.POSITIVE_INFINITY;
+                if (fallback && fallbackAgeMs <= this.dashboardSummaryStaleMaxAgeMs && this.isTransientSummaryError(error)) {
+                    return Object.assign(Object.assign({}, fallback.value), { cacheMode: 'stale-fallback', staleAgeMs: Math.max(0, fallbackAgeMs) });
+                }
+                throw error;
             }
             finally {
                 this.dashboardSummaryInFlight.delete(companyId);

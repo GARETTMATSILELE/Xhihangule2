@@ -1,6 +1,7 @@
 import DatabaseSyncService from '../services/databaseSyncService';
 import ScheduledSyncService from '../services/scheduledSyncService';
 import { logger } from '../utils/logger';
+import maintenanceJobQueueService from '../services/maintenanceJobQueueService';
 
 /**
  * Initialize and start database synchronization services
@@ -14,6 +15,7 @@ export const initializeSyncServices = async (): Promise<void> => {
     
     // Start all enabled schedules
     scheduledService.startAllSchedules();
+    maintenanceJobQueueService.start();
     
     logger.info('✅ Scheduled synchronization services started');
 
@@ -43,6 +45,7 @@ export const shutdownSyncServices = async (): Promise<void> => {
     // Stop all scheduled sync jobs
     const scheduledService = ScheduledSyncService.getInstance();
     scheduledService.stopAllSchedules();
+    maintenanceJobQueueService.stop();
 
     logger.info('✅ Database synchronization services shut down successfully');
 
