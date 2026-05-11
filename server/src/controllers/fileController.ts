@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import File, { IFile } from '../models/File';
 import { Property } from '../models/Property';
 import { AuthRequest } from '../middleware/auth';
@@ -56,12 +56,6 @@ export const getFiles = async (req: AuthRequest, res: Response) => {
 // Upload a file
 export const uploadFile = async (req: AuthRequest, res: Response) => {
   try {
-    console.log('Upload request received:', {
-      file: req.file,
-      body: req.body,
-      user: req.user
-    });
-
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' });
     }
@@ -116,9 +110,13 @@ export const uploadFile = async (req: AuthRequest, res: Response) => {
 };
 
 // Download a file
-export const downloadFile = async (req: Request, res: Response) => {
+export const downloadFile = async (req: AuthRequest, res: Response) => {
   try {
-    const file = await File.findById(req.params.id);
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const file = await File.findOne({ _id: req.params.id, companyId: req.user.companyId });
     if (!file) {
       return res.status(404).json({ message: 'File not found' });
     }
@@ -136,9 +134,13 @@ export const downloadFile = async (req: Request, res: Response) => {
 };
 
 // Delete a file
-export const deleteFile = async (req: Request, res: Response) => {
+export const deleteFile = async (req: AuthRequest, res: Response) => {
   try {
-    const file = await File.findById(req.params.id);
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const file = await File.findOne({ _id: req.params.id, companyId: req.user.companyId });
     if (!file) {
       return res.status(404).json({ message: 'File not found' });
     }

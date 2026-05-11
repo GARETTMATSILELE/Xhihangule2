@@ -96,19 +96,14 @@ function syncValuationOnPropertySold(params) {
 }
 // Public endpoint for getting properties with user-based filtering
 const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
-        const userContext = getUserContext(req);
+        const userContext = {
+            userId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId,
+            companyId: (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId,
+            userRole: (_c = req.user) === null || _c === void 0 ? void 0 : _c.role
+        };
         const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
-        // If no user context provided, return all properties (for admin dashboard)
-        if (!userContext.userId && !userContext.companyId) {
-            const allProperties = yield Property_1.Property.find(includeDeleted ? {} : { isDeleted: { $ne: true } })
-                .populate('ownerId', 'firstName lastName email')
-                .sort({ createdAt: -1 });
-            return res.json({
-                status: 'success',
-                data: allProperties
-            });
-        }
         // Validate user context
         if (!userContext.userId) {
             return res.status(400).json({
@@ -130,7 +125,7 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         };
         // If user is not in a company-wide visibility role, only show their own properties
         const companyWideRoles = ['admin', 'accountant', 'principal', 'prea'];
-        if (!companyWideRoles.includes(userContext.userRole)) {
+        if (!companyWideRoles.includes(String(userContext.userRole || ''))) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(userContext.userId);
         }
         // Optional lightweight search and projection for fast autocomplete

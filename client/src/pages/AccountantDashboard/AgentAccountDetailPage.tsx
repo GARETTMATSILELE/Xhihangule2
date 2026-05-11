@@ -199,17 +199,32 @@ const AgentAccountDetailPage: React.FC = () => {
 
   const handlePrintPayoutAcknowledgement = (payout: AgentPayout) => {
     try {
-      const companyName = (company as any)?.name || 'Company';
-      const companyAddress = (company as any)?.address || '';
-      const companyEmail = (company as any)?.email || '';
-      const companyPhone = (company as any)?.phone || '';
+      const escapeHtml = (value: unknown) =>
+        String(value ?? '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        }[char] || char));
+      const sanitizeDataImage = (value: unknown) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        if (raw.startsWith('data:image/')) return raw.replace(/"/g, '%22');
+        return `data:image/png;base64,${raw.replace(/[^A-Za-z0-9+/=]/g, '')}`;
+      };
+      const companyName = escapeHtml((company as any)?.name || 'Company');
+      const companyAddress = escapeHtml((company as any)?.address || '');
+      const companyEmail = escapeHtml((company as any)?.email || '');
+      const companyPhone = escapeHtml((company as any)?.phone || '');
       const logoRaw = (company as any)?.logo || '';
-      const logoSrc = logoRaw ? (logoRaw.startsWith('data:') ? logoRaw : `data:image/png;base64,${logoRaw}`) : '';
-      const agentName = account?.agentName || payout.recipientName || 'Agent';
-      const amountFmt = agentAccountService.formatCurrency(payout.amount);
-      const dateStr = new Date(payout.date).toLocaleDateString();
-      const ref = payout.referenceNumber || payout._id || '';
-      const methodLabel = agentAccountService.getPaymentMethodLabel(payout.paymentMethod);
+      const logoSrc = sanitizeDataImage(logoRaw);
+      const agentName = escapeHtml(account?.agentName || payout.recipientName || 'Agent');
+      const amountFmt = escapeHtml(agentAccountService.formatCurrency(payout.amount));
+      const dateStr = escapeHtml(new Date(payout.date).toLocaleDateString());
+      const ref = escapeHtml(payout.referenceNumber || payout._id || '');
+      const methodLabel = escapeHtml(agentAccountService.getPaymentMethodLabel(payout.paymentMethod));
+      const notes = escapeHtml((payout.notes || '').toString());
       const html = `<!doctype html>
 <html>
   <head>
@@ -249,7 +264,7 @@ const AgentAccountDetailPage: React.FC = () => {
       <div class="row"><div class="label">Reference</div><div>${ref}</div></div>
       <div class="row"><div class="label">Payment Method</div><div>${methodLabel}</div></div>
       <div class="row"><div class="label">Amount</div><div class="amount">${amountFmt}</div></div>
-      <div class="row mt24"><div class="label">Notes</div><div>${(payout.notes || '').toString()}</div></div>
+      <div class="row mt24"><div class="label">Notes</div><div>${notes}</div></div>
     </div>
     <div class="sign">
       <div class="line">Agent Signature</div>
@@ -267,6 +282,7 @@ const AgentAccountDetailPage: React.FC = () => {
       iframe.style.width = '0';
       iframe.style.height = '0';
       iframe.style.border = '0';
+      iframe.sandbox.add('allow-modals');
       document.body.appendChild(iframe);
       const cleanup = () => setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 500);
       const triggerPrint = () => { try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch {} cleanup(); };

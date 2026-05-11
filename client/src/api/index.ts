@@ -36,7 +36,7 @@ export const apiService = {
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get('/fiscal/health', config);
+    return apiInstance.get('/fiscal/health', config);
   },
 
   // Companies
@@ -102,14 +102,14 @@ export const apiService = {
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get('/tenants/public', config);
+    return apiInstance.get('/tenants/public', config);
   },
   getTenantPublic: (id: string, companyId?: string) => {
     const config: any = {};
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get(`/tenants/public/${id}`, config);
+    return apiInstance.get(`/tenants/public/${id}`, config);
   },
 
   // Leases
@@ -132,22 +132,22 @@ export const apiService = {
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get('/payments/public', config);
+    return apiInstance.get('/payments/public', config);
   },
   getPaymentPublic: (id: string, companyId?: string) => {
     const config: any = {};
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get(`/payments/public/${id}`, config);
+    return apiInstance.get(`/payments/public/${id}`, config);
   },
-  createPaymentPublic: (data: any) => publicApi.post('/payments/public', data),
+  createPaymentPublic: (data: any) => apiInstance.post('/payments/public', data),
   getPaymentReceipt: (id: string, companyId?: string) => {
     const config: any = {};
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get(`/payments/public/${id}/receipt`, config);
+    return apiInstance.get(`/payments/public/${id}/receipt`, config);
   },
 
   // Public Users/Agents (for admin dashboard)
@@ -156,7 +156,7 @@ export const apiService = {
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get('/users/public/agents', config);
+    return apiInstance.get('/users/public/agents', config);
   },
 
   // Charts
@@ -212,7 +212,7 @@ export const apiService = {
     if (companyId) {
       config.params = { companyId };
     }
-    return publicApi.get('/maintenance/public', config);
+    return apiInstance.get('/maintenance/public', config);
   },
   getMaintenanceEventsPublic: (companyId?: string) => {
     const config: any = {};
@@ -231,7 +231,7 @@ export const apiService = {
     if (companyId) {
       config.params = { ...config.params, companyId };
     }
-    return publicApi.get('/owners/maintenance-requests', config);
+    return apiInstance.get('/owners/maintenance-requests', config);
   },
   getOwnerMaintenanceRequestPublic: (requestId: string, userId?: string, companyId?: string) => {
     const config: any = {};
@@ -241,7 +241,7 @@ export const apiService = {
     if (companyId) {
       config.params = { ...config.params, companyId };
     }
-    return publicApi.get(`/owners/maintenance-requests/${requestId}`, config);
+    return apiInstance.get(`/owners/maintenance-requests/${requestId}`, config);
   },
   approveOwnerMaintenanceRequest: (requestId: string, userId?: string, companyId?: string) => {
     const config: any = {};
@@ -251,7 +251,7 @@ export const apiService = {
     if (companyId) {
       config.params = { ...config.params, companyId };
     }
-    return publicApi.patch(`/owners/maintenance-requests/${requestId}/approve`, {}, config);
+    return apiInstance.patch(`/owners/maintenance-requests/${requestId}/approve`, {}, config);
   },
   rejectOwnerMaintenanceRequest: (requestId: string, reason?: string, userId?: string, companyId?: string) => {
     const config: any = {};
@@ -261,7 +261,7 @@ export const apiService = {
     if (companyId) {
       config.params = { ...config.params, companyId };
     }
-    return publicApi.patch(`/owners/maintenance-requests/${requestId}/reject`, { reason }, config);
+    return apiInstance.patch(`/owners/maintenance-requests/${requestId}/reject`, { reason }, config);
   },
 
   // Public Owner Net Income endpoint (for owner dashboard)
@@ -273,7 +273,7 @@ export const apiService = {
     if (companyId) {
       config.params = { ...config.params, companyId };
     }
-    return publicApi.get('/owners/net-income', config);
+    return apiInstance.get('/owners/net-income', config);
   },
 
   // File upload endpoint

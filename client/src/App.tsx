@@ -56,7 +56,6 @@ const LedgerDrilldownPage = lazyWithRetry(() => import('./pages/AccountantDashbo
 const CommissionsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/CommissionsPage'));
 const SettingsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/SettingsPage'));
 const ReportsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/ReportsPage'));
-const TestAuth = lazyWithRetry(() => import('./pages/TestAuth'));
 const PropertyAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/PropertyAccountsPage'));
 const PropertyAccountDetailPage = lazyWithRetry(() => import('./pages/AccountantDashboard/PropertyAccountDetailPage'));
 const PropertyDepositLedgerPage = lazyWithRetry(() => import('./pages/AccountantDashboard/PropertyDepositLedgerPage'));
@@ -272,15 +271,6 @@ const App: React.FC = () => {
                   <PropertyProvider>
                     <CompanyProvider>
                       <Settings />
-                    </CompanyProvider>
-                  </PropertyProvider>
-                </ProtectedRoute>
-              } />
-              <Route path="/test-auth" element={
-                <ProtectedRoute>
-                  <PropertyProvider>
-                    <CompanyProvider>
-                      <TestAuth />
                     </CompanyProvider>
                   </PropertyProvider>
                 </ProtectedRoute>

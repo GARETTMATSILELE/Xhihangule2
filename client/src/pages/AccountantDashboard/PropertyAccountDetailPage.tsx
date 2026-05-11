@@ -915,11 +915,6 @@ const PropertyAccountDetailPage: React.FC = () => {
         <Typography variant="body1" color="text.secondary" gutterBottom>
           {property.address}
         </Typography>
-        <script dangerouslySetInnerHTML={{ __html: `
-          window.__CURRENT_PROPERTY_ADDRESS__ = ${JSON.stringify(property.address || '')};
-          window.__CURRENT_OWNER_NAME__ = ${JSON.stringify(ownerMap[propertyId!] || account.ownerName || '')};
-          window.__CURRENT_TENANT_NAME__ = '';
-        ` }} />
         <Typography variant="body2" color="text.secondary">
           Owner: {ownerMap[propertyId!] || account.ownerName || 'Unknown'}
         </Typography>

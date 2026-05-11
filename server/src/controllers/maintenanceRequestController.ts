@@ -9,8 +9,12 @@ import mongoose from 'mongoose';
 export const createMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
+    const companyId = (req.user as JwtPayload)?.companyId;
     if (!userId) {
       throw new AppError('User authentication required', 401);
+    }
+    if (!companyId) {
+      throw new AppError('Company context required', 403);
     }
 
     const { propertyId, title, description, priority, estimatedCost, attachments } = req.body;
@@ -21,7 +25,7 @@ export const createMaintenanceRequest = async (req: Request, res: Response) => {
     }
 
     // Fetch the property to get ownerId and companyId
-    const property = await Property.findOne({ _id: propertyId });
+    const property = await Property.findOne({ _id: propertyId, companyId });
     if (!property) {
       throw new AppError('Property not found', 404);
     }
@@ -81,12 +85,18 @@ export const getPropertyMaintenanceRequests = async (req: Request, res: Response
 export const addMaintenanceMessage = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
-    const { requestId } = req.params;
+    const companyId = (req.user as JwtPayload)?.companyId;
+    const requestId = req.params.requestId || req.params.id;
     const { content } = req.body;
 
     const maintenanceRequest = await MaintenanceRequest.findOne({
       _id: requestId,
-      tenantId: userId
+      companyId,
+      $or: [
+        { tenantId: userId },
+        { requestedBy: userId },
+        { ownerId: userId }
+      ]
     });
 
     if (!maintenanceRequest) {
@@ -114,8 +124,12 @@ export const addMaintenanceMessage = async (req: Request, res: Response) => {
 export const updateMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
+    const companyId = (req.user as JwtPayload)?.companyId;
     if (!userId) {
       throw new AppError('User authentication required', 401);
+    }
+    if (!companyId) {
+      throw new AppError('Company context required', 403);
     }
 
     const { id } = req.params;
@@ -125,13 +139,13 @@ export const updateMaintenanceRequest = async (req: Request, res: Response) => {
 
     const { status, estimatedCost, attachments } = req.body;
 
-    const maintenanceRequest = await MaintenanceRequest.findById(id);
+    const maintenanceRequest = await MaintenanceRequest.findOne({ _id: id, companyId });
     if (!maintenanceRequest) {
       throw new AppError('Maintenance request not found', 404);
     }
 
     // Check if user has permission to update this request
-    const property = await Property.findOne({ _id: maintenanceRequest.propertyId });
+    const property = await Property.findOne({ _id: maintenanceRequest.propertyId, companyId });
     if (!property) {
       throw new AppError('Property not found', 404);
     }
@@ -160,7 +174,7 @@ export const updateMaintenanceRequest = async (req: Request, res: Response) => {
     await maintenanceRequest.save();
     
     // Populate related data before sending response
-    const updatedRequest = await MaintenanceRequest.findById(id)
+    const updatedRequest = await MaintenanceRequest.findOne({ _id: id, companyId })
       .populate('propertyId', 'name address')
       .populate('requestedBy', 'firstName lastName')
       .populate('ownerId', 'firstName lastName');
@@ -179,8 +193,12 @@ export const updateMaintenanceRequest = async (req: Request, res: Response) => {
 export const approveMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
+    const companyId = (req.user as JwtPayload)?.companyId;
     if (!userId) {
       throw new AppError('User authentication required', 401);
+    }
+    if (!companyId) {
+      throw new AppError('Company context required', 403);
     }
 
     const { id } = req.params;
@@ -188,7 +206,7 @@ export const approveMaintenanceRequest = async (req: Request, res: Response) => 
       throw new AppError('Maintenance request ID is required', 400);
     }
 
-    const maintenanceRequest = await MaintenanceRequest.findById(id);
+    const maintenanceRequest = await MaintenanceRequest.findOne({ _id: id, companyId });
     if (!maintenanceRequest) {
       throw new AppError('Maintenance request not found', 404);
     }
@@ -199,7 +217,7 @@ export const approveMaintenanceRequest = async (req: Request, res: Response) => 
     }
 
     // Check if user is the owner of the property
-    const property = await Property.findOne({ _id: maintenanceRequest.propertyId });
+    const property = await Property.findOne({ _id: maintenanceRequest.propertyId, companyId });
     if (!property) {
       throw new AppError('Property not found', 404);
     }
@@ -212,7 +230,7 @@ export const approveMaintenanceRequest = async (req: Request, res: Response) => 
     maintenanceRequest.status = 'approved';
     await maintenanceRequest.save();
 
-    const updatedRequest = await MaintenanceRequest.findById(id)
+    const updatedRequest = await MaintenanceRequest.findOne({ _id: id, companyId })
       .populate('propertyId', 'name address')
       .populate('requestedBy', 'firstName lastName')
       .populate('ownerId', 'firstName lastName');
@@ -231,8 +249,12 @@ export const approveMaintenanceRequest = async (req: Request, res: Response) => 
 export const completeMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
+    const companyId = (req.user as JwtPayload)?.companyId;
     if (!userId) {
       throw new AppError('User authentication required', 401);
+    }
+    if (!companyId) {
+      throw new AppError('Company context required', 403);
     }
 
     const { id } = req.params;
@@ -240,7 +262,7 @@ export const completeMaintenanceRequest = async (req: Request, res: Response) =>
       throw new AppError('Maintenance request ID is required', 400);
     }
 
-    const maintenanceRequest = await MaintenanceRequest.findById(id);
+    const maintenanceRequest = await MaintenanceRequest.findOne({ _id: id, companyId });
     if (!maintenanceRequest) {
       throw new AppError('Maintenance request not found', 404);
     }
@@ -259,7 +281,7 @@ export const completeMaintenanceRequest = async (req: Request, res: Response) =>
     maintenanceRequest.status = 'completed';
     await maintenanceRequest.save();
 
-    const updatedRequest = await MaintenanceRequest.findById(id)
+    const updatedRequest = await MaintenanceRequest.findOne({ _id: id, companyId })
       .populate('propertyId', 'name address')
       .populate('requestedBy', 'firstName lastName')
       .populate('ownerId', 'firstName lastName');
@@ -278,10 +300,16 @@ export const completeMaintenanceRequest = async (req: Request, res: Response) =>
 export const getMaintenanceRequestDetails = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
-    const { requestId } = req.params;
+    const companyId = (req.user as JwtPayload)?.companyId;
+    const requestId = req.params.requestId || req.params.id;
     const maintenanceRequest = await MaintenanceRequest.findOne({
       _id: requestId,
-      tenantId: userId
+      companyId,
+      $or: [
+        { tenantId: userId },
+        { requestedBy: userId },
+        { ownerId: userId }
+      ]
     })
       .populate('propertyId', 'name address')
       .populate('tenantId', 'name email');
@@ -302,10 +330,15 @@ export const getMaintenanceRequestDetails = async (req: Request, res: Response) 
 export const deleteMaintenanceRequest = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
-    const { requestId } = req.params;
+    const companyId = (req.user as JwtPayload)?.companyId;
+    const requestId = req.params.requestId || req.params.id;
     const maintenanceRequest = await MaintenanceRequest.findOneAndDelete({
       _id: requestId,
-      tenantId: userId
+      companyId,
+      $or: [
+        { tenantId: userId },
+        { requestedBy: userId }
+      ]
     });
 
     if (!maintenanceRequest) {
@@ -373,45 +406,44 @@ export const getMaintenanceRequestsPublic = async (req: Request, res: Response) 
 export const getMaintenanceRequests = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
-    const { propertyId, role, companyId } = req.query;
+    const companyId = (req.user as JwtPayload)?.companyId;
+    const userRole = (req.user as JwtPayload)?.role;
+    const { propertyId, role } = req.query;
 
-    const query: any = {};
+    if (!userId) {
+      throw new AppError('User authentication required', 401);
+    }
+    if (!companyId) {
+      throw new AppError('Company context required', 403);
+    }
+
+    const query: any = { companyId };
     
     // If propertyId is specified, filter by that property
     if (propertyId) {
       query.propertyId = propertyId;
     }
 
-    // If companyId is specified (for public requests), filter by company
-    if (companyId) {
-      query.companyId = companyId;
-    }
+    const elevatedRoles = ['admin', 'agent', 'accountant', 'principal', 'prea'];
+    const canViewCompanyMaintenance = userRole && elevatedRoles.includes(userRole);
 
-    // If user is authenticated, apply role-based filtering
-    if (userId) {
-      // If role is specified as 'owner', filter by properties owned by the user
-      if (role === 'owner') {
-        const properties = await Property.find({ ownerId: userId });
-        const propertyIds = properties.map((p: IProperty) => p._id);
-        query.propertyId = { $in: propertyIds };
-      }
-      // If role is specified as 'tenant', filter by maintenance requests created by the user
-      else if (role === 'tenant') {
-        query.tenantId = userId;
-      }
-      // If no role specified, try to determine based on user's properties
-      else {
-        // Check if user owns any properties
-        const ownedProperties = await Property.find({ ownerId: userId });
-        if (ownedProperties.length > 0) {
-          // User is a property owner, show maintenance requests for their properties
-          const propertyIds = ownedProperties.map((p: IProperty) => p._id);
-          query.propertyId = { $in: propertyIds };
-        } else {
-          // User is likely a tenant, show their own maintenance requests
-          query.tenantId = userId;
-        }
-      }
+    // If role is specified as 'owner', filter by properties owned by the user
+    if (role === 'owner') {
+      const properties = await Property.find({ ownerId: userId, companyId });
+      const propertyIds = properties.map((p: IProperty) => p._id);
+      query.propertyId = { $in: propertyIds };
+    }
+    // If role is specified as 'tenant', filter by maintenance requests created by the user
+    else if (role === 'tenant') {
+      query.tenantId = userId;
+    }
+    else if (!canViewCompanyMaintenance) {
+      // Non-elevated users can only see records tied directly to them.
+      query.$or = [
+        { tenantId: userId },
+        { requestedBy: userId },
+        { ownerId: userId }
+      ];
     }
 
     const maintenanceRequests = await MaintenanceRequest.find(query)

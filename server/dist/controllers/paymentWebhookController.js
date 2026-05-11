@@ -34,7 +34,12 @@ const isSignatureValid = (body, signature) => {
     if (!signature)
         return false;
     const expected = crypto_1.default.createHmac('sha256', secret).update(JSON.stringify(body || {})).digest('hex');
-    return crypto_1.default.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const signatureBuffer = Buffer.from(String(signature).trim(), 'hex');
+    if (signatureBuffer.length !== expectedBuffer.length) {
+        return false;
+    }
+    return crypto_1.default.timingSafeEqual(expectedBuffer, signatureBuffer);
 };
 const handlePaymentConfirmationWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {

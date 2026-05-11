@@ -1,6 +1,5 @@
 import { Lease, LeaseFilter } from '../types/lease';
 import api from '../api/axios';
-import publicApi from '../api/publicApi';
 import { useAuth } from '../contexts/AuthContext';
 
 export const useLeaseService = () => {
@@ -14,7 +13,7 @@ export const useLeaseService = () => {
         config.params = { companyId };
       }
       
-      const response = await publicApi.get('/leases/public', config);
+      const response = await api.get('/leases/public', config);
       return response.data.data || [];
     } catch (error) {
       console.error('Error fetching leases (public):', error);

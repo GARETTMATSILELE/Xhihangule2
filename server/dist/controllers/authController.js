@@ -77,8 +77,11 @@ function getCookieDomain() {
 // Signup with company details
 const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const allowPublicSignup = String(process.env.ALLOW_PUBLIC_SIGNUP || '').toLowerCase() === 'true';
+        if (process.env.NODE_ENV === 'production' && !allowPublicSignup) {
+            throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
+        }
         const { email, password, name, company, plan: inputPlan } = req.body;
-        console.log('Signup attempt with data:', { email, name, hasCompany: !!company });
         if (!email || !password || !name) {
             throw new errorHandler_1.AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
         }
@@ -508,11 +511,9 @@ exports.getCurrentUser = getCurrentUser;
 const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        console.log('Refresh token request received');
         // Get refresh token from cookie
         const refreshToken = (_a = req.cookies) === null || _a === void 0 ? void 0 : _a.refreshToken;
         if (!refreshToken) {
-            console.log('No refresh token found in cookies');
             throw new errorHandler_1.AppError('No refresh token available', 401);
         }
         // Double-submit cookie CSRF protection
@@ -521,10 +522,8 @@ const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
         if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
             throw new errorHandler_1.AppError('CSRF token missing or invalid', 403, 'CSRF_MISMATCH');
         }
-        console.log('Refresh token found, attempting to refresh...');
         // Use auth service to refresh token
         const { token: newAccessToken, refreshToken: newRefreshToken } = yield authService.refreshToken(refreshToken);
-        console.log('Token refresh successful');
         // Set new refresh token as HttpOnly cookie
         const cookieDomain = getCookieDomain();
         res.cookie('refreshToken', newRefreshToken, Object.assign(Object.assign({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax', path: '/' }, (process.env.NODE_ENV === 'production' && cookieDomain ? { domain: cookieDomain } : {})), { maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days

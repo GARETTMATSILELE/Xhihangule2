@@ -8,6 +8,9 @@ const multer_1 = __importDefault(require("multer"));
 const companyController_1 = require("../controllers/companyController");
 const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
+const asyncRoute = (handler) => (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(next);
+};
 // Configure multer for file uploads
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -26,18 +29,18 @@ const upload = (0, multer_1.default)({
 });
 // Protected routes
 // Allow fetching current company even if none exists (returns 404 inside controller)
-router.get('/current', auth_1.auth, companyController_1.getCurrentCompany);
-router.put('/current', auth_1.authWithCompany, companyController_1.updateCurrentCompany);
+router.get('/current', auth_1.auth, asyncRoute(companyController_1.getCurrentCompany));
+router.put('/current', auth_1.authWithCompany, asyncRoute(companyController_1.updateCurrentCompany));
 // Admin: change plan directly by company id (can be restricted later)
-router.put('/:id/plan', auth_1.authWithCompany, companyController_1.updateCompany);
+router.put('/:id/plan', auth_1.authWithCompany, asyncRoute(companyController_1.updateCompany));
 // Public routes
-router.get('/', companyController_1.getCompanies);
-router.get('/:id', companyController_1.getCompany);
+router.get('/', asyncRoute(companyController_1.getCompanies));
+router.get('/:id', asyncRoute(companyController_1.getCompany));
 // Protected routes
 // Allow creating a company even if user has no company yet
-router.post('/', auth_1.auth, companyController_1.createCompany);
-router.put('/:id', auth_1.authWithCompany, companyController_1.updateCompany);
-router.delete('/:id', auth_1.authWithCompany, companyController_1.deleteCompany);
+router.post('/', auth_1.auth, asyncRoute(companyController_1.createCompany));
+router.put('/:id', auth_1.authWithCompany, asyncRoute(companyController_1.updateCompany));
+router.delete('/:id', auth_1.authWithCompany, asyncRoute(companyController_1.deleteCompany));
 // Logo upload route
-router.post('/:id/logo', auth_1.authWithCompany, upload.single('logo'), companyController_1.uploadCompanyLogo);
+router.post('/:id/logo', auth_1.authWithCompany, upload.single('logo'), asyncRoute(companyController_1.uploadCompanyLogo));
 exports.default = router;

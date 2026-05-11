@@ -175,10 +175,10 @@ app.set('trust proxy', 1);
 // Fail fast on missing critical environment in production
 if (process.env.NODE_ENV === 'production') {
     const missing = [];
-    if (!process.env.JWT_SECRET)
-        missing.push('JWT_SECRET');
-    if (!process.env.JWT_REFRESH_SECRET)
-        missing.push('JWT_REFRESH_SECRET');
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)
+        missing.push('JWT_SECRET (min 32 chars)');
+    if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 32)
+        missing.push('JWT_REFRESH_SECRET (min 32 chars)');
     if (!process.env.MONGODB_URI)
         missing.push('MONGODB_URI');
     if (missing.length > 0) {
@@ -310,8 +310,9 @@ app.use((0, cors_1.default)({
 }));
 // Add cookie-parser middleware
 app.use((0, cookie_parser_1.default)());
-app.use(express_1.default.json({ limit: '50mb' }));
-app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
+const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '10mb';
+app.use(express_1.default.json({ limit: requestBodyLimit }));
+app.use(express_1.default.urlencoded({ extended: true, limit: requestBodyLimit }));
 // Enable gzip compression
 app.use((0, compression_1.default)());
 // Rate limiting
@@ -371,6 +372,22 @@ if (process.env.NODE_ENV !== 'production') {
     });
 }
 // Routes
+// Keep liveness/readiness probes available even while MongoDB is still connecting.
+app.use('/api/health', healthRoutes_1.default);
+app.use('/health', healthRoutes_1.default);
+const databaseReadinessGate = (req, res, next) => {
+    if ((0, database_1.isDatabaseAvailable)()) {
+        return next();
+    }
+    res.setHeader('Retry-After', '5');
+    return res.status(503).json({
+        status: 'error',
+        message: 'Service temporarily unavailable',
+        code: 'DB_NOT_READY',
+        database: (0, database_1.getDatabaseHealth)()
+    });
+};
+app.use('/api', databaseReadinessGate);
 app.use('/api/properties', propertyRoutes_1.default);
 app.use('/api/tenants', tenantRoutes_1.default);
 app.use('/api/leases', leaseRoutes_1.default);
@@ -395,9 +412,6 @@ app.use('/api/sales-files', salesFileRoutes_1.default);
 app.use('/api/property-owners', propertyOwnerRoutes_1.default);
 app.use('/api/sales-owners', salesOwnerRoutes_1.default);
 app.use('/api/owners', ownerRoutes_1.default);
-app.use('/api/health', healthRoutes_1.default);
-// Root health aliases for platform probes (e.g., Azure App Service)
-app.use('/health', healthRoutes_1.default);
 app.use('/api/maintenance', maintenanceRequestRoutes_1.default);
 app.use('/api/deals', dealRoutes_1.default);
 app.use('/api/buyers', buyerRoutes_1.default);

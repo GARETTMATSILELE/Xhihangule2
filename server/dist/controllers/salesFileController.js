@@ -82,8 +82,11 @@ const uploadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function
 });
 exports.uploadSalesFile = uploadSalesFile;
 const downloadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const f = yield SalesFile_1.default.findById(req.params.id);
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
+            return res.status(401).json({ message: 'Authentication required' });
+        const f = yield SalesFile_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
         if (!f)
             return res.status(404).json({ message: 'File not found' });
         const buffer = Buffer.from(f.fileUrl, 'base64');
@@ -97,8 +100,11 @@ const downloadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.downloadSalesFile = downloadSalesFile;
 const deleteSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const f = yield SalesFile_1.default.findById(req.params.id);
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
+            return res.status(401).json({ message: 'Authentication required' });
+        const f = yield SalesFile_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
         if (!f)
             return res.status(404).json({ message: 'File not found' });
         yield f.deleteOne();

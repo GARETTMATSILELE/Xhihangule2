@@ -200,9 +200,9 @@ exports.createLevyPayment = createLevyPayment;
 const getLevyPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.query.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
-            return res.status(400).json({ message: 'Company ID is required' });
+            return res.status(401).json({ message: 'Authentication required' });
         }
         const levyPayments = yield LevyPayment_1.LevyPayment.find({ companyId })
             .populate('propertyId', 'name address')
@@ -218,28 +218,19 @@ const getLevyPayments = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getLevyPayments = getLevyPayments;
 // Public endpoint for getting a levy payment receipt (for printing)
 const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     try {
         const { id } = req.params;
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
-            req.query.companyId ||
-            req.headers['x-company-id'];
-        const query = { _id: id };
-        if ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) {
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
-            }
-            catch (_c) {
-                query.companyId = String(req.user.companyId);
-            }
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ message: 'Authentication required' });
         }
-        else if (companyId) {
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
-            }
-            catch (_d) {
-                query.companyId = companyId;
-            }
+        const query = { _id: id };
+        try {
+            query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
+        }
+        catch (_b) {
+            query.companyId = String(companyId);
         }
         const levy = yield LevyPayment_1.LevyPayment.findOne(query)
             .populate('propertyId', 'name address')
@@ -261,7 +252,7 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
                     tenantName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
             }
         }
-        catch (_e) { }
+        catch (_c) { }
         // Load company details for header/logo
         let company = null;
         try {
@@ -269,7 +260,7 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
             }
         }
-        catch (_f) { }
+        catch (_d) { }
         const receipt = {
             receiptNumber: levy.referenceNumber || String(levy._id),
             paymentDate: levy.paymentDate,
@@ -342,8 +333,11 @@ const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, voi
     var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
         const { id } = req.params;
-        const companyId = req.query.companyId || ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
-        const levy = yield LevyPayment_1.LevyPayment.findOne(Object.assign({ _id: id }, (companyId ? { companyId } : {})))
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        const levy = yield LevyPayment_1.LevyPayment.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
             .populate('processedBy', 'firstName lastName email');
         if (!levy)
@@ -419,29 +413,20 @@ const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, voi
 exports.getLevyPayoutAcknowledgement = getLevyPayoutAcknowledgement;
 // Public: Download levy receipt as HTML (formatted for A4 print/PDF)
 const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e;
     try {
         const { id } = req.params;
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
-            req.query.companyId ||
-            req.headers['x-company-id'];
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).send('Authentication required');
+        }
         const format = String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.format) || '').toLowerCase();
         const query = { _id: id };
-        if ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) {
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
-            }
-            catch (_g) {
-                query.companyId = String(req.user.companyId);
-            }
+        try {
+            query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        else if (companyId) {
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
-            }
-            catch (_h) {
-                query.companyId = companyId;
-            }
+        catch (_f) {
+            query.companyId = String(companyId);
         }
         const levy = yield LevyPayment_1.LevyPayment.findOne(query)
             .populate('propertyId', 'name address')
@@ -463,7 +448,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
                     tenantName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
             }
         }
-        catch (_j) { }
+        catch (_g) { }
         // Load company details for header/logo
         let company = null;
         try {
@@ -471,7 +456,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
                 company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
             }
         }
-        catch (_k) { }
+        catch (_h) { }
         const html = `<!DOCTYPE html>
       <html>
       <head>
@@ -511,9 +496,9 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
             <div class="row"><div class="label">Date:</div><div class="value">${new Date(levy.paymentDate).toLocaleDateString()}</div></div>
             <div class="row"><div class="label">Method:</div><div class="value">${String(levy.paymentMethod).replace('_', ' ').toUpperCase()}</div></div>
             <div class="row"><div class="label">Status:</div><div class="value">${String(levy.status).toUpperCase()}</div></div>
-            <div class="row"><div class="label">Property:</div><div class="value">${((_d = levy.propertyId) === null || _d === void 0 ? void 0 : _d.name) || 'N/A'}</div></div>
+            <div class="row"><div class="label">Property:</div><div class="value">${((_c = levy.propertyId) === null || _c === void 0 ? void 0 : _c.name) || 'N/A'}</div></div>
             <div class="row"><div class="label">Tenant:</div><div class="value">${tenantName || 'N/A'}</div></div>
-            <div class="row"><div class="label">Processed By:</div><div class="value">${(((_e = levy.processedBy) === null || _e === void 0 ? void 0 : _e.firstName) || '')} ${(((_f = levy.processedBy) === null || _f === void 0 ? void 0 : _f.lastName) || '')}</div></div>
+            <div class="row"><div class="label">Processed By:</div><div class="value">${(((_d = levy.processedBy) === null || _d === void 0 ? void 0 : _d.firstName) || '')} ${(((_e = levy.processedBy) === null || _e === void 0 ? void 0 : _e.lastName) || '')}</div></div>
             ${levy.notes ? `<div class="row"><div class="label">Notes:</div><div class="value">${levy.notes}</div></div>` : ''}
           </div>
           <div class="footer">

@@ -60,7 +60,9 @@ export const uploadSalesFile = async (req: AuthRequest, res: Response) => {
 
 export const downloadSalesFile = async (req: AuthRequest, res: Response) => {
   try {
-    const f = await SalesFile.findById(req.params.id);
+    if (!req.user?.companyId) return res.status(401).json({ message: 'Authentication required' });
+
+    const f = await SalesFile.findOne({ _id: req.params.id, companyId: req.user.companyId });
     if (!f) return res.status(404).json({ message: 'File not found' });
     const buffer = Buffer.from(f.fileUrl, 'base64');
     res.setHeader('Content-Type', 'application/octet-stream');
@@ -73,7 +75,9 @@ export const downloadSalesFile = async (req: AuthRequest, res: Response) => {
 
 export const deleteSalesFile = async (req: AuthRequest, res: Response) => {
   try {
-    const f = await SalesFile.findById(req.params.id);
+    if (!req.user?.companyId) return res.status(401).json({ message: 'Authentication required' });
+
+    const f = await SalesFile.findOne({ _id: req.params.id, companyId: req.user.companyId });
     if (!f) return res.status(404).json({ message: 'File not found' });
     await f.deleteOne();
     res.json({ message: 'File deleted successfully' });

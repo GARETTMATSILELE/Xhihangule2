@@ -20,42 +20,30 @@ const router = express.Router();
 
 // Debug middleware for user routes
 router.use((req, res, next) => {
-  console.log('User route accessed:', {
-    method: req.method,
-    path: req.path,
-    body: req.body,
-    headers: req.headers,
-    cookies: req.cookies
-  });
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('User route accessed:', {
+      method: req.method,
+      path: req.path,
+      userId: req.user?.userId
+    });
+  }
   next();
 });
 
-// Public endpoint for getting agents (for admin dashboard) - NO AUTH REQUIRED
-router.get('/public/agents', async (req: Request, res: Response) => {
+// Legacy public endpoint for getting agents; requires authenticated company scope.
+router.get('/public/agents', authWithCompany, async (req: Request, res: Response) => {
   try {
-    console.log('Public agents request:', {
-      query: req.query,
-      headers: req.headers
-    });
-
-    // Get company ID from query params or headers (for admin dashboard)
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
     const role = (req.query.role as string) || 'agent';
     
-    let query: any = { $or: [{ role }, { roles: role }], isArchived: { $ne: true } };
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = companyId;
-    }
-
-    console.log('Public agents query:', query);
+    let query: any = { $or: [{ role }, { roles: role }], isArchived: { $ne: true }, companyId };
 
     const agents = await User.find(query)
       .select('firstName lastName email role companyId')
       .sort({ firstName: 1, lastName: 1 });
-
-    console.log(`Found ${agents.length} agents`);
 
     res.json({
       status: 'success',

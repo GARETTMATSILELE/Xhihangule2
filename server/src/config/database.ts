@@ -137,8 +137,13 @@ const getRetryDelay = (retryCount: number): number => {
 // Connect to MongoDB
 export const connectDatabase = async (): Promise<void> => {
   try {
-    if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
+    if (mongoose.connection.readyState === 1) {
       console.log('Already connected to MongoDB');
+      return;
+    }
+    if (mongoose.connection.readyState === 2) {
+      console.log('MongoDB connection already in progress; waiting for it to complete');
+      await mongoose.connection.asPromise();
       return;
     }
     if (IS_COSMOS_MONGO) {

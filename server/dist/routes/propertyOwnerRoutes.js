@@ -16,11 +16,13 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const propertyOwnerController_1 = require("../controllers/propertyOwnerController");
 const router = express_1.default.Router();
-// Public endpoints (must come before protected routes)
-router.get('/public', propertyOwnerController_1.getPropertyOwnersPublic);
-router.get('/public/:id', propertyOwnerController_1.getPropertyOwnerByIdPublic);
+// Legacy public endpoints now require company authentication because property
+// owner records contain PII and account-management capabilities.
+router.get('/public', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwnersPublic);
+router.get('/public/:id', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwnerByIdPublic);
 // New endpoint: Get property owner by propertyId
-router.get('/by-property/:propertyId', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+router.get('/by-property/:propertyId', auth_1.authWithCompany, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const propertyId = req.params.propertyId;
         if (!propertyId) {
@@ -31,14 +33,13 @@ router.get('/by-property/:propertyId', (req, res) => __awaiter(void 0, void 0, v
         try {
             objectId = new mongoose.Types.ObjectId(propertyId);
         }
-        catch (_a) {
+        catch (_b) {
             return res.status(400).json({ message: 'Invalid propertyId format' });
         }
-        // Optional company scoping (preferred): from auth or query
-        const companyIdParam = (req.user && req.user.companyId) || req.query.companyId || null;
-        const companyFilter = companyIdParam
-            ? { companyId: new mongoose.Types.ObjectId(companyIdParam) }
-            : {};
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        const companyFilter = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
         // Find owner whose properties array contains this propertyId as ObjectId or string or $oid
         const PropertyOwner = require('../models/PropertyOwner').PropertyOwner;
         // Strategy: fetch owners in company scope and filter in Node to avoid Mongoose cast issues
@@ -69,7 +70,7 @@ router.get('/by-property/:propertyId', (req, res) => __awaiter(void 0, void 0, v
             // Fallback: get property and use its ownerId
             const Property = require('../models/Property').Property;
             const User = require('../models/User').User;
-            const property = yield Property.findById(objectId);
+            const property = yield Property.findOne({ _id: objectId, companyId: companyFilter.companyId });
             const rawOwnerId = property === null || property === void 0 ? void 0 : property.ownerId;
             if (rawOwnerId) {
                 // Try to find a PropertyOwner by this id
@@ -110,9 +111,9 @@ router.get('/by-property/:propertyId', (req, res) => __awaiter(void 0, void 0, v
         res.status(500).json({ message: 'Error fetching owner by propertyId' });
     }
 }));
-router.post('/public', propertyOwnerController_1.createPropertyOwnerPublic);
-router.patch('/public/:id', propertyOwnerController_1.updatePropertyOwnerPublic);
-router.delete('/public/:id', propertyOwnerController_1.deletePropertyOwnerPublic);
+router.post('/public', auth_1.authWithCompany, propertyOwnerController_1.createPropertyOwnerPublic);
+router.patch('/public/:id', auth_1.authWithCompany, propertyOwnerController_1.updatePropertyOwnerPublic);
+router.delete('/public/:id', auth_1.authWithCompany, propertyOwnerController_1.deletePropertyOwnerPublic);
 // CRUD routes for property owners (company-scoped)
 router.post('/', auth_1.authWithCompany, propertyOwnerController_1.createPropertyOwner);
 router.get('/', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwners);

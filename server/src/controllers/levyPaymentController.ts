@@ -161,9 +161,9 @@ export const createLevyPayment = async (req: Request, res: Response) => {
 
 export const getLevyPayments = async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId || req.query.companyId;
+    const companyId = req.user?.companyId;
     if (!companyId) {
-      return res.status(400).json({ message: 'Company ID is required' });
+      return res.status(401).json({ message: 'Authentication required' });
     }
     const levyPayments = await LevyPayment.find({ companyId })
       .populate('propertyId', 'name address')
@@ -180,17 +180,13 @@ export const getLevyPayments = async (req: Request, res: Response) => {
 export const getLevyReceiptPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId =
-      (req.user?.companyId as string | undefined) ||
-      (req.query.companyId as string | undefined) ||
-      (req.headers['x-company-id'] as string | undefined);
+    const companyId = req.user?.companyId as string | undefined;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
 
     const query: any = { _id: id };
-    if (req.user?.companyId) {
-      try { query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId)); } catch { query.companyId = String(req.user.companyId); }
-    } else if (companyId) {
-      try { query.companyId = new mongoose.Types.ObjectId(companyId); } catch { query.companyId = companyId; }
-    }
+    try { query.companyId = new mongoose.Types.ObjectId(String(companyId)); } catch { query.companyId = String(companyId); }
 
     const levy = await LevyPayment.findOne(query)
       .populate('propertyId', 'name address')
@@ -298,8 +294,11 @@ export const initiateLevyPayout = async (req: Request, res: Response) => {
 export const getLevyPayoutAcknowledgement = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = (req.query.companyId as string) || req.user?.companyId;
-    const levy = await LevyPayment.findOne({ _id: id, ...(companyId ? { companyId } : {}) })
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      throw new AppError('Authentication required', 401);
+    }
+    const levy = await LevyPayment.findOne({ _id: id, companyId })
       .populate('propertyId', 'name address')
       .populate('processedBy', 'firstName lastName email');
     if (!levy) throw new AppError('Levy payment not found', 404);
@@ -374,18 +373,14 @@ export const getLevyPayoutAcknowledgement = async (req: Request, res: Response) 
 export const getLevyReceiptDownload = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId =
-      (req.user?.companyId as string | undefined) ||
-      (req.query.companyId as string | undefined) ||
-      (req.headers['x-company-id'] as string | undefined);
+    const companyId = req.user?.companyId as string | undefined;
+    if (!companyId) {
+      return res.status(401).send('Authentication required');
+    }
     const format = String((req.query as any)?.format || '').toLowerCase();
 
     const query: any = { _id: id };
-    if (req.user?.companyId) {
-      try { query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId)); } catch { query.companyId = String(req.user.companyId); }
-    } else if (companyId) {
-      try { query.companyId = new mongoose.Types.ObjectId(companyId); } catch { query.companyId = companyId; }
-    }
+    try { query.companyId = new mongoose.Types.ObjectId(String(companyId)); } catch { query.companyId = String(companyId); }
 
     const levy = await LevyPayment.findOne(query)
       .populate('propertyId', 'name address')

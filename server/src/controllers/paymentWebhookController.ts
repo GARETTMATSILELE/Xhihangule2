@@ -19,7 +19,12 @@ const isSignatureValid = (body: unknown, signature: string | undefined): boolean
   if (!secret) return false;
   if (!signature) return false;
   const expected = crypto.createHmac('sha256', secret).update(JSON.stringify(body || {})).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  const signatureBuffer = Buffer.from(String(signature).trim(), 'hex');
+  if (signatureBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
 };
 
 export const handlePaymentConfirmationWebhook = async (req: Request, res: Response) => {

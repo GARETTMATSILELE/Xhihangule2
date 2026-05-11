@@ -18,8 +18,9 @@ const tenantController_1 = require("../controllers/tenantController");
 const validation_1 = require("../middleware/validation");
 const Tenant_1 = require("../models/Tenant");
 const router = express_1.default.Router();
-// Public endpoint for admin dashboard
-router.get('/public', tenantController_1.getTenantsPublic);
+// Legacy public tenant endpoints now require company authentication because
+// tenant records contain PII and lease/payment context.
+router.get('/public', auth_1.authWithCompany, tenantController_1.getTenantsPublic);
 // MVP: Comprehensive public endpoints for all tenant operations (disabled in production)
 router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (process.env.NODE_ENV === 'production') {
@@ -36,9 +37,10 @@ router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, functi
         res.status(500).json({ message: 'Error fetching tenants' });
     }
 }));
-router.get('/public/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+router.get('/public/:id', auth_1.authWithCompany, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const tenant = yield Tenant_1.Tenant.findById(req.params.id)
+        const tenant = yield Tenant_1.Tenant.findOne({ _id: req.params.id, companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId })
             .select('firstName lastName email phone rentAmount leaseStartDate leaseEndDate status propertyId');
         if (!tenant) {
             return res.status(404).json({ message: 'Tenant not found' });

@@ -35,8 +35,15 @@ const initializeSocket = (httpServer) => {
             return next(new Error('Authentication error: No token provided'));
         }
         try {
-            const decoded = jsonwebtoken_1.default.verify(token, jwt_1.JWT_CONFIG.SECRET);
-            socket.data = { user: decoded };
+            const decoded = jsonwebtoken_1.default.verify(token, jwt_1.JWT_CONFIG.SECRET, {
+                issuer: jwt_1.JWT_CONFIG.ISSUER,
+                audience: jwt_1.JWT_CONFIG.AUDIENCE
+            });
+            const userId = decoded.userId || decoded.id;
+            if (!userId) {
+                return next(new Error('Authentication error: Invalid token payload'));
+            }
+            socket.data = { user: Object.assign(Object.assign({}, decoded), { id: userId }) };
             next();
         }
         catch (err) {

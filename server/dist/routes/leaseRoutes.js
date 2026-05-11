@@ -8,9 +8,10 @@ const leaseController_1 = require("../controllers/leaseController");
 const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
 const leaseController = leaseController_1.LeaseController.getInstance();
-// Public endpoints (must come before protected routes)
-router.get('/public', leaseController.getLeasesPublic.bind(leaseController));
-router.get('/public/:id', leaseController.getLeaseByIdPublic.bind(leaseController));
+// Legacy public endpoints now require authentication because leases contain
+// tenant and financial information.
+router.get('/public', auth_1.auth, leaseController.getLeasesPublic.bind(leaseController));
+router.get('/public/:id', auth_1.auth, leaseController.getLeaseByIdPublic.bind(leaseController));
 // Protected routes - require authentication
 router.use(auth_1.auth);
 router.get('/', leaseController.getLeases.bind(leaseController));

@@ -100,33 +100,33 @@ router.get('/properties/:id/tenants', auth_1.propertyOwnerAuth, (req, res) => __
         return res.status(500).json({ message: 'Error fetching tenants for property' });
     }
 }));
-// Net income route for owners (public)
-router.get('/net-income', (req, res, next) => {
+// Net income route for owners
+router.get('/net-income', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: GET /net-income route hit');
     next();
 }, ownerController_1.getOwnerNetIncome);
-// Maintenance request routes for owners (public)
-router.get('/maintenance-requests', (req, res, next) => {
+// Maintenance request routes for owners
+router.get('/maintenance-requests', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: GET /maintenance-requests route hit');
     next();
 }, ownerController_1.getOwnerMaintenanceRequests);
-router.get('/maintenance-requests/:id', (req, res, next) => {
+router.get('/maintenance-requests/:id', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: GET /maintenance-requests/:id route hit');
     next();
 }, ownerController_1.getOwnerMaintenanceRequestById);
-router.patch('/maintenance-requests/:id', (req, res, next) => {
+router.patch('/maintenance-requests/:id', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: PATCH /maintenance-requests/:id route hit');
     next();
 }, ownerController_1.updateOwnerMaintenanceRequest);
-router.patch('/maintenance-requests/:id/approve', (req, res, next) => {
+router.patch('/maintenance-requests/:id/approve', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: PATCH /maintenance-requests/:id/approve route hit');
     next();
 }, ownerController_1.approveOwnerMaintenanceRequest);
-router.patch('/maintenance-requests/:id/reject', (req, res, next) => {
+router.patch('/maintenance-requests/:id/reject', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: PATCH /maintenance-requests/:id/reject route hit');
     next();
 }, ownerController_1.rejectOwnerMaintenanceRequest);
-router.post('/maintenance-requests/:id/messages', (req, res, next) => {
+router.post('/maintenance-requests/:id/messages', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: POST /maintenance-requests/:id/messages route hit');
     next();
 }, ownerController_1.addOwnerMaintenanceMessage);

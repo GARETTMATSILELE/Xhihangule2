@@ -96,12 +96,7 @@ let refreshToken: string | null = null;
 const setTokens = (newAccessToken: string | null, newRefreshToken: string | null) => {
   accessToken = newAccessToken;
   refreshToken = newRefreshToken;
-  
-  if (newAccessToken) {
-    api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
-  } else {
-    delete api.defaults.headers.common['Authorization'];
-  }
+  delete api.defaults.headers.common['Authorization'];
 };
 
 const getAccessToken = () => accessToken;
@@ -158,14 +153,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Check if we have tokens in localStorage (for persistence across page reloads)
-        const storedAccessToken = localStorage.getItem('accessToken');
+        // Auth is restored via HttpOnly cookies, never persisted bearer tokens.
         const storedRefreshToken = null; // refresh handled via HttpOnly cookie; do not rely on storage
         const storedUser = localStorage.getItem('user');
         const storedImpersonating = localStorage.getItem('impersonating') === 'true';
         
-        if (storedAccessToken) {
-          setTokens(storedAccessToken, null);
+        {
           setIsImpersonating(storedImpersonating);
           if (storedUser) {
             try {
@@ -216,8 +209,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (newAccessToken) {
                 // Update tokens
                 setTokens(newAccessToken, null);
-                localStorage.setItem('accessToken', newAccessToken);
-                
                 // Try to get user data again
                 const userResponse = await api.get('/auth/me');
                 const userData = userResponse.data.user;
@@ -370,9 +361,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('No access token received');
       }
 
-      // Store token in memory and localStorage
+      // Store token in memory only; HttpOnly cookies carry requests after reloads.
       setTokens(token, null);
-      localStorage.setItem('accessToken', token);
       
       // Store user data in localStorage for other services to access
       localStorage.setItem('user', JSON.stringify(userData));
@@ -440,7 +430,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const { user: userData, company: companyData, token } = retryResp.data;
             if (!token) throw new Error('No access token received');
             setTokens(token, null);
-            localStorage.setItem('accessToken', token);
             localStorage.setItem('user', JSON.stringify(userData));
             setUser(userData);
             setCompany(companyData);
@@ -546,7 +535,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Store token
       setTokens(token, null);
-      localStorage.setItem('accessToken', token);
       
       // Store user data in localStorage for other services to access
       localStorage.setItem('user', JSON.stringify(userData));
@@ -595,7 +583,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('No access token received for impersonation');
       }
       setTokens(newAccessToken, null);
-      localStorage.setItem('accessToken', newAccessToken);
       localStorage.setItem('user', JSON.stringify(impersonatedUser));
       localStorage.setItem('impersonating', 'true');
       setUser(impersonatedUser);
@@ -620,13 +607,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const refreshResponse = await api.post('/auth/refresh-token');
           const { token } = refreshResponse.data;
           setTokens(token, null);
-          localStorage.setItem('accessToken', token);
         } catch (e) {
           console.warn('Failed to refresh token after stop impersonation');
         }
       } else {
         setTokens(newAccessToken, null);
-        localStorage.setItem('accessToken', newAccessToken);
       }
       // Reload /auth/me to get current user
       await refreshUser();

@@ -1,5 +1,4 @@
 import api from '../api/axios';
-import publicApi from '../api/publicApi';
 import { Tenant, TenantFormData } from '../types/tenant';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -56,7 +55,7 @@ export const useTenantService = () => {
     try {
       const params: any = {};
       if (user?.companyId) params.companyId = user.companyId;
-      const response = await publicApi.get('/tenants/public', { params });
+      const response = await api.get('/tenants/public', { params });
       return response.data;
     } catch (error: any) {
       console.error('Error fetching tenants (public):', error);

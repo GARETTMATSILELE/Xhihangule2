@@ -182,9 +182,9 @@ exports.createPaymentRequest = createPaymentRequest;
 const getPaymentRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.query.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
-            return res.status(400).json({ message: 'Company ID is required' });
+            return res.status(403).json({ message: 'Company context required' });
         }
         const { status, page = 1, limit = 10, readyForAccounting } = req.query;
         const skip = (Number(page) - 1) * Number(limit);
@@ -492,9 +492,9 @@ exports.deletePaymentRequest = deletePaymentRequest;
 const getPaymentRequestStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.query.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
-            return res.status(400).json({ message: 'Company ID is required' });
+            return res.status(403).json({ message: 'Company context required' });
         }
         const stats = yield PaymentRequest_1.PaymentRequest.aggregate([
             { $match: { companyId } },

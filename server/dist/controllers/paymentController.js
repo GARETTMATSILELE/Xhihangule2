@@ -2446,18 +2446,13 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.reversePayment = reversePayment;
 // Public endpoint for admin dashboard - no authentication required
 const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        console.log('Public payments request:', {
-            query: req.query,
-            headers: req.headers
-        });
-        // Get company ID from query params or headers (for admin dashboard)
-        const companyId = req.query.companyId || req.headers['x-company-id'];
-        let query = {};
-        // Filter by company ID if provided
-        if (companyId) {
-            query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ message: 'Authentication required' });
         }
+        let query = { companyId: new mongoose_1.default.Types.ObjectId(companyId) };
         // Additional filtering options
         if (req.query.status) {
             query.status = req.query.status;
@@ -2476,7 +2471,7 @@ const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, functi
             try {
                 query.agentId = new mongoose_1.default.Types.ObjectId(req.query.agentId);
             }
-            catch (_a) {
+            catch (_b) {
                 // Ignore invalid ObjectId to avoid throwing on public endpoint
             }
         }
@@ -2490,13 +2485,11 @@ const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 query.paymentDate.$lte = new Date(req.query.endDate);
             }
         }
-        console.log('Public payments query:', query);
         const payments = yield Payment_1.Payment.find(query)
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName')
             .populate('agentId', 'firstName lastName')
             .sort({ paymentDate: -1 });
-        console.log(`Found ${payments.length} payments`);
         res.json({
             status: 'success',
             data: payments,
@@ -2516,21 +2509,14 @@ const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.getPaymentsPublic = getPaymentsPublic;
 // Public endpoint for getting a single payment by ID - no authentication required
 const getPaymentByIdPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const { id } = req.params;
-        const companyId = req.query.companyId || req.headers['x-company-id'];
-        console.log('Public payment by ID request:', {
-            id,
-            companyId,
-            query: req.query,
-            headers: req.headers
-        });
-        let query = { _id: id };
-        // Filter by company ID if provided
-        if (companyId) {
-            query.companyId = new mongoose_1.default.Types.ObjectId(companyId);
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ message: 'Authentication required' });
         }
-        console.log('Public payment by ID query:', query);
+        let query = { _id: id, companyId: new mongoose_1.default.Types.ObjectId(companyId) };
         const payment = yield Payment_1.Payment.findOne(query)
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName')
@@ -2543,7 +2529,6 @@ const getPaymentByIdPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 companyId: companyId || null
             });
         }
-        console.log('Found payment:', { id: payment._id, amount: payment.amount });
         res.json({
             status: 'success',
             data: payment
@@ -2561,7 +2546,8 @@ const getPaymentByIdPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getPaymentByIdPublic = getPaymentByIdPublic;
 // Public endpoint for creating payments (for admin dashboard) - no authentication required
 const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    if (!req.user) {
+    var _a;
+    if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
     // Allow Idempotency-Key header as an alternative to body field
@@ -2573,11 +2559,8 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
     catch (_) { }
     try {
-        console.log('Public payment creation request:', {
-            body: req.body,
-            headers: req.headers
-        });
-        const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
+        const { leaseId, amount, paymentDate, paymentMethod, status, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
+        const companyId = req.user.companyId;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
@@ -2586,7 +2569,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             });
         }
         // Get lease details to extract property and tenant information
-        const lease = yield Lease_1.Lease.findById(leaseId);
+        const lease = yield Lease_1.Lease.findOne({ _id: leaseId, companyId });
         if (!lease) {
             return res.status(404).json({
                 status: 'error',
@@ -2594,7 +2577,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             });
         }
         // Get property details
-        const property = yield Property_1.Property.findById(lease.propertyId);
+        const property = yield Property_1.Property.findOne({ _id: lease.propertyId, companyId });
         if (!property) {
             return res.status(404).json({ message: 'Property not found' });
         }
@@ -2707,40 +2690,21 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.createPaymentPublic = createPaymentPublic;
 // Public endpoint for downloading a payment receipt as blob (no authentication required)
 const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
     try {
         const { id } = req.params;
-        // Prefer authenticated company when available; otherwise allow explicit query/header for public route
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
-            req.query.companyId ||
-            req.headers['x-company-id'];
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
         const format = String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.format) || '').toLowerCase();
-        console.log('Payment receipt download request:', {
-            id,
-            companyId,
-            query: req.query,
-            headers: req.headers
-        });
         let query = { _id: id };
-        // When authenticated, strictly scope to the user's company
-        if ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) {
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
-            }
-            catch (_s) {
-                query.companyId = String(req.user.companyId);
-            }
+        try {
+            query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        else if (companyId) {
-            // Public path: optional companyId filter
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
-            }
-            catch (_t) {
-                query.companyId = String(companyId);
-            }
+        catch (_r) {
+            query.companyId = String(companyId);
         }
-        console.log('Payment receipt download query:', query);
         const payment = yield Payment_1.Payment.findOne(query)
             .populate('propertyId', 'name address rent')
             .populate('tenantId', 'firstName lastName email')
@@ -2762,7 +2726,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
         // Determine rent amount to display on receipt: prefer explicit rentUsed, then property's rent
         const rentAmountForDisplay = typeof payment.rentUsed === 'number'
             ? Number(payment.rentUsed)
-            : Number(((_d = payment.propertyId) === null || _d === void 0 ? void 0 : _d.rent) || 0);
+            : Number(((_c = payment.propertyId) === null || _c === void 0 ? void 0 : _c.rent) || 0);
         // Compute paid-to-date across the rental period (company + property + tenant + month/year)
         let rentalOutstanding = 0;
         try {
@@ -2776,8 +2740,8 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
                 companyId: payment.companyId,
                 paymentType: 'rental',
                 status: { $in: ['completed'] },
-                propertyId: ((_e = payment.propertyId) === null || _e === void 0 ? void 0 : _e._id) || payment.propertyId,
-                tenantId: ((_f = payment.tenantId) === null || _f === void 0 ? void 0 : _f._id) || payment.tenantId,
+                propertyId: ((_d = payment.propertyId) === null || _d === void 0 ? void 0 : _d._id) || payment.propertyId,
+                tenantId: ((_e = payment.tenantId) === null || _e === void 0 ? void 0 : _e._id) || payment.tenantId,
                 rentalPeriodYear: periodYear,
                 rentalPeriodMonth: periodMonth
             };
@@ -2785,10 +2749,10 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
                 { $match: match },
                 { $group: { _id: null, total: { $sum: '$amount' } } }
             ]);
-            const paidToDate = Number(((_g = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _g === void 0 ? void 0 : _g.total) || 0);
+            const paidToDate = Number(((_f = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _f === void 0 ? void 0 : _f.total) || 0);
             rentalOutstanding = Math.max(0, Number(rentAmountForDisplay || 0) - paidToDate);
         }
-        catch (_u) {
+        catch (_s) {
             const rentPaidOnly = Number(payment.amount || 0);
             rentalOutstanding = Math.max(0, Number(rentAmountForDisplay || 0) - rentPaidOnly);
         }
@@ -2838,27 +2802,27 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               </div>
               <div class="detail-row">
                 <span class="label">Payment Method:</span>
-                <span class="value">${((_h = payment.paymentMethod) === null || _h === void 0 ? void 0 : _h.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_g = payment.paymentMethod) === null || _g === void 0 ? void 0 : _g.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Status:</span>
-                <span class="value">${((_j = payment.status) === null || _j === void 0 ? void 0 : _j.toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_h = payment.status) === null || _h === void 0 ? void 0 : _h.toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Property:</span>
-                <span class="value">${((_k = payment.propertyId) === null || _k === void 0 ? void 0 : _k.name) || 'N/A'}</span>
+                <span class="value">${((_j = payment.propertyId) === null || _j === void 0 ? void 0 : _j.name) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Tenant:</span>
-                <span class="value">${(_l = payment.tenantId) === null || _l === void 0 ? void 0 : _l.firstName} ${(_m = payment.tenantId) === null || _m === void 0 ? void 0 : _m.lastName}</span>
+                <span class="value">${(_k = payment.tenantId) === null || _k === void 0 ? void 0 : _k.firstName} ${(_l = payment.tenantId) === null || _l === void 0 ? void 0 : _l.lastName}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Agent:</span>
-                <span class="value">${(_o = payment.agentId) === null || _o === void 0 ? void 0 : _o.firstName} ${((_p = payment.agentId) === null || _p === void 0 ? void 0 : _p.lastName) || 'N/A'}</span>
+                <span class="value">${(_m = payment.agentId) === null || _m === void 0 ? void 0 : _m.firstName} ${((_o = payment.agentId) === null || _o === void 0 ? void 0 : _o.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Processed By:</span>
-                <span class="value">${(_q = payment.processedBy) === null || _q === void 0 ? void 0 : _q.firstName} ${((_r = payment.processedBy) === null || _r === void 0 ? void 0 : _r.lastName) || 'N/A'}</span>
+                <span class="value">${(_p = payment.processedBy) === null || _p === void 0 ? void 0 : _p.firstName} ${((_q = payment.processedBy) === null || _q === void 0 ? void 0 : _q.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Rent Amount:</span>
@@ -2936,39 +2900,20 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
 exports.getPaymentReceiptDownload = getPaymentReceiptDownload;
 // Public endpoint for getting a payment receipt for printing
 const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e;
     try {
         const { id } = req.params;
-        // Prefer authenticated company when available; otherwise allow explicit query/header for public route
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ||
-            req.query.companyId ||
-            req.headers['x-company-id'];
-        console.log('Payment receipt request:', {
-            id,
-            companyId,
-            query: req.query,
-            headers: req.headers
-        });
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
         let query = { _id: id };
-        // When authenticated, strictly scope to the user's company
-        if ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) {
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(String(req.user.companyId));
-            }
-            catch (_g) {
-                query.companyId = String(req.user.companyId);
-            }
+        try {
+            query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        else if (companyId) {
-            // Public path: optional companyId filter
-            try {
-                query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
-            }
-            catch (_h) {
-                query.companyId = String(companyId);
-            }
+        catch (_f) {
+            query.companyId = String(companyId);
         }
-        console.log('Payment receipt query:', query);
         const payment = yield Payment_1.Payment.findOne(query)
             .populate('propertyId', 'name address rent')
             .populate('tenantId', 'firstName lastName email')
@@ -3027,12 +2972,12 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
         try {
             const rentAmountForDisplay = typeof payment.rentUsed === 'number'
                 ? Number(payment.rentUsed)
-                : Number(((_c = payment.propertyId) === null || _c === void 0 ? void 0 : _c.rent) || 0);
+                : Number(((_b = payment.propertyId) === null || _b === void 0 ? void 0 : _b.rent) || 0);
             if (Number.isFinite(rentAmountForDisplay)) {
                 receipt.rentAmount = rentAmountForDisplay;
             }
         }
-        catch (_j) {
+        catch (_g) {
             // ignore
         }
         // Include rental outstanding aggregated across the rental period (rent - paid-to-date; deposit excluded)
@@ -3050,8 +2995,8 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 companyId: payment.companyId,
                 paymentType: 'rental',
                 status: { $in: ['completed'] },
-                propertyId: ((_d = payment.propertyId) === null || _d === void 0 ? void 0 : _d._id) || payment.propertyId,
-                tenantId: ((_e = payment.tenantId) === null || _e === void 0 ? void 0 : _e._id) || payment.tenantId,
+                propertyId: ((_c = payment.propertyId) === null || _c === void 0 ? void 0 : _c._id) || payment.propertyId,
+                tenantId: ((_d = payment.tenantId) === null || _d === void 0 ? void 0 : _d._id) || payment.tenantId,
                 rentalPeriodYear: periodYear,
                 rentalPeriodMonth: periodMonth
             };
@@ -3059,12 +3004,12 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 { $match: match },
                 { $group: { _id: null, total: { $sum: '$amount' } } }
             ]);
-            const paidToDate = Number(((_f = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _f === void 0 ? void 0 : _f.total) || 0);
+            const paidToDate = Number(((_e = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _e === void 0 ? void 0 : _e.total) || 0);
             const rentalOutstanding = Math.max(0, rentAmountForDisplay - paidToDate);
             receipt.paidToDate = paidToDate;
             receipt.rentalOutstanding = rentalOutstanding;
         }
-        catch (_k) {
+        catch (_h) {
             // ignore
         }
         // Generate a deterministic unique receipt code for sale payments

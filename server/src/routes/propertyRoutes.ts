@@ -3,7 +3,6 @@ import {
   getProperties,
   getProperty,
   createProperty,
-  createPropertyPublic,
   createSalesProperty,
   updateProperty,
   deleteProperty,
@@ -69,11 +68,11 @@ router.get('/public', async (req, res) => {
   }
 });
 
-// Public property creation endpoint (no auth required)
-router.post('/public', createPropertyPublic);
+// Legacy public creation endpoint now requires authenticated company context.
+router.post('/public', authWithCompany, canCreateProperty, enforcePropertyLimit, createProperty);
 
-// New public endpoint with user-based filtering (no auth required)
-router.get('/public-filtered', getPublicProperties);
+// Legacy public-filtered endpoint now requires authenticated company context.
+router.get('/public-filtered', authWithCompany, getPublicProperties);
 
 // MVP: Comprehensive public endpoints for all property operations (disabled in production)
 router.get('/public/all', async (req, res) => {

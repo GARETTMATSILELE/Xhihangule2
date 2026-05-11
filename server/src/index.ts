@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import compression from 'compression';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -49,7 +49,7 @@ import accountingRoutes from './routes/accountingRoutes';
 import trustAccountRoutes from './routes/trustAccountRoutes';
 import webhookRoutes from './routes/webhookRoutes';
 import adminRoutes from './routes/adminRoutes';
-import { connectDatabase, closeDatabase } from './config/database';
+import { connectDatabase, closeDatabase, getDatabaseHealth, isDatabaseAvailable } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
 import { initializeSocket } from './config/socket';
@@ -132,8 +132,8 @@ app.set('trust proxy', 1);
 // Fail fast on missing critical environment in production
 if (process.env.NODE_ENV === 'production') {
   const missing: string[] = [];
-  if (!process.env.JWT_SECRET) missing.push('JWT_SECRET');
-  if (!process.env.JWT_REFRESH_SECRET) missing.push('JWT_REFRESH_SECRET');
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) missing.push('JWT_SECRET (min 32 chars)');
+  if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 32) missing.push('JWT_REFRESH_SECRET (min 32 chars)');
   if (!process.env.MONGODB_URI) missing.push('MONGODB_URI');
   if (missing.length > 0) {
     // eslint-disable-next-line no-console
@@ -271,8 +271,9 @@ app.use(cors({
 // Add cookie-parser middleware
 app.use(cookieParser());
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '10mb';
+app.use(express.json({ limit: requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
 // Enable gzip compression
 app.use(compression());
@@ -337,6 +338,26 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Routes
+// Keep liveness/readiness probes available even while MongoDB is still connecting.
+app.use('/api/health', healthRoutes);
+app.use('/health', healthRoutes);
+
+const databaseReadinessGate = (req: Request, res: Response, next: NextFunction) => {
+  if (isDatabaseAvailable()) {
+    return next();
+  }
+
+  res.setHeader('Retry-After', '5');
+  return res.status(503).json({
+    status: 'error',
+    message: 'Service temporarily unavailable',
+    code: 'DB_NOT_READY',
+    database: getDatabaseHealth()
+  });
+};
+
+app.use('/api', databaseReadinessGate);
+
 app.use('/api/properties', propertyRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/leases', leaseRoutes);
@@ -362,9 +383,6 @@ app.use('/api/sales-files', salesFileRoutes);
 app.use('/api/property-owners', propertyOwnerRoutes);
 app.use('/api/sales-owners', salesOwnerRoutes);
 app.use('/api/owners', ownerRoutes);
-app.use('/api/health', healthRoutes);
-// Root health aliases for platform probes (e.g., Azure App Service)
-app.use('/health', healthRoutes);
 app.use('/api/maintenance', maintenanceRequestRoutes);
 app.use('/api/deals', dealRoutes);
 app.use('/api/buyers', buyerRoutes);

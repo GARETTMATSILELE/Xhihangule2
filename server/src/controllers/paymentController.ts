@@ -2545,20 +2545,12 @@ export const reversePayment = async (req: Request, res: Response) => {
 // Public endpoint for admin dashboard - no authentication required
 export const getPaymentsPublic = async (req: Request, res: Response) => {
   try {
-    console.log('Public payments request:', {
-      query: req.query,
-      headers: req.headers
-    });
-
-    // Get company ID from query params or headers (for admin dashboard)
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
-    
-    let query: any = {};
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = new mongoose.Types.ObjectId(companyId);
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
+    
+    let query: any = { companyId: new mongoose.Types.ObjectId(companyId) };
 
     // Additional filtering options
     if (req.query.status) {
@@ -2597,15 +2589,11 @@ export const getPaymentsPublic = async (req: Request, res: Response) => {
       }
     }
 
-    console.log('Public payments query:', query);
-
     const payments = await Payment.find(query)
       .populate('propertyId', 'name address')
       .populate('tenantId', 'firstName lastName')
       .populate('agentId', 'firstName lastName')
       .sort({ paymentDate: -1 });
-
-    console.log(`Found ${payments.length} payments`);
 
     res.json({
       status: 'success',
@@ -2627,23 +2615,12 @@ export const getPaymentsPublic = async (req: Request, res: Response) => {
 export const getPaymentByIdPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
-    
-    console.log('Public payment by ID request:', {
-      id,
-      companyId,
-      query: req.query,
-      headers: req.headers
-    });
-
-    let query: any = { _id: id };
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = new mongoose.Types.ObjectId(companyId);
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
 
-    console.log('Public payment by ID query:', query);
+    let query: any = { _id: id, companyId: new mongoose.Types.ObjectId(companyId) };
 
     const payment = await Payment.findOne(query)
       .populate('propertyId', 'name address')
@@ -2658,8 +2635,6 @@ export const getPaymentByIdPublic = async (req: Request, res: Response) => {
         companyId: companyId || null
       });
     }
-
-    console.log('Found payment:', { id: payment._id, amount: payment.amount });
 
     res.json({
       status: 'success',
@@ -2677,7 +2652,7 @@ export const getPaymentByIdPublic = async (req: Request, res: Response) => {
 
 // Public endpoint for creating payments (for admin dashboard) - no authentication required
 export const createPaymentPublic = async (req: Request, res: Response) => {
-  if (!req.user) {
+  if (!req.user?.companyId) {
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
@@ -2690,24 +2665,19 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
   } catch (_) {}
 
   try {
-    console.log('Public payment creation request:', {
-      body: req.body,
-      headers: req.headers
-    });
-
     const {
       leaseId,
       amount,
       paymentDate,
       paymentMethod,
       status,
-      companyId,
       rentalPeriodMonth,
       rentalPeriodYear,
       advanceMonthsPaid,
       advancePeriodStart,
       advancePeriodEnd,
     } = req.body;
+    const companyId = req.user.companyId;
 
     // Validate required fields
     if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
@@ -2718,7 +2688,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
     }
 
     // Get lease details to extract property and tenant information
-    const lease = await Lease.findById(leaseId);
+    const lease = await Lease.findOne({ _id: leaseId, companyId });
     if (!lease) {
       return res.status(404).json({
         status: 'error',
@@ -2727,7 +2697,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
     }
 
     // Get property details
-    const property = await Property.findById(lease.propertyId);
+    const property = await Property.findOne({ _id: lease.propertyId, companyId });
     if (!property) {
       return res.status(404).json({ message: 'Property not found' });
     }
@@ -2850,38 +2820,18 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
 export const getPaymentReceiptDownload = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    // Prefer authenticated company when available; otherwise allow explicit query/header for public route
-    const companyId =
-      (req.user?.companyId as string | undefined) ||
-      (req.query.companyId as string | undefined) ||
-      (req.headers['x-company-id'] as string | undefined);
+    const companyId = req.user?.companyId as string | undefined;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
     const format = String((req.query as any)?.format || '').toLowerCase();
-    
-    console.log('Payment receipt download request:', {
-      id,
-      companyId,
-      query: req.query,
-      headers: req.headers
-    });
 
     let query: any = { _id: id };
-    // When authenticated, strictly scope to the user's company
-    if (req.user?.companyId) {
-      try {
-        query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId));
-      } catch {
-        query.companyId = String(req.user.companyId);
-      }
-    } else if (companyId) {
-      // Public path: optional companyId filter
-      try {
-        query.companyId = new mongoose.Types.ObjectId(String(companyId));
-      } catch {
-        query.companyId = String(companyId);
-      }
+    try {
+      query.companyId = new mongoose.Types.ObjectId(String(companyId));
+    } catch {
+      query.companyId = String(companyId);
     }
-
-    console.log('Payment receipt download query:', query);
 
     const payment = await Payment.findOne(query)
       .populate('propertyId', 'name address rent')
@@ -3087,37 +3037,17 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
 export const getPaymentReceipt = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    // Prefer authenticated company when available; otherwise allow explicit query/header for public route
-    const companyId =
-      (req.user?.companyId as string | undefined) ||
-      (req.query.companyId as string | undefined) ||
-      (req.headers['x-company-id'] as string | undefined);
-    
-    console.log('Payment receipt request:', {
-      id,
-      companyId,
-      query: req.query,
-      headers: req.headers
-    });
-
-    let query: any = { _id: id };
-    // When authenticated, strictly scope to the user's company
-    if (req.user?.companyId) {
-      try {
-        query.companyId = new mongoose.Types.ObjectId(String(req.user.companyId));
-      } catch {
-        query.companyId = String(req.user.companyId);
-      }
-    } else if (companyId) {
-      // Public path: optional companyId filter
-      try {
-        query.companyId = new mongoose.Types.ObjectId(String(companyId));
-      } catch {
-        query.companyId = String(companyId);
-      }
+    const companyId = req.user?.companyId as string | undefined;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
 
-    console.log('Payment receipt query:', query);
+    let query: any = { _id: id };
+    try {
+      query.companyId = new mongoose.Types.ObjectId(String(companyId));
+    } catch {
+      query.companyId = String(companyId);
+    }
 
     const payment = await Payment.findOne(query)
       .populate('propertyId', 'name address rent')

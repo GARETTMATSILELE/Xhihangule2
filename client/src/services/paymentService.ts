@@ -1,5 +1,4 @@
 import api from '../api/axios';
-import publicApi from '../api/publicApi';
 import { Payment, PaymentFormData, PaymentFilter } from '../types/payment';
 import { DatabaseService } from './databaseService';
 
@@ -337,7 +336,7 @@ class PaymentService {
         }
       }
       
-      const response = await publicApi.get('/payments/public', config);
+      const response = await api.get('/payments/public', config);
       const out = response.data as { data: any[] };
       const list = Array.isArray(out?.data) ? out.data : [];
       const agentIdFilter = config?.params?.agentId ? String(config.params.agentId) : undefined;
@@ -374,7 +373,7 @@ class PaymentService {
         config.params = { companyId };
       }
       
-      const response = await publicApi.get(`/payments/public/${id}`, config);
+      const response = await api.get(`/payments/public/${id}`, config);
       return response.data.data;
     } catch (error: any) {
       console.error('Error fetching payment by ID (public):', error);
@@ -391,7 +390,7 @@ class PaymentService {
   async createPaymentPublic(paymentData: any): Promise<Payment> {
     try {
       const body = { ...paymentData, idempotencyKey: paymentData?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'pub') };
-      const response = await publicApi.post('/payments/public', body);
+      const response = await api.post('/payments/public', body);
       return response.data.data;
     } catch (error: any) {
       console.error('Error creating payment (public):', error);
@@ -409,7 +408,7 @@ class PaymentService {
       if (!config.params) config.params = {};
       config.params.role = role;
       
-      const response = await publicApi.get('/users/public/agents', config);
+      const response = await api.get('/users/public/agents', config);
       return response.data.data || [];
     } catch (error: any) {
       console.error('Error fetching agents (public):', error);
@@ -534,12 +533,12 @@ class PaymentService {
 
   async getLevyPayments(companyId?: string): Promise<any[]> {
     try {
-      // Use publicApi instead of api to avoid sending credentials
+      // Levy payments are company-scoped and require authenticated cookies.
       const config: any = {};
       if (companyId) {
         config.params = { companyId };
       }
-      const response = await publicApi.get('/levy-payments', config);
+      const response = await api.get('/levy-payments', config);
       return response.data;
     } catch (error: any) {
       return this.handleAuthError(error);
@@ -554,7 +553,7 @@ class PaymentService {
   async getLevyPayoutAcknowledgement(id: string, companyId?: string): Promise<string> {
     const config: any = { responseType: 'text' };
     if (companyId) config.params = { companyId };
-    const response = await publicApi.get(`/levy-payments/public/${id}/payout/ack`, config);
+    const response = await api.get(`/levy-payments/public/${id}/payout/ack`, config);
     return response.data;
   }
 

@@ -175,23 +175,16 @@ export const deletePropertyOwner = async (req: Request, res: Response, next: Nex
   }
 };
 
-// Public endpoint for admin dashboard - no authentication required
+// Legacy public endpoint for admin dashboard. Route-level middleware now
+// requires authentication; always scope to the authenticated company.
 export const getPropertyOwnersPublic = async (req: Request, res: Response) => {
   try {
-    console.log('Public property owners request:', {
-      query: req.query,
-      headers: req.headers
-    });
-
-    // Get company ID from query params or headers (for admin dashboard)
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
-    
-    let query: any = {};
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = companyId;
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
+    
+    let query: any = { companyId };
 
     // Additional filtering options
     if (req.query.email) {
@@ -206,14 +199,10 @@ export const getPropertyOwnersPublic = async (req: Request, res: Response) => {
       query.lastName = { $regex: req.query.lastName as string, $options: 'i' };
     }
 
-    console.log('Public property owners query:', query);
-
     // Get property owners, excluding password field
     const owners = await PropertyOwner.find(query)
       .select('-password')
       .sort({ createdAt: -1 }); // Sort by newest first
-
-    console.log(`Found ${owners.length} property owners`);
 
     res.json({ 
       owners,
@@ -229,27 +218,16 @@ export const getPropertyOwnersPublic = async (req: Request, res: Response) => {
   }
 };
 
-// Public endpoint for getting a single property owner by ID - no authentication required
+// Legacy public endpoint for getting a single property owner by ID.
 export const getPropertyOwnerByIdPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
-    
-    console.log('Public property owner by ID request:', {
-      id,
-      companyId,
-      query: req.query,
-      headers: req.headers
-    });
-
-    let query: any = { _id: id };
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = companyId;
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
 
-    console.log('Public property owner by ID query:', query);
+    let query: any = { _id: id, companyId };
 
     const owner = await PropertyOwner.findOne(query).select('-password');
     
@@ -261,8 +239,6 @@ export const getPropertyOwnerByIdPublic = async (req: Request, res: Response) =>
       });
     }
 
-    console.log('Found property owner:', { id: owner._id, email: owner.email });
-
     res.json(owner);
   } catch (error) {
     console.error('Error fetching property owner by ID (public):', error);
@@ -273,19 +249,14 @@ export const getPropertyOwnerByIdPublic = async (req: Request, res: Response) =>
   }
 };
 
-// Public endpoint for creating property owner - no authentication required
+// Legacy public endpoint for creating property owner.
 export const createPropertyOwnerPublic = async (req: Request, res: Response) => {
   try {
-    const { email, password, firstName, lastName, phone, companyId, propertyIds } = req.body;
-
-    console.log('Public create property owner request:', {
-      email,
-      firstName,
-      lastName,
-      phone,
-      companyId,
-      propertyIds
-    });
+    const { email, password, firstName, lastName, phone, propertyIds } = req.body;
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
 
     // Validate required fields
     if (!email || !password || !firstName || !lastName || !phone) {
@@ -293,7 +264,7 @@ export const createPropertyOwnerPublic = async (req: Request, res: Response) => 
     }
 
     // Check if owner already exists
-    const existingOwner = await PropertyOwner.findOne({ email });
+    const existingOwner = await PropertyOwner.findOne({ email, companyId });
     if (existingOwner) {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
@@ -321,8 +292,6 @@ export const createPropertyOwnerPublic = async (req: Request, res: Response) => 
     const ownerResponse = owner.toObject();
     delete (ownerResponse as Partial<typeof ownerResponse>).password;
     
-    console.log('Property owner created successfully:', { id: owner._id, email: owner.email });
-    
     res.status(201).json(ownerResponse);
   } catch (error) {
     console.error('Error creating property owner (public):', error);
@@ -330,25 +299,17 @@ export const createPropertyOwnerPublic = async (req: Request, res: Response) => 
   }
 };
 
-// Public endpoint for updating property owner - no authentication required
+// Legacy public endpoint for updating property owner.
 export const updatePropertyOwnerPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { email, properties, password, ...updates } = req.body;
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
-
-    console.log('Public update property owner request:', {
-      id,
-      email,
-      companyId,
-      updates,
-      properties
-    });
-
-    let query: any = { _id: id };
-    if (companyId) {
-      query.companyId = companyId;
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
+
+    let query: any = { _id: id, companyId };
 
     // If email is being updated, check if it's already in use
     if (email) {
@@ -381,7 +342,6 @@ export const updatePropertyOwnerPublic = async (req: Request, res: Response) => 
 
     // Do not modify Property.ownerId on public updates; linkage is via PropertyOwner.properties.
 
-    console.log('Property owner updated successfully:', { id: owner._id, email: owner.email });
     res.json(owner);
   } catch (error) {
     console.error('Error updating property owner (public):', error);
@@ -389,23 +349,16 @@ export const updatePropertyOwnerPublic = async (req: Request, res: Response) => 
   }
 };
 
-// Public endpoint for deleting property owner - no authentication required
+// Legacy public endpoint for deleting property owner.
 export const deletePropertyOwnerPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const companyId = req.query.companyId as string || req.headers['x-company-id'] as string;
-
-    console.log('Public delete property owner request:', {
-      id,
-      companyId
-    });
-
-    let query: any = { _id: id };
-    
-    // Filter by company ID if provided
-    if (companyId) {
-      query.companyId = companyId;
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
     }
+
+    let query: any = { _id: id, companyId };
 
     const owner = await PropertyOwner.findOneAndDelete(query);
     

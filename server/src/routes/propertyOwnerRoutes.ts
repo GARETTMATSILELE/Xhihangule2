@@ -15,11 +15,12 @@ import {
 
 const router = express.Router();
 
-// Public endpoints (must come before protected routes)
-router.get('/public', getPropertyOwnersPublic);
-router.get('/public/:id', getPropertyOwnerByIdPublic);
+// Legacy public endpoints now require company authentication because property
+// owner records contain PII and account-management capabilities.
+router.get('/public', authWithCompany, getPropertyOwnersPublic);
+router.get('/public/:id', authWithCompany, getPropertyOwnerByIdPublic);
 // New endpoint: Get property owner by propertyId
-router.get('/by-property/:propertyId', async (req, res) => {
+router.get('/by-property/:propertyId', authWithCompany, async (req, res) => {
   try {
     const propertyId = req.params.propertyId;
     if (!propertyId) {
@@ -33,11 +34,10 @@ router.get('/by-property/:propertyId', async (req, res) => {
       return res.status(400).json({ message: 'Invalid propertyId format' });
     }
 
-    // Optional company scoping (preferred): from auth or query
-    const companyIdParam = (req.user && req.user.companyId) || (req.query.companyId as string) || null;
-    const companyFilter: any = companyIdParam
-      ? { companyId: new mongoose.Types.ObjectId(companyIdParam) }
-      : {};
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    const companyFilter: any = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
     // Find owner whose properties array contains this propertyId as ObjectId or string or $oid
     const PropertyOwner = require('../models/PropertyOwner').PropertyOwner;
     // Strategy: fetch owners in company scope and filter in Node to avoid Mongoose cast issues
@@ -65,7 +65,7 @@ router.get('/by-property/:propertyId', async (req, res) => {
       // Fallback: get property and use its ownerId
       const Property = require('../models/Property').Property;
       const User = require('../models/User').User;
-      const property = await Property.findById(objectId);
+      const property = await Property.findOne({ _id: objectId, companyId: companyFilter.companyId });
       const rawOwnerId = property?.ownerId;
       if (rawOwnerId) {
         // Try to find a PropertyOwner by this id
@@ -105,9 +105,9 @@ router.get('/by-property/:propertyId', async (req, res) => {
     res.status(500).json({ message: 'Error fetching owner by propertyId' });
   }
 });
-router.post('/public', createPropertyOwnerPublic);
-router.patch('/public/:id', updatePropertyOwnerPublic);
-router.delete('/public/:id', deletePropertyOwnerPublic);
+router.post('/public', authWithCompany, createPropertyOwnerPublic);
+router.patch('/public/:id', authWithCompany, updatePropertyOwnerPublic);
+router.delete('/public/:id', authWithCompany, deletePropertyOwnerPublic);
 
 // CRUD routes for property owners (company-scoped)
 router.post('/', authWithCompany, createPropertyOwner);

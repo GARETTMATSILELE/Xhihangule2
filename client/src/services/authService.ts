@@ -102,7 +102,6 @@ export const useAuthService = () => {
     }
     
     return {
-      'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
       'Content-Type': 'application/json'
     };
   };

@@ -127,8 +127,13 @@ const getRetryDelay = (retryCount) => {
 // Connect to MongoDB
 const connectDatabase = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        if (mongoose_1.default.connection.readyState === 1 || mongoose_1.default.connection.readyState === 2) {
+        if (mongoose_1.default.connection.readyState === 1) {
             console.log('Already connected to MongoDB');
+            return;
+        }
+        if (mongoose_1.default.connection.readyState === 2) {
+            console.log('MongoDB connection already in progress; waiting for it to complete');
+            yield mongoose_1.default.connection.asPromise();
             return;
         }
         if (IS_COSMOS_MONGO) {

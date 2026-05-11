@@ -38,22 +38,13 @@ const api = axios.create({
   withCredentials: true // This ensures cookies are sent with requests
 });
 
-// Local token helpers to avoid circular dependency with AuthContext
-const getAccessToken = (): string | null => {
-  try {
-    return localStorage.getItem('accessToken');
-  } catch {
-    return null;
-  }
-};
-
+// Tokens are delivered via HttpOnly cookies. Do not persist bearer tokens in
+// browser storage, where any XSS can exfiltrate them.
 const setTokens = (newAccessToken: string | null, _newRefreshToken: string | null) => {
   if (newAccessToken) {
-    api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
-    try { localStorage.setItem('accessToken', newAccessToken); } catch {}
+    delete api.defaults.headers.common['Authorization'];
   } else {
     delete api.defaults.headers.common['Authorization'];
-    try { localStorage.removeItem('accessToken'); } catch {}
   }
 };
 
@@ -90,11 +81,6 @@ const getCookieValue = (name: string): string | null => {
 // Request interceptor
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = getAccessToken();
-    
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
     // Attach CSRF header for refresh endpoint
     try {
       const url = config.url || '';
@@ -130,14 +116,11 @@ api.interceptors.response.use(
 
     // If the error is 401 and we haven't tried to refresh the token yet
     if (error.response?.status === 401 && !originalRequest._retry) {
-      // Only attempt refresh if we appear to have been authenticated
-      // i.e., the request had an Authorization header or we have a stored access token.
-      const hadAuthHeader = !!originalRequest.headers?.Authorization;
-      const hasStoredAccess = !!getAccessToken();
       const isRefreshCall = Boolean(originalRequest.url && /\/auth\/refresh-token(?:\?|$|\/)?/.test(originalRequest.url));
+      const isAuthBootstrapCall = Boolean(originalRequest.url && /\/auth\/(?:login|signup|forgot-password|reset-password)(?:\?|$|\/)?/.test(originalRequest.url));
 
       // Skip refresh for public requests (no auth) or if the failing call was the refresh itself
-      if ((!hadAuthHeader && !hasStoredAccess) || isRefreshCall) {
+      if (isRefreshCall || isAuthBootstrapCall) {
         return Promise.reject(error);
       }
       if (isDevelopment) console.log('401 error detected, attempting token refresh');
@@ -147,10 +130,7 @@ api.interceptors.response.use(
         if (isDevelopment) console.log('Token refresh already in progress, queuing request');
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
-        }).then((token) => {
-          if (originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-          }
+        }).then(() => {
           return api(originalRequest);
         }).catch((err) => {
           return Promise.reject(err);
@@ -183,17 +163,11 @@ api.interceptors.response.use(
         
         if (newAccessToken) {
           if (isDevelopment) console.log('Token refresh successful');
-          // Update tokens in memory and localStorage
+          // Server rotates HttpOnly cookies; keep bearer tokens out of storage.
           setTokens(newAccessToken, null);
-          localStorage.setItem('accessToken', newAccessToken);
           
           // Process queued requests
-          processQueue(null, newAccessToken);
-          
-          // Retry the original request
-          if (originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-          }
+          processQueue(null, null);
           
           if (isDevelopment) {
             console.log('Retrying original request with refreshed token:', {

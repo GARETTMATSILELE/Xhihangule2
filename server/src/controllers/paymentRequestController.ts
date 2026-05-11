@@ -154,10 +154,10 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
 // Get all payment requests for a company
 export const getPaymentRequests = async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId || req.query.companyId as string;
+    const companyId = req.user?.companyId;
     
     if (!companyId) {
-      return res.status(400).json({ message: 'Company ID is required' });
+      return res.status(403).json({ message: 'Company context required' });
     }
 
     const { status, page = 1, limit = 10, readyForAccounting } = req.query as any;
@@ -489,10 +489,10 @@ export const deletePaymentRequest = async (req: Request, res: Response) => {
 // Get payment request statistics
 export const getPaymentRequestStats = async (req: Request, res: Response) => {
   try {
-    const companyId = req.user?.companyId || req.query.companyId as string;
+    const companyId = req.user?.companyId;
     
     if (!companyId) {
-      return res.status(400).json({ message: 'Company ID is required' });
+      return res.status(403).json({ message: 'Company context required' });
     }
 
     const stats = await PaymentRequest.aggregate([

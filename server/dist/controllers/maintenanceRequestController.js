@@ -19,11 +19,15 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 // Create a new maintenance request
 const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!userId) {
             throw new errorHandler_1.AppError('User authentication required', 401);
+        }
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company context required', 403);
         }
         const { propertyId, title, description, priority, estimatedCost, attachments } = req.body;
         // Validate required fields
@@ -31,7 +35,7 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
             throw new errorHandler_1.AppError('Property ID, title, and description are required', 400);
         }
         // Fetch the property to get ownerId and companyId
-        const property = yield Property_1.Property.findOne({ _id: propertyId });
+        const property = yield Property_1.Property.findOne({ _id: propertyId, companyId });
         if (!property) {
             throw new errorHandler_1.AppError('Property not found', 404);
         }
@@ -88,14 +92,20 @@ const getPropertyMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, v
 exports.getPropertyMaintenanceRequests = getPropertyMaintenanceRequests;
 // Add message to maintenance request
 const addMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
-        const { requestId } = req.params;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const requestId = req.params.requestId || req.params.id;
         const { content } = req.body;
         const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({
             _id: requestId,
-            tenantId: userId
+            companyId,
+            $or: [
+                { tenantId: userId },
+                { requestedBy: userId },
+                { ownerId: userId }
+            ]
         });
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
@@ -119,23 +129,27 @@ const addMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 0, fu
 exports.addMaintenanceMessage = addMaintenanceMessage;
 // Update maintenance request
 const updateMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!userId) {
             throw new errorHandler_1.AppError('User authentication required', 401);
+        }
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company context required', 403);
         }
         const { id } = req.params;
         if (!id) {
             throw new errorHandler_1.AppError('Maintenance request ID is required', 400);
         }
         const { status, estimatedCost, attachments } = req.body;
-        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id);
+        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId });
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
         }
         // Check if user has permission to update this request
-        const property = yield Property_1.Property.findOne({ _id: maintenanceRequest.propertyId });
+        const property = yield Property_1.Property.findOne({ _id: maintenanceRequest.propertyId, companyId });
         if (!property) {
             throw new errorHandler_1.AppError('Property not found', 404);
         }
@@ -157,7 +171,7 @@ const updateMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
         }
         yield maintenanceRequest.save();
         // Populate related data before sending response
-        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id)
+        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName')
             .populate('ownerId', 'firstName lastName');
@@ -174,17 +188,21 @@ const updateMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
 exports.updateMaintenanceRequest = updateMaintenanceRequest;
 // Approve maintenance request (owner action)
 const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!userId) {
             throw new errorHandler_1.AppError('User authentication required', 401);
+        }
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company context required', 403);
         }
         const { id } = req.params;
         if (!id) {
             throw new errorHandler_1.AppError('Maintenance request ID is required', 400);
         }
-        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id);
+        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId });
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
         }
@@ -193,7 +211,7 @@ const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0
             throw new errorHandler_1.AppError('Only requests with pending approval status can be approved', 400);
         }
         // Check if user is the owner of the property
-        const property = yield Property_1.Property.findOne({ _id: maintenanceRequest.propertyId });
+        const property = yield Property_1.Property.findOne({ _id: maintenanceRequest.propertyId, companyId });
         if (!property) {
             throw new errorHandler_1.AppError('Property not found', 404);
         }
@@ -203,7 +221,7 @@ const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0
         // Update status to approved
         maintenanceRequest.status = 'approved';
         yield maintenanceRequest.save();
-        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id)
+        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName')
             .populate('ownerId', 'firstName lastName');
@@ -220,17 +238,21 @@ const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0
 exports.approveMaintenanceRequest = approveMaintenanceRequest;
 // Complete maintenance request (agent action)
 const completeMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         if (!userId) {
             throw new errorHandler_1.AppError('User authentication required', 401);
+        }
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company context required', 403);
         }
         const { id } = req.params;
         if (!id) {
             throw new errorHandler_1.AppError('Maintenance request ID is required', 400);
         }
-        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id);
+        const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId });
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
         }
@@ -245,7 +267,7 @@ const completeMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 
         // Update status to completed
         maintenanceRequest.status = 'completed';
         yield maintenanceRequest.save();
-        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id)
+        const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName')
             .populate('ownerId', 'firstName lastName');
@@ -262,13 +284,19 @@ const completeMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 
 exports.completeMaintenanceRequest = completeMaintenanceRequest;
 // Get maintenance request details
 const getMaintenanceRequestDetails = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
-        const { requestId } = req.params;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const requestId = req.params.requestId || req.params.id;
         const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({
             _id: requestId,
-            tenantId: userId
+            companyId,
+            $or: [
+                { tenantId: userId },
+                { requestedBy: userId },
+                { ownerId: userId }
+            ]
         })
             .populate('propertyId', 'name address')
             .populate('tenantId', 'name email');
@@ -286,13 +314,18 @@ const getMaintenanceRequestDetails = (req, res) => __awaiter(void 0, void 0, voi
 });
 exports.getMaintenanceRequestDetails = getMaintenanceRequestDetails;
 const deleteMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
-        const { requestId } = req.params;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const requestId = req.params.requestId || req.params.id;
         const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOneAndDelete({
             _id: requestId,
-            tenantId: userId
+            companyId,
+            $or: [
+                { tenantId: userId },
+                { requestedBy: userId }
+            ]
         });
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
@@ -350,45 +383,42 @@ const getMaintenanceRequestsPublic = (req, res) => __awaiter(void 0, void 0, voi
 });
 exports.getMaintenanceRequestsPublic = getMaintenanceRequestsPublic;
 const getMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
-        const { propertyId, role, companyId } = req.query;
-        const query = {};
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+        const userRole = (_c = req.user) === null || _c === void 0 ? void 0 : _c.role;
+        const { propertyId, role } = req.query;
+        if (!userId) {
+            throw new errorHandler_1.AppError('User authentication required', 401);
+        }
+        if (!companyId) {
+            throw new errorHandler_1.AppError('Company context required', 403);
+        }
+        const query = { companyId };
         // If propertyId is specified, filter by that property
         if (propertyId) {
             query.propertyId = propertyId;
         }
-        // If companyId is specified (for public requests), filter by company
-        if (companyId) {
-            query.companyId = companyId;
+        const elevatedRoles = ['admin', 'agent', 'accountant', 'principal', 'prea'];
+        const canViewCompanyMaintenance = userRole && elevatedRoles.includes(userRole);
+        // If role is specified as 'owner', filter by properties owned by the user
+        if (role === 'owner') {
+            const properties = yield Property_1.Property.find({ ownerId: userId, companyId });
+            const propertyIds = properties.map((p) => p._id);
+            query.propertyId = { $in: propertyIds };
         }
-        // If user is authenticated, apply role-based filtering
-        if (userId) {
-            // If role is specified as 'owner', filter by properties owned by the user
-            if (role === 'owner') {
-                const properties = yield Property_1.Property.find({ ownerId: userId });
-                const propertyIds = properties.map((p) => p._id);
-                query.propertyId = { $in: propertyIds };
-            }
-            // If role is specified as 'tenant', filter by maintenance requests created by the user
-            else if (role === 'tenant') {
-                query.tenantId = userId;
-            }
-            // If no role specified, try to determine based on user's properties
-            else {
-                // Check if user owns any properties
-                const ownedProperties = yield Property_1.Property.find({ ownerId: userId });
-                if (ownedProperties.length > 0) {
-                    // User is a property owner, show maintenance requests for their properties
-                    const propertyIds = ownedProperties.map((p) => p._id);
-                    query.propertyId = { $in: propertyIds };
-                }
-                else {
-                    // User is likely a tenant, show their own maintenance requests
-                    query.tenantId = userId;
-                }
-            }
+        // If role is specified as 'tenant', filter by maintenance requests created by the user
+        else if (role === 'tenant') {
+            query.tenantId = userId;
+        }
+        else if (!canViewCompanyMaintenance) {
+            // Non-elevated users can only see records tied directly to them.
+            query.$or = [
+                { tenantId: userId },
+                { requestedBy: userId },
+                { ownerId: userId }
+            ];
         }
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find(query)
             .populate('tenantId', 'name email')

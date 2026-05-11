@@ -7,7 +7,6 @@ import {
   getMaintenanceRequestDetails, 
   deleteMaintenanceRequest, 
   getMaintenanceRequests,
-  getMaintenanceRequestsPublic,
   approveMaintenanceRequest,
   completeMaintenanceRequest
 } from '../controllers/maintenanceRequestController';
@@ -20,8 +19,9 @@ router.get('/test', (req, res) => {
   res.json({ message: 'Maintenance router is working' });
 });
 
-// Simple public route
-router.get('/public', getMaintenanceRequestsPublic);
+// Legacy public route now requires authentication; maintenance records contain
+// owner/tenant/property details and must be scoped by the authenticated user.
+router.get('/public', auth, getMaintenanceRequests);
 
 // Simple events route
 router.get('/public/events', (req, res) => {

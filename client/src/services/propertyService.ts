@@ -92,7 +92,7 @@ export const usePropertyService = () => {
         const onAccountantDashboard = typeof pathname === 'string' && pathname.includes('/accountant-dashboard');
         const roleForQuery = (activeRole as any) ?? (onAccountantDashboard ? ('accountant' as any) : (user?.role as any));
         if (roleForQuery) params.userRole = roleForQuery;
-        const response = await publicApi.get('/properties/public-filtered', { params });
+        const response = await api.get('/properties/public-filtered', { params });
         return Array.isArray(response.data) ? response.data : response.data.data;
       } catch (error: any) {
         console.error('Error fetching properties (public):', error);
@@ -121,7 +121,7 @@ export const usePropertyService = () => {
         if (params?.limit) query.limit = params.limit;
         if (params?.page) query.page = params.page;
         if (params?.fields) query.fields = params.fields;
-        const response = await publicApi.get('/properties/public-filtered', { params: query });
+        const response = await api.get('/properties/public-filtered', { params: query });
         return Array.isArray(response.data?.data) ? response.data.data : (Array.isArray(response.data) ? response.data : []);
       } catch (error: any) {
         console.error('Error searching properties (public):', error);
@@ -206,20 +206,13 @@ export const usePropertyService = () => {
 
     const createProperty = async (propertyData: Partial<Property>): Promise<Property> => {
       try {
-        const validatedUser = validateUserAndCompany(user);
+        validateUserAndCompany(user);
 
         if (!propertyData.name || !propertyData.address || !propertyData.type) {
           throw new Error('Name, address, and type are required');
         }
 
-        // Use public API with user context in query parameters
-        const response = await publicApi.post('/properties/public', propertyData, {
-          params: {
-            userId: validatedUser.userId,
-            companyId: validatedUser.companyId,
-            userRole: validatedUser.role
-          }
-        });
+        const response = await api.post('/properties/public', propertyData);
         console.log('Create Property Public API Response:', response.data);
 
         // Extract data from the response structure
@@ -358,7 +351,7 @@ export const usePropertyService = () => {
         console.log('propertyService: About to make API call to /properties/public-filtered');
         console.log('propertyService: Query params:', params.toString());
 
-        const response = await publicApi.get(`/properties/public-filtered?${params.toString()}`);
+        const response = await api.get(`/properties/public-filtered?${params.toString()}`);
         console.log('Properties for User API Response:', response.data);
 
         const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;

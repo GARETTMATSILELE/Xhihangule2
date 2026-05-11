@@ -4,9 +4,8 @@
 name: Build and deploy container app to Azure Web App - mantisafrica
 
 on:
-  push:
-    branches:
-      - main
+  # This Azure-generated workflow duplicates azure-deploy.yml.
+  # Keep it manual-only so it does not create a fourth CI/CD run on every push.
   workflow_dispatch:
 
 jobs:

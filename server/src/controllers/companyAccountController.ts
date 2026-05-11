@@ -4,9 +4,9 @@ import accountingIntegrationService from '../services/accountingIntegrationServi
 
 export const getCompanyAccountSummary = async (req: Request, res: Response) => {
   try {
-    const companyId = (req as any).user?.companyId || req.query.companyId;
+    const companyId = (req as any).user?.companyId;
     if (!companyId) {
-      return res.status(400).json({ message: 'companyId is required' });
+      return res.status(403).json({ message: 'Company context required' });
     }
     const account = await CompanyAccount.findOne({ companyId });
     if (!account) {
@@ -20,9 +20,9 @@ export const getCompanyAccountSummary = async (req: Request, res: Response) => {
 
 export const getCompanyTransactions = async (req: Request, res: Response) => {
   try {
-    const companyId = (req as any).user?.companyId || req.query.companyId;
+    const companyId = (req as any).user?.companyId;
     if (!companyId) {
-      return res.status(400).json({ message: 'companyId is required' });
+      return res.status(403).json({ message: 'Company context required' });
     }
     const account = await CompanyAccount.findOne({ companyId });
     const transactions = (account?.transactions || []).filter((t: any) => t?.isArchived !== true);

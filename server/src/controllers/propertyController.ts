@@ -107,20 +107,12 @@ async function syncValuationOnPropertySold(params: {
 // Public endpoint for getting properties with user-based filtering
 export const getPublicProperties = async (req: Request, res: Response) => {
   try {
-    const userContext = getUserContext(req);
+    const userContext = {
+      userId: req.user?.userId,
+      companyId: req.user?.companyId,
+      userRole: req.user?.role
+    };
     const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
-
-    // If no user context provided, return all properties (for admin dashboard)
-    if (!userContext.userId && !userContext.companyId) {
-      const allProperties = await Property.find(includeDeleted ? {} : { isDeleted: { $ne: true } })
-        .populate('ownerId', 'firstName lastName email')
-        .sort({ createdAt: -1 });
-
-      return res.json({
-        status: 'success',
-        data: allProperties
-      });
-    }
 
     // Validate user context
     if (!userContext.userId) {
@@ -146,7 +138,7 @@ export const getPublicProperties = async (req: Request, res: Response) => {
     
     // If user is not in a company-wide visibility role, only show their own properties
     const companyWideRoles = ['admin', 'accountant', 'principal', 'prea'];
-    if (!companyWideRoles.includes(userContext.userRole)) {
+    if (!companyWideRoles.includes(String(userContext.userRole || ''))) {
       query.ownerId = new mongoose.Types.ObjectId(userContext.userId);
     }
     

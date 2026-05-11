@@ -108,39 +108,39 @@ router.get('/properties/:id/tenants', propertyOwnerAuth, async (req, res) => {
   }
 });
 
-// Net income route for owners (public)
-router.get('/net-income', (req, res, next) => {
+// Net income route for owners
+router.get('/net-income', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: GET /net-income route hit');
   next();
 }, getOwnerNetIncome);
 
-// Maintenance request routes for owners (public)
-router.get('/maintenance-requests', (req, res, next) => {
+// Maintenance request routes for owners
+router.get('/maintenance-requests', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: GET /maintenance-requests route hit');
   next();
 }, getOwnerMaintenanceRequests);
 
-router.get('/maintenance-requests/:id', (req, res, next) => {
+router.get('/maintenance-requests/:id', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: GET /maintenance-requests/:id route hit');
   next();
 }, getOwnerMaintenanceRequestById);
 
-router.patch('/maintenance-requests/:id', (req, res, next) => {
+router.patch('/maintenance-requests/:id', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: PATCH /maintenance-requests/:id route hit');
   next();
 }, updateOwnerMaintenanceRequest);
 
-router.patch('/maintenance-requests/:id/approve', (req, res, next) => {
+router.patch('/maintenance-requests/:id/approve', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: PATCH /maintenance-requests/:id/approve route hit');
   next();
 }, approveOwnerMaintenanceRequest);
 
-router.patch('/maintenance-requests/:id/reject', (req, res, next) => {
+router.patch('/maintenance-requests/:id/reject', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: PATCH /maintenance-requests/:id/reject route hit');
   next();
 }, rejectOwnerMaintenanceRequest);
 
-router.post('/maintenance-requests/:id/messages', (req, res, next) => {
+router.post('/maintenance-requests/:id/messages', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: POST /maintenance-requests/:id/messages route hit');
   next();
 }, addOwnerMaintenanceMessage);

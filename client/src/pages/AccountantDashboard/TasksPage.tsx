@@ -483,6 +483,8 @@ const TasksPage: React.FC<TasksPageProps> = () => {
                 <iframe
                   title="Company Disbursement Report"
                   srcDoc={(request as any).reportHtml as any}
+                  sandbox=""
+                  referrerPolicy="no-referrer"
                   style={{ width: '100%', height: '100%', border: 'none' }}
                 />
               </Box>

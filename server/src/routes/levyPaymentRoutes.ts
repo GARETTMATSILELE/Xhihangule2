@@ -5,15 +5,15 @@ import { auth } from '../middleware/auth';
 const router = express.Router();
 
 router.post('/', auth, createLevyPayment);
-router.get('/', getLevyPayments);
-// Public receipt endpoint to mirror payments/public/:id/receipt
-router.get('/public/:id/receipt', getLevyReceiptPublic);
-router.get('/public/:id/receipt/download', getLevyReceiptDownload);
+router.get('/', auth, getLevyPayments);
+// Legacy public receipt endpoints now require authentication.
+router.get('/public/:id/receipt', auth, getLevyReceiptPublic);
+router.get('/public/:id/receipt/download', auth, getLevyReceiptDownload);
 // Authenticated receipt endpoints (JSON + HTML download)
 router.get('/:id/receipt', auth, getLevyReceiptPublic);
 router.get('/:id/receipt/download', auth, getLevyReceiptDownload);
 // Payout endpoints
 router.post('/:id/payout', auth, initiateLevyPayout);
-router.get('/public/:id/payout/ack', getLevyPayoutAcknowledgement);
+router.get('/public/:id/payout/ack', auth, getLevyPayoutAcknowledgement);
 
 export default router; 

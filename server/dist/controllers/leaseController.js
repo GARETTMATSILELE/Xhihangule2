@@ -337,21 +337,17 @@ class LeaseController {
             }
         });
     }
-    // Public endpoint for admin dashboard - no authentication required
+    // Legacy public endpoint for admin dashboard; now authenticated and company-scoped.
     getLeasesPublic(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             try {
-                console.log('Public leases request:', {
-                    query: req.query,
-                    headers: req.headers
-                });
-                // Get company ID from query params or headers (for admin dashboard)
-                const companyId = req.query.companyId || req.headers['x-company-id'];
-                let query = {};
-                // Filter by company ID if provided
-                if (companyId) {
-                    query.companyId = companyId;
+                const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+                if (!companyId) {
+                    res.status(401).json({ message: 'Authentication required' });
+                    return;
                 }
+                let query = { companyId };
                 // Additional filtering options
                 if (req.query.status) {
                     query.status = req.query.status;
@@ -362,9 +358,7 @@ class LeaseController {
                 if (req.query.tenantId) {
                     query.tenantId = req.query.tenantId;
                 }
-                console.log('Public leases query:', query);
                 const leases = yield this.leaseRepository.find(query);
-                console.log(`Found ${leases.length} leases`);
                 res.json({
                     status: 'success',
                     data: leases,
@@ -382,24 +376,18 @@ class LeaseController {
             }
         });
     }
-    // Public endpoint for getting a single lease by ID - no authentication required
+    // Legacy public endpoint for getting a single lease by ID.
     getLeaseByIdPublic(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             try {
                 const { id } = req.params;
-                const companyId = req.query.companyId || req.headers['x-company-id'];
-                console.log('Public lease by ID request:', {
-                    id,
-                    companyId,
-                    query: req.query,
-                    headers: req.headers
-                });
-                let query = { _id: id };
-                // Filter by company ID if provided
-                if (companyId) {
-                    query.companyId = companyId;
+                const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+                if (!companyId) {
+                    res.status(401).json({ message: 'Authentication required' });
+                    return;
                 }
-                console.log('Public lease by ID query:', query);
+                let query = { _id: id, companyId };
                 const lease = yield this.leaseRepository.findOne(query);
                 if (!lease) {
                     res.status(404).json({

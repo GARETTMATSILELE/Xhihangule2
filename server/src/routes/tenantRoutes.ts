@@ -13,8 +13,9 @@ import { Tenant } from '../models/Tenant';
 
 const router = express.Router();
 
-// Public endpoint for admin dashboard
-router.get('/public', getTenantsPublic);
+// Legacy public tenant endpoints now require company authentication because
+// tenant records contain PII and lease/payment context.
+router.get('/public', authWithCompany, getTenantsPublic);
 
 // MVP: Comprehensive public endpoints for all tenant operations (disabled in production)
 router.get('/public/all', async (req, res) => {
@@ -32,9 +33,9 @@ router.get('/public/all', async (req, res) => {
   }
 });
 
-router.get('/public/:id', async (req, res) => {
+router.get('/public/:id', authWithCompany, async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.id)
+    const tenant = await Tenant.findOne({ _id: req.params.id, companyId: req.user?.companyId })
       .select('firstName lastName email phone rentAmount leaseStartDate leaseEndDate status propertyId');
     if (!tenant) {
       return res.status(404).json({ message: 'Tenant not found' });

@@ -18,9 +18,9 @@ const accountingIntegrationService_1 = __importDefault(require("../services/acco
 const getCompanyAccountSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.query.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
-            return res.status(400).json({ message: 'companyId is required' });
+            return res.status(403).json({ message: 'Company context required' });
         }
         const account = yield CompanyAccount_1.CompanyAccount.findOne({ companyId });
         if (!account) {
@@ -36,9 +36,9 @@ exports.getCompanyAccountSummary = getCompanyAccountSummary;
 const getCompanyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.query.companyId;
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
-            return res.status(400).json({ message: 'companyId is required' });
+            return res.status(403).json({ message: 'Company context required' });
         }
         const account = yield CompanyAccount_1.CompanyAccount.findOne({ companyId });
         const transactions = ((account === null || account === void 0 ? void 0 : account.transactions) || []).filter((t) => (t === null || t === void 0 ? void 0 : t.isArchived) !== true);

@@ -32,8 +32,12 @@ function getCookieDomain(): string | undefined {
 // Signup with company details
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const allowPublicSignup = String(process.env.ALLOW_PUBLIC_SIGNUP || '').toLowerCase() === 'true';
+    if (process.env.NODE_ENV === 'production' && !allowPublicSignup) {
+      throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
+    }
+
     const { email, password, name, company, plan: inputPlan } = req.body;
-    console.log('Signup attempt with data:', { email, name, hasCompany: !!company });
 
     if (!email || !password || !name) {
       throw new AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
@@ -550,13 +554,10 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
 // Refresh token
 export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    console.log('Refresh token request received');
-    
     // Get refresh token from cookie
     const refreshToken = req.cookies?.refreshToken;
     
     if (!refreshToken) {
-      console.log('No refresh token found in cookies');
       throw new AppError('No refresh token available', 401);
     }
 
@@ -567,12 +568,8 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       throw new AppError('CSRF token missing or invalid', 403, 'CSRF_MISMATCH');
     }
 
-    console.log('Refresh token found, attempting to refresh...');
-    
     // Use auth service to refresh token
     const { token: newAccessToken, refreshToken: newRefreshToken } = await authService.refreshToken(refreshToken);
-
-    console.log('Token refresh successful');
 
     // Set new refresh token as HttpOnly cookie
     const cookieDomain = getCookieDomain();

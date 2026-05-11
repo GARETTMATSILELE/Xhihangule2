@@ -16,10 +16,13 @@ router.post('/logout', logout);
 
 // Test endpoint to verify authentication
 router.get('/test', (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ message: 'Not found' });
+  }
+
   res.json({ 
     message: 'Auth routes are working',
-    cookies: req.cookies,
-    headers: req.headers
+    authenticated: Boolean(req.cookies?.accessToken || req.headers.authorization)
   });
 });
 

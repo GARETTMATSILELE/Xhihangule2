@@ -16,8 +16,9 @@ import { Payment } from '../models/Payment';
 
 const router = express.Router();
 
-// Public endpoints (must come before protected routes)
-router.get('/public', getPaymentsPublic);
+// Legacy "public" payment endpoints now require authentication. Payment data is
+// financial data and must never be queryable by companyId alone.
+router.get('/public', authWithCompany, canManagePayments, getPaymentsPublic);
 
 // MVP: Comprehensive public endpoints for all payment operations (disabled in production)
 router.get('/public/all', async (req, res) => {
@@ -36,15 +37,15 @@ router.get('/public/all', async (req, res) => {
 });
 
 // Public endpoint for getting payment receipt (must come before /public/:id)
-router.get('/public/:id/receipt', getPaymentReceipt);
+router.get('/public/:id/receipt', authWithCompany, canManagePayments, getPaymentReceipt);
 
 // Public endpoint for downloading payment receipt as blob (must come before /public/:id)
-router.get('/public/:id/receipt/download', getPaymentReceiptDownload);
+router.get('/public/:id/receipt/download', authWithCompany, canManagePayments, getPaymentReceiptDownload);
 
-router.get('/public/:id', getPaymentByIdPublic);
+router.get('/public/:id', authWithCompany, canManagePayments, getPaymentByIdPublic);
 
 // Public endpoint for creating payments (for admin dashboard)
-router.post('/public', createPaymentPublic);
+router.post('/public', authWithCompany, canManagePayments, createPaymentPublic);
 
 // Create a new payment
 router.post('/', authWithCompany, canManagePayments, createPayment);

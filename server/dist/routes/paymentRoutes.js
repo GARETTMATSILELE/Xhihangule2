@@ -18,8 +18,9 @@ const roles_1 = require("../middleware/roles");
 const paymentController_1 = require("../controllers/paymentController");
 const Payment_1 = require("../models/Payment");
 const router = express_1.default.Router();
-// Public endpoints (must come before protected routes)
-router.get('/public', paymentController_1.getPaymentsPublic);
+// Legacy "public" payment endpoints now require authentication. Payment data is
+// financial data and must never be queryable by companyId alone.
+router.get('/public', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentsPublic);
 // MVP: Comprehensive public endpoints for all payment operations (disabled in production)
 router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (process.env.NODE_ENV === 'production') {
@@ -37,12 +38,12 @@ router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 }));
 // Public endpoint for getting payment receipt (must come before /public/:id)
-router.get('/public/:id/receipt', paymentController_1.getPaymentReceipt);
+router.get('/public/:id/receipt', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentReceipt);
 // Public endpoint for downloading payment receipt as blob (must come before /public/:id)
-router.get('/public/:id/receipt/download', paymentController_1.getPaymentReceiptDownload);
-router.get('/public/:id', paymentController_1.getPaymentByIdPublic);
+router.get('/public/:id/receipt/download', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentReceiptDownload);
+router.get('/public/:id', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.getPaymentByIdPublic);
 // Public endpoint for creating payments (for admin dashboard)
-router.post('/public', paymentController_1.createPaymentPublic);
+router.post('/public', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.createPaymentPublic);
 // Create a new payment
 router.post('/', auth_1.authWithCompany, roles_1.canManagePayments, paymentController_1.createPayment);
 // Get all payments for a company

@@ -10,7 +10,7 @@ const router = express_1.default.Router();
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: {
-        fileSize: 10 * 1024 * 1024 // 10MB per file
+        fileSize: 5 * 1024 * 1024 // 5MB per file
     },
     fileFilter: (_req, file, cb) => {
         const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
@@ -22,8 +22,8 @@ const upload = (0, multer_1.default)({
     }
 });
 router.post('/', auth_1.auth, upload.fields([
-    { name: 'files', maxCount: 10 },
-    { name: 'file', maxCount: 10 }
+    { name: 'files', maxCount: 5 },
+    { name: 'file', maxCount: 5 }
 ]), (req, res) => {
     const uploadedFiles = (req.files || {});
     const files = [...(uploadedFiles.files || []), ...(uploadedFiles.file || [])];

@@ -1,4 +1,5 @@
 import express from 'express';
+import { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import {
   getCompanies,
@@ -13,6 +14,12 @@ import {
 import { auth, authWithCompany } from '../middleware/auth';
 
 const router = express.Router();
+
+const asyncRoute = (
+  handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown
+) => (req: Request, res: Response, next: NextFunction) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
 // Configure multer for file uploads
 const upload = multer({
@@ -32,22 +39,22 @@ const upload = multer({
 
 // Protected routes
 // Allow fetching current company even if none exists (returns 404 inside controller)
-router.get('/current', auth, getCurrentCompany);
-router.put('/current', authWithCompany, updateCurrentCompany);
+router.get('/current', auth, asyncRoute(getCurrentCompany));
+router.put('/current', authWithCompany, asyncRoute(updateCurrentCompany));
 // Admin: change plan directly by company id (can be restricted later)
-router.put('/:id/plan', authWithCompany, updateCompany);
+router.put('/:id/plan', authWithCompany, asyncRoute(updateCompany));
 
 // Public routes
-router.get('/', getCompanies);
-router.get('/:id', getCompany);
+router.get('/', asyncRoute(getCompanies));
+router.get('/:id', asyncRoute(getCompany));
 
 // Protected routes
 // Allow creating a company even if user has no company yet
-router.post('/', auth, createCompany);
-router.put('/:id', authWithCompany, updateCompany);
-router.delete('/:id', authWithCompany, deleteCompany);
+router.post('/', auth, asyncRoute(createCompany));
+router.put('/:id', authWithCompany, asyncRoute(updateCompany));
+router.delete('/:id', authWithCompany, asyncRoute(deleteCompany));
 
 // Logo upload route
-router.post('/:id/logo', authWithCompany, upload.single('logo'), uploadCompanyLogo);
+router.post('/:id/logo', authWithCompany, upload.single('logo'), asyncRoute(uploadCompanyLogo));
 
-export default router; 
+export default router;

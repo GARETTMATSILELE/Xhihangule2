@@ -330,15 +330,16 @@ const deleteTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.deleteTenant = deleteTenant;
-// Public endpoint for admin dashboard - no authentication required
+// Legacy public endpoint for admin dashboard. Route-level middleware now
+// requires authentication; always scope to the authenticated company.
 const getTenantsPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        // Get company ID from query params or headers (for admin dashboard)
-        const companyId = req.query.companyId || req.headers['x-company-id'];
-        let query = {};
-        if (companyId) {
-            query = { companyId: new mongoose_1.default.Types.ObjectId(companyId) };
+        const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        if (!companyId) {
+            return res.status(401).json({ message: 'Authentication required' });
         }
+        const query = { companyId: new mongoose_1.default.Types.ObjectId(companyId) };
         const tenants = yield Tenant_1.Tenant.find(query).sort({ createdAt: -1 });
         res.json({ tenants });
     }

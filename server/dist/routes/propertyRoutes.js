@@ -69,10 +69,10 @@ router.get('/public', (req, res) => __awaiter(void 0, void 0, void 0, function* 
         res.status(500).json({ message: 'Error fetching properties' });
     }
 }));
-// Public property creation endpoint (no auth required)
-router.post('/public', propertyController_1.createPropertyPublic);
-// New public endpoint with user-based filtering (no auth required)
-router.get('/public-filtered', propertyController_1.getPublicProperties);
+// Legacy public creation endpoint now requires authenticated company context.
+router.post('/public', auth_1.authWithCompany, roles_1.canCreateProperty, limits_1.enforcePropertyLimit, propertyController_1.createProperty);
+// Legacy public-filtered endpoint now requires authenticated company context.
+router.get('/public-filtered', auth_1.authWithCompany, propertyController_1.getPublicProperties);
 // MVP: Comprehensive public endpoints for all property operations (disabled in production)
 router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (process.env.NODE_ENV === 'production') {

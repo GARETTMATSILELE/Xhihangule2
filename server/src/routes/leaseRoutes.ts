@@ -5,9 +5,10 @@ import { auth } from '../middleware/auth';
 const router = express.Router();
 const leaseController = LeaseController.getInstance();
 
-// Public endpoints (must come before protected routes)
-router.get('/public', leaseController.getLeasesPublic.bind(leaseController) as RequestHandler);
-router.get('/public/:id', leaseController.getLeaseByIdPublic.bind(leaseController) as RequestHandler);
+// Legacy public endpoints now require authentication because leases contain
+// tenant and financial information.
+router.get('/public', auth, leaseController.getLeasesPublic.bind(leaseController) as RequestHandler);
+router.get('/public/:id', auth, leaseController.getLeaseByIdPublic.bind(leaseController) as RequestHandler);
 
 // Protected routes - require authentication
 router.use(auth);

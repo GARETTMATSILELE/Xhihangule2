@@ -7,7 +7,7 @@ const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB per file
+    fileSize: 5 * 1024 * 1024 // 5MB per file
   },
   fileFilter: (_req, file, cb) => {
     const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
@@ -23,8 +23,8 @@ router.post(
   '/',
   auth,
   upload.fields([
-    { name: 'files', maxCount: 10 },
-    { name: 'file', maxCount: 10 }
+    { name: 'files', maxCount: 5 },
+    { name: 'file', maxCount: 5 }
   ]),
   (req, res) => {
     const uploadedFiles = (req.files || {}) as Record<string, Express.Multer.File[]>;

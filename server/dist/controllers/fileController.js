@@ -47,11 +47,6 @@ exports.getFiles = getFiles;
 const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        console.log('Upload request received:', {
-            file: req.file,
-            body: req.body,
-            user: req.user
-        });
         if (!req.file) {
             return res.status(400).json({ message: 'No file uploaded' });
         }
@@ -102,8 +97,12 @@ const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.uploadFile = uploadFile;
 // Download a file
 const downloadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const file = yield File_1.default.findById(req.params.id);
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        const file = yield File_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
         if (!file) {
             return res.status(404).json({ message: 'File not found' });
         }
@@ -121,8 +120,12 @@ const downloadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.downloadFile = downloadFile;
 // Delete a file
 const deleteFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const file = yield File_1.default.findById(req.params.id);
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+        const file = yield File_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
         if (!file) {
             return res.status(404).json({ message: 'File not found' });
         }

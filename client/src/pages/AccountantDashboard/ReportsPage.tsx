@@ -14,6 +14,16 @@ function currency(amount: number) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(amount);
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char] || char));
+}
+
 type StatementRow = { date: string; property: string; reference: string; amount: number };
 type PartyStatement = { id: string; name: string; total: number; count: number; payments: StatementRow[] };
 type TenantMonthItem = { period: string; expected: number; paid: number; outstanding: number; rows: StatementRow[] };
@@ -479,18 +489,18 @@ const ReportsPage: React.FC = () => {
             </style>
           </head>
           <body>
-            <div class="brand">${(companySummary as any)?.companyName || 'Company'}</div>
+            <div class="brand">${escapeHtml((companySummary as any)?.companyName || 'Company')}</div>
             <h1>Disbursement Report</h1>
-            <div class="muted">Reference: ${t.referenceNumber || t.id} • Date: ${t.date} • Currency: ${t.currencyCode || 'USD'}</div>
+            <div class="muted">Reference: ${escapeHtml(t.referenceNumber || t.id)} • Date: ${escapeHtml(t.date)} • Currency: ${escapeHtml(t.currencyCode || 'USD')}</div>
 
             <div class="grid">
               <div>
                 <h2>Property & Parties</h2>
                 <table>
-                  <tr><td>Property</td><td>${(t.propertyAddress || '').toString()}</td></tr>
-                  <tr><td>Buyer</td><td>${(t.buyer || '-').toString()}</td></tr>
-                  <tr><td>Seller</td><td>${(t.seller || '-').toString()}</td></tr>
-                  <tr><td>Agent</td><td>${(t.primaryAgentName || '-').toString()}</td></tr>
+                  <tr><td>Property</td><td>${escapeHtml(t.propertyAddress || '')}</td></tr>
+                  <tr><td>Buyer</td><td>${escapeHtml(t.buyer || '-')}</td></tr>
+                  <tr><td>Seller</td><td>${escapeHtml(t.seller || '-')}</td></tr>
+                  <tr><td>Agent</td><td>${escapeHtml(t.primaryAgentName || '-')}</td></tr>
                 </table>
               </div>
               <div>
@@ -503,7 +513,7 @@ const ReportsPage: React.FC = () => {
                   <tr><td>Total Commission</td><td class="right">${currency(t.totalCommission)}</td></tr>
                   <tr><td>Prea Fee</td><td class="right">${currency(t.preafee)}</td></tr>
                   <tr><td>Net Commission (after Prea)</td><td class="right">${currency(Math.max(0, (t.totalCommission || 0) - (t.preafee || 0)))}</td></tr>
-                  <tr><td>Payment Method</td><td class="right">${(t.paymentMethod || '-').toString()}</td></tr>
+                  <tr><td>Payment Method</td><td class="right">${escapeHtml(t.paymentMethod || '-')}</td></tr>
                 </table>
               </div>
             </div>
@@ -516,8 +526,8 @@ const ReportsPage: React.FC = () => {
                 </thead>
                 <tbody>
                   <tr><td>Agent Share${t.hasSplit ? ' (Total)' : ''}</td><td class="right">${currency(t.agentShare)}</td></tr>
-                  ${t.hasSplit ? `<tr><td>• Owner Agent (${t.splitOwnerPct || 0}%${t.ownerAgentName ? ', ' + t.ownerAgentName : ''})</td><td class=\"right\">${currency(t.ownerAgentShare)}</td></tr>` : ''}
-                  ${t.hasSplit ? `<tr><td>• Collaborator Agent (${t.splitCollabPct || 0}%${t.collaboratorAgentName ? ', ' + t.collaboratorAgentName : ''})</td><td class=\"right\">${currency(t.collaboratorAgentShare)}</td></tr>` : ''}
+                  ${t.hasSplit ? `<tr><td>Owner Agent (${t.splitOwnerPct || 0}%${t.ownerAgentName ? ', ' + escapeHtml(t.ownerAgentName) : ''})</td><td class=\"right\">${currency(t.ownerAgentShare)}</td></tr>` : ''}
+                  ${t.hasSplit ? `<tr><td>Collaborator Agent (${t.splitCollabPct || 0}%${t.collaboratorAgentName ? ', ' + escapeHtml(t.collaboratorAgentName) : ''})</td><td class=\"right\">${currency(t.collaboratorAgentShare)}</td></tr>` : ''}
                   <tr><td>Agency Share</td><td class="right">${currency(t.agencyShare)}</td></tr>
                 </tbody>
               </table>
@@ -531,8 +541,6 @@ const ReportsPage: React.FC = () => {
                 <tr class="total"><td>Seller Amount (after VAT on commission)</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
               </table>
             </div>
-
-            <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 300); };</script>
           </body>
         </html>`;
       const iframe = document.createElement('iframe') as HTMLIFrameElement;

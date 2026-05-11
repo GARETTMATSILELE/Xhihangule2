@@ -3,9 +3,9 @@ import Company from '../models/Company';
 
 export const getFiscalHealth = async (req: Request, res: Response) => {
   try {
-    const companyId = (req.query.companyId as string) || '';
+    const companyId = req.user?.companyId || '';
     if (!companyId) {
-      return res.status(400).json({ status: 'error', message: 'companyId is required' });
+      return res.status(403).json({ status: 'error', message: 'Company context required' });
     }
 
     const company = await Company.findById(companyId);

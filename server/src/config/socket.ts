@@ -8,9 +8,11 @@ config();
 
 // Define types for socket data
 interface SocketUser {
-  id: string;
+  id?: string;
+  userId?: string;
   email: string;
   role?: string;
+  companyId?: string;
 }
 
 interface SocketData {
@@ -52,8 +54,15 @@ export const initializeSocket = (httpServer: HttpServer) => {
     }
 
     try {
-      const decoded = jwt.verify(token, JWT_CONFIG.SECRET) as SocketUser;
-      (socket as CustomSocket).data = { user: decoded };
+      const decoded = jwt.verify(token, JWT_CONFIG.SECRET, {
+        issuer: JWT_CONFIG.ISSUER,
+        audience: JWT_CONFIG.AUDIENCE
+      }) as SocketUser;
+      const userId = decoded.userId || decoded.id;
+      if (!userId) {
+        return next(new Error('Authentication error: Invalid token payload'));
+      }
+      (socket as CustomSocket).data = { user: { ...decoded, id: userId } };
       next();
     } catch (err) {
       next(new Error('Authentication error: Invalid token'));

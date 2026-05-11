@@ -17,10 +17,13 @@ router.post('/reset-password', authController_1.resetPassword);
 router.post('/logout', authController_1.logout);
 // Test endpoint to verify authentication
 router.get('/test', (req, res) => {
+    var _a;
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(404).json({ message: 'Not found' });
+    }
     res.json({
         message: 'Auth routes are working',
-        cookies: req.cookies,
-        headers: req.headers
+        authenticated: Boolean(((_a = req.cookies) === null || _a === void 0 ? void 0 : _a.accessToken) || req.headers.authorization)
     });
 });
 // Protected routes
