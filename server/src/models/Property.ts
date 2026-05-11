@@ -46,6 +46,9 @@ export interface IProperty extends Document {
   commissionAgentPercentRemaining?: number;
   // Sale-specific
   saleType?: 'cash' | 'installment';
+  isDeleted?: boolean;
+  deletedAt?: Date | null;
+  deletedBy?: mongoose.Types.ObjectId | null;
 }
 
 const PropertySchema: Schema = new Schema({
@@ -236,6 +239,20 @@ const PropertySchema: Schema = new Schema({
     type: String,
     enum: ['cash', 'installment'],
     required: false
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+  deletedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
   }
 }, {
   timestamps: true

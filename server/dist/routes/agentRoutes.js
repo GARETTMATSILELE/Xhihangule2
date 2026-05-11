@@ -46,6 +46,8 @@ router.get('/properties', (req, res) => {
 });
 router.post('/properties', limits_1.enforcePropertyLimit, agentController_1.createAgentProperty);
 router.put('/properties/:id', agentController_1.updateAgentProperty);
+router.delete('/properties/:id', agentController_1.deleteAgentProperty);
+router.put('/properties/:id/restore', agentController_1.restoreAgentProperty);
 router.get('/tenants', agentController_1.getAgentTenants);
 router.post('/tenants', agentController_1.createAgentTenant);
 router.get('/leases', agentController_1.getAgentLeases);

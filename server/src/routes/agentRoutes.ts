@@ -22,7 +22,9 @@ import {
   createAgentPropertyOwner,
   updateAgentPropertyOwner,
   deleteAgentPropertyOwner,
-  updateAgentProperty
+  updateAgentProperty,
+  deleteAgentProperty,
+  restoreAgentProperty
 } from '../controllers/agentController';
 
 const router = express.Router();
@@ -65,6 +67,8 @@ router.get('/properties', (req, res) => {
 });
 router.post('/properties', enforcePropertyLimit, createAgentProperty);
 router.put('/properties/:id', updateAgentProperty);
+router.delete('/properties/:id', deleteAgentProperty);
+router.put('/properties/:id/restore', restoreAgentProperty);
 router.get('/tenants', getAgentTenants);
 router.post('/tenants', createAgentTenant);
 router.get('/leases', getAgentLeases);

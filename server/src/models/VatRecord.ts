@@ -9,7 +9,7 @@ export interface IVatRecord extends Document {
   vatPaid: number;
   vatRate: number;
   filingPeriod: string;
-  status: 'pending' | 'submitted';
+  status: 'pending' | 'submitted' | 'reversed';
   createdAt: Date;
 }
 
@@ -22,7 +22,7 @@ const VatRecordSchema = new Schema<IVatRecord>(
     vatPaid: { type: Number, default: 0, min: 0 },
     vatRate: { type: Number, default: 0, min: 0 },
     filingPeriod: { type: String, required: true },
-    status: { type: String, enum: ['pending', 'submitted'], default: 'pending' }
+    status: { type: String, enum: ['pending', 'submitted', 'reversed'], default: 'pending' }
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: false } }
 );

@@ -63,7 +63,7 @@ export interface MaintenanceRequest {
   priority: 'low' | 'medium' | 'high' | 'urgent';
   status?: string;
   estimatedCost?: number;
-  attachments?: string[];
+  attachments?: MaintenanceAttachment[];
   messages?: any[];
   ownerApprovalStatus: 'pending' | 'approved' | 'rejected';
   category: MaintenanceCategory;

@@ -22,8 +22,10 @@ const TrustAccountPropertyReportPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<any>(null);
   const [ledgerRows, setLedgerRows] = useState<any[]>([]);
+  const [buyerPayments, setBuyerPayments] = useState<any[]>([]);
   const [taxSummary, setTaxSummary] = useState<any>(null);
   const [partyNames, setPartyNames] = useState<{ buyer?: string; seller?: string } | null>(null);
+  const [propertySummary, setPropertySummary] = useState<{ purchasePrice?: number } | null>(null);
   const [auditRows, setAuditRows] = useState<any[]>([]);
   const [settlement, setSettlement] = useState<any>(null);
   const [manualCgtAmount, setManualCgtAmount] = useState<string>('');
@@ -82,8 +84,10 @@ const TrustAccountPropertyReportPage: React.FC = () => {
           status: trustAccount?.status || (data?.settlement?.locked ? 'SETTLED' : 'OPEN')
         });
         setLedgerRows(ledger);
+        setBuyerPayments(Array.isArray(data?.buyerPayments) ? data.buyerPayments : []);
         setTaxSummary(data?.taxSummary || null);
         setPartyNames(data?.partyNames || null);
+        setPropertySummary(data?.propertySummary || null);
         setAuditRows(Array.isArray(data?.auditLogs) ? data.auditLogs : []);
         setSettlement(data?.settlement || null);
       } catch (e: any) {
@@ -156,6 +160,8 @@ const TrustAccountPropertyReportPage: React.FC = () => {
       setTaxSummary(refreshed?.taxSummary || null);
       setPartyNames(refreshed?.partyNames || null);
       setLedgerRows(Array.isArray(refreshed?.ledger) ? refreshed.ledger : []);
+      setBuyerPayments(Array.isArray(refreshed?.buyerPayments) ? refreshed.buyerPayments : []);
+      setPropertySummary(refreshed?.propertySummary || null);
       setAuditRows(Array.isArray(refreshed?.auditLogs) ? refreshed.auditLogs : []);
     } catch (e: any) {
       setError(e?.message || 'Failed to calculate settlement');
@@ -173,6 +179,8 @@ const TrustAccountPropertyReportPage: React.FC = () => {
       setTaxSummary(refreshed?.taxSummary || null);
       setPartyNames(refreshed?.partyNames || null);
       setLedgerRows(Array.isArray(refreshed?.ledger) ? refreshed.ledger : []);
+      setBuyerPayments(Array.isArray(refreshed?.buyerPayments) ? refreshed.buyerPayments : []);
+      setPropertySummary(refreshed?.propertySummary || null);
       setAuditRows(Array.isArray(refreshed?.auditLogs) ? refreshed.auditLogs : []);
     } catch (e: any) {
       setError(e?.message || 'Failed to apply taxes');
@@ -189,6 +197,7 @@ const TrustAccountPropertyReportPage: React.FC = () => {
       const refreshed = await trustAccountService.getFullByProperty(propertyId);
       setSettlement(refreshed?.settlement || null);
       setPartyNames(refreshed?.partyNames || null);
+      setPropertySummary(refreshed?.propertySummary || null);
       setAuditRows(Array.isArray(refreshed?.auditLogs) ? refreshed.auditLogs : []);
       setSummary((prev: any) => ({ ...(prev || {}), status: 'CLOSED' }));
     } catch (e: any) {
@@ -199,7 +208,7 @@ const TrustAccountPropertyReportPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="w-full p-6">
       <div className="flex items-center justify-between mb-6">
         <button
           type="button"
@@ -270,10 +279,16 @@ const TrustAccountPropertyReportPage: React.FC = () => {
             status={summary?.status || 'OPEN'}
           />
 
-          <BuyerLedgerTable rows={ledgerRows as any} />
+          <BuyerLedgerTable
+            rows={ledgerRows as any}
+            buyerPayments={buyerPayments as any}
+            buyerName={partyNames?.buyer || routeState.buyer || ''}
+            sellerName={partyNames?.seller || routeState.seller || ''}
+            purchasePrice={Number(propertySummary?.purchasePrice || summary?.grossProceeds || 0)}
+          />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <SellerSettlementPanel settlement={settlement} />
+            <SellerSettlementPanel settlement={settlement} ledgerRows={ledgerRows as any} />
             <TaxSummaryPanel summary={taxSummary} />
           </div>
 

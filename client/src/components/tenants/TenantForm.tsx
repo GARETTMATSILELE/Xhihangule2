@@ -45,7 +45,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
   const [loadingProperties, setLoadingProperties] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const [formData, setFormData] = React.useState<TenantFormData>(() => ({
+  const getInitialFormData = React.useCallback((): TenantFormData => ({
     firstName: initialData?.firstName || '',
     lastName: initialData?.lastName || '',
     email: initialData?.email || '',
@@ -56,29 +56,24 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     idNumber: initialData?.idNumber || '',
     emergencyContact: initialData?.emergencyContact || '',
     companyId: company?._id || ''
-  }));
+  }), [initialData, company?._id]);
+
+  const [formData, setFormData] = React.useState<TenantFormData>(getInitialFormData);
 
   const [useMultipleProperties, setUseMultipleProperties] = React.useState<boolean>(
     Array.isArray(initialData?.propertyIds) && (initialData?.propertyIds || []).length > 0
   );
 
-  // Sync form state when initialData changes (e.g., when editing a tenant)
+  // Sync form state when the dialog opens so consecutive adds start clean.
   useEffect(() => {
-    setFormData(prev => ({
-      ...prev,
-      firstName: initialData?.firstName || '',
-      lastName: initialData?.lastName || '',
-      email: initialData?.email || '',
-      phone: initialData?.phone || '',
-      status: initialData?.status || 'Active',
-      propertyId: initialData?.propertyId || '',
-      propertyIds: initialData?.propertyIds || [],
-      idNumber: initialData?.idNumber || '',
-      emergencyContact: initialData?.emergencyContact || '',
-      companyId: company?._id || ''
-    }));
-    setUseMultipleProperties(Array.isArray(initialData?.propertyIds) && (initialData?.propertyIds || []).length > 0);
-  }, [initialData]);
+    if (!open) return;
+
+    setFormData(getInitialFormData());
+    setUseMultipleProperties(
+      Array.isArray(initialData?.propertyIds) && (initialData?.propertyIds || []).length > 0
+    );
+    setError(null);
+  }, [open, getInitialFormData, initialData?.propertyIds]);
 
   // Fetch vacant properties when the form opens
   useEffect(() => {

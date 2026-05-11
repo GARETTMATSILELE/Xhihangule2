@@ -121,4 +121,5 @@ router.post('/sales', auth_1.authWithCompany, propertyController_1.createSalesPr
 router.put('/sales/:id', auth_1.authWithCompany, propertyController_1.updateProperty);
 router.put('/:id', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.updateProperty);
 router.delete('/:id', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.deleteProperty);
+router.put('/:id/restore', auth_1.authWithCompany, roles_1.isAdmin, propertyController_1.restoreProperty);
 exports.default = router;

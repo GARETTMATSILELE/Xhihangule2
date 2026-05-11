@@ -359,20 +359,6 @@ const RevenuePage: React.FC = () => {
             </Card>
           </Grid>
         ))}
-        {/* VAT management shortcut */}
-        <Grid item xs={12} sm={6} md={4} key="VAT Management">
-          <Card
-            sx={{ cursor: 'pointer', bgcolor: 'warning.main', color: '#1a1a1a' }}
-            onClick={() => navigate('/accountant-dashboard/vat')}
-          >
-            <CardContent>
-              <Typography variant="subtitle2" sx={{ opacity: 0.9, fontWeight: 600 }}>VAT Management</Typography>
-              <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                {`$${Number(totalVatCollected || 0).toLocaleString()}`}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
       </Grid>
 
       <Grid container spacing={3} sx={{ mt: 1 }}>

@@ -28,6 +28,17 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
   }
 };
 
+export const getDashboardOutstanding = async (req: Request, res: Response) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) return res.status(400).json({ message: 'companyId is required' });
+    const breakdown = await accountingService.getDashboardOutstanding(companyId);
+    return res.json(breakdown);
+  } catch (error: any) {
+    return res.status(500).json({ message: error?.message || 'Failed to fetch outstanding dashboard data' });
+  }
+};
+
 export const getRevenueTrend = async (req: Request, res: Response) => {
   try {
     const companyId = getCompanyId(req);
@@ -58,8 +69,8 @@ export const getVatStatus = async (req: Request, res: Response) => {
     if (!companyId) return res.status(400).json({ message: 'companyId is required' });
     const filingPeriod = typeof req.query.filingPeriod === 'string' ? req.query.filingPeriod : undefined;
     const status =
-      req.query.status === 'pending' || req.query.status === 'submitted'
-        ? (req.query.status as 'pending' | 'submitted')
+      req.query.status === 'pending' || req.query.status === 'submitted' || req.query.status === 'reversed'
+        ? (req.query.status as 'pending' | 'submitted' | 'reversed')
         : undefined;
     const rows = await accountingService.getVatStatus(companyId, { filingPeriod, status });
     return res.json({ data: rows });
@@ -74,8 +85,8 @@ export const exportVatReport = async (req: Request, res: Response) => {
     if (!companyId) return res.status(400).json({ message: 'companyId is required' });
     const filingPeriod = typeof req.query.filingPeriod === 'string' ? req.query.filingPeriod : undefined;
     const status =
-      req.query.status === 'pending' || req.query.status === 'submitted'
-        ? (req.query.status as 'pending' | 'submitted')
+      req.query.status === 'pending' || req.query.status === 'submitted' || req.query.status === 'reversed'
+        ? (req.query.status as 'pending' | 'submitted' | 'reversed')
         : undefined;
     const format = String(req.query.format || 'csv').toLowerCase();
     const rows = await accountingService.getVatStatus(companyId, { filingPeriod, status });

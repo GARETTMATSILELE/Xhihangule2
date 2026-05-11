@@ -75,6 +75,8 @@ const ensureCompany = (req, res) => {
     return companyId;
 };
 const getPaymentPartyNames = (companyId, propertyId) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!propertyId)
+        return { buyer: '', seller: '' };
     const payments = yield Payment_1.Payment.find({
         companyId,
         propertyId,
@@ -90,6 +92,31 @@ const getPaymentPartyNames = (companyId, propertyId) => __awaiter(void 0, void 0
     const buyer = payments.map((p) => String((p === null || p === void 0 ? void 0 : p.buyerName) || '').trim()).find((name) => name.length > 0) || '';
     const seller = payments.map((p) => String((p === null || p === void 0 ? void 0 : p.sellerName) || '').trim()).find((name) => name.length > 0) || '';
     return { buyer, seller };
+});
+const getPropertyBuyerPayments = (companyId, propertyId) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!propertyId)
+        return [];
+    const payments = yield Payment_1.Payment.find({
+        companyId,
+        propertyId,
+        paymentType: 'sale',
+        status: 'completed',
+        isProvisional: { $ne: true },
+        isInSuspense: { $ne: true },
+        reversalOfPaymentId: { $exists: false },
+        isCorrectionEntry: { $ne: true }
+    })
+        .sort({ paymentDate: 1, createdAt: 1, _id: 1 })
+        .select('_id amount paymentDate createdAt referenceNumber buyerName sellerName')
+        .lean();
+    return payments.map((payment) => ({
+        paymentId: String((payment === null || payment === void 0 ? void 0 : payment._id) || ''),
+        amount: Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0),
+        paymentDate: new Date((payment === null || payment === void 0 ? void 0 : payment.paymentDate) || (payment === null || payment === void 0 ? void 0 : payment.createdAt) || Date.now()).toISOString(),
+        referenceNumber: String((payment === null || payment === void 0 ? void 0 : payment.referenceNumber) || '').trim() || undefined,
+        buyerName: String((payment === null || payment === void 0 ? void 0 : payment.buyerName) || '').trim() || undefined,
+        sellerName: String((payment === null || payment === void 0 ? void 0 : payment.sellerName) || '').trim() || undefined
+    }));
 });
 const filterOutReversedLedgerRows = (companyId, ledgerRows) => __awaiter(void 0, void 0, void 0, function* () {
     if (!Array.isArray(ledgerRows) || ledgerRows.length === 0)
@@ -115,6 +142,37 @@ const filterOutReversedLedgerRows = (companyId, ledgerRows) => __awaiter(void 0,
         return ledgerRows;
     return ledgerRows.filter((row) => !hiddenPaymentIds.has(String((row === null || row === void 0 ? void 0 : row.paymentId) || '')));
 });
+const toIsoDate = (value) => {
+    const parsed = new Date(String(value || ''));
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+};
+const toIdString = (value) => {
+    if (!value)
+        return '';
+    if (typeof value === 'string')
+        return value;
+    if (typeof value === 'object' && (value === null || value === void 0 ? void 0 : value._id)) {
+        return String(value._id);
+    }
+    if (typeof (value === null || value === void 0 ? void 0 : value.toString) === 'function') {
+        const converted = String(value.toString());
+        return converted === '[object Object]' ? '' : converted;
+    }
+    return '';
+};
+const readableTrustTxType = (rawType) => {
+    const type = String(rawType || '').toUpperCase();
+    const map = {
+        BUYER_PAYMENT: 'Buyer Payment',
+        CGT_DEDUCTION: 'CGT Deduction',
+        COMMISSION_DEDUCTION: 'Commission Deduction',
+        VAT_DEDUCTION: 'VAT Deduction',
+        VAT_ON_COMMISSION: 'VAT on Commission',
+        TRANSFER_TO_SELLER: 'Transfer to Seller',
+        REFUND: 'Refund'
+    };
+    return map[type] || String(rawType || '');
+};
 const listTrustAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companyId = ensureCompany(req, res);
@@ -228,13 +286,14 @@ const calculateSettlement = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!companyId)
             return;
         const trustAccountId = String(req.params.id || '');
-        const { salePrice, commissionAmount, applyVatOnSale, cgtRate, cgtAmount, vatSaleRate, vatOnCommissionRate } = req.body || {};
+        const { salePrice, commissionAmount, applyVatOnSale, applyVatOnCommission, cgtRate, cgtAmount, vatSaleRate, vatOnCommissionRate } = req.body || {};
         const data = yield trustAccountService_1.default.calculateSettlement({
             companyId,
             trustAccountId,
             salePrice: salePrice != null ? Number(salePrice) : undefined,
             commissionAmount: commissionAmount != null ? Number(commissionAmount) : undefined,
             applyVatOnSale: Boolean(applyVatOnSale),
+            applyVatOnCommission: applyVatOnCommission != null ? Boolean(applyVatOnCommission) : undefined,
             cgtRate: cgtRate != null ? Number(cgtRate) : undefined,
             cgtAmount: cgtAmount != null ? Number(cgtAmount) : undefined,
             vatSaleRate: vatSaleRate != null ? Number(vatSaleRate) : undefined,
@@ -426,12 +485,23 @@ const getTrustAccountFull = (req, res) => __awaiter(void 0, void 0, void 0, func
             trustAccountService_1.default.getReconciliation(companyId, trustAccountId),
             TrustSettlement_1.TrustSettlement.findOne({ companyId, trustAccountId }).lean()
         ]);
+        const propertyId = String((refreshedAccount === null || refreshedAccount === void 0 ? void 0 : refreshedAccount.propertyId) || account.propertyId || '');
+        const [partyNames, buyerPayments, property] = yield Promise.all([
+            getPaymentPartyNames(companyId, propertyId),
+            getPropertyBuyerPayments(companyId, propertyId),
+            propertyId ? Property_1.Property.findById(propertyId).select('price').lean() : Promise.resolve(null)
+        ]);
         const filteredLedgerRows = yield filterOutReversedLedgerRows(companyId, ledger.items || []);
-        const partyNames = yield getPaymentPartyNames(companyId, String((refreshedAccount === null || refreshedAccount === void 0 ? void 0 : refreshedAccount.propertyId) || account.propertyId || ''));
         return res.json({
             data: {
                 trustAccount: refreshedAccount || account,
+                propertySummary: {
+                    purchasePrice: Number((property === null || property === void 0 ? void 0 : property.price) || 0) > 0
+                        ? Number((property === null || property === void 0 ? void 0 : property.price) || 0)
+                        : Number((refreshedAccount === null || refreshedAccount === void 0 ? void 0 : refreshedAccount.purchasePrice) || (account === null || account === void 0 ? void 0 : account.purchasePrice) || 0)
+                },
                 ledger: filteredLedgerRows,
+                buyerPayments,
                 taxSummary,
                 auditLogs,
                 reconciliation,
@@ -463,41 +533,97 @@ const getTrustAccountByPropertyFull = (req, res) => __awaiter(void 0, void 0, vo
 });
 exports.getTrustAccountByPropertyFull = getTrustAccountByPropertyFull;
 const generateTrustReport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
         const companyId = ensureCompany(req, res);
         if (!companyId)
             return;
         const trustAccountId = String(req.params.id || '');
         const reportType = String(req.params.reportType || '').toLowerCase() || 'buyer-statement';
-        const account = yield trustAccountService_1.default.listTrustAccounts(companyId, { page: 1, limit: 200 });
-        const trust = account.items.find((r) => String(r._id) === trustAccountId);
+        const trust = yield trustAccountService_1.default.getById(companyId, trustAccountId);
         if (!trust)
             return res.status(404).json({ message: 'Trust account not found' });
-        const [ledger, taxSummary, auditLogs, reconciliation, settlement, property] = yield Promise.all([
+        const propertyId = toIdString(trust === null || trust === void 0 ? void 0 : trust.propertyId);
+        const [ledger, taxSummary, auditLogs, reconciliation, settlement, property, buyerPayments, partyNames] = yield Promise.all([
             trustAccountService_1.default.getLedger(companyId, trustAccountId, { page: 1, limit: 500 }),
             trustAccountService_1.default.getTaxSummary(companyId, trustAccountId),
             trustAccountService_1.default.getAuditLogs(companyId, trustAccountId, 500),
             trustAccountService_1.default.getReconciliation(companyId, trustAccountId),
             TrustSettlement_1.TrustSettlement.findOne({ companyId, trustAccountId }).lean(),
-            Property_1.Property.findById(trust.propertyId).lean()
+            propertyId ? Property_1.Property.findById(propertyId).lean() : Promise.resolve(null),
+            getPropertyBuyerPayments(companyId, propertyId),
+            getPaymentPartyNames(companyId, propertyId)
         ]);
         const filteredLedgerRows = yield filterOutReversedLedgerRows(companyId, ledger.items || []);
         let rows = [];
         let totals = {};
         if (reportType === 'buyer-statement') {
-            rows = filteredLedgerRows.map((t) => ({
-                date: t.createdAt,
-                type: t.type,
-                debit: t.debit,
-                credit: t.credit,
-                runningBalance: t.runningBalance,
-                reference: t.reference || ''
-            }));
-            totals = { trustBalance: reconciliation.trustBankBalance, buyerFundsHeld: reconciliation.totalBuyerFundsHeld };
+            const resolvedBuyerName = String((partyNames === null || partyNames === void 0 ? void 0 : partyNames.buyer) || '').trim() || 'Buyer';
+            const resolvedSellerName = String((partyNames === null || partyNames === void 0 ? void 0 : partyNames.seller) || '').trim() || 'Seller';
+            const purchasePrice = Number((property === null || property === void 0 ? void 0 : property.price) || 0) > 0
+                ? Number((property === null || property === void 0 ? void 0 : property.price) || 0)
+                : Number((trust === null || trust === void 0 ? void 0 : trust.openingBalance) || 0);
+            const firstPaymentDate = (_a = buyerPayments === null || buyerPayments === void 0 ? void 0 : buyerPayments[0]) === null || _a === void 0 ? void 0 : _a.paymentDate;
+            let outstandingBalance = Number(purchasePrice || 0);
+            rows = [
+                {
+                    date: toIsoDate(firstPaymentDate || (trust === null || trust === void 0 ? void 0 : trust.createdAt) || new Date().toISOString()),
+                    description: `Opening debit balance of purchase price (${resolvedBuyerName})`,
+                    debit: Number(purchasePrice || 0),
+                    credit: 0,
+                    runningBalance: Number(outstandingBalance.toFixed(2)),
+                    reference: '-'
+                },
+                ...buyerPayments
+                    .filter((payment) => Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0) > 0)
+                    .map((payment) => {
+                    outstandingBalance = Number((outstandingBalance - Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0)).toFixed(2));
+                    return {
+                        date: toIsoDate(payment === null || payment === void 0 ? void 0 : payment.paymentDate),
+                        description: `Amount paid by ${resolvedBuyerName} paid to ${resolvedSellerName}`,
+                        debit: 0,
+                        credit: Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0),
+                        runningBalance: Number(outstandingBalance.toFixed(2)),
+                        reference: String((payment === null || payment === void 0 ? void 0 : payment.referenceNumber) || '').trim() || '-'
+                    };
+                })
+            ];
+            totals = {
+                purchasePrice: Number(purchasePrice || 0),
+                totalPaidByBuyer: Number(buyerPayments.reduce((sum, p) => sum + Number((p === null || p === void 0 ? void 0 : p.amount) || 0), 0).toFixed(2)),
+                outstandingBalance: Number(outstandingBalance.toFixed(2))
+            };
         }
         else if (reportType === 'seller-settlement') {
-            rows = ((settlement === null || settlement === void 0 ? void 0 : settlement.deductions) || []).map((d) => ({ type: d.type, amount: d.amount }));
-            totals = { salePrice: Number((settlement === null || settlement === void 0 ? void 0 : settlement.salePrice) || 0), netPayout: Number((settlement === null || settlement === void 0 ? void 0 : settlement.netPayout) || 0) };
+            const sellerLedgerRows = filteredLedgerRows
+                .filter((row) => [
+                'BUYER_PAYMENT',
+                'CGT_DEDUCTION',
+                'COMMISSION_DEDUCTION',
+                'VAT_DEDUCTION',
+                'VAT_ON_COMMISSION',
+                'TRANSFER_TO_SELLER',
+                'REFUND'
+            ].includes(String((row === null || row === void 0 ? void 0 : row.type) || '').toUpperCase()))
+                .sort((a, b) => new Date((a === null || a === void 0 ? void 0 : a.createdAt) || 0).getTime() - new Date((b === null || b === void 0 ? void 0 : b.createdAt) || 0).getTime());
+            let runningBalance = 0;
+            rows = sellerLedgerRows.map((row) => {
+                runningBalance = Number((runningBalance + Number((row === null || row === void 0 ? void 0 : row.credit) || 0) - Number((row === null || row === void 0 ? void 0 : row.debit) || 0)).toFixed(2));
+                return {
+                    date: toIsoDate(row === null || row === void 0 ? void 0 : row.createdAt),
+                    transaction: readableTrustTxType(row === null || row === void 0 ? void 0 : row.type),
+                    debit: Number((row === null || row === void 0 ? void 0 : row.debit) || 0),
+                    credit: Number((row === null || row === void 0 ? void 0 : row.credit) || 0),
+                    balance: Number(runningBalance.toFixed(2)),
+                    reference: String((row === null || row === void 0 ? void 0 : row.reference) || '').trim() || '-'
+                };
+            });
+            totals = {
+                salePrice: Number((settlement === null || settlement === void 0 ? void 0 : settlement.salePrice) || 0),
+                grossProceeds: Number((settlement === null || settlement === void 0 ? void 0 : settlement.grossProceeds) || 0),
+                netPayout: Number((settlement === null || settlement === void 0 ? void 0 : settlement.netPayout) || 0),
+                settlementBalance: Number(runningBalance.toFixed(2))
+            };
         }
         else if (reportType === 'tax-zimra') {
             rows = taxSummary.records.map((r) => ({
@@ -533,7 +659,7 @@ const generateTrustReport = (req, res) => __awaiter(void 0, void 0, void 0, func
         const pdf = yield (0, reportGenerator_1.generateTrustReportPdf)({
             reportType,
             companyName: 'Mantis Africa',
-            propertyLabel: String((property === null || property === void 0 ? void 0 : property.address) || (property === null || property === void 0 ? void 0 : property.name) || (trust === null || trust === void 0 ? void 0 : trust.propertyId) || ''),
+            propertyLabel: String((property === null || property === void 0 ? void 0 : property.address) || (property === null || property === void 0 ? void 0 : property.name) || propertyId || ''),
             auditReference: `TRUST-${trustAccountId}-${Date.now()}`,
             rows,
             totals
@@ -543,6 +669,12 @@ const generateTrustReport = (req, res) => __awaiter(void 0, void 0, void 0, func
         return res.status(200).send(pdf);
     }
     catch (error) {
+        console.error('generateTrustReport failed', {
+            trustAccountId: (_b = req === null || req === void 0 ? void 0 : req.params) === null || _b === void 0 ? void 0 : _b.id,
+            reportType: (_c = req === null || req === void 0 ? void 0 : req.params) === null || _c === void 0 ? void 0 : _c.reportType,
+            message: error === null || error === void 0 ? void 0 : error.message,
+            stack: error === null || error === void 0 ? void 0 : error.stack
+        });
         return res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to generate trust report' });
     }
 });

@@ -185,11 +185,29 @@ export const setUnitBuyer = async (req: Request, res: Response) => {
     const buyer = await Buyer.findOne({ _id: buyerId, companyId: req.user!.companyId }).lean();
     if (!buyer) throw new AppError('Buyer not found', 404);
 
-    const updated = await DevelopmentUnit.findByIdAndUpdate(
-      unitId,
-      { $set: { buyerId: buyer._id, buyerName: buyer.name } },
-      { new: true }
-    );
+    const now = new Date();
+    const shouldMoveToUnderOffer = String(unit.status) === 'available';
+    const update: any = {
+      $set: {
+        buyerId: buyer._id,
+        buyerName: buyer.name
+      }
+    };
+    if (shouldMoveToUnderOffer) {
+      update.$set.status = 'under_offer';
+      update.$set.reservedAt = now;
+      update.$set.reservedBy = new mongoose.Types.ObjectId(req.user!.userId);
+      update.$push = {
+        statusHistory: {
+          from: unit.status,
+          to: 'under_offer',
+          at: now,
+          by: new mongoose.Types.ObjectId(req.user!.userId)
+        }
+      };
+    }
+
+    const updated = await DevelopmentUnit.findByIdAndUpdate(unitId, update, { new: true });
     return res.json({ status: 'success', data: updated });
   } catch (error: any) {
     const status = (error as any)?.statusCode || 500;

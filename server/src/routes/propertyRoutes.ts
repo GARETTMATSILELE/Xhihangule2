@@ -7,6 +7,7 @@ import {
   createSalesProperty,
   updateProperty,
   deleteProperty,
+  restoreProperty,
   getVacantProperties,
   getAdminDashboardProperties,
   getPublicProperties
@@ -123,5 +124,6 @@ router.post('/sales', authWithCompany, createSalesProperty);
 router.put('/sales/:id', authWithCompany, updateProperty);
 router.put('/:id', authWithCompany, isAdmin, updateProperty);
 router.delete('/:id', authWithCompany, isAdmin, deleteProperty);
+router.put('/:id/restore', authWithCompany, isAdmin, restoreProperty);
 
 export default router; 

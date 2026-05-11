@@ -481,6 +481,7 @@ class TrustAccountService {
     salePrice?: number;
     commissionAmount?: number;
     applyVatOnSale?: boolean;
+    applyVatOnCommission?: boolean;
     cgtRate?: number;
     cgtAmount?: number;
     vatSaleRate?: number;
@@ -555,20 +556,27 @@ class TrustAccountService {
           0
         )
       );
+      const hasExplicitVatOnCommission =
+        derivedVatOnCommission > 0 ||
+        settlementPayments.some((payment: any) =>
+          typeof payment?.applyVatOnCommission === 'boolean' ||
+          typeof payment?.vatOnCommissionRate === 'number'
+        );
 
       const resolvedCommission = derivedCommission > 0 ? derivedCommission : money(Number(input.commissionAmount || 0));
       const summaryBase = taxEngine.generateTaxSummary({
         salePrice: derivedSalePrice,
         commissionAmount: resolvedCommission,
-        vatOnCommissionAmount: derivedVatOnCommission > 0 ? derivedVatOnCommission : undefined,
+        vatOnCommissionAmount: hasExplicitVatOnCommission ? derivedVatOnCommission : undefined,
         applyVatOnSale: input.applyVatOnSale,
+        applyVatOnCommission: input.applyVatOnCommission,
         cgtRate: input.cgtRate,
         vatSaleRate: input.vatSaleRate,
         vatOnCommissionRate: input.vatOnCommissionRate
       });
       const cgt = input.cgtAmount != null ? money(input.cgtAmount) : money(summaryBase.cgt);
       const vatOnSale = derivedVatOnSale > 0 ? derivedVatOnSale : money(summaryBase.vatOnSale);
-      const vatOnCommission = derivedVatOnCommission > 0 ? derivedVatOnCommission : money(summaryBase.vatOnCommission);
+      const vatOnCommission = hasExplicitVatOnCommission ? derivedVatOnCommission : money(summaryBase.vatOnCommission);
       const commission = money(summaryBase.commission);
       const totalDeductions = money(cgt + commission + vatOnCommission + vatOnSale);
       const sellerNetPayout = money(Math.max(0, derivedSalePrice - totalDeductions));

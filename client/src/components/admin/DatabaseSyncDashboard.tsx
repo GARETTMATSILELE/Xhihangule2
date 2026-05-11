@@ -123,6 +123,8 @@ interface TrustBackfillResult {
 
 const DatabaseSyncDashboard: React.FC = () => {
   const { user } = useAuth();
+  const userRoles = ((user as any)?.roles as string[] | undefined) || (user?.role ? [user.role] : []);
+  const canManageSync = userRoles.includes('admin');
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncSchedules, setSyncSchedules] = useState<SyncSchedule[]>([]);
   const [syncHealth, setSyncHealth] = useState<SyncHealth | null>(null);
@@ -177,28 +179,11 @@ const DatabaseSyncDashboard: React.FC = () => {
     loadBackfillState();
   }, [user]);
 
-  // Auto-start real-time sync when an authenticated admin/accountant visits the page
-  useEffect(() => {
-    const tryStartRealtime = async () => {
-      try {
-        // Only attempt for admin/accountant roles
-        if (!user || !['admin', 'accountant'].includes(user.role)) return;
-
-        // Check current status first to avoid redundant starts
-        const statusRes = await api.get('/sync/status');
-        const isRunning = Boolean(statusRes?.data?.data?.realTime?.isRunning);
-        if (!isRunning) {
-          await api.post('/sync/real-time/start');
-          await loadSyncData();
-        }
-      } catch (e) {
-        // Non-fatal: surface in UI error banner
-        setError((e as any)?.message || 'Failed to auto-start real-time sync');
-      }
-    };
-    tryStartRealtime();
-    // Run this when user changes (e.g., impersonation) or on first mount
-  }, [user?.role]);
+  const requireSyncAdmin = () => {
+    if (canManageSync) return true;
+    setError('Only administrators can manage synchronization operations.');
+    return false;
+  };
 
   const loadSyncData = async (background: boolean = false) => {
     try {
@@ -239,6 +224,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleRealTimeSync = async (action: 'start' | 'stop') => {
+    if (!requireSyncAdmin()) return;
     try {
       setActionLoading(`realTime_${action}`);
       await api.post(`/sync/real-time/${action}`);
@@ -251,6 +237,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleFullSync = async () => {
+    if (!requireSyncAdmin()) return;
     try {
       setActionLoading('fullSync');
       const prevLastSync = syncStatus?.stats?.lastSyncTime ? new Date(syncStatus.stats.lastSyncTime).getTime() : 0;
@@ -296,6 +283,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleScheduleAction = async (scheduleName: string, action: 'enable' | 'disable') => {
+    if (!requireSyncAdmin()) return;
     try {
       setActionLoading(`schedule_${action}_${scheduleName}`);
       await api.post(`/sync/schedules/${scheduleName}/${action}`);
@@ -308,6 +296,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleAddSchedule = async () => {
+    if (!requireSyncAdmin()) return;
     try {
       setActionLoading('addSchedule');
       await api.post('/sync/schedules', newSchedule);
@@ -323,6 +312,7 @@ const DatabaseSyncDashboard: React.FC = () => {
 
   const handleEditSchedule = async () => {
     if (!selectedSchedule) return;
+    if (!requireSyncAdmin()) return;
     
     try {
       setActionLoading('editSchedule');
@@ -343,6 +333,7 @@ const DatabaseSyncDashboard: React.FC = () => {
 
   const confirmDeleteSchedule = async () => {
     if (!deleteConfirmDialog.scheduleName) return;
+    if (!requireSyncAdmin()) return;
     
     try {
       setActionLoading(`delete_${deleteConfirmDialog.scheduleName}`);
@@ -383,6 +374,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleRetryFailure = async (id: string) => {
+    if (!requireSyncAdmin()) return;
     try {
       setRetryingFailureId(id);
       await api.post('/sync/failures/retry', { id });
@@ -406,6 +398,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleReconcilePayment = async (paymentId: string) => {
+    if (!requireSyncAdmin()) return;
     try {
       setActionLoading(`reconcile_${paymentId}`);
       await api.post(`/sync/reconcile/payment/${paymentId}`);
@@ -421,6 +414,7 @@ const DatabaseSyncDashboard: React.FC = () => {
   };
 
   const handleRunTrustBackfill = async () => {
+    if (!requireSyncAdmin()) return;
     try {
       setActionLoading('trustBackfill');
       setError(null);
@@ -500,16 +494,18 @@ const DatabaseSyncDashboard: React.FC = () => {
                 </Alert>
               </Box>
             )}
-            <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
-              <Button
-                variant="outlined"
-                onClick={runConsistencyCheck}
-                disabled={consistencyLoading}
-                startIcon={consistencyLoading ? <CircularProgress size={16} /> : <Error />}
-              >
-                {consistencyLoading ? 'Checking…' : 'Check consistency'}
-              </Button>
-            </Box>
+            {canManageSync && (
+              <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                <Button
+                  variant="outlined"
+                  onClick={runConsistencyCheck}
+                  disabled={consistencyLoading}
+                  startIcon={consistencyLoading ? <CircularProgress size={16} /> : <Error />}
+                >
+                  {consistencyLoading ? 'Checking…' : 'Check consistency'}
+                </Button>
+              </Box>
+            )}
             <Grid container spacing={2} sx={{ mt: 2 }}>
               <Grid item xs={12} md={4}>
                 <Typography variant="body2" color="text.secondary">
@@ -555,50 +551,54 @@ const DatabaseSyncDashboard: React.FC = () => {
           <Typography variant="h6" gutterBottom>
             Control Panel
           </Typography>
-          <Grid container spacing={2}>
-            <Grid item>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<PlayArrow />}
-                onClick={() => handleRealTimeSync('start')}
-                disabled={syncStatus?.realTime.isRunning || actionLoading === 'realTime_start'}
-              >
-                {actionLoading === 'realTime_start' ? <CircularProgress size={20} /> : 'Start Real-time Sync'}
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<Stop />}
-                onClick={() => handleRealTimeSync('stop')}
-                disabled={!syncStatus?.realTime.isRunning || actionLoading === 'realTime_stop'}
-              >
-                {actionLoading === 'realTime_stop' ? <CircularProgress size={20} /> : 'Stop Real-time Sync'}
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="outlined"
-                startIcon={<Refresh />}
-                onClick={handleFullSync}
-                disabled={actionLoading === 'fullSync'}
-              >
-                {actionLoading === 'fullSync' ? <CircularProgress size={20} /> : 'Full Sync Now'}
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="outlined"
-                startIcon={<Refresh />}
-                onClick={() => loadSyncData(false)}
-                disabled={loading}
-              >
-                Refresh
-              </Button>
-            </Grid>
-            {user?.role === 'admin' && (
+          {!canManageSync ? (
+            <Alert severity="info">
+              Synchronization status is read-only. Only administrators can start sync jobs, edit schedules, or run maintenance actions.
+            </Alert>
+          ) : (
+            <Grid container spacing={2}>
+              <Grid item>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<PlayArrow />}
+                  onClick={() => handleRealTimeSync('start')}
+                  disabled={syncStatus?.realTime.isRunning || actionLoading === 'realTime_start'}
+                >
+                  {actionLoading === 'realTime_start' ? <CircularProgress size={20} /> : 'Start Real-time Sync'}
+                </Button>
+              </Grid>
+              <Grid item>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={<Stop />}
+                  onClick={() => handleRealTimeSync('stop')}
+                  disabled={!syncStatus?.realTime.isRunning || actionLoading === 'realTime_stop'}
+                >
+                  {actionLoading === 'realTime_stop' ? <CircularProgress size={20} /> : 'Stop Real-time Sync'}
+                </Button>
+              </Grid>
+              <Grid item>
+                <Button
+                  variant="outlined"
+                  startIcon={<Refresh />}
+                  onClick={handleFullSync}
+                  disabled={actionLoading === 'fullSync'}
+                >
+                  {actionLoading === 'fullSync' ? <CircularProgress size={20} /> : 'Full Sync Now'}
+                </Button>
+              </Grid>
+              <Grid item>
+                <Button
+                  variant="outlined"
+                  startIcon={<Refresh />}
+                  onClick={() => loadSyncData(false)}
+                  disabled={loading}
+                >
+                  Refresh
+                </Button>
+              </Grid>
               <Grid item>
                 <Button
                   variant="outlined"
@@ -610,8 +610,8 @@ const DatabaseSyncDashboard: React.FC = () => {
                   {actionLoading === 'trustBackfill' ? <CircularProgress size={20} /> : 'Backfill Trust Accounts'}
                 </Button>
               </Grid>
-            )}
-          </Grid>
+            </Grid>
+          )}
         </CardContent>
       </Card>
 
@@ -700,13 +700,15 @@ const DatabaseSyncDashboard: React.FC = () => {
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography variant="h6">Synchronization Schedules</Typography>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => setAddScheduleDialog(true)}
-            >
-              Add Schedule
-            </Button>
+            {canManageSync && (
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => setAddScheduleDialog(true)}
+              >
+                Add Schedule
+              </Button>
+            )}
           </Box>
           
           <TableContainer>
@@ -753,38 +755,42 @@ const DatabaseSyncDashboard: React.FC = () => {
                     </TableCell>
                     <TableCell>{schedule.runCount}</TableCell>
                     <TableCell>
-                      <Box display="flex" gap={1}>
-                        <Tooltip title={schedule.enabled ? 'Disable' : 'Enable'}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleScheduleAction(schedule.name, schedule.enabled ? 'disable' : 'enable')}
-                            disabled={actionLoading === `schedule_${schedule.enabled ? 'disable' : 'enable'}_${schedule.name}`}
-                          >
-                            {schedule.enabled ? <Pause /> : <PlayIcon />}
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Edit">
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              setSelectedSchedule(schedule);
-                              setEditScheduleDialog(true);
-                            }}
-                          >
-                            <Edit />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleDeleteSchedule(schedule.name)}
-                            disabled={actionLoading === `delete_${schedule.name}`}
-                          >
-                            <Delete />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
+                      {canManageSync ? (
+                        <Box display="flex" gap={1}>
+                          <Tooltip title={schedule.enabled ? 'Disable' : 'Enable'}>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleScheduleAction(schedule.name, schedule.enabled ? 'disable' : 'enable')}
+                              disabled={actionLoading === `schedule_${schedule.enabled ? 'disable' : 'enable'}_${schedule.name}`}
+                            >
+                              {schedule.enabled ? <Pause /> : <PlayIcon />}
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Edit">
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setSelectedSchedule(schedule);
+                                setEditScheduleDialog(true);
+                              }}
+                            >
+                              <Edit />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleDeleteSchedule(schedule.name)}
+                              disabled={actionLoading === `delete_${schedule.name}`}
+                            >
+                              <Delete />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">Read-only</Typography>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -843,14 +849,18 @@ const DatabaseSyncDashboard: React.FC = () => {
                     <TableCell>{f.nextAttemptAt ? formatDate(f.nextAttemptAt) : '—'}</TableCell>
                     <TableCell>{f.lastErrorAt ? formatDate(f.lastErrorAt) : '—'}</TableCell>
                     <TableCell align="right">
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleRetryFailure(String(f._id))}
-                        disabled={retryingFailureId === String(f._id)}
-                      >
-                        {retryingFailureId === String(f._id) ? <CircularProgress size={16} /> : 'Retry'}
-                      </Button>
+                      {canManageSync ? (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleRetryFailure(String(f._id))}
+                          disabled={retryingFailureId === String(f._id)}
+                        >
+                          {retryingFailureId === String(f._id) ? <CircularProgress size={16} /> : 'Retry'}
+                        </Button>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">Read-only</Typography>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1041,7 +1051,7 @@ const DatabaseSyncDashboard: React.FC = () => {
                           const paymentId = (inc.type === 'missing_property_ledger_income' || inc.type === 'missing_company_commission')
                             ? extractPaymentIdFromDescription(inc.description)
                             : null;
-                          const canReconcile = Boolean(paymentId);
+                          const canReconcile = canManageSync && Boolean(paymentId);
                           const loadingKey = `reconcile_${paymentId}`;
                           return (
                             <TableRow key={`${inc.type}-${idx}`}>

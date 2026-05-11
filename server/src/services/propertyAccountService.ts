@@ -630,15 +630,19 @@ export class PropertyAccountService {
       .reduce((sum, t) => sum + t.amount, 0);
     
     const totalExpenses = account.transactions
-      .filter(t => t.type !== 'income' && t.status === 'completed')
+      .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed')
       .reduce((sum, t) => sum + t.amount, 0);
     
     const totalOwnerPayouts = account.ownerPayouts
       .filter(p => p.status === 'completed')
       .reduce((sum, p) => sum + p.amount, 0);
+
+    const openingBalance = account.transactions
+      .filter(t => t.type === 'opening_balance' && t.status === 'completed')
+      .reduce((sum, t) => sum + ((t as any).direction === 'debit' ? -t.amount : t.amount), 0);
     
     // Calculate running balance
-    const newRunningBalance = totalIncome - totalExpenses - totalOwnerPayouts;
+    const newRunningBalance = totalIncome - totalExpenses - totalOwnerPayouts + openingBalance;
     
     // Update the account if balance has changed
     if (account.runningBalance !== newRunningBalance) {
@@ -1138,6 +1142,86 @@ export class PropertyAccountService {
   }
 
   /**
+   * Add an opening balance adjustment to a property account.
+   *
+   * Opening balance entries affect running balance only. They are intentionally
+   * excluded from operational income/expense totals and the general ledger sync.
+   */
+  async addOpeningBalanceAdjustment(
+    propertyId: string,
+    openingBalanceData: {
+      amount: number;
+      direction: 'credit' | 'debit';
+      date: Date;
+      description?: string;
+      processedBy: string;
+      notes?: string;
+      idempotencyKey?: string;
+    },
+    ledgerType?: 'rental' | 'sale'
+  ): Promise<IPropertyAccount> {
+    try {
+      const amount = Number(openingBalanceData.amount || 0);
+      if (amount <= 0) {
+        throw new AppError('Opening balance amount must be greater than 0', 400);
+      }
+
+      if (!['credit', 'debit'].includes(openingBalanceData.direction)) {
+        throw new AppError('Opening balance direction must be credit or debit', 400);
+      }
+
+      const effectiveDate = openingBalanceData.date instanceof Date
+        ? openingBalanceData.date
+        : new Date(openingBalanceData.date);
+      if (Number.isNaN(effectiveDate.getTime())) {
+        throw new AppError('Valid opening balance date is required', 400);
+      }
+
+      const idKey = (openingBalanceData.idempotencyKey && openingBalanceData.idempotencyKey.trim().length > 0)
+        ? openingBalanceData.idempotencyKey.trim()
+        : `opening-balance:${uuidv4()}`;
+
+      const account = await this.getOrCreatePropertyAccount(propertyId, ledgerType);
+      const referenceNumber = `OB-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const directionLabel = openingBalanceData.direction === 'credit' ? 'Credit' : 'Debit';
+      const openingBalanceTransaction: any = {
+        type: 'opening_balance',
+        amount,
+        direction: openingBalanceData.direction,
+        date: effectiveDate,
+        description: openingBalanceData.description?.trim() || `Opening balance ${directionLabel.toLowerCase()}`,
+        category: 'opening_balance',
+        status: 'completed',
+        processedBy: new mongoose.Types.ObjectId(openingBalanceData.processedBy),
+        notes: openingBalanceData.notes,
+        referenceNumber,
+        idempotencyKey: idKey,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      await PropertyAccount.updateOne(
+        {
+          _id: (account as any)._id,
+          'transactions.idempotencyKey': { $ne: idKey }
+        },
+        {
+          $push: { transactions: openingBalanceTransaction },
+          $set: { lastUpdated: new Date() }
+        }
+      );
+
+      const reloaded = await PropertyAccount.findById((account as any)._id) as any;
+      if (reloaded) await this.recalculateBalance(reloaded as any);
+      logger.info(`Added opening balance ${openingBalanceData.direction} of ${amount} to property ${propertyId}`);
+      return (await this.getPropertyAccount(propertyId, ledgerType)) as any;
+    } catch (error) {
+      logger.error('Error adding opening balance adjustment:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create owner payout
    */
   async createOwnerPayout(
@@ -1154,6 +1238,7 @@ export class PropertyAccountService {
       };
       processedBy: string;
       notes?: string;
+      autoComplete?: boolean;
       idempotencyKey?: string;
     },
     ledgerType?: 'rental' | 'sale'
@@ -1175,6 +1260,7 @@ export class PropertyAccountService {
       }
 
       const referenceNumber = `PAYOUT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const payoutStatus = payoutData.autoComplete ? 'completed' : 'pending';
 
       const payout: any = {
         amount: payoutData.amount,
@@ -1182,7 +1268,7 @@ export class PropertyAccountService {
         paymentMethod: payoutData.paymentMethod,
         referenceNumber,
         idempotencyKey: idKey,
-        status: 'pending',
+        status: payoutStatus,
         processedBy: new mongoose.Types.ObjectId(payoutData.processedBy),
         recipientId: new mongoose.Types.ObjectId(payoutData.recipientId),
         recipientName: payoutData.recipientName,

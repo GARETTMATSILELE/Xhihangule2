@@ -111,6 +111,7 @@ const getOwnerProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 type: property.type,
                 status: property.status,
                 rent: property.rent,
+                commission: property.commission || 0,
                 bedrooms: property.bedrooms,
                 bathrooms: property.bathrooms,
                 area: property.area,
@@ -195,6 +196,7 @@ const getOwnerPropertyById = (req, res, next) => __awaiter(void 0, void 0, void 
             type: property.type,
             status: property.status,
             rent: property.rent,
+            commission: property.commission || 0,
             bedrooms: property.bedrooms,
             bathrooms: property.bathrooms,
             area: property.area,
@@ -319,6 +321,7 @@ const getOwnerMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void
                     priority: request.priority || 'medium',
                     status: request.status || 'pending',
                     estimatedCost: request.estimatedCost || 0,
+                    attachments: Array.isArray(request.attachments) ? request.attachments : [],
                     createdAt: request.createdAt
                 };
             }
@@ -335,6 +338,7 @@ const getOwnerMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void
                     priority: 'medium',
                     status: 'pending',
                     estimatedCost: 0,
+                    attachments: [],
                     createdAt: request.createdAt
                 };
             }
@@ -553,19 +557,6 @@ const approveOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, v
         // Update status to approved
         maintenanceRequest.status = 'approved';
         yield maintenanceRequest.save();
-        // After a short delay, change to pending_completion
-        setTimeout(() => __awaiter(void 0, void 0, void 0, function* () {
-            try {
-                const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId);
-                if (updatedRequest && updatedRequest.status === 'approved') {
-                    updatedRequest.status = 'pending_completion';
-                    yield updatedRequest.save();
-                }
-            }
-            catch (error) {
-                console.error('Error updating status to pending_completion:', error);
-            }
-        }), 1000);
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId)
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName email')

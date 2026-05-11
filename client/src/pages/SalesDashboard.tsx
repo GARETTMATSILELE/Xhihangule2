@@ -1048,6 +1048,7 @@ export default function CRM() {
       await propertyService.updateProperty(String(_id), { status: statusPayload });
       // Refresh shared properties so cards and lists update
       try { await refreshProperties(); } catch {}
+      try { await refreshDeals(); } catch {}
     } catch (e) {
       console.error('Failed to update property status', e);
     }
@@ -1993,6 +1994,7 @@ export default function CRM() {
               payload.buyerId = values.buyerId ? values.buyerId : null;
               await propertyService.updateProperty(editPropertyId, payload);
               await refreshProperties();
+              await refreshDeals();
               addNotification({ id: uid(), title: 'Property updated', message: 'Property details saved.', read: false, createdAt: new Date() });
             } catch (e) {}
           }}
@@ -2053,6 +2055,7 @@ export default function CRM() {
               images: Array.isArray(data.images) ? data.images.filter((u: any) => String(u || '').trim() !== '') : [],
             });
             await refreshProperties();
+            await refreshDeals();
             addNotification({ id: uid(), title: 'Listing updated', message: 'Listing quality improved.', read: false, createdAt: new Date() });
           } catch (e) {}
         }}

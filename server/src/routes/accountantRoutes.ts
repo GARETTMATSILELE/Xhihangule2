@@ -1,14 +1,22 @@
 import express from 'express';
+import multer from 'multer';
 import { auth } from '../middleware/auth';
-import { isAccountant, canManagePayments, canViewCommissions, canViewSalesPayments, canViewAgentAccounts } from '../middleware/roles';
+import { isAccountant, canManagePayments, canViewAccountantDashboard, canViewCommissions, canViewSalesPayments, canViewAgentAccounts } from '../middleware/roles';
 import {
   getAgentCommissions,
   getAgencyCommission,
   getPREACommission,
+  getCommissionAccount,
+  getCommissionReports,
   getPropertyDepositLedger,
   getPropertyDepositSummary,
   createPropertyDepositPayout,
-  getCompanyDepositSummaries
+  getCompanyDepositSummaries,
+  getTaxLedgers,
+  createTaxPayout,
+  uploadTaxPayoutReceipt,
+  getTaxPayoutReceipt,
+  getTaxPropertyReport
 } from '../controllers/accountantController';
 import {
   createPayment,
@@ -26,6 +34,7 @@ import {
   getPropertyTransactions,
   getPropertyAccount,
   addExpense,
+  addOpeningBalanceAdjustment,
   createOwnerPayout,
   updatePayoutStatus,
   getPayoutHistory,
@@ -81,6 +90,15 @@ import {
 import { createPerCompanyConcurrencyGuard } from '../middleware/companyLoadShedding';
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const mime = String(file?.mimetype || '').toLowerCase();
+    if (mime === 'application/pdf' || mime.startsWith('image/')) return cb(null, true);
+    return cb(new Error('Only PDF or image files are allowed'));
+  }
+});
 const syncConcurrencyGuard = createPerCompanyConcurrencyGuard({ operation: 'property-account-sync', maxConcurrent: 1 });
 const ledgerEnsureConcurrencyGuard = createPerCompanyConcurrencyGuard({ operation: 'ensure-development-ledgers', maxConcurrent: 1 });
 
@@ -110,6 +128,13 @@ router.get('/agent-commissions', canViewCommissions, getAgentCommissions);
 router.get('/agency-commission', canViewCommissions, getAgencyCommission);
 
 router.get('/prea-commission', canViewCommissions, getPREACommission);
+router.get('/commission-account', canViewCommissions, getCommissionAccount);
+router.get('/commission-reports', canViewCommissions, getCommissionReports);
+router.get('/tax-ledgers', canViewCommissions, getTaxLedgers);
+router.post('/tax-payouts', isAccountant, createTaxPayout);
+router.post('/tax-payouts/:payoutId/receipt', isAccountant, upload.single('receipt'), uploadTaxPayoutReceipt);
+router.get('/tax-payouts/:payoutId/receipt', canViewCommissions, getTaxPayoutReceipt);
+router.get('/tax-reports/:propertyId', canViewCommissions, getTaxPropertyReport);
 
 // Deposit ledger routes - allow admin and accountant
 router.get('/property-accounts/:propertyId/deposits', canViewCommissions, getPropertyDepositLedger);
@@ -201,6 +226,7 @@ router.get('/property-accounts', canViewCommissions, getCompanyPropertyAccounts)
 router.post('/property-accounts/migrate-legacy-ledgers', canViewCommissions, migrateLegacyLedgerTypes);
 router.get('/property-accounts/:propertyId', canViewCommissions, getPropertyAccount);
 router.get('/property-accounts/:propertyId/transactions', canViewCommissions, getPropertyTransactions);
+router.post('/property-accounts/:propertyId/opening-balances', isAccountant, addOpeningBalanceAdjustment);
 router.post('/property-accounts/:propertyId/expense', canViewCommissions, addExpense);
 router.post('/property-accounts/:propertyId/payout', canViewCommissions, createOwnerPayout);
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', canViewCommissions, updatePayoutStatus);
@@ -218,8 +244,8 @@ router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', ca
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', canViewCommissions, getAcknowledgementDocument);
 
 // Company account routes
-router.get('/company-account/summary', isAccountant, getCompanyAccountSummary);
-router.get('/company-account/transactions', isAccountant, getCompanyTransactions);
+router.get('/company-account/summary', canViewAccountantDashboard, getCompanyAccountSummary);
+router.get('/company-account/transactions', canViewAccountantDashboard, getCompanyTransactions);
 router.post('/company-account/transactions', isAccountant, createCompanyTransaction);
 
 // Sales contracts

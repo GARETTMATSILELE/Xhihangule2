@@ -50,11 +50,15 @@ const handleApiError = (error: unknown): never => {
 // Use shared api instance which includes auth header + token refresh
 
 export const useAdminDashboardService = () => {
-  const getAdminDashboardProperties = useCallback(async (): Promise<Property[]> => {
+  const getAdminDashboardProperties = useCallback(async (options?: { deleted?: boolean }): Promise<Property[]> => {
     try {
       console.log('adminDashboardService: getAdminDashboardProperties called (authenticated)');
       // Use authenticated, company-scoped endpoint
-      const response = await api.get('/properties');
+      const response = await api.get('/properties', {
+        params: {
+          deleted: options?.deleted ? 'true' : 'false'
+        }
+      });
       console.log('Admin Dashboard Properties API Response:', response.data);
 
       const data = isApiResponse<Property[]>(response.data) ? response.data.data : response.data;
@@ -182,6 +186,26 @@ export const useAdminDashboardService = () => {
       console.log('adminDashboardService: Property deleted successfully');
     } catch (error) {
       console.error('adminDashboardService: Error in deleteProperty:', error);
+      return handleApiError(error);
+    }
+  }, []);
+
+  const restoreProperty = useCallback(async (propertyId: string, user: any): Promise<void> => {
+    try {
+      console.log('adminDashboardService: restoreProperty called with:', { propertyId, user });
+      
+      if (!user?._id) {
+        throw new Error('You must be logged in to restore a property');
+      }
+
+      if (!user?.companyId) {
+        throw new Error('Company ID not found. Please ensure you are associated with a company.');
+      }
+
+      await api.put(`/properties/${propertyId}/restore`);
+      console.log('adminDashboardService: Property restored successfully');
+    } catch (error) {
+      console.error('adminDashboardService: Error in restoreProperty:', error);
       return handleApiError(error);
     }
   }, []);
@@ -326,6 +350,7 @@ export const useAdminDashboardService = () => {
     addProperty,
     updateProperty,
     deleteProperty,
+    restoreProperty,
     getAdminDashboardTenants,
     addTenant,
     updateTenant,

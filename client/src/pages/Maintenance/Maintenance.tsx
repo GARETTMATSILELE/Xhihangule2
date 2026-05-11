@@ -4,6 +4,7 @@ import { useMaintenance } from '../../hooks/maintenance';
 import { MaintenanceRequestForm } from './MaintenanceRequestForm';
 import { MaintenanceCalendar } from './MaintenanceCalendar';
 import { User } from '../../types/auth';
+import paymentRequestService from '../../services/paymentRequestService';
 
 // Define a flexible company interface that matches auth context
 interface CompanyInfo {
@@ -38,8 +39,47 @@ export const Maintenance: React.FC<MaintenanceProps> = ({
   isAuthenticated, 
   authLoading 
 }) => {
-  const { requests, loading, error, updateRequest } = useMaintenance(user);
+  const { requests, loading, error, updateRequest, fetchRequests } = useMaintenance(user);
   const [showForm, setShowForm] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [submittingRequestId, setSubmittingRequestId] = useState<string | null>(null);
+
+  const handleSendPaymentRequestToAccountant = async (request: any) => {
+    if (!request?._id) return;
+    setActionError(null);
+    setActionSuccess(null);
+
+    const amount = Number(request.estimatedCost || 0);
+    if (!amount || amount <= 0) {
+      setActionError('Please set an estimated cost before sending payment request to accountant.');
+      return;
+    }
+
+    try {
+      setSubmittingRequestId(request._id);
+      const requesterFirstName = user?.firstName?.trim() || 'Maintenance';
+      const requesterLastName = user?.lastName?.trim() || 'Vendor';
+      await paymentRequestService.createPaymentRequest({
+        propertyId: typeof request.propertyId === 'string' ? request.propertyId : request.propertyId?._id,
+        amount,
+        currency: 'USD',
+        reason: `Maintenance: ${request.title || request.description || 'Property maintenance request'}`,
+        notes: `Generated from maintenance request ${request._id}`,
+        payTo: {
+          name: requesterFirstName,
+          surname: requesterLastName
+        }
+      });
+      await fetchRequests();
+      setActionSuccess('Payment request sent to accountant successfully.');
+    } catch (e) {
+      console.error('Error sending payment request to accountant', e);
+      setActionError('Failed to send payment request to accountant.');
+    } finally {
+      setSubmittingRequestId(null);
+    }
+  };
 
   // Show loading if maintenance data is loading
   if (loading) {
@@ -66,6 +106,16 @@ export const Maintenance: React.FC<MaintenanceProps> = ({
 
   return (
     <Box sx={{ width: '100%' }}>
+      {actionError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
+          {actionError}
+        </Alert>
+      )}
+      {actionSuccess && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setActionSuccess(null)}>
+          {actionSuccess}
+        </Alert>
+      )}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
         <Typography variant="h4">Maintenance Requests</Typography>
         <Button
@@ -93,7 +143,17 @@ export const Maintenance: React.FC<MaintenanceProps> = ({
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                         <Typography variant="body2">Status:</Typography>
-                        <strong>{request.status}</strong>
+                        <Typography
+                          component="span"
+                          sx={{
+                            fontWeight: 700,
+                            color: ['approved', 'pending_completion'].includes(String(request.status)) ? 'success.main' : 'text.primary'
+                          }}
+                        >
+                          {['approved', 'pending_completion'].includes(String(request.status))
+                            ? 'Approved by Owner'
+                            : request.status}
+                        </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                         <Typography variant="body2">Priority:</Typography>
@@ -104,19 +164,22 @@ export const Maintenance: React.FC<MaintenanceProps> = ({
                           <Button variant="outlined" size="small" onClick={async () => {
                             try {
                               await updateRequest(request._id!, { status: 'pending_approval' as any });
+                              await fetchRequests();
                             } catch (e) {
                               console.error('Error sending for owner approval', e);
                             }
                           }}>Send to Owner</Button>
                         )}
-                        {request.status === 'approved' && (
-                          <Button variant="contained" color="primary" size="small" onClick={async () => {
-                            try {
-                              await updateRequest(request._id!, { status: 'in_progress' });
-                            } catch (e) {
-                              console.error('Error starting work', e);
-                            }
-                          }}>Start Work</Button>
+                        {(request.status === 'approved' || request.status === 'pending_completion') && (
+                          <Button
+                            variant="contained"
+                            color="primary"
+                            size="small"
+                            disabled={submittingRequestId === request._id}
+                            onClick={() => handleSendPaymentRequestToAccountant(request)}
+                          >
+                            {submittingRequestId === request._id ? 'Sending...' : 'Send Payment Request'}
+                          </Button>
                         )}
                         {request.status === 'in_progress' && (
                           <Button variant="contained" color="success" size="small" onClick={async () => {

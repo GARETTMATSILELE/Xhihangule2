@@ -51,12 +51,13 @@ export interface PropertyAccount {
 
 export interface Transaction {
   _id?: string;
-  type: 'income' | 'expense' | 'owner_payout' | 'repair' | 'maintenance' | 'other';
+  type: 'income' | 'expense' | 'owner_payout' | 'repair' | 'maintenance' | 'opening_balance' | 'other';
   amount: number;
   date: Date;
   paymentId?: string;
   description: string;
   category?: string;
+  direction?: 'credit' | 'debit';
   recipientId?: string;
   recipientType?: 'owner' | 'contractor' | 'tenant' | 'other';
   referenceNumber?: string;
@@ -99,6 +100,14 @@ export interface ExpenseData {
   notes?: string;
 }
 
+export interface OpeningBalanceData {
+  amount: number;
+  direction: 'credit' | 'debit';
+  date: Date;
+  description?: string;
+  notes?: string;
+}
+
 export interface PayoutData {
   amount: number;
   paymentMethod: 'bank_transfer' | 'cash' | 'mobile_money' | 'check';
@@ -109,6 +118,7 @@ export interface PayoutData {
     accountNumber?: string;
     accountName?: string;
   };
+  autoComplete?: boolean;
   notes?: string;
 }
 
@@ -233,6 +243,28 @@ class PropertyAccountService {
   }
 
   /**
+   * Add opening balance adjustment to property account
+   */
+  async addOpeningBalanceAdjustment(
+    propertyId: string,
+    openingBalanceData: OpeningBalanceData,
+    ledger?: 'rental' | 'sale'
+  ): Promise<PropertyAccount> {
+    try {
+      const key = `opening-balance:${generateId()}`;
+      const response = await api.post(
+        `/accountants/property-accounts/${propertyId}/opening-balances`,
+        { ...openingBalanceData },
+        { params: ledger ? { ledger } : {}, headers: { 'Idempotency-Key': key } }
+      );
+      return response.data.data;
+    } catch (error) {
+      console.error('Error adding opening balance adjustment:', error);
+      throw new Error(humanizeAccountError(error));
+    }
+  }
+
+  /**
    * Create owner payout
    */
   async createOwnerPayout(
@@ -350,6 +382,8 @@ class PropertyAccountService {
       if (isCompleted) {
         if (transaction.type === 'income') {
           balanceCents += amtCents;
+        } else if (transaction.type === 'opening_balance') {
+          balanceCents += transaction.direction === 'debit' ? -amtCents : amtCents;
         } else {
           balanceCents -= amtCents;
         }
@@ -384,6 +418,7 @@ class PropertyAccountService {
       owner_payout: 'Owner Payout',
       repair: 'Repair',
       maintenance: 'Maintenance',
+      opening_balance: 'Opening Balance',
       other: 'Other'
     };
     return labels[type] || type;

@@ -33,6 +33,7 @@ const getPaymentPartyNames = async (
   companyId: string,
   propertyId: string
 ): Promise<{ buyer: string; seller: string }> => {
+  if (!propertyId) return { buyer: '', seller: '' };
   const payments = await Payment.find({
     companyId,
     propertyId,
@@ -52,6 +53,44 @@ const getPaymentPartyNames = async (
     payments.map((p: any) => String(p?.sellerName || '').trim()).find((name) => name.length > 0) || '';
 
   return { buyer, seller };
+};
+
+const getPropertyBuyerPayments = async (
+  companyId: string,
+  propertyId: string
+): Promise<
+  Array<{
+    paymentId: string;
+    amount: number;
+    paymentDate?: string;
+    referenceNumber?: string;
+    buyerName?: string;
+    sellerName?: string;
+  }>
+> => {
+  if (!propertyId) return [];
+  const payments = await Payment.find({
+    companyId,
+    propertyId,
+    paymentType: 'sale',
+    status: 'completed',
+    isProvisional: { $ne: true },
+    isInSuspense: { $ne: true },
+    reversalOfPaymentId: { $exists: false },
+    isCorrectionEntry: { $ne: true }
+  })
+    .sort({ paymentDate: 1, createdAt: 1, _id: 1 })
+    .select('_id amount paymentDate createdAt referenceNumber buyerName sellerName')
+    .lean();
+
+  return (payments as any[]).map((payment) => ({
+    paymentId: String(payment?._id || ''),
+    amount: Number(payment?.amount || 0),
+    paymentDate: new Date(payment?.paymentDate || payment?.createdAt || Date.now()).toISOString(),
+    referenceNumber: String(payment?.referenceNumber || '').trim() || undefined,
+    buyerName: String(payment?.buyerName || '').trim() || undefined,
+    sellerName: String(payment?.sellerName || '').trim() || undefined
+  }));
 };
 
 const filterOutReversedLedgerRows = async (
@@ -86,6 +125,38 @@ const filterOutReversedLedgerRows = async (
 
   if (!hiddenPaymentIds.size) return ledgerRows;
   return ledgerRows.filter((row: any) => !hiddenPaymentIds.has(String(row?.paymentId || '')));
+};
+
+const toIsoDate = (value?: unknown): string => {
+  const parsed = new Date(String(value || ''));
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+};
+
+const toIdString = (value: any): string => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value?._id) {
+    return String(value._id);
+  }
+  if (typeof value?.toString === 'function') {
+    const converted = String(value.toString());
+    return converted === '[object Object]' ? '' : converted;
+  }
+  return '';
+};
+
+const readableTrustTxType = (rawType?: unknown): string => {
+  const type = String(rawType || '').toUpperCase();
+  const map: Record<string, string> = {
+    BUYER_PAYMENT: 'Buyer Payment',
+    CGT_DEDUCTION: 'CGT Deduction',
+    COMMISSION_DEDUCTION: 'Commission Deduction',
+    VAT_DEDUCTION: 'VAT Deduction',
+    VAT_ON_COMMISSION: 'VAT on Commission',
+    TRANSFER_TO_SELLER: 'Transfer to Seller',
+    REFUND: 'Refund'
+  };
+  return map[type] || String(rawType || '');
 };
 
 export const listTrustAccounts = async (req: Request, res: Response) => {
@@ -182,13 +253,14 @@ export const calculateSettlement = async (req: Request, res: Response) => {
     const companyId = ensureCompany(req, res);
     if (!companyId) return;
     const trustAccountId = String(req.params.id || '');
-    const { salePrice, commissionAmount, applyVatOnSale, cgtRate, cgtAmount, vatSaleRate, vatOnCommissionRate } = req.body || {};
+    const { salePrice, commissionAmount, applyVatOnSale, applyVatOnCommission, cgtRate, cgtAmount, vatSaleRate, vatOnCommissionRate } = req.body || {};
     const data = await trustAccountService.calculateSettlement({
       companyId,
       trustAccountId,
       salePrice: salePrice != null ? Number(salePrice) : undefined,
       commissionAmount: commissionAmount != null ? Number(commissionAmount) : undefined,
       applyVatOnSale: Boolean(applyVatOnSale),
+      applyVatOnCommission: applyVatOnCommission != null ? Boolean(applyVatOnCommission) : undefined,
       cgtRate: cgtRate != null ? Number(cgtRate) : undefined,
       cgtAmount: cgtAmount != null ? Number(cgtAmount) : undefined,
       vatSaleRate: vatSaleRate != null ? Number(vatSaleRate) : undefined,
@@ -356,12 +428,24 @@ export const getTrustAccountFull = async (req: Request, res: Response) => {
       trustAccountService.getReconciliation(companyId, trustAccountId),
       TrustSettlement.findOne({ companyId, trustAccountId }).lean()
     ]);
+    const propertyId = String((refreshedAccount as any)?.propertyId || (account as any).propertyId || '');
+    const [partyNames, buyerPayments, property] = await Promise.all([
+      getPaymentPartyNames(companyId, propertyId),
+      getPropertyBuyerPayments(companyId, propertyId),
+      propertyId ? Property.findById(propertyId).select('price').lean() : Promise.resolve(null)
+    ]);
     const filteredLedgerRows = await filterOutReversedLedgerRows(companyId, ledger.items || []);
-    const partyNames = await getPaymentPartyNames(companyId, String((refreshedAccount as any)?.propertyId || (account as any).propertyId || ''));
     return res.json({
       data: {
         trustAccount: refreshedAccount || account,
+        propertySummary: {
+          purchasePrice:
+            Number((property as any)?.price || 0) > 0
+              ? Number((property as any)?.price || 0)
+              : Number((refreshedAccount as any)?.purchasePrice || (account as any)?.purchasePrice || 0)
+        },
         ledger: filteredLedgerRows,
+        buyerPayments,
         taxSummary,
         auditLogs,
         reconciliation,
@@ -401,17 +485,19 @@ export const generateTrustReport = async (req: Request, res: Response) => {
         | 'tax-zimra'
         | 'audit-log') || 'buyer-statement';
 
-    const account = await trustAccountService.listTrustAccounts(companyId, { page: 1, limit: 200 });
-    const trust = account.items.find((r: any) => String(r._id) === trustAccountId);
+    const trust = await trustAccountService.getById(companyId, trustAccountId);
     if (!trust) return res.status(404).json({ message: 'Trust account not found' });
+    const propertyId = toIdString((trust as any)?.propertyId);
 
-    const [ledger, taxSummary, auditLogs, reconciliation, settlement, property] = await Promise.all([
+    const [ledger, taxSummary, auditLogs, reconciliation, settlement, property, buyerPayments, partyNames] = await Promise.all([
       trustAccountService.getLedger(companyId, trustAccountId, { page: 1, limit: 500 }),
       trustAccountService.getTaxSummary(companyId, trustAccountId),
       trustAccountService.getAuditLogs(companyId, trustAccountId, 500),
       trustAccountService.getReconciliation(companyId, trustAccountId),
       TrustSettlement.findOne({ companyId, trustAccountId }).lean(),
-      Property.findById((trust as any).propertyId).lean()
+      propertyId ? Property.findById(propertyId).lean() : Promise.resolve(null),
+      getPropertyBuyerPayments(companyId, propertyId),
+      getPaymentPartyNames(companyId, propertyId)
     ]);
 
     const filteredLedgerRows = await filterOutReversedLedgerRows(companyId, ledger.items || []);
@@ -419,18 +505,78 @@ export const generateTrustReport = async (req: Request, res: Response) => {
     let rows: Record<string, unknown>[] = [];
     let totals: Record<string, number> = {};
     if (reportType === 'buyer-statement') {
-      rows = filteredLedgerRows.map((t: any) => ({
-        date: t.createdAt,
-        type: t.type,
-        debit: t.debit,
-        credit: t.credit,
-        runningBalance: t.runningBalance,
-        reference: t.reference || ''
-      }));
-      totals = { trustBalance: reconciliation.trustBankBalance, buyerFundsHeld: reconciliation.totalBuyerFundsHeld };
+      const resolvedBuyerName = String((partyNames as any)?.buyer || '').trim() || 'Buyer';
+      const resolvedSellerName = String((partyNames as any)?.seller || '').trim() || 'Seller';
+      const purchasePrice =
+        Number((property as any)?.price || 0) > 0
+          ? Number((property as any)?.price || 0)
+          : Number((trust as any)?.openingBalance || 0);
+      const firstPaymentDate = (buyerPayments as any[])?.[0]?.paymentDate;
+      let outstandingBalance = Number(purchasePrice || 0);
+
+      rows = [
+        {
+          date: toIsoDate(firstPaymentDate || (trust as any)?.createdAt || new Date().toISOString()),
+          description: `Opening debit balance of purchase price (${resolvedBuyerName})`,
+          debit: Number(purchasePrice || 0),
+          credit: 0,
+          runningBalance: Number(outstandingBalance.toFixed(2)),
+          reference: '-'
+        },
+        ...(buyerPayments as any[])
+          .filter((payment) => Number(payment?.amount || 0) > 0)
+          .map((payment) => {
+            outstandingBalance = Number((outstandingBalance - Number(payment?.amount || 0)).toFixed(2));
+            return {
+              date: toIsoDate(payment?.paymentDate),
+              description: `Amount paid by ${resolvedBuyerName} paid to ${resolvedSellerName}`,
+              debit: 0,
+              credit: Number(payment?.amount || 0),
+              runningBalance: Number(outstandingBalance.toFixed(2)),
+              reference: String(payment?.referenceNumber || '').trim() || '-'
+            };
+          })
+      ];
+
+      totals = {
+        purchasePrice: Number(purchasePrice || 0),
+        totalPaidByBuyer: Number((buyerPayments as any[]).reduce((sum, p) => sum + Number(p?.amount || 0), 0).toFixed(2)),
+        outstandingBalance: Number(outstandingBalance.toFixed(2))
+      };
     } else if (reportType === 'seller-settlement') {
-      rows = (settlement?.deductions || []).map((d: any) => ({ type: d.type, amount: d.amount }));
-      totals = { salePrice: Number(settlement?.salePrice || 0), netPayout: Number(settlement?.netPayout || 0) };
+      const sellerLedgerRows = filteredLedgerRows
+        .filter((row: any) =>
+          [
+            'BUYER_PAYMENT',
+            'CGT_DEDUCTION',
+            'COMMISSION_DEDUCTION',
+            'VAT_DEDUCTION',
+            'VAT_ON_COMMISSION',
+            'TRANSFER_TO_SELLER',
+            'REFUND'
+          ].includes(String(row?.type || '').toUpperCase())
+        )
+        .sort((a: any, b: any) => new Date(a?.createdAt || 0).getTime() - new Date(b?.createdAt || 0).getTime());
+
+      let runningBalance = 0;
+      rows = sellerLedgerRows.map((row: any) => {
+        runningBalance = Number((runningBalance + Number(row?.credit || 0) - Number(row?.debit || 0)).toFixed(2));
+        return {
+          date: toIsoDate(row?.createdAt),
+          transaction: readableTrustTxType(row?.type),
+          debit: Number(row?.debit || 0),
+          credit: Number(row?.credit || 0),
+          balance: Number(runningBalance.toFixed(2)),
+          reference: String(row?.reference || '').trim() || '-'
+        };
+      });
+
+      totals = {
+        salePrice: Number(settlement?.salePrice || 0),
+        grossProceeds: Number(settlement?.grossProceeds || 0),
+        netPayout: Number(settlement?.netPayout || 0),
+        settlementBalance: Number(runningBalance.toFixed(2))
+      };
     } else if (reportType === 'tax-zimra') {
       rows = taxSummary.records.map((r: any) => ({
         taxType: r.taxType,
@@ -464,7 +610,7 @@ export const generateTrustReport = async (req: Request, res: Response) => {
     const pdf = await generateTrustReportPdf({
       reportType,
       companyName: 'Mantis Africa',
-      propertyLabel: String(property?.address || property?.name || (trust as any)?.propertyId || ''),
+      propertyLabel: String(property?.address || property?.name || propertyId || ''),
       auditReference: `TRUST-${trustAccountId}-${Date.now()}`,
       rows,
       totals
@@ -474,6 +620,12 @@ export const generateTrustReport = async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="trust-${reportType}-${trustAccountId}.pdf"`);
     return res.status(200).send(pdf);
   } catch (error: any) {
+    console.error('generateTrustReport failed', {
+      trustAccountId: req?.params?.id,
+      reportType: req?.params?.reportType,
+      message: error?.message,
+      stack: error?.stack
+    });
     return res.status(500).json({ message: error?.message || 'Failed to generate trust report' });
   }
 };

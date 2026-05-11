@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPropertyPublic = exports.getAdminDashboardProperties = exports.getVacantProperties = exports.deleteProperty = exports.updateProperty = exports.createSalesProperty = exports.createProperty = exports.getProperty = exports.getProperties = exports.getPublicProperties = void 0;
+exports.createPropertyPublic = exports.getAdminDashboardProperties = exports.getVacantProperties = exports.restoreProperty = exports.deleteProperty = exports.updateProperty = exports.createSalesProperty = exports.createProperty = exports.getProperty = exports.getProperties = exports.getPublicProperties = void 0;
 const Property_1 = require("../models/Property");
 const SalesOwner_1 = require("../models/SalesOwner");
 const chartController_1 = require("./chartController");
@@ -98,9 +98,10 @@ function syncValuationOnPropertySold(params) {
 const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userContext = getUserContext(req);
+        const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
         // If no user context provided, return all properties (for admin dashboard)
         if (!userContext.userId && !userContext.companyId) {
-            const allProperties = yield Property_1.Property.find({})
+            const allProperties = yield Property_1.Property.find(includeDeleted ? {} : { isDeleted: { $ne: true } })
                 .populate('ownerId', 'firstName lastName email')
                 .sort({ createdAt: -1 });
             return res.json({
@@ -124,7 +125,8 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         }
         // Build query based on user role
         const query = {
-            companyId: new mongoose_1.default.Types.ObjectId(userContext.companyId)
+            companyId: new mongoose_1.default.Types.ObjectId(userContext.companyId),
+            isDeleted: includeDeleted ? true : { $ne: true }
         };
         // If user is not in a company-wide visibility role, only show their own properties
         const companyWideRoles = ['admin', 'accountant', 'principal', 'prea'];
@@ -256,8 +258,10 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const requestedPageRaw = Number(req.query.page || 1);
         const page = Number.isFinite(requestedPageRaw) ? Math.max(1, Math.floor(requestedPageRaw)) : 1;
         // Build query based on user role
+        const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
         const query = {
-            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            isDeleted: includeDeleted ? true : { $ne: true }
         };
         // Apply rentalType filter only when explicitly requested or for sales users
         if (typeof req.query.rentalType === 'string' && req.query.rentalType.trim()) {
@@ -365,7 +369,8 @@ const getProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         // Build query based on user role
         const query = {
             _id: req.params.id,
-            companyId: req.user.companyId
+            companyId: req.user.companyId,
+            isDeleted: { $ne: true }
         };
         // If user is not an admin or accountant, only allow access to their properties
         if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
@@ -597,9 +602,12 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         const match = {
             _id: req.params.id,
-            ownerId: req.user.userId,
-            companyId: req.user.companyId
+            companyId: req.user.companyId,
+            isDeleted: { $ne: true }
         };
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
+            match.ownerId = req.user.userId;
+        }
         const before = yield Property_1.Property.findOne(match).select('status price buyerId').lean();
         if (!before) {
             throw new errorHandler_1.AppError('Property not found', 404);
@@ -643,20 +651,54 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         // Keep Buyer.propertyId in sync with Property.buyerId (best-effort; non-fatal).
         if (nextBuyerId !== undefined) {
             try {
+                const companyObjectId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
                 const propObjectId = new mongoose_1.default.Types.ObjectId(String(property._id));
                 if (nextBuyerId === null) {
                     // Clear any buyers pointing at this property (including previous buyer).
-                    yield Buyer_1.Buyer.updateMany({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), propertyId: propObjectId }, { $unset: { propertyId: '' } });
+                    yield Buyer_1.Buyer.updateMany({ companyId: companyObjectId, propertyId: propObjectId }, { $unset: { propertyId: '' } });
                 }
                 else {
+                    const linkedBuyer = yield Buyer_1.Buyer.findOne({
+                        _id: nextBuyerId,
+                        companyId: companyObjectId
+                    })
+                        .select('name email phone')
+                        .lean();
                     // Link selected buyer to this property.
-                    yield Buyer_1.Buyer.updateOne({ _id: nextBuyerId, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, { $set: { propertyId: propObjectId } });
+                    yield Buyer_1.Buyer.updateOne({ _id: nextBuyerId, companyId: companyObjectId }, { $set: { propertyId: propObjectId } });
                     // Ensure no other buyer still points at this property.
                     yield Buyer_1.Buyer.updateMany({
-                        companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                        companyId: companyObjectId,
                         propertyId: propObjectId,
                         _id: { $ne: nextBuyerId }
                     }, { $unset: { propertyId: '' } });
+                    // Ensure linked buyer appears in Deals pipeline as "Offer" for this property.
+                    if (linkedBuyer === null || linkedBuyer === void 0 ? void 0 : linkedBuyer.name) {
+                        const buyerEmail = String(linkedBuyer.email || '').trim();
+                        const buyerPhone = String(linkedBuyer.phone || '').trim();
+                        const buyerName = String(linkedBuyer.name || '').trim();
+                        const identityFilters = [];
+                        if (buyerEmail)
+                            identityFilters.push({ buyerEmail });
+                        if (buyerPhone)
+                            identityFilters.push({ buyerPhone });
+                        if (identityFilters.length === 0)
+                            identityFilters.push({ buyerName });
+                        const existingOfferDeal = yield Deal_1.Deal.findOne({
+                            companyId: companyObjectId,
+                            propertyId: propObjectId,
+                            won: { $ne: true },
+                            stage: { $ne: 'Won' },
+                            $or: identityFilters
+                        })
+                            .select('_id')
+                            .lean();
+                        if (!existingOfferDeal) {
+                            yield Deal_1.Deal.create(Object.assign(Object.assign(Object.assign({ propertyId: propObjectId, buyerName }, (buyerEmail ? { buyerEmail } : {})), (buyerPhone ? { buyerPhone } : {})), { stage: 'Offer', offerPrice: typeof (property === null || property === void 0 ? void 0 : property.price) === 'number' && Number.isFinite(property.price)
+                                    ? Number(property.price)
+                                    : 0, closeDate: null, won: false, notes: 'Auto-created from property buyer linkage', companyId: companyObjectId, ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) }));
+                        }
+                    }
                 }
             }
             catch (syncErr) {
@@ -714,15 +756,25 @@ const deleteProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const property = yield Property_1.Property.findOneAndDelete({
+        const match = {
             _id: req.params.id,
-            ownerId: req.user.userId,
-            companyId: req.user.companyId
-        });
+            companyId: req.user.companyId,
+            isDeleted: { $ne: true }
+        };
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
+            match.ownerId = req.user.userId;
+        }
+        const property = yield Property_1.Property.findOneAndUpdate(match, {
+            $set: {
+                isDeleted: true,
+                deletedAt: new Date(),
+                deletedBy: req.user.userId
+            }
+        }, { new: true });
         if (!property) {
             throw new errorHandler_1.AppError('Property not found', 404);
         }
-        res.json({ message: 'Property deleted successfully' });
+        res.json({ message: 'Property moved to deleted properties successfully', data: property });
     }
     catch (error) {
         if (error instanceof errorHandler_1.AppError) {
@@ -732,6 +784,43 @@ const deleteProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.deleteProperty = deleteProperty;
+const restoreProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        const match = {
+            _id: req.params.id,
+            companyId: req.user.companyId,
+            isDeleted: true
+        };
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
+            match.ownerId = req.user.userId;
+        }
+        const property = yield Property_1.Property.findOneAndUpdate(match, {
+            $set: {
+                isDeleted: false,
+                deletedAt: null,
+                deletedBy: null
+            }
+        }, { new: true });
+        if (!property) {
+            throw new errorHandler_1.AppError('Deleted property not found', 404);
+        }
+        res.json({ message: 'Property restored successfully', data: property });
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        res.status(500).json({ message: 'Error restoring property' });
+    }
+});
+exports.restoreProperty = restoreProperty;
 const getVacantProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -748,7 +837,8 @@ const getVacantProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         const query = {
             companyId: req.user.companyId,
             ownerId: req.user.userId,
-            status: 'available'
+            status: 'available',
+            isDeleted: { $ne: true }
         };
         console.log('Query:', JSON.stringify(query, null, 2));
         try {
@@ -777,8 +867,9 @@ exports.getVacantProperties = getVacantProperties;
 const getAdminDashboardProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         console.log('getAdminDashboardProperties request received');
+        const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
         // Get all properties without authentication requirements
-        const properties = yield Property_1.Property.find({})
+        const properties = yield Property_1.Property.find(includeDeleted ? {} : { isDeleted: { $ne: true } })
             .populate('ownerId', 'firstName lastName email')
             .sort({ createdAt: -1 });
         console.log('Found properties for admin dashboard:', {

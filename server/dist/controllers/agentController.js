@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAgentPropertyOwner = exports.updateAgentPropertyOwner = exports.createAgentPropertyOwner = exports.getAgentPropertyOwners = exports.createAgentFile = exports.getAgentLevyPayments = exports.getAgentPayments = exports.updateAgentPayment = exports.createAgentPayment = exports.updateAgentProperty = exports.createAgentLease = exports.createAgentTenant = exports.createAgentProperty = exports.getAgentCommission = exports.getAgentFiles = exports.getAgentLeases = exports.getAgentTenants = exports.getAgentPropertyOwnerById = exports.getAgentProperties = void 0;
+exports.deleteAgentPropertyOwner = exports.updateAgentPropertyOwner = exports.createAgentPropertyOwner = exports.getAgentPropertyOwners = exports.createAgentFile = exports.getAgentLevyPayments = exports.getAgentPayments = exports.updateAgentPayment = exports.createAgentPayment = exports.restoreAgentProperty = exports.deleteAgentProperty = exports.updateAgentProperty = exports.createAgentLease = exports.createAgentTenant = exports.createAgentProperty = exports.getAgentCommission = exports.getAgentFiles = exports.getAgentLeases = exports.getAgentTenants = exports.getAgentPropertyOwnerById = exports.getAgentProperties = void 0;
 const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const Lease_1 = require("../models/Lease");
@@ -75,9 +75,11 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
             role: req.user.role
         });
         // Get only properties where the agent is the owner (ownerId matches the agent's userId)
+        const showDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
         const query = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) // Only properties owned by this agent
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Only properties owned by this agent
+            isDeleted: showDeleted ? true : { $ne: true }
         };
         console.log('Agent properties query:', query);
         // First, let's see all properties in the company to understand the data
@@ -594,7 +596,8 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         const existing = yield Property_1.Property.findOne({
             _id: new mongoose_1.default.Types.ObjectId(propertyId),
             ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
-            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            isDeleted: { $ne: true }
         });
         if (!existing) {
             return res.status(404).json({ message: 'Property not found or you do not have permission to update it.' });
@@ -634,6 +637,88 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.updateAgentProperty = updateAgentProperty;
+// Soft delete a property owned by the agent
+const deleteAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        const propertyId = req.params.id;
+        if (!mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
+            return res.status(400).json({ message: 'Invalid property ID format.' });
+        }
+        const property = yield Property_1.Property.findOneAndUpdate({
+            _id: new mongoose_1.default.Types.ObjectId(propertyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            isDeleted: { $ne: true }
+        }, {
+            $set: {
+                isDeleted: true,
+                deletedAt: new Date(),
+                deletedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                updatedAt: new Date()
+            }
+        }, { new: true });
+        if (!property) {
+            return res.status(404).json({ message: 'Property not found or already deleted.' });
+        }
+        return res.json({ message: 'Property moved to deleted properties.', property });
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error('Error deleting agent property:', error);
+        return res.status(500).json({ message: 'Error deleting property' });
+    }
+});
+exports.deleteAgentProperty = deleteAgentProperty;
+// Restore a soft-deleted property owned by the agent
+const restoreAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+        }
+        const propertyId = req.params.id;
+        if (!mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
+            return res.status(400).json({ message: 'Invalid property ID format.' });
+        }
+        const property = yield Property_1.Property.findOneAndUpdate({
+            _id: new mongoose_1.default.Types.ObjectId(propertyId),
+            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+            isDeleted: true
+        }, {
+            $set: {
+                isDeleted: false,
+                deletedAt: null,
+                deletedBy: null,
+                updatedAt: new Date()
+            }
+        }, { new: true });
+        if (!property) {
+            return res.status(404).json({ message: 'Deleted property not found.' });
+        }
+        return res.json({ message: 'Property restored successfully.', property });
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error('Error restoring agent property:', error);
+        return res.status(500).json({ message: 'Error restoring property' });
+    }
+});
+exports.restoreAgentProperty = restoreAgentProperty;
 // Create a new payment for the agent
 const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -652,7 +737,8 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // Accept idempotency key from header or body
         const idempotencyKey = req.headers['idempotency-key'] || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.idempotencyKey) || undefined;
         // Validate required fields
-        if (!propertyId || !tenantId || !amount || !paymentDate || !paymentMethod) {
+        const amountMissing = amount === undefined || amount === null || Number.isNaN(Number(amount));
+        if (!propertyId || !tenantId || amountMissing || !paymentDate || !paymentMethod) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Missing required fields: propertyId, tenantId, amount, paymentDate, paymentMethod',

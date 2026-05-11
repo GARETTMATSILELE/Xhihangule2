@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.backfillBalances = exports.postManualTransaction = exports.getBankTransactionSuggestions = exports.reconcileBankTransaction = exports.getBankReconciliation = exports.getLedger = exports.getBalanceSheet = exports.getProfitAndLoss = exports.getCommissionLiability = exports.exportVatReport = exports.getVatStatus = exports.getExpenseTrend = exports.getRevenueTrend = exports.getDashboardSummary = void 0;
+exports.backfillBalances = exports.postManualTransaction = exports.getBankTransactionSuggestions = exports.reconcileBankTransaction = exports.getBankReconciliation = exports.getLedger = exports.getBalanceSheet = exports.getProfitAndLoss = exports.getCommissionLiability = exports.exportVatReport = exports.getVatStatus = exports.getExpenseTrend = exports.getRevenueTrend = exports.getDashboardOutstanding = exports.getDashboardSummary = void 0;
 const accountingService_1 = __importDefault(require("../services/accountingService"));
 const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
 const parseDate = (value) => {
@@ -44,6 +44,19 @@ const getDashboardSummary = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.getDashboardSummary = getDashboardSummary;
+const getDashboardOutstanding = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+            return res.status(400).json({ message: 'companyId is required' });
+        const breakdown = yield accountingService_1.default.getDashboardOutstanding(companyId);
+        return res.json(breakdown);
+    }
+    catch (error) {
+        return res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to fetch outstanding dashboard data' });
+    }
+});
+exports.getDashboardOutstanding = getDashboardOutstanding;
 const getRevenueTrend = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companyId = getCompanyId(req);
@@ -78,7 +91,7 @@ const getVatStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!companyId)
             return res.status(400).json({ message: 'companyId is required' });
         const filingPeriod = typeof req.query.filingPeriod === 'string' ? req.query.filingPeriod : undefined;
-        const status = req.query.status === 'pending' || req.query.status === 'submitted'
+        const status = req.query.status === 'pending' || req.query.status === 'submitted' || req.query.status === 'reversed'
             ? req.query.status
             : undefined;
         const rows = yield accountingService_1.default.getVatStatus(companyId, { filingPeriod, status });
@@ -95,7 +108,7 @@ const exportVatReport = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!companyId)
             return res.status(400).json({ message: 'companyId is required' });
         const filingPeriod = typeof req.query.filingPeriod === 'string' ? req.query.filingPeriod : undefined;
-        const status = req.query.status === 'pending' || req.query.status === 'submitted'
+        const status = req.query.status === 'pending' || req.query.status === 'submitted' || req.query.status === 'reversed'
             ? req.query.status
             : undefined;
         const format = String(req.query.format || 'csv').toLowerCase();

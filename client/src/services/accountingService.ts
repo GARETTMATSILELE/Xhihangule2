@@ -18,6 +18,31 @@ export interface DashboardSummary {
   lastUpdated: string;
 }
 
+export interface OutstandingTenantBreakdown {
+  tenantId: string;
+  tenantName: string;
+  labels: string[];
+}
+
+export interface OutstandingPropertyBreakdown {
+  propertyId: string;
+  propertyName: string;
+  propertyAddress: string;
+  totalOwedMonths: number;
+  totalAmount: number;
+  tenants: OutstandingTenantBreakdown[];
+}
+
+export interface DashboardOutstandingBreakdown {
+  expenses: number;
+  invoices: number;
+  outstandingRentals: number;
+  outstandingLevies: number;
+  rentals: OutstandingPropertyBreakdown[];
+  levies: OutstandingPropertyBreakdown[];
+  lastUpdated: string;
+}
+
 export interface TrendPoint {
   month: string;
   total: number;
@@ -68,6 +93,10 @@ export interface BankMatchSuggestion {
 const accountingService = {
   async getDashboardSummary(): Promise<DashboardSummary> {
     const res = await api.get('/accounting/dashboard-summary');
+    return res.data;
+  },
+  async getDashboardOutstanding(): Promise<DashboardOutstandingBreakdown> {
+    const res = await api.get('/accounting/dashboard-outstanding');
     return res.data;
   },
   async getRevenueTrend(months = 12): Promise<TrendPoint[]> {

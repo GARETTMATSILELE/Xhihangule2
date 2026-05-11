@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.mergePropertyAccountDuplicatesForProperty = exports.listPropertyMaintenanceJobs = exports.getPropertyMaintenanceJobStatus = exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
+exports.mergePropertyAccountDuplicatesForProperty = exports.listPropertyMaintenanceJobs = exports.getPropertyMaintenanceJobStatus = exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addOpeningBalanceAdjustment = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Property_1 = require("../models/Property");
 const Development_1 = require("../models/Development");
@@ -30,7 +30,8 @@ const maintenanceJobQueueService_1 = __importDefault(require("../services/mainte
 const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { propertyId } = req.params;
-        const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
+        const ledgerRaw = String(req.query.ledger || '').toLowerCase();
+        const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined));
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
@@ -208,7 +209,12 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
     try {
         const { propertyId } = req.params;
         const { type, startDate, endDate, category, status } = req.query;
-        const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
+        const includePayoutsRaw = String(req.query.includePayouts || '').toLowerCase();
+        const includePayouts = includePayoutsRaw === '1' ||
+            includePayoutsRaw === 'true' ||
+            includePayoutsRaw === 'yes';
+        const ledgerRaw = String(req.query.ledger || '').toLowerCase();
+        const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined));
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
@@ -224,9 +230,31 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (status)
             filters.status = status;
         const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters, ledger);
+        if (!includePayouts) {
+            return res.json({
+                success: true,
+                data: transactions
+            });
+        }
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
+        const payoutTransactions = (account.ownerPayouts || []).map((payout) => ({
+            _id: String((payout === null || payout === void 0 ? void 0 : payout._id) || ''),
+            type: 'owner_payout',
+            amount: Number((payout === null || payout === void 0 ? void 0 : payout.amount) || 0),
+            date: payout === null || payout === void 0 ? void 0 : payout.date,
+            notes: payout === null || payout === void 0 ? void 0 : payout.notes,
+            referenceNumber: payout === null || payout === void 0 ? void 0 : payout.referenceNumber,
+            status: payout === null || payout === void 0 ? void 0 : payout.status,
+            description: `Owner payout - ${(payout === null || payout === void 0 ? void 0 : payout.recipientName) || 'Owner'}`,
+            category: 'owner_payout',
+            paymentMethod: payout === null || payout === void 0 ? void 0 : payout.paymentMethod,
+            recipientId: payout === null || payout === void 0 ? void 0 : payout.recipientId,
+            recipientName: payout === null || payout === void 0 ? void 0 : payout.recipientName
+        }));
+        const merged = [...transactions, ...payoutTransactions].sort((a, b) => new Date((b === null || b === void 0 ? void 0 : b.date) || 0).getTime() - new Date((a === null || a === void 0 ? void 0 : a.date) || 0).getTime());
         res.json({
             success: true,
-            data: transactions
+            data: merged
         });
     }
     catch (error) {
@@ -320,6 +348,69 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.addExpense = addExpense;
 /**
+ * Add opening balance adjustment to property account
+ */
+const addOpeningBalanceAdjustment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        const { propertyId } = req.params;
+        const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
+        const { amount, direction, date, description, notes } = req.body;
+        if (!propertyId) {
+            return res.status(400).json({ message: 'Property ID is required' });
+        }
+        if (!amount || Number(amount) <= 0) {
+            return res.status(400).json({ message: 'Valid amount is required' });
+        }
+        if (direction !== 'credit' && direction !== 'debit') {
+            return res.status(400).json({ message: 'Direction must be credit or debit' });
+        }
+        if (!((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId)) {
+            return res.status(401).json({ message: 'User authentication required' });
+        }
+        const effectiveDate = date ? new Date(date) : new Date();
+        if (Number.isNaN(effectiveDate.getTime())) {
+            return res.status(400).json({ message: 'Valid date is required' });
+        }
+        const idempotencyKey = req.headers['idempotency-key'] || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.idempotencyKey) || undefined;
+        const account = yield propertyAccountService_1.default.addOpeningBalanceAdjustment(propertyId, {
+            amount: Number(amount),
+            direction,
+            date: effectiveDate,
+            description,
+            processedBy: req.user.userId,
+            notes,
+            idempotencyKey
+        }, ledger);
+        if (idempotencyKey) {
+            try {
+                res.setHeader('Idempotency-Key', idempotencyKey);
+            }
+            catch (_e) { }
+        }
+        res.json({
+            success: true,
+            message: 'Opening balance adjustment added successfully',
+            data: account,
+            idempotencyKey: idempotencyKey || undefined
+        });
+    }
+    catch (error) {
+        logger_1.logger.error('Error in addOpeningBalanceAdjustment:', error);
+        if (error instanceof errorHandler_1.AppError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+exports.addOpeningBalanceAdjustment = addOpeningBalanceAdjustment;
+/**
  * Create owner payout
  */
 const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -327,7 +418,7 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
     try {
         const { propertyId } = req.params;
         const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
-        const { amount, paymentMethod, recipientId, recipientName, recipientBankDetails, notes } = req.body;
+        const { amount, paymentMethod, recipientId, recipientName, recipientBankDetails, notes, autoComplete } = req.body;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
@@ -364,6 +455,7 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
             recipientBankDetails,
             processedBy: req.user.userId,
             notes,
+            autoComplete: Boolean(autoComplete),
             idempotencyKey
         };
         const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData, ledger);

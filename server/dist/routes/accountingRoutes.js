@@ -16,6 +16,7 @@ const dashboardSummaryLimiter = (0, companyLoadShedding_1.createPerCompanyRateLi
 });
 router.use(auth_1.auth);
 router.get('/dashboard-summary', roles_1.canViewCommissions, dashboardSummaryLimiter, accountingController_1.getDashboardSummary);
+router.get('/dashboard-outstanding', roles_1.canViewCommissions, dashboardSummaryLimiter, accountingController_1.getDashboardOutstanding);
 router.get('/revenue-trend', roles_1.canViewCommissions, accountingController_1.getRevenueTrend);
 router.get('/expense-trend', roles_1.canViewCommissions, accountingController_1.getExpenseTrend);
 router.get('/vat-status', roles_1.canViewCommissions, accountingController_1.getVatStatus);

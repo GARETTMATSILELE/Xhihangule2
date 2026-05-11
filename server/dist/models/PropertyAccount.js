@@ -14,7 +14,7 @@ const database_1 = require("../config/database");
 const TransactionSchema = new mongoose_1.Schema({
     type: {
         type: String,
-        enum: ['income', 'expense', 'owner_payout', 'repair', 'maintenance', 'other'],
+        enum: ['income', 'expense', 'owner_payout', 'repair', 'maintenance', 'opening_balance', 'other'],
         required: true
     },
     amount: {
@@ -40,6 +40,10 @@ const TransactionSchema = new mongoose_1.Schema({
     },
     category: {
         type: String
+    },
+    direction: {
+        type: String,
+        enum: ['credit', 'debit']
     },
     recipientId: {
         type: mongoose_1.Schema.Types.Mixed
@@ -311,13 +315,16 @@ PropertyAccountSchema.pre('save', function (next) {
         .filter(t => t.type === 'income' && t.status === 'completed')
         .reduce((sum, t) => sum + t.amount, 0);
     this.totalExpenses = this.transactions
-        .filter(t => t.type !== 'income' && t.status === 'completed')
+        .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed')
         .reduce((sum, t) => sum + t.amount, 0);
     this.totalOwnerPayouts = this.ownerPayouts
         .filter(p => p.status === 'completed')
         .reduce((sum, p) => sum + p.amount, 0);
-    // Calculate running balance
-    this.runningBalance = this.totalIncome - this.totalExpenses - this.totalOwnerPayouts;
+    const openingBalance = this.transactions
+        .filter(t => t.type === 'opening_balance' && t.status === 'completed')
+        .reduce((sum, t) => sum + (t.direction === 'debit' ? -t.amount : t.amount), 0);
+    // Calculate running balance. Opening balances affect availability without inflating income/expense totals.
+    this.runningBalance = this.totalIncome - this.totalExpenses - this.totalOwnerPayouts + openingBalance;
     // Update last dates
     const incomeTransactions = this.transactions.filter(t => t.type === 'income');
     if (incomeTransactions.length > 0) {

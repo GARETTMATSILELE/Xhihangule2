@@ -246,6 +246,33 @@ const AdminDashboard: React.FC = () => {
     return '';
   }
 
+  function getOutstandingRangeForLease(
+    lease: any,
+    property: any,
+    currentMonthStart: Date,
+    cutoverDate: Date | null
+  ): { start: Date; end: Date } | null {
+    const start = lease?.startDate ? new Date(lease.startDate) : null;
+    const end = lease?.endDate ? new Date(lease.endDate) : currentMonthStart;
+    if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) return null;
+
+    const leaseStartMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+    const leaseEndMonth = new Date(Math.min(end.getTime(), currentMonthStart.getTime()));
+    if (leaseStartMonth.getTime() > leaseEndMonth.getTime()) return null;
+
+    const rentalType = String((property as any)?.rentalType || '').toLowerCase();
+    if (rentalType === 'introduction') {
+      // Introduction rentals are one-time only (first lease month).
+      if (cutoverDate && leaseStartMonth.getTime() < cutoverDate.getTime()) return null;
+      return { start: leaseStartMonth, end: leaseStartMonth };
+    }
+
+    let normalizedStart = leaseStartMonth;
+    if (cutoverDate && normalizedStart.getTime() < cutoverDate.getTime()) normalizedStart = cutoverDate;
+    if (normalizedStart.getTime() > leaseEndMonth.getTime()) return null;
+    return { start: normalizedStart, end: leaseEndMonth };
+  }
+
   // Update active tab based on current route
   useEffect(() => {
     const path = location.pathname;
@@ -456,14 +483,14 @@ const AdminDashboard: React.FC = () => {
           .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
           .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
-          const start = l?.startDate ? new Date(l.startDate) : null;
-          const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
-          if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          let ns = new Date(start.getFullYear(), start.getMonth(), 1);
-          if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
-          const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
-          if (ns.getTime() > ne.getTime()) continue;
-          iterateMonths(ns, ne, (y, m) => {
+          const range = getOutstandingRangeForLease(
+            l,
+            prop,
+            new Date(currentYear, currentMonth - 1, 1),
+            cutoverDate
+          );
+          if (!range) continue;
+          iterateMonths(range.start, range.end, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missing.add(key);
           });
@@ -533,14 +560,14 @@ const AdminDashboard: React.FC = () => {
           .filter((l: any) => (getId((l as any).propertyId) || '') === pid)
           .filter((l: any) => String((l?.status || '')).toLowerCase() === 'active');
         for (const l of leasesForProperty) {
-          const start = l?.startDate ? new Date(l.startDate) : null;
-          const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
-          if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-          let ns = new Date(start.getFullYear(), start.getMonth(), 1);
-          if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
-          const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
-          if (ns.getTime() > ne.getTime()) continue;
-          iterateMonths(ns, ne, (y, m) => {
+          const range = getOutstandingRangeForLease(
+            l,
+            prop,
+            new Date(currentYear, currentMonth - 1, 1),
+            cutoverDate
+          );
+          if (!range) continue;
+          iterateMonths(range.start, range.end, (y, m) => {
             const key = ymKey(y, m);
             if (!paidKeys.has(key)) missing.add(key);
           });
@@ -921,15 +948,15 @@ const AdminDashboard: React.FC = () => {
                       let propertyTotalAmount = 0;
                       const monthlyLevy = Number((prop as any)?.levyOrMunicipalAmount) || 0;
                       for (const l of leasesForProperty) {
-                        const start = l?.startDate ? new Date(l.startDate) : null;
-                        const end = l?.endDate ? new Date(l.endDate) : now;
-                        if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-                        const normEnd = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+                        const range = getOutstandingRangeForLease(
+                          l,
+                          prop,
+                          new Date(currentYear, currentMonth - 1, 1),
+                          cutoverDate
+                        );
+                        if (!range) continue;
                         const labels: string[] = [];
-                        let ns = new Date(start.getFullYear(), start.getMonth(), 1);
-                        if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
-                        const ne = new Date(normEnd.getFullYear(), normEnd.getMonth(), 1);
-                        iterateMonths(ns, ne, (y, m, label) => {
+                        iterateMonths(range.start, range.end, (y, m, label) => {
                           if (!paidKeys.has(ymKey(y, m))) labels.push(label);
                         });
                         if (labels.length > 0) {
@@ -1053,14 +1080,15 @@ const AdminDashboard: React.FC = () => {
                       const missingSet = new Set<string>();
                       const missingLabels: string[] = [];
                       for (const l of leasesForProperty) {
-                        const start = l?.startDate ? new Date(l.startDate) : null;
-                        const end = l?.endDate ? new Date(l.endDate) : new Date(currentYear, currentMonth - 1, 1);
-                        if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) continue;
-                        let ns = new Date(start.getFullYear(), start.getMonth(), 1);
-                        if (cutoverDate && ns.getTime() < cutoverDate.getTime()) ns = cutoverDate;
-                        const ne = new Date(Math.min(end.getTime(), new Date(currentYear, currentMonth - 1, 1).getTime()));
+                      const range = getOutstandingRangeForLease(
+                        l,
+                        prop,
+                        new Date(currentYear, currentMonth - 1, 1),
+                        cutoverDate
+                      );
+                      if (!range) continue;
                         const labels: string[] = [];
-                        iterateMonths(ns, ne, (y, m, label) => {
+                      iterateMonths(range.start, range.end, (y, m, label) => {
                           const key = ymKey(y, m);
                           if (!paidKeys.has(key)) {
                             labels.push(label);

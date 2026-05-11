@@ -225,6 +225,20 @@ const PropertySchema = new mongoose_1.Schema({
         type: String,
         enum: ['cash', 'installment'],
         required: false
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    deletedAt: {
+        type: Date,
+        default: null
+    },
+    deletedBy: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
     }
 }, {
     timestamps: true

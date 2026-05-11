@@ -7,10 +7,14 @@ import { buildPaymentIdempotencyKey } from './paymentService';
 
 export const agentService = {
   // Get properties managed by the agent
-  getProperties: async (): Promise<Property[]> => {
+  getProperties: async (options?: { deleted?: boolean }): Promise<Property[]> => {
     console.log('AgentService: Fetching properties for agent...');
     // Use agent-specific endpoint so we only get properties belonging to this agent
-    const response = await api.get('/agents/properties');
+    const response = await api.get('/agents/properties', {
+      params: {
+        deleted: options?.deleted ? 'true' : 'false'
+      }
+    });
     const raw = response.data as any;
     const data: Property[] = Array.isArray(raw)
       ? raw
@@ -34,6 +38,17 @@ export const agentService = {
   updateProperty: async (id: string, propertyData: Partial<PropertyFormData>): Promise<Property> => {
     const response = await api.put(`/agents/properties/${id}`, propertyData);
     return response.data;
+  },
+
+  // Soft delete an existing property (agent-owned)
+  deleteProperty: async (id: string): Promise<void> => {
+    await api.delete(`/agents/properties/${id}`);
+  },
+
+  // Restore a soft-deleted property (agent-owned)
+  restoreProperty: async (id: string): Promise<Property> => {
+    const response = await api.put(`/agents/properties/${id}/restore`);
+    return response.data?.property ?? response.data;
   },
 
   // Get tenants managed by the agent

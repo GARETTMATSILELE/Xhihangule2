@@ -13,6 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const multer_1 = __importDefault(require("multer"));
 const auth_1 = require("../middleware/auth");
 const roles_1 = require("../middleware/roles");
 const accountantController_1 = require("../controllers/accountantController");
@@ -28,6 +29,16 @@ const agentAccountController_2 = require("../controllers/agentAccountController"
 const trustAccountController_1 = require("../controllers/trustAccountController");
 const companyLoadShedding_1 = require("../middleware/companyLoadShedding");
 const router = express_1.default.Router();
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        const mime = String((file === null || file === void 0 ? void 0 : file.mimetype) || '').toLowerCase();
+        if (mime === 'application/pdf' || mime.startsWith('image/'))
+            return cb(null, true);
+        return cb(new Error('Only PDF or image files are allowed'));
+    }
+});
 const syncConcurrencyGuard = (0, companyLoadShedding_1.createPerCompanyConcurrencyGuard)({ operation: 'property-account-sync', maxConcurrent: 1 });
 const ledgerEnsureConcurrencyGuard = (0, companyLoadShedding_1.createPerCompanyConcurrencyGuard)({ operation: 'ensure-development-ledgers', maxConcurrent: 1 });
 // Debug middleware
@@ -51,6 +62,13 @@ router.use(auth_1.auth);
 router.get('/agent-commissions', roles_1.canViewCommissions, accountantController_1.getAgentCommissions);
 router.get('/agency-commission', roles_1.canViewCommissions, accountantController_1.getAgencyCommission);
 router.get('/prea-commission', roles_1.canViewCommissions, accountantController_1.getPREACommission);
+router.get('/commission-account', roles_1.canViewCommissions, accountantController_1.getCommissionAccount);
+router.get('/commission-reports', roles_1.canViewCommissions, accountantController_1.getCommissionReports);
+router.get('/tax-ledgers', roles_1.canViewCommissions, accountantController_1.getTaxLedgers);
+router.post('/tax-payouts', roles_1.isAccountant, accountantController_1.createTaxPayout);
+router.post('/tax-payouts/:payoutId/receipt', roles_1.isAccountant, upload.single('receipt'), accountantController_1.uploadTaxPayoutReceipt);
+router.get('/tax-payouts/:payoutId/receipt', roles_1.canViewCommissions, accountantController_1.getTaxPayoutReceipt);
+router.get('/tax-reports/:propertyId', roles_1.canViewCommissions, accountantController_1.getTaxPropertyReport);
 // Deposit ledger routes - allow admin and accountant
 router.get('/property-accounts/:propertyId/deposits', roles_1.canViewCommissions, accountantController_1.getPropertyDepositLedger);
 router.get('/property-accounts/:propertyId/deposits/summary', roles_1.canViewCommissions, accountantController_1.getPropertyDepositSummary);
@@ -141,6 +159,7 @@ router.get('/property-accounts', roles_1.canViewCommissions, propertyAccountCont
 router.post('/property-accounts/migrate-legacy-ledgers', roles_1.canViewCommissions, propertyAccountController_1.migrateLegacyLedgerTypes);
 router.get('/property-accounts/:propertyId', roles_1.canViewCommissions, propertyAccountController_1.getPropertyAccount);
 router.get('/property-accounts/:propertyId/transactions', roles_1.canViewCommissions, propertyAccountController_1.getPropertyTransactions);
+router.post('/property-accounts/:propertyId/opening-balances', roles_1.isAccountant, propertyAccountController_1.addOpeningBalanceAdjustment);
 router.post('/property-accounts/:propertyId/expense', roles_1.canViewCommissions, propertyAccountController_1.addExpense);
 router.post('/property-accounts/:propertyId/payout', roles_1.canViewCommissions, propertyAccountController_1.createOwnerPayout);
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.canViewCommissions, propertyAccountController_1.updatePayoutStatus);
@@ -157,8 +176,8 @@ router.post('/property-accounts/:propertyId/merge-duplicates', roles_1.canViewCo
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.canViewCommissions, propertyAccountController_1.getAcknowledgementDocument);
 // Company account routes
-router.get('/company-account/summary', roles_1.isAccountant, companyAccountController_1.getCompanyAccountSummary);
-router.get('/company-account/transactions', roles_1.isAccountant, companyAccountController_1.getCompanyTransactions);
+router.get('/company-account/summary', roles_1.canViewAccountantDashboard, companyAccountController_1.getCompanyAccountSummary);
+router.get('/company-account/transactions', roles_1.canViewAccountantDashboard, companyAccountController_1.getCompanyTransactions);
 router.post('/company-account/transactions', roles_1.isAccountant, companyAccountController_1.createCompanyTransaction);
 // Sales contracts
 router.post('/sales', roles_1.isAccountant, salesContractController_1.createSalesContract);

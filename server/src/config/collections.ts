@@ -30,6 +30,7 @@ export const COLLECTIONS = {
   TRUST_ACCOUNTS: 'trustaccounts',
   TRUST_TRANSACTIONS: 'trusttransactions',
   TAX_RECORDS: 'taxrecords',
+  TAX_PAYOUTS: 'taxpayouts',
   TRUST_SETTLEMENTS: 'trustsettlements',
   TRUST_AUDIT_LOGS: 'trustauditlogs',
   TRUST_EVENT_FAILURE_LOGS: 'trusteventfailurelogs',
@@ -46,5 +47,6 @@ export type CollectionsKeys = keyof typeof COLLECTIONS | 'INSPECTIONS';
 export const ensureCollections = {
   ...COLLECTIONS,
   INSPECTIONS: (COLLECTIONS as any).INSPECTIONS || 'inspections',
-  VAT_PAYOUTS: (COLLECTIONS as any).VAT_PAYOUTS || 'vatpayouts'
+  VAT_PAYOUTS: (COLLECTIONS as any).VAT_PAYOUTS || 'vatpayouts',
+  TAX_PAYOUTS: (COLLECTIONS as any).TAX_PAYOUTS || 'taxpayouts'
 } as const;

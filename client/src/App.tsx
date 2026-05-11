@@ -64,7 +64,7 @@ const AgentAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboar
 const AgentAccountDetailPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AgentAccountDetailPage'));
 const WrittenInvoicesPage = lazyWithRetry(() => import('./pages/AccountantDashboard/WrittenInvoicesPage'));
 const LevyPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/LevyPaymentsPage'));
-const VATManagementPage = lazyWithRetry(() => import('./pages/AccountantDashboard/VATManagementPage'));
+const TaxAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TaxAccountsPage'));
 const TasksPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TasksPage'));
 const DatabaseSyncDashboard = lazyWithRetry(() => import('./components/admin/DatabaseSyncDashboard'));
 const TrustAccountReportsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TrustAccountReportsPage'));
@@ -198,7 +198,7 @@ const App: React.FC = () => {
               </Route>
               <Route path="/choose-dashboard" element={<ChooseDashboard />} />
               <Route path="/accountant-dashboard/*" element={
-                <ProtectedRoute requiredRoles={['accountant','principal','prea']}>
+                <ProtectedRoute requiredRoles={['admin','accountant','principal','prea']}>
                   <PropertyProvider>
                     <CompanyProvider>
                       <AccountantDashboard />
@@ -211,13 +211,13 @@ const App: React.FC = () => {
                 <Route path="sales" element={<SalesPaymentsPage />} />
                 <Route path="revenue" element={<RevenuePage />} />
                 <Route path="ledger" element={<LedgerDrilldownPage />} />
-                <Route path="vat" element={<VATManagementPage />} />
                 <Route path="property-accounts" element={<PropertyAccountsPage />} />
                 <Route path="property-accounts/:propertyId" element={<PropertyAccountDetailPage />} />
                 <Route path="property-accounts/:propertyId/deposits" element={<PropertyDepositLedgerPage />} />
                 <Route path="agent-accounts" element={<AgentAccountsPage />} />
                 <Route path="agent-accounts/:agentId" element={<AgentAccountDetailPage />} />
                 <Route path="commissions" element={<CommissionsPage />} />
+                <Route path="tax" element={<TaxAccountsPage />} />
                 <Route path="written-invoices" element={<WrittenInvoicesPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="levies" element={<LevyPaymentsPage />} />
@@ -225,7 +225,11 @@ const App: React.FC = () => {
                 <Route path="trust-account-reports" element={<TrustAccountReportsPage />} />
                 <Route path="trust-account-reports/:propertyId" element={<TrustAccountPropertyReportPage />} />
                 <Route path="tasks" element={<TasksPage />} />
-                <Route path="data-sync" element={<DatabaseSyncDashboard />} />
+                <Route path="data-sync" element={
+                  <ProtectedRoute requiredRoles={['admin']}>
+                    <DatabaseSyncDashboard />
+                  </ProtectedRoute>
+                } />
               </Route>
               <Route path="/admin/users" element={
                 <ProtectedRoute requiredRoles={['admin']}>

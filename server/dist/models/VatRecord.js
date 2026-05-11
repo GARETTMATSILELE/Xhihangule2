@@ -44,7 +44,7 @@ const VatRecordSchema = new mongoose_1.Schema({
     vatPaid: { type: Number, default: 0, min: 0 },
     vatRate: { type: Number, default: 0, min: 0 },
     filingPeriod: { type: String, required: true },
-    status: { type: String, enum: ['pending', 'submitted'], default: 'pending' }
+    status: { type: String, enum: ['pending', 'submitted', 'reversed'], default: 'pending' }
 }, { timestamps: { createdAt: 'createdAt', updatedAt: false } });
 VatRecordSchema.index({ companyId: 1, filingPeriod: 1 });
 VatRecordSchema.index({ companyId: 1, status: 1 });

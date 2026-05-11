@@ -35,7 +35,9 @@ const generateTaxSummary = (input) => {
     const vatOnSale = (0, exports.calculateVATOnSale)(salePrice, (_b = input.applyVatOnSale) !== null && _b !== void 0 ? _b : DEFAULT_CONFIG.applyVatOnSale, (_c = input.vatSaleRate) !== null && _c !== void 0 ? _c : DEFAULT_CONFIG.vatSaleRate);
     const vatOnCommission = input.vatOnCommissionAmount != null
         ? money(input.vatOnCommissionAmount)
-        : (0, exports.calculateCommissionVAT)(commissionAmount, (_d = input.vatOnCommissionRate) !== null && _d !== void 0 ? _d : DEFAULT_CONFIG.vatOnCommissionRate);
+        : input.applyVatOnCommission === false
+            ? 0
+            : (0, exports.calculateCommissionVAT)(commissionAmount, (_d = input.vatOnCommissionRate) !== null && _d !== void 0 ? _d : DEFAULT_CONFIG.vatOnCommissionRate);
     const deductions = [cgt, vatOnSale, commissionAmount, vatOnCommission];
     const totalDeductions = money(deductions.reduce((sum, d) => sum + d, 0));
     const sellerNetPayout = (0, exports.calculateSellerNetPayout)(salePrice, deductions);
@@ -55,7 +57,7 @@ const generateTaxSummary = (input) => {
             appliedRules: {
                 cgtFirst: true,
                 vatOnSaleApplied: (_h = input.applyVatOnSale) !== null && _h !== void 0 ? _h : DEFAULT_CONFIG.applyVatOnSale,
-                vatOnCommissionApplied: true,
+                vatOnCommissionApplied: input.applyVatOnCommission !== false,
                 vatOnCommissionSource: input.vatOnCommissionAmount != null ? 'payment' : 'calculated'
             }
         }

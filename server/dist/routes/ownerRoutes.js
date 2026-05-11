@@ -16,12 +16,13 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
-const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const PropertyOwner_1 = require("../models/PropertyOwner");
+const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const ownerController_1 = require("../controllers/ownerController");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Tenant_1 = require("../models/Tenant");
 const Lease_1 = require("../models/Lease");
+const Payment_1 = require("../models/Payment");
 const router = express_1.default.Router();
 console.log('OwnerRoutes: Registering owner routes...');
 // Only protect property routes, not maintenance-requests
@@ -129,6 +130,32 @@ router.post('/maintenance-requests/:id/messages', (req, res, next) => {
     console.log('OwnerRoutes: POST /maintenance-requests/:id/messages route hit');
     next();
 }, ownerController_1.addOwnerMaintenanceMessage);
+const resolveOwnerIncomeType = (rentalType) => {
+    const normalized = String(rentalType || '').trim().toLowerCase();
+    if (normalized === 'sale' || normalized === 'sales') {
+        return { ledgerType: 'sale', incomeType: 'Sales Income' };
+    }
+    return { ledgerType: 'rental', incomeType: 'Rental Income' };
+};
+const normalizeNumericAmount = (value) => {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : 0;
+    }
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/[^0-9.-]/g, '');
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    if (value && typeof value === 'object' && typeof value.toString === 'function') {
+        const parsed = Number(String(value.toString()).replace(/[^0-9.-]/g, ''));
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+};
+const getSortTimestamp = (value) => {
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+};
 // Get owner financial data from accounting database
 router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -226,170 +253,8 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
             });
         }
         console.log(`[Owner Financial Data] Final property IDs to query:`, ownerPropertyIds);
-        // Get property accounts for this owner's properties from the accounting database
-        console.log(`[Owner Financial Data] Querying PropertyAccount with propertyIds:`, ownerPropertyIds);
-        // First, let's see if there are any PropertyAccount records at all
-        const totalPropertyAccounts = yield PropertyAccount_1.default.countDocuments({});
-        console.log(`[Owner Financial Data] Total PropertyAccount records in accounting database:`, totalPropertyAccounts);
-        // Check all PropertyAccount records to see their structure
-        const samplePropertyAccounts = yield PropertyAccount_1.default.find({}).limit(5);
-        console.log(`[Owner Financial Data] Sample PropertyAccount records:`, samplePropertyAccounts);
-        // Query PropertyAccount by propertyId (this is the correct way since PropertyAccount uses propertyId to link to properties)
-        console.log(`[Owner Financial Data] Querying PropertyAccount with propertyIds:`, ownerPropertyIds);
-        console.log(`[Owner Financial Data] PropertyAccount query: { propertyId: { $in: [${ownerPropertyIds.map((id) => `"${id}"`).join(', ')}] } }`);
-        let propertyAccounts = yield PropertyAccount_1.default.find({
-            propertyId: { $in: ownerPropertyIds }
-        });
-        console.log(`[Owner Financial Data] PropertyAccount query result by propertyId:`, propertyAccounts);
-        console.log(`[Owner Financial Data] PropertyAccount records found:`, propertyAccounts.length);
-        if (propertyAccounts.length > 0) {
-            console.log(`[Owner Financial Data] PropertyAccount details:`, propertyAccounts.map(account => {
-                var _a;
-                return ({
-                    propertyId: account.propertyId,
-                    propertyName: account.propertyName,
-                    totalIncome: account.totalIncome,
-                    totalExpenses: account.totalExpenses,
-                    runningBalance: account.runningBalance,
-                    transactionsCount: ((_a = account.transactions) === null || _a === void 0 ? void 0 : _a.length) || 0
-                });
-            }));
-        }
-        else {
-            console.log(`[Owner Financial Data] No PropertyAccount records found for the given property IDs`);
-            // Let's also check what PropertyAccount records exist in the database
-            const allPropertyAccounts = yield PropertyAccount_1.default.find({}).limit(5);
-            console.log(`[Owner Financial Data] Sample PropertyAccount records in database:`, allPropertyAccounts.map(acc => ({
-                propertyId: acc.propertyId,
-                propertyName: acc.propertyName,
-                totalIncome: acc.totalIncome
-            })));
-        }
-        // If no property accounts found, try without the isActive filter
-        if (!propertyAccounts || propertyAccounts.length === 0) {
-            console.log(`[Owner Financial Data] No property accounts found by propertyId, trying without isActive filter`);
-            propertyAccounts = yield PropertyAccount_1.default.find({
-                propertyId: { $in: ownerPropertyIds }
-            });
-            console.log(`[Owner Financial Data] PropertyAccount query without isActive filter:`, propertyAccounts);
-        }
-        // If still no property accounts found, let's check if there are actual payments for these properties
-        if (!propertyAccounts || propertyAccounts.length === 0) {
-            console.log(`[Owner Financial Data] No property accounts found in accounting database for owner's properties`);
-            // Check if there are actual payments for these properties
-            const Payment = require('../models/Payment');
-            // First check all payments to see what's in the database
-            const allPayments = yield Payment.find({ companyId: req.user.companyId }).limit(10);
-            console.log(`[Owner Financial Data] Sample payments in database:`, allPayments);
-            const payments = yield Payment.find({
-                propertyId: { $in: ownerPropertyIds },
-                companyId: req.user.companyId
-            }).populate('propertyId', 'name address');
-            console.log(`[Owner Financial Data] Found ${payments.length} payments for owner's properties:`, payments);
-            console.log(`[Owner Financial Data] Payment details:`, payments.map((p) => {
-                var _a, _b, _c;
-                return ({
-                    id: p._id,
-                    propertyId: (_a = p.propertyId) === null || _a === void 0 ? void 0 : _a._id,
-                    propertyName: (_b = p.propertyId) === null || _b === void 0 ? void 0 : _b.name,
-                    amount: p.amount,
-                    paymentType: p.paymentType,
-                    status: p.status,
-                    ownerAmount: (_c = p.commissionDetails) === null || _c === void 0 ? void 0 : _c.ownerAmount
-                });
-            }));
-            if (payments.length > 0) {
-                // Create a temporary data structure from actual payment data
-                const tempPropertyAccounts = [];
-                const propertyPaymentMap = new Map();
-                // Group payments by property
-                payments.forEach((payment) => {
-                    var _a;
-                    const propertyId = payment.propertyId._id.toString();
-                    if (!propertyPaymentMap.has(propertyId)) {
-                        propertyPaymentMap.set(propertyId, {
-                            propertyId: payment.propertyId._id,
-                            propertyName: payment.propertyId.name,
-                            propertyAddress: payment.propertyId.address,
-                            payments: [],
-                            totalIncome: 0,
-                            totalExpenses: 0,
-                            totalOwnerPayouts: 0,
-                            runningBalance: 0
-                        });
-                    }
-                    const propertyData = propertyPaymentMap.get(propertyId);
-                    propertyData.payments.push(payment);
-                    // Calculate totals based on payment data
-                    if (payment.paymentType === 'rental' && payment.status === 'completed') {
-                        const ownerAmount = ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || payment.amount || 0;
-                        propertyData.totalIncome += ownerAmount;
-                        propertyData.runningBalance += ownerAmount;
-                    }
-                });
-                // Convert to the expected format
-                propertyAccounts = Array.from(propertyPaymentMap.values()).map(propertyData => (Object.assign(Object.assign({}, propertyData), { transactions: propertyData.payments.map((payment) => {
-                        var _a;
-                        return ({
-                            _id: payment._id,
-                            type: payment.paymentType === 'rental' ? 'income' : 'other',
-                            amount: ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || payment.amount || 0,
-                            date: payment.paymentDate,
-                            description: `Rental payment - ${payment.tenantName || 'Unknown Tenant'}`,
-                            category: 'rental',
-                            status: payment.status,
-                            referenceNumber: payment.referenceNumber || payment._id.toString()
-                        });
-                    }), ownerPayouts: [] })));
-                console.log(`[Owner Financial Data] Created temporary property accounts from payment data:`, propertyAccounts);
-            }
-        }
-        // Deduplicate accounts by propertyId to avoid duplicates in UI and summary
-        if (propertyAccounts && propertyAccounts.length > 0) {
-            const dedupedMap = new Map();
-            for (const acc of propertyAccounts) {
-                const key = (acc.propertyId || '').toString();
-                if (!key)
-                    continue;
-                const existing = dedupedMap.get(key);
-                if (!existing) {
-                    dedupedMap.set(key, {
-                        propertyId: acc.propertyId,
-                        propertyName: acc.propertyName,
-                        propertyAddress: acc.propertyAddress,
-                        totalIncome: Number(acc.totalIncome || 0),
-                        totalExpenses: Number(acc.totalExpenses || 0),
-                        totalOwnerPayouts: Number(acc.totalOwnerPayouts || 0),
-                        runningBalance: Number(acc.runningBalance || 0),
-                        lastIncomeDate: acc.lastIncomeDate,
-                        lastExpenseDate: acc.lastExpenseDate,
-                        lastPayoutDate: acc.lastPayoutDate,
-                        transactions: Array.isArray(acc.transactions) ? [...acc.transactions] : [],
-                        ownerPayouts: Array.isArray(acc.ownerPayouts) ? [...acc.ownerPayouts] : [],
-                    });
-                }
-                else {
-                    existing.totalIncome += Number(acc.totalIncome || 0);
-                    existing.totalExpenses += Number(acc.totalExpenses || 0);
-                    existing.totalOwnerPayouts += Number(acc.totalOwnerPayouts || 0);
-                    // Prefer the most recent balance/date values
-                    existing.runningBalance = Number(acc.runningBalance || existing.runningBalance || 0);
-                    existing.lastIncomeDate = new Date(Math.max(existing.lastIncomeDate ? new Date(existing.lastIncomeDate).getTime() : 0, acc.lastIncomeDate ? new Date(acc.lastIncomeDate).getTime() : 0));
-                    existing.lastExpenseDate = new Date(Math.max(existing.lastExpenseDate ? new Date(existing.lastExpenseDate).getTime() : 0, acc.lastExpenseDate ? new Date(acc.lastExpenseDate).getTime() : 0));
-                    existing.lastPayoutDate = new Date(Math.max(existing.lastPayoutDate ? new Date(existing.lastPayoutDate).getTime() : 0, acc.lastPayoutDate ? new Date(acc.lastPayoutDate).getTime() : 0));
-                    if (Array.isArray(acc.transactions)) {
-                        existing.transactions.push(...acc.transactions);
-                    }
-                    if (Array.isArray(acc.ownerPayouts)) {
-                        existing.ownerPayouts.push(...acc.ownerPayouts);
-                    }
-                }
-            }
-            propertyAccounts = Array.from(dedupedMap.values());
-            console.log(`[Owner Financial Data] Deduplicated property accounts count:`, propertyAccounts.length);
-        }
-        if (!propertyAccounts || propertyAccounts.length === 0) {
-            console.log(`[Owner Financial Data] No property accounts or payment data found for owner's properties`);
+        const ownerProperties = yield Property_1.Property.find(Object.assign({ _id: { $in: ownerPropertyIds } }, (req.user.companyId ? { companyId: req.user.companyId } : {}))).select('_id name address rentalType');
+        if (!ownerProperties || ownerProperties.length === 0) {
             return res.json({
                 success: true,
                 data: {
@@ -407,7 +272,34 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
                 }
             });
         }
-        console.log(`[Owner Financial Data] Found ${propertyAccounts.length} property accounts in accounting database`);
+        const propertyAccounts = yield Promise.all(ownerProperties.map((property) => __awaiter(void 0, void 0, void 0, function* () {
+            const propertyId = String(property._id);
+            const { ledgerType, incomeType } = resolveOwnerIncomeType(property.rentalType);
+            try {
+                const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledgerType);
+                return Object.assign(Object.assign({}, (typeof (account === null || account === void 0 ? void 0 : account.toObject) === 'function' ? account.toObject() : account)), { propertyId: (account === null || account === void 0 ? void 0 : account.propertyId) || property._id, propertyName: (account === null || account === void 0 ? void 0 : account.propertyName) || property.name || 'Unknown Property', propertyAddress: (account === null || account === void 0 ? void 0 : account.propertyAddress) || property.address || 'No Address', ledgerType,
+                    incomeType });
+            }
+            catch (accountErr) {
+                console.warn(`[Owner Financial Data] Could not load account for property ${propertyId} (${ledgerType})`, (accountErr === null || accountErr === void 0 ? void 0 : accountErr.message) || accountErr);
+                return {
+                    propertyId: property._id,
+                    propertyName: property.name || 'Unknown Property',
+                    propertyAddress: property.address || 'No Address',
+                    totalIncome: 0,
+                    totalExpenses: 0,
+                    totalOwnerPayouts: 0,
+                    runningBalance: 0,
+                    lastIncomeDate: null,
+                    lastExpenseDate: null,
+                    lastPayoutDate: null,
+                    transactions: [],
+                    ownerPayouts: [],
+                    ledgerType,
+                    incomeType
+                };
+            }
+        })));
         // Calculate summary statistics
         const summary = {
             totalIncome: 0,
@@ -420,12 +312,123 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
         const monthlyData = {};
         const allTransactions = [];
         const propertyBreakdown = [];
-        propertyAccounts.forEach(account => {
+        for (const account of propertyAccounts) {
             // Add to summary
             summary.totalIncome += account.totalIncome || 0;
             summary.totalExpenses += account.totalExpenses || 0;
             summary.totalOwnerPayouts += account.totalOwnerPayouts || 0;
             summary.runningBalance += account.runningBalance || 0;
+            const incomeTransactions = Array.isArray(account.transactions)
+                ? account.transactions.filter((transaction) => String((transaction === null || transaction === void 0 ? void 0 : transaction.type) || '').toLowerCase() === 'income')
+                : [];
+            const paymentIds = Array.isArray(incomeTransactions)
+                ? incomeTransactions
+                    .map((transaction) => String((transaction === null || transaction === void 0 ? void 0 : transaction.paymentId) || '').trim())
+                    .filter((id) => Boolean(id && mongoose_1.default.isValidObjectId(id)))
+                : [];
+            const paymentRefs = Array.isArray(incomeTransactions)
+                ? incomeTransactions
+                    .map((transaction) => String((transaction === null || transaction === void 0 ? void 0 : transaction.referenceNumber) || '').trim())
+                    .filter((ref) => Boolean(ref))
+                : [];
+            const uniquePaymentIds = Array.from(new Set(paymentIds));
+            const uniquePaymentRefs = Array.from(new Set(paymentRefs));
+            let paymentById = new Map();
+            let paymentByReference = new Map();
+            if (uniquePaymentIds.length > 0 || uniquePaymentRefs.length > 0) {
+                try {
+                    const paymentQuery = Object.assign({ $or: [
+                            ...(uniquePaymentIds.length > 0 ? [{ _id: { $in: uniquePaymentIds } }] : []),
+                            ...(uniquePaymentRefs.length > 0 ? [{ referenceNumber: { $in: uniquePaymentRefs } }] : [])
+                        ] }, (req.user.companyId ? { companyId: req.user.companyId } : {}));
+                    const payments = yield Payment_1.Payment.find(paymentQuery)
+                        .select('_id amount commissionDetails.totalCommission')
+                        .lean();
+                    paymentById = new Map();
+                    paymentByReference = new Map();
+                    payments.forEach((payment) => {
+                        var _a;
+                        const normalized = {
+                            receiptAmount: normalizeNumericAmount(payment === null || payment === void 0 ? void 0 : payment.amount),
+                            commissionAmount: normalizeNumericAmount((_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.totalCommission)
+                        };
+                        paymentById.set(String(payment._id), normalized);
+                        if (payment === null || payment === void 0 ? void 0 : payment.referenceNumber) {
+                            paymentByReference.set(String(payment.referenceNumber), normalized);
+                        }
+                    });
+                }
+                catch (paymentLookupError) {
+                    console.warn('[Owner Financial Data] Failed to resolve receipt totals for account transactions:', (paymentLookupError === null || paymentLookupError === void 0 ? void 0 : paymentLookupError.message) || paymentLookupError);
+                }
+            }
+            const resolvePaymentInfo = (transaction) => paymentById.get(String((transaction === null || transaction === void 0 ? void 0 : transaction.paymentId) || '')) ||
+                paymentByReference.get(String((transaction === null || transaction === void 0 ? void 0 : transaction.referenceNumber) || ''));
+            const propertyTransactionsRaw = [
+                ...(Array.isArray(account.transactions) ? account.transactions.map((transaction) => {
+                    var _a;
+                    return (Object.assign(Object.assign({}, (() => {
+                        var _a, _b;
+                        const paymentInfo = resolvePaymentInfo(transaction);
+                        const normalizedType = String((transaction === null || transaction === void 0 ? void 0 : transaction.type) || '').toLowerCase();
+                        const isIncome = normalizedType === 'income';
+                        return {
+                            // Rent must come from Payment.amount in property management DB.
+                            // For non-income entries, keep amount-aligned fallback for completeness.
+                            receiptAmount: (_a = paymentInfo === null || paymentInfo === void 0 ? void 0 : paymentInfo.receiptAmount) !== null && _a !== void 0 ? _a : (isIncome ? 0 : normalizeNumericAmount(transaction === null || transaction === void 0 ? void 0 : transaction.amount)),
+                            commissionAmount: (_b = paymentInfo === null || paymentInfo === void 0 ? void 0 : paymentInfo.commissionAmount) !== null && _b !== void 0 ? _b : 0
+                        };
+                    })()), { id: transaction._id, type: transaction.type, amount: transaction.amount, date: transaction.date, createdAt: transaction.createdAt, updatedAt: transaction.updatedAt, description: transaction.description, category: transaction.category, status: transaction.status, ledgerType: account.ledgerType, incomeType: account.incomeType, propertyName: account.propertyName || ((_a = account.propertyId) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Property', referenceNumber: transaction.referenceNumber }));
+                }) : []),
+                ...(Array.isArray(account.ownerPayouts) ? account.ownerPayouts.map((payout) => {
+                    var _a;
+                    return ({
+                        id: payout._id,
+                        type: 'owner_payout',
+                        amount: payout.amount,
+                        date: payout.date,
+                        createdAt: payout.createdAt,
+                        updatedAt: payout.updatedAt,
+                        description: payout.notes || 'Owner payout',
+                        category: 'owner_payout',
+                        status: payout.status,
+                        ledgerType: account.ledgerType,
+                        incomeType: account.incomeType,
+                        propertyName: account.propertyName || ((_a = account.propertyId) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Property',
+                        referenceNumber: payout.referenceNumber
+                    });
+                }) : [])
+            ];
+            const propertyTransactions = propertyTransactionsRaw
+                .sort((a, b) => {
+                const byDate = getSortTimestamp(a.date) - getSortTimestamp(b.date);
+                if (byDate !== 0)
+                    return byDate;
+                const byCreated = getSortTimestamp(a.createdAt || a.updatedAt) - getSortTimestamp(b.createdAt || b.updatedAt);
+                if (byCreated !== 0)
+                    return byCreated;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            })
+                .reduce((accum, transaction) => {
+                const prev = accum.length > 0 ? Number(accum[accum.length - 1].runningBalance || 0) : 0;
+                const amount = normalizeNumericAmount(transaction.amount);
+                const normalizedStatus = String(transaction.status || '').trim().toLowerCase();
+                const normalizedType = String(transaction.type || '').trim().toLowerCase();
+                const affectsBalance = normalizedStatus === 'completed';
+                const delta = affectsBalance ? (normalizedType === 'income' ? amount : -amount) : 0;
+                const runningBalance = Math.round((prev + delta) * 100) / 100;
+                accum.push(Object.assign(Object.assign({}, transaction), { amount, receiptAmount: normalizeNumericAmount(transaction.receiptAmount), commissionAmount: normalizeNumericAmount(transaction.commissionAmount), runningBalance }));
+                return accum;
+            }, [])
+                .sort((a, b) => {
+                const byDate = getSortTimestamp(b.date) - getSortTimestamp(a.date);
+                if (byDate !== 0)
+                    return byDate;
+                const byCreated = getSortTimestamp(b.createdAt || b.updatedAt) - getSortTimestamp(a.createdAt || a.updatedAt);
+                if (byCreated !== 0)
+                    return byCreated;
+                return String(b.id || '').localeCompare(String(a.id || ''));
+            });
             // Add property breakdown
             const propertyName = account.propertyName || 'Unknown Property';
             const propertyAddress = account.propertyAddress || 'No Address';
@@ -433,18 +436,29 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
                 propertyId: account.propertyId,
                 propertyName: propertyName,
                 propertyAddress: propertyAddress,
+                ledgerType: account.ledgerType,
+                incomeType: account.incomeType,
                 totalIncome: account.totalIncome || 0,
+                totalRentPaid: propertyTransactions
+                    .filter((transaction) => String((transaction === null || transaction === void 0 ? void 0 : transaction.type) || '').toLowerCase() === 'income')
+                    .reduce((sum, transaction) => sum + normalizeNumericAmount(transaction === null || transaction === void 0 ? void 0 : transaction.receiptAmount), 0),
+                totalCommission: propertyTransactions
+                    .filter((transaction) => String((transaction === null || transaction === void 0 ? void 0 : transaction.type) || '').toLowerCase() === 'income')
+                    .reduce((sum, transaction) => sum + normalizeNumericAmount(transaction === null || transaction === void 0 ? void 0 : transaction.commissionAmount), 0),
                 totalExpenses: account.totalExpenses || 0,
                 totalOwnerPayouts: account.totalOwnerPayouts || 0,
                 runningBalance: account.runningBalance || 0,
+                netIncome: (account.totalIncome || 0) - (account.totalExpenses || 0) - (account.totalOwnerPayouts || 0),
                 lastIncomeDate: account.lastIncomeDate,
                 lastExpenseDate: account.lastExpenseDate,
-                lastPayoutDate: account.lastPayoutDate
+                lastPayoutDate: account.lastPayoutDate,
+                transactions: propertyTransactions,
+                recentTransactions: propertyTransactions.slice(0, 20)
             });
             console.log(`[Owner Financial Data] Processing property: ${propertyName} (${propertyAddress})`);
             // Process transactions by month
             account.transactions.forEach((transaction) => {
-                var _a;
+                var _a, _b, _c;
                 const transactionDate = new Date(transaction.date);
                 const monthKey = `${transactionDate.getFullYear()}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
                 if (!monthlyData[monthKey]) {
@@ -464,11 +478,15 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
                     id: transaction._id,
                     type: transaction.type,
                     amount: transaction.amount,
+                    receiptAmount: normalizeNumericAmount((_a = resolvePaymentInfo(transaction)) === null || _a === void 0 ? void 0 : _a.receiptAmount),
+                    commissionAmount: normalizeNumericAmount((_b = resolvePaymentInfo(transaction)) === null || _b === void 0 ? void 0 : _b.commissionAmount),
                     date: transaction.date,
                     description: transaction.description,
                     category: transaction.category,
                     status: transaction.status,
-                    propertyName: account.propertyName || ((_a = account.propertyId) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Property',
+                    ledgerType: account.ledgerType,
+                    incomeType: account.incomeType,
+                    propertyName: account.propertyName || ((_c = account.propertyId) === null || _c === void 0 ? void 0 : _c.name) || 'Unknown Property',
                     referenceNumber: transaction.referenceNumber
                 });
             });
@@ -490,11 +508,13 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
                     description: payout.notes || 'Owner payout',
                     category: 'owner_payout',
                     status: payout.status,
+                    ledgerType: account.ledgerType,
+                    incomeType: account.incomeType,
                     propertyName: account.propertyName || ((_a = account.propertyId) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Property',
                     referenceNumber: payout.referenceNumber
                 });
             });
-        });
+        }
         // Convert monthly data to chart format and sort by date
         const monthlyChartData = Object.entries(monthlyData)
             .map(([month, data]) => ({

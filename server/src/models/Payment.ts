@@ -45,6 +45,8 @@ export interface IPayment extends Document {
   vatIncluded?: boolean;
   vatRate?: number;
   vatAmount?: number;
+  applyVatOnCommission?: boolean;
+  vatOnCommissionRate?: number;
   status: 'pending' | 'completed' | 'failed' | 'reversed' | 'refunded';
   postingStatus?: 'draft' | 'posted' | 'reversed' | 'voided';
   currency: 'USD' | 'ZWL';
@@ -245,6 +247,18 @@ const PaymentSchema: Schema = new Schema({
     type: Number,
     required: false,
     min: 0,
+    default: 0
+  },
+  applyVatOnCommission: {
+    type: Boolean,
+    required: false,
+    default: false
+  },
+  vatOnCommissionRate: {
+    type: Number,
+    required: false,
+    min: 0,
+    max: 1,
     default: 0
   },
   status: {
@@ -473,7 +487,8 @@ function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
         'status','isProvisional','isInSuspense','commissionFinalized','provisionalRelationshipType',
         'finalizedAt','finalizedBy','idempotencyKey','manualPropertyAddress','manualTenantName',
         'buyerName','sellerName','saleId','developmentId','developmentUnitId','notes',
-        'postingStatus','reversalOfPaymentId','reversalPaymentId','correctedPaymentId',
+        'postingStatus','vatIncluded','vatRate','vatAmount','applyVatOnCommission','vatOnCommissionRate',
+        'reversalOfPaymentId','reversalPaymentId','correctedPaymentId',
         'reversedBy','reversedAt','reversalReason','voidedBy','voidedAt','voidReason','isCorrectionEntry'
       ].includes(key)) continue;
       if (protectedKeys.has(key)) return true;
@@ -484,13 +499,13 @@ function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
 
 PaymentSchema.pre('save', function(next) {
   try {
-    if (!(this as any).postingStatus) {
-      const status = String((this as any).status || '').toLowerCase();
-      if (status === 'completed') (this as any).postingStatus = 'posted';
-      else if (status === 'reversed') (this as any).postingStatus = 'reversed';
-      else if (status === 'failed') (this as any).postingStatus = 'voided';
-      else (this as any).postingStatus = 'draft';
-    }
+    // Keep postingStatus consistent with status to avoid "completed but draft" conflicts.
+    // This is critical for reversal eligibility and ledger posting correctness.
+    const status = String((this as any).status || '').toLowerCase();
+    if (status === 'completed') (this as any).postingStatus = 'posted';
+    else if (status === 'reversed') (this as any).postingStatus = 'reversed';
+    else if (status === 'failed') (this as any).postingStatus = 'voided';
+    else (this as any).postingStatus = 'draft';
     return next();
   } catch (e) {
     return next(e as any);

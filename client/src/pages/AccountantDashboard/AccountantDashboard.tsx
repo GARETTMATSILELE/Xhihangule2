@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Box, Toolbar, Tabs, Tab } from '@mui/material';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Header } from '../../components/Layout/Header';
 const DashboardOverview = lazy(() => import('./DashboardOverview'));
@@ -8,7 +8,7 @@ const AccountantPaymentsPage = lazy(() => import('./AccountantPaymentsPage'));
 const SalesPaymentsPage = lazy(() => import('./SalesPaymentsPage'));
 const RevenuePage = lazy(() => import('./RevenuePage'));
 const LedgerDrilldownPage = lazy(() => import('./LedgerDrilldownPage'));
-const VATManagementPage = lazy(() => import('./VATManagementPage'));
+const TaxAccountsPage = lazy(() => import('./TaxAccountsPage'));
 const LevyPaymentsPage = lazy(() => import('./LevyPaymentsPage'));
 const WrittenInvoicesPage = lazy(() => import('./WrittenInvoicesPage'));
 const PropertyAccountsPage = lazy(() => import('./PropertyAccountsPage'));
@@ -28,6 +28,8 @@ const AccountantDashboard: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
+  const userRoles = ((user as any)?.roles as string[] | undefined) || (user?.role ? [user.role] : []);
+  const canManageSync = userRoles.includes('admin');
 
   // Support path-scoped sessions
   useEffect(() => {
@@ -83,7 +85,7 @@ const AccountantDashboard: React.FC = () => {
     }
   }, [location.pathname]);
 
-  const menuItems: { label: string; path: string }[] = [
+  const menuItems = [
     { label: 'Dashboard', path: '/accountant-dashboard' },
     { label: 'Payments', path: '/accountant-dashboard/payments' },
     { label: 'Sales', path: '/accountant-dashboard/sales' },
@@ -98,7 +100,8 @@ const AccountantDashboard: React.FC = () => {
     { label: 'Data Sync', path: '/accountant-dashboard/data-sync' },
     { label: 'Tasks', path: '/accountant-dashboard/tasks' },
     { label: 'Settings', path: '/accountant-dashboard/settings' },
-  ];
+  ].map((item, index) => ({ ...item, index }))
+    .filter((item) => item.path !== '/accountant-dashboard/data-sync' || canManageSync);
 
   // Prefetch tab chunks on hover to speed next navigation
   const prefetchByIndex: Record<number, () => void> = {
@@ -148,15 +151,15 @@ const AccountantDashboard: React.FC = () => {
             value={activeTab}
             onChange={(_, idx) => {
               setActiveTab(idx);
-              const item = menuItems[idx];
+              const item = menuItems.find((menuItem) => menuItem.index === idx);
               if (item) navigate(item.path);
             }}
             variant="scrollable"
             scrollButtons="auto"
             sx={{ mb: 2 }}
           >
-            {menuItems.map((item, idx) => (
-              <Tab key={item.path} label={item.label} onMouseEnter={() => prefetchByIndex[idx]?.()} />
+            {menuItems.map((item) => (
+              <Tab key={item.path} value={item.index} label={item.label} onMouseEnter={() => prefetchByIndex[item.index]?.()} />
             ))}
           </Tabs>
           <Toolbar />
@@ -167,7 +170,8 @@ const AccountantDashboard: React.FC = () => {
               <Route path="sales" element={<SalesPaymentsPage />} />
               <Route path="revenue" element={<RevenuePage />} />
               <Route path="ledger" element={<LedgerDrilldownPage />} />
-              <Route path="vat" element={<VATManagementPage />} />
+              <Route path="vat" element={<Navigate to="/accountant-dashboard/tax" replace />} />
+              <Route path="tax" element={<TaxAccountsPage />} />
               <Route path="levies" element={<LevyPaymentsPage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="property-accounts" element={<PropertyAccountsPage />} />
@@ -179,7 +183,7 @@ const AccountantDashboard: React.FC = () => {
               <Route path="written-invoices" element={<WrittenInvoicesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="reports" element={<ReportsPage />} />
-              <Route path="data-sync" element={<DatabaseSyncDashboard />} />
+              <Route path="data-sync" element={canManageSync ? <DatabaseSyncDashboard /> : <Navigate to="/accountant-dashboard" replace />} />
             </Routes>
           </Suspense>
         </Box>

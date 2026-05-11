@@ -10,6 +10,7 @@ export interface SettlementInput {
   commissionAmount: number;
   vatOnCommissionAmount?: number;
   applyVatOnSale?: boolean;
+  applyVatOnCommission?: boolean;
   cgtRate?: number;
   vatSaleRate?: number;
   vatOnCommissionRate?: number;
@@ -71,7 +72,9 @@ export const generateTaxSummary = (input: SettlementInput): TaxSummary => {
   const vatOnCommission =
     input.vatOnCommissionAmount != null
       ? money(input.vatOnCommissionAmount)
-      : calculateCommissionVAT(commissionAmount, input.vatOnCommissionRate ?? DEFAULT_CONFIG.vatOnCommissionRate);
+      : input.applyVatOnCommission === false
+        ? 0
+        : calculateCommissionVAT(commissionAmount, input.vatOnCommissionRate ?? DEFAULT_CONFIG.vatOnCommissionRate);
 
   const deductions = [cgt, vatOnSale, commissionAmount, vatOnCommission];
   const totalDeductions = money(deductions.reduce((sum, d) => sum + d, 0));
@@ -93,7 +96,7 @@ export const generateTaxSummary = (input: SettlementInput): TaxSummary => {
       appliedRules: {
         cgtFirst: true,
         vatOnSaleApplied: input.applyVatOnSale ?? DEFAULT_CONFIG.applyVatOnSale,
-        vatOnCommissionApplied: true,
+        vatOnCommissionApplied: input.applyVatOnCommission !== false,
         vatOnCommissionSource: input.vatOnCommissionAmount != null ? 'payment' : 'calculated'
       }
     }

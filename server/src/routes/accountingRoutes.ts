@@ -3,6 +3,7 @@ import { auth } from '../middleware/auth';
 import { canViewCommissions, isAccountant } from '../middleware/roles';
 import {
   getDashboardSummary,
+  getDashboardOutstanding,
   getRevenueTrend,
   getExpenseTrend,
   getVatStatus,
@@ -29,6 +30,7 @@ const dashboardSummaryLimiter = createPerCompanyRateLimiter({
 router.use(auth);
 
 router.get('/dashboard-summary', canViewCommissions, dashboardSummaryLimiter, getDashboardSummary);
+router.get('/dashboard-outstanding', canViewCommissions, dashboardSummaryLimiter, getDashboardOutstanding);
 router.get('/revenue-trend', canViewCommissions, getRevenueTrend);
 router.get('/expense-trend', canViewCommissions, getExpenseTrend);
 router.get('/vat-status', canViewCommissions, getVatStatus);

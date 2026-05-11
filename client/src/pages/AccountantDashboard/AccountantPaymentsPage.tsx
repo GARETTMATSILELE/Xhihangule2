@@ -290,7 +290,15 @@ const AccountantPaymentsPage: React.FC = () => {
         if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
         if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
         if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
-        if ((debouncedFilters as any).search) filterParams.search = (debouncedFilters as any).search;
+        // Guard against accidental "undefined" propagation into query params
+        const rawSearch = (debouncedFilters as any).search;
+        const search =
+          typeof rawSearch === 'string'
+            ? rawSearch.trim()
+            : '';
+        if (search && search.toLowerCase() !== 'undefined') {
+          filterParams.search = search;
+        }
         // Include provisional payments on accountant view
         const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true', paymentType: 'rental' as any } as any);
         setPayments(sortPayments(items as any[]));

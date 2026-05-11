@@ -590,8 +590,11 @@ const SalesDevelopmentsPage: React.FC = () => {
         const pickedName = (picked as any)?.name || buyerName.trim();
         // Update buyer record to link to this unit and also set the unit's buyerId/buyerName
         await buyerService.update(buyerPickerId, { developmentId: buyerDevId, developmentUnitId: buyerUnitId } as any).catch(() => undefined);
-        await developmentUnitService.setBuyer(buyerUnitId, buyerPickerId).catch(() => undefined);
-        updateUnit(buyerDevId, buyerUnitId, { buyerName: pickedName });
+        const linkedUnit = await developmentUnitService.setBuyer(buyerUnitId, buyerPickerId).catch(() => undefined);
+        updateUnit(buyerDevId, buyerUnitId, {
+          buyerName: (linkedUnit as any)?.buyerName || pickedName,
+          status: ((linkedUnit as any)?.status || 'under_offer') as UnitStatus
+        });
       } else {
         const created = await buyerService.create({
           name: buyerName.trim(),
@@ -604,9 +607,14 @@ const SalesDevelopmentsPage: React.FC = () => {
         const displayName = created?.name || buyerName.trim();
         const createdId = String((created as any)?._id || (created as any)?.id || '');
         if (createdId) {
-          await developmentUnitService.setBuyer(buyerUnitId, createdId).catch(() => undefined);
+          const linkedUnit = await developmentUnitService.setBuyer(buyerUnitId, createdId).catch(() => undefined);
+          updateUnit(buyerDevId, buyerUnitId, {
+            buyerName: (linkedUnit as any)?.buyerName || displayName,
+            status: ((linkedUnit as any)?.status || 'under_offer') as UnitStatus
+          });
+        } else {
+          updateUnit(buyerDevId, buyerUnitId, { buyerName: displayName });
         }
-        updateUnit(buyerDevId, buyerUnitId, { buyerName: displayName });
       }
       setShowAddBuyer(false);
     } catch (e) {

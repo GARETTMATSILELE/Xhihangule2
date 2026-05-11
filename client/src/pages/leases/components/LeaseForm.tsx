@@ -63,6 +63,8 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
       // Ensure dates are properly formatted strings or empty strings
       const formattedData = {
         ...initialData,
+        propertyId: getId((initialData as any).propertyId),
+        tenantId: getId((initialData as any).tenantId),
         startDate: initialData.startDate && !isNaN(new Date(initialData.startDate).getTime()) 
           ? initialData.startDate 
           : '',
@@ -88,9 +90,23 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
     return '';
   }
 
-  // Filter tenants by selected property and auto-select a linked tenant
+  const findPropertyIdForTenant = (tenantId: string): string => {
+    if (!tenantId) return '';
+    const tenant = (tenants || []).find((t) => getId(t._id) === tenantId);
+    if (!tenant) return '';
+
+    const singlePropertyId = getId((tenant as any).propertyId);
+    if (singlePropertyId) return singlePropertyId;
+
+    const multiPropertyIds = Array.isArray((tenant as any).propertyIds)
+      ? ((tenant as any).propertyIds as any[]).map(getId).filter(Boolean)
+      : [];
+    return multiPropertyIds[0] || '';
+  };
+
+  // Keep tenant list filtered by selected property; auto-fill tenant from property.
   useEffect(() => {
-    const propertyId = formData.propertyId;
+    const propertyId = getId(formData.propertyId);
     if (!propertyId) {
       setFilteredTenants(tenants);
       return;
@@ -104,37 +120,28 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
 
     setFilteredTenants(linked.length > 0 ? linked : tenants);
 
-    // If current tenant isn't linked, auto-select an active one if available
-    const stillValid = linked.some((t: Tenant) => t._id === formData.tenantId);
-    if (!stillValid) {
-      const preferred = linked.find((t: any) => t.status === 'Active') || linked[0];
-      setFormData((prev) => ({ ...prev, tenantId: preferred ? preferred._id : '' }));
-    }
-  }, [formData.propertyId, tenants]);
+    const currentTenantId = getId(formData.tenantId);
+    const linkedTenant = linked.find((t) => getId(t._id) === currentTenantId);
 
-  // Filter tenants by selected property and auto-select a linked tenant
-  useEffect(() => {
-    const propertyId = formData.propertyId;
-    if (!propertyId) {
-      setFilteredTenants(tenants);
-      return;
-    }
-
-    const linked = (tenants || []).filter((t: any) => {
-      const matchesSingle = t?.propertyId === propertyId;
-      const matchesMulti = Array.isArray(t?.propertyIds) && (t.propertyIds as string[]).includes(propertyId);
-      return matchesSingle || matchesMulti;
-    });
-
-    setFilteredTenants(linked.length > 0 ? linked : tenants);
-
-    // If current tenant isn't linked, auto-select an active one if available
-    const stillValid = linked.some((t) => t._id === formData.tenantId);
-    if (!stillValid) {
+    // Auto-fill tenant when property changes or selected tenant is unrelated.
+    if (!linkedTenant && linked.length > 0) {
       const preferred = linked.find((t: Tenant) => (t as any).status === 'Active') || linked[0];
       setFormData((prev) => ({ ...prev, tenantId: preferred ? preferred._id : '' }));
     }
-  }, [formData.propertyId, tenants]);
+  }, [formData.propertyId, formData.tenantId, tenants]);
+
+  // Auto-fill property when tenant changes (keeps property dropdown available).
+  useEffect(() => {
+    const tenantId = getId(formData.tenantId);
+    if (!tenantId) return;
+
+    const mappedPropertyId = findPropertyIdForTenant(tenantId);
+    if (!mappedPropertyId) return;
+
+    if (getId(formData.propertyId) !== mappedPropertyId) {
+      setFormData((prev) => ({ ...prev, propertyId: mappedPropertyId }));
+    }
+  }, [formData.tenantId, formData.propertyId, tenants]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent) => {
     const { name, value } = e.target;

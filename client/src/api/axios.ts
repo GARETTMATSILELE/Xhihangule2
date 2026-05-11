@@ -1,5 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
 // Default API URL with sensible defaults for dev and production
 const isBrowser = typeof window !== 'undefined';
 const isLocalDev = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (window.location.port === '3000' || window.location.port === '5173');
@@ -117,12 +119,14 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    console.log('Axios interceptor error:', {
-      status: error.response?.status,
-      url: error.config?.url,
-      method: error.config?.method,
-      isRetry: originalRequest._retry
-    });
+    if (isDevelopment) {
+      console.log('Axios interceptor error:', {
+        status: error.response?.status,
+        url: error.config?.url,
+        method: error.config?.method,
+        isRetry: originalRequest._retry
+      });
+    }
 
     // If the error is 401 and we haven't tried to refresh the token yet
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -136,11 +140,11 @@ api.interceptors.response.use(
       if ((!hadAuthHeader && !hasStoredAccess) || isRefreshCall) {
         return Promise.reject(error);
       }
-      console.log('401 error detected, attempting token refresh');
+      if (isDevelopment) console.log('401 error detected, attempting token refresh');
       
       if (isRefreshing) {
         // If we're already refreshing, queue this request
-        console.log('Token refresh already in progress, queuing request');
+        if (isDevelopment) console.log('Token refresh already in progress, queuing request');
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         }).then((token) => {
@@ -158,7 +162,7 @@ api.interceptors.response.use(
 
       try {
         // Refresh token is stored as HttpOnly cookie, so we don't need to check memory
-        console.log('Calling refresh token endpoint');
+        if (isDevelopment) console.log('Calling refresh token endpoint');
         const refreshCsrf = getCookieValue('refreshCsrf');
         const refreshResponse = await axios.post(`${API_URL}/auth/refresh-token`, {}, {
           headers: {
@@ -168,16 +172,17 @@ api.interceptors.response.use(
           withCredentials: true // This ensures cookies are sent
         });
 
-        console.log('Refresh response received:', {
-          status: refreshResponse.status,
-          data: refreshResponse.data,
-          hasToken: !!refreshResponse.data.token
-        });
+        if (isDevelopment) {
+          console.log('Refresh response received:', {
+            status: refreshResponse.status,
+            hasToken: !!refreshResponse.data.token
+          });
+        }
 
         const { token: newAccessToken } = refreshResponse.data;
         
         if (newAccessToken) {
-          console.log('Token refresh successful');
+          if (isDevelopment) console.log('Token refresh successful');
           // Update tokens in memory and localStorage
           setTokens(newAccessToken, null);
           localStorage.setItem('accessToken', newAccessToken);
@@ -190,11 +195,12 @@ api.interceptors.response.use(
             originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
           }
           
-          console.log('Retrying original request with new token:', {
-            url: originalRequest.url,
-            method: originalRequest.method,
-            hasAuthHeader: !!originalRequest.headers?.Authorization
-          });
+          if (isDevelopment) {
+            console.log('Retrying original request with refreshed token:', {
+              url: originalRequest.url,
+              method: originalRequest.method
+            });
+          }
           
           isRefreshing = false;
           return api(originalRequest);
@@ -202,7 +208,7 @@ api.interceptors.response.use(
           throw new Error('No new access token received');
         }
       } catch (refreshError) {
-        console.log('Token refresh failed:', refreshError);
+        if (isDevelopment) console.log('Token refresh failed:', refreshError);
         const transientRefreshFailure =
           refreshError instanceof AxiosError &&
           (!refreshError.response || refreshError.code === 'ECONNABORTED');
@@ -232,7 +238,7 @@ api.interceptors.response.use(
     // If the error is 403 (forbidden), do NOT clear auth; surface to caller
     if (error.response?.status === 403) {
       const code = (error.response?.data as any)?.code;
-      console.log('403 forbidden detected', { code, url: error.config?.url });
+      if (isDevelopment) console.log('403 forbidden detected', { code, url: error.config?.url });
       // Business-rule 403s: user may be authenticated but lacks company/permission
       if (code === 'NO_COMPANY' || code === 'INSUFFICIENT_PERMISSIONS' || code === 'OWNER_ACCESS_REQUIRED') {
         return Promise.reject(error);

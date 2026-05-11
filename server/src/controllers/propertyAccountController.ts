@@ -19,7 +19,11 @@ import maintenanceJobQueueService from '../services/maintenanceJobQueueService';
 export const getPropertyAccount = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
+    const ledgerRaw = String(req.query.ledger || '').toLowerCase();
+    const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined)) as
+      | 'rental'
+      | 'sale'
+      | undefined;
     
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
@@ -214,7 +218,16 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
     const { type, startDate, endDate, category, status } = req.query;
-    const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
+    const includePayoutsRaw = String(req.query.includePayouts || '').toLowerCase();
+    const includePayouts =
+      includePayoutsRaw === '1' ||
+      includePayoutsRaw === 'true' ||
+      includePayoutsRaw === 'yes';
+    const ledgerRaw = String(req.query.ledger || '').toLowerCase();
+    const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined)) as
+      | 'rental'
+      | 'sale'
+      | undefined;
     
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
@@ -228,10 +241,36 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
     if (status) filters.status = status;
 
     const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters, ledger as any);
+    if (!includePayouts) {
+      return res.json({
+        success: true,
+        data: transactions
+      });
+    }
+
+    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
+    const payoutTransactions = (account.ownerPayouts || []).map((payout: any) => ({
+      _id: String(payout?._id || ''),
+      type: 'owner_payout',
+      amount: Number(payout?.amount || 0),
+      date: payout?.date,
+      notes: payout?.notes,
+      referenceNumber: payout?.referenceNumber,
+      status: payout?.status,
+      description: `Owner payout - ${payout?.recipientName || 'Owner'}`,
+      category: 'owner_payout',
+      paymentMethod: payout?.paymentMethod,
+      recipientId: payout?.recipientId,
+      recipientName: payout?.recipientName
+    }));
+
+    const merged = [...transactions, ...payoutTransactions].sort(
+      (a: any, b: any) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime()
+    );
     
     res.json({
       success: true,
-      data: transactions
+      data: merged
     });
   } catch (error) {
     logger.error('Error in getPropertyTransactions:', error);
@@ -342,6 +381,81 @@ export const addExpense = async (req: Request, res: Response) => {
 };
 
 /**
+ * Add opening balance adjustment to property account
+ */
+export const addOpeningBalanceAdjustment = async (req: Request, res: Response) => {
+  try {
+    const { propertyId } = req.params;
+    const ledger = (String(req.query?.ledger || '').toLowerCase() === 'sale' ? 'sale' : (String(req.query?.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined)) as
+      | 'rental'
+      | 'sale'
+      | undefined;
+    const { amount, direction, date, description, notes } = req.body;
+
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ message: 'Valid amount is required' });
+    }
+
+    if (direction !== 'credit' && direction !== 'debit') {
+      return res.status(400).json({ message: 'Direction must be credit or debit' });
+    }
+
+    if (!req.user?.userId) {
+      return res.status(401).json({ message: 'User authentication required' });
+    }
+
+    const effectiveDate = date ? new Date(date) : new Date();
+    if (Number.isNaN(effectiveDate.getTime())) {
+      return res.status(400).json({ message: 'Valid date is required' });
+    }
+
+    const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
+    const account = await propertyAccountService.addOpeningBalanceAdjustment(
+      propertyId,
+      {
+        amount: Number(amount),
+        direction,
+        date: effectiveDate,
+        description,
+        processedBy: req.user.userId,
+        notes,
+        idempotencyKey
+      },
+      ledger
+    );
+
+    if (idempotencyKey) {
+      try { res.setHeader('Idempotency-Key', idempotencyKey); } catch {}
+    }
+
+    res.json({
+      success: true,
+      message: 'Opening balance adjustment added successfully',
+      data: account,
+      idempotencyKey: idempotencyKey || undefined
+    });
+  } catch (error) {
+    logger.error('Error in addOpeningBalanceAdjustment:', error);
+
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+/**
  * Create owner payout
  */
 export const createOwnerPayout = async (req: Request, res: Response) => {
@@ -351,13 +465,14 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
       | 'rental'
       | 'sale'
       | undefined;
-    const { 
+    const {
       amount,
       paymentMethod, 
       recipientId, 
       recipientName, 
       recipientBankDetails, 
-      notes 
+      notes,
+      autoComplete
     } = req.body;
     
     if (!propertyId) {
@@ -405,6 +520,7 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
       recipientBankDetails,
       processedBy: req.user.userId,
       notes,
+      autoComplete: Boolean(autoComplete),
       idempotencyKey
     };
 

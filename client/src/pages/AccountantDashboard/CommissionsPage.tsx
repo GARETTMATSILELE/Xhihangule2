@@ -25,7 +25,7 @@ import {
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import accountantService, { CommissionData, AgencyCommission, PREACommission } from '../../services/accountantService';
+import accountantService, { CommissionData, AgencyCommission, PREACommission, CommissionAccountData, CommissionReportsData, PropertyCommissionReport } from '../../services/accountantService';
 import { useCompany } from '../../contexts/CompanyContext';
 
 const CommissionsPage: React.FC = () => {
@@ -34,6 +34,8 @@ const CommissionsPage: React.FC = () => {
   const [agentCommissions, setAgentCommissions] = useState<CommissionData | null>(null);
   const [agencyCommission, setAgencyCommission] = useState<AgencyCommission | null>(null);
   const [preaCommission, setPREACommission] = useState<PREACommission | null>(null);
+  const [commissionAccount, setCommissionAccount] = useState<CommissionAccountData | null>(null);
+  const [commissionReports, setCommissionReports] = useState<CommissionReportsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -53,6 +55,11 @@ const CommissionsPage: React.FC = () => {
   const [preaSearchTerm, setPREASearchTerm] = useState<string>('');
   const [preaSelectedYear, setPREASelectedYear] = useState<number>(new Date().getFullYear());
   const [preaSelectedMonth, setPREASelectedMonth] = useState<number>(new Date().getMonth());
+  const [commissionFromYear, setCommissionFromYear] = useState<number>(new Date().getFullYear());
+  const [commissionFromMonth, setCommissionFromMonth] = useState<number>(0);
+  const [commissionToYear, setCommissionToYear] = useState<number>(new Date().getFullYear());
+  const [commissionToMonth, setCommissionToMonth] = useState<number>(new Date().getMonth());
+  const [commissionReportFilter, setCommissionReportFilter] = useState<'all' | 'sales' | 'rentals'>('all');
 
   // Format currency helper function
   const formatCurrency = (amount: number) => {
@@ -118,6 +125,71 @@ const CommissionsPage: React.FC = () => {
     const start = new Date(now.getFullYear(), 0, 1);
     const days = Math.floor((now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
     return Math.ceil((days + start.getDay() + 1) / 7);
+  };
+
+  const compareMonthYear = (yearA: number, monthA: number, yearB: number, monthB: number) => {
+    if (yearA !== yearB) return yearA - yearB;
+    return monthA - monthB;
+  };
+
+  const getCommissionAccountFilters = () => ({
+    fromYear: commissionFromYear,
+    fromMonth: commissionFromMonth + 1, // API uses 1-12
+    toYear: commissionToYear,
+    toMonth: commissionToMonth + 1 // API uses 1-12
+  });
+
+  const getCommissionRangeLabel = () => {
+    return `${getMonthName(commissionFromMonth)} ${commissionFromYear} - ${getMonthName(commissionToMonth)} ${commissionToYear}`;
+  };
+
+  const isSalesCommissionEntry = (entry: PropertyCommissionReport['entries'][number]) => {
+    return String(entry.accountKey || '').startsWith('sale-');
+  };
+
+  const getCommissionReportFilterLabel = () => {
+    if (commissionReportFilter === 'sales') return 'Sales';
+    if (commissionReportFilter === 'rentals') return 'Rentals';
+    return 'All';
+  };
+
+  const getFilteredCommissionReportProperties = (reportsData?: CommissionReportsData | null): PropertyCommissionReport[] => {
+    if (!reportsData) return [];
+
+    return reportsData.properties
+      .map((property) => {
+        const filteredEntries = property.entries.filter((entry) => {
+          if (commissionReportFilter === 'all') return true;
+          if (commissionReportFilter === 'sales') return isSalesCommissionEntry(entry);
+          // Treat all non-sale commission entries (rental + introduction) as rentals
+          return !isSalesCommissionEntry(entry);
+        });
+
+        if (filteredEntries.length === 0) return null;
+
+        let runningBalance = 0;
+        let totalExpected = 0;
+        let totalReceived = 0;
+
+        const entries = filteredEntries.map((entry) => {
+          totalExpected += entry.debit;
+          totalReceived += entry.credit;
+          runningBalance += entry.debit - entry.credit;
+          return {
+            ...entry,
+            balance: Number(runningBalance.toFixed(2))
+          };
+        });
+
+        return {
+          ...property,
+          totalExpectedCommission: Number(totalExpected.toFixed(2)),
+          totalReceivedCommission: Number(totalReceived.toFixed(2)),
+          closingBalance: Number(runningBalance.toFixed(2)),
+          entries
+        };
+      })
+      .filter((property): property is PropertyCommissionReport => Boolean(property));
   };
 
   const calculateFilteredCommission = (agent: any) => {
@@ -219,11 +291,16 @@ const CommissionsPage: React.FC = () => {
           day: agencySelectedDay === 'all' ? undefined : agencySelectedDay,
           filterType: agencyFilterType
         };
-        const { agentCommissions, agencyCommission, preaCommission } = await accountantService.getAllCommissions(filters);
+        const { agentCommissions, agencyCommission, preaCommission, commissionAccount, commissionReports } = await accountantService.getAllCommissions(
+          filters,
+          getCommissionAccountFilters()
+        );
 
         setAgentCommissions(agentCommissions);
         setAgencyCommission(agencyCommission);
         setPREACommission(preaCommission);
+        setCommissionAccount(commissionAccount);
+        setCommissionReports(commissionReports);
       } catch (err) {
         console.error('Error fetching commission data:', err);
         setError(err instanceof Error ? err.message : 'An error occurred while fetching commission data');
@@ -299,8 +376,101 @@ const CommissionsPage: React.FC = () => {
     }
   }, [preaSelectedYear, preaSelectedMonth]);
 
+  // Effect to refresh Commission Account data when date range filters change
+  useEffect(() => {
+    const fetchCommissionAccountData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const accountData = await accountantService.getCommissionAccount(getCommissionAccountFilters());
+        setCommissionAccount(accountData);
+      } catch (err) {
+        console.error('Error fetching commission account data:', err);
+        setError(err instanceof Error ? err.message : 'An error occurred while fetching commission account data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (commissionAccount) {
+      fetchCommissionAccountData();
+    }
+  }, [commissionFromYear, commissionFromMonth, commissionToYear, commissionToMonth]);
+
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
+  };
+
+  const printCommissionPropertyReport = (property: PropertyCommissionReport) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Commission Report - ${property.propertyTitle}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; font-weight: bold; }
+            .summary { margin: 16px 0; padding: 12px; background: #f9f9f9; border-radius: 4px; }
+            @page { size: A4 portrait; margin: 12mm; }
+            @media print {
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <h2>Commission Report - ${property.propertyTitle}</h2>
+          <p>${property.propertyAddress || ''}</p>
+          <p>Generated on: ${new Date().toLocaleDateString()}</p>
+          <div class="summary">
+            <p>Total Expected Commission (Dr): ${formatCurrency(property.totalExpectedCommission)}</p>
+            <p>Total Received Commission (Cr): ${formatCurrency(property.totalReceivedCommission)}</p>
+            <p>Closing Balance: ${formatCurrency(property.closingBalance)}</p>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Dr</th>
+                <th>Cr</th>
+                <th>Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${property.entries.map((entry) => `
+                <tr>
+                  <td>${formatDate(entry.date)}</td>
+                  <td>${entry.description}</td>
+                  <td>${entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
+                  <td>${entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
+                  <td>${formatCurrency(entry.balance)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.onload = () => {
+      const closeWindow = () => {
+        try {
+          printWindow.close();
+        } catch (_) {
+          // Ignore close errors in restricted browser contexts
+        }
+      };
+      printWindow.addEventListener('afterprint', closeWindow, { once: true });
+      printWindow.print();
+      setTimeout(closeWindow, 1500);
+    };
   };
 
   const printReport = () => {
@@ -308,8 +478,8 @@ const CommissionsPage: React.FC = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const title = ['Agent Commissions', 'Agency Commission', 'PREA Commission'][activeTab];
-    const data = [agentCommissions, agencyCommission, preaCommission][activeTab];
+    const title = ['Agent Commissions', 'Agency Commission', 'PREA Commission', 'Commission Account', 'Commission Reports'][activeTab];
+    const data = [agentCommissions, agencyCommission, preaCommission, commissionAccount, commissionReports][activeTab];
     
     if (!data) {
       printWindow.alert('No data available to print');
@@ -329,7 +499,10 @@ const CommissionsPage: React.FC = () => {
             th { background-color: #f2f2f2; font-weight: bold; }
             .header { text-align: center; margin-bottom: 20px; }
             .summary { margin: 20px 0; padding: 15px; background-color: #f9f9f9; border-radius: 5px; }
-            @media print { body { margin: 0; } }
+            @page { size: A4 portrait; margin: 12mm; }
+            @media print {
+              body { margin: 0; }
+            }
           </style>
         </head>
         <body>
@@ -371,13 +544,17 @@ const CommissionsPage: React.FC = () => {
       `;
       
       filteredAgents.forEach((agent: any) => {
+        const totalCommission = agent.monthlyCommissions?.reduce(
+          (sum: number, monthData: any) => sum + (monthData.commission || 0),
+          0
+        ) || 0;
         printContent += `
           <tr>
             <td>${agent.agentName}</td>
             <td>${formatCurrency(agent.filteredCommission)}</td>
             <td>${agent.propertiesWithPayments}</td>
             <td>${agent.totalProperties}</td>
-            <td>${formatCurrency(agent.commission * 12)}</td>
+            <td>${formatCurrency(totalCommission)}</td>
           </tr>
         `;
       });
@@ -435,7 +612,7 @@ const CommissionsPage: React.FC = () => {
           </tbody>
         </table>
       `;
-    } else if (data && 'details' in data) {
+    } else if (data && activeTab === 2 && 'details' in data) {
       // PREA Commission
       const filteredDetails = getFilteredPREACommissions();
       
@@ -469,6 +646,83 @@ const CommissionsPage: React.FC = () => {
           </tbody>
         </table>
       `;
+    } else if (data && activeTab === 3 && 'entries' in data) {
+      // Commission Account
+      const commissionData = data as CommissionAccountData;
+      printContent += `
+        <div class="summary">
+          <h3>Commission Account Ledger</h3>
+          <p>Period: ${getCommissionRangeLabel()}</p>
+          <p>Opening balance: ${formatCurrency(commissionData.openingBalance || 0)}</p>
+          <p>Total commission received: ${formatCurrency(commissionData.totalCommissionReceived)}</p>
+          <p>Total payouts: ${formatCurrency(commissionData.totalPayouts)}</p>
+          <p>Balance: ${formatCurrency(commissionData.balance)}</p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Debit</th>
+              <th>Credit</th>
+              <th>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      commissionData.entries.forEach((entry: any) => {
+        printContent += `
+          <tr>
+            <td>${formatDate(entry.date)}</td>
+            <td>${entry.description}</td>
+            <td>${entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
+            <td>${entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
+            <td>${formatCurrency(entry.balance)}</td>
+          </tr>
+        `;
+      });
+
+      printContent += `
+          </tbody>
+        </table>
+      `;
+    } else if (data && activeTab === 4 && 'properties' in data) {
+      const reportsData = data as CommissionReportsData;
+      const filteredProperties = getFilteredCommissionReportProperties(reportsData);
+      printContent += `
+        <div class="summary">
+          <h3>Commission Reports by Property</h3>
+          <p>Type: ${getCommissionReportFilterLabel()}</p>
+          <p>Properties with payments: ${filteredProperties.length}</p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th>Address</th>
+              <th>Expected Commission (Dr)</th>
+              <th>Received Commission (Cr)</th>
+              <th>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+      filteredProperties.forEach((property) => {
+        printContent += `
+          <tr>
+            <td>${property.propertyTitle}</td>
+            <td>${property.propertyAddress || '-'}</td>
+            <td>${formatCurrency(property.totalExpectedCommission)}</td>
+            <td>${formatCurrency(property.totalReceivedCommission)}</td>
+            <td>${formatCurrency(property.closingBalance)}</td>
+          </tr>
+        `;
+      });
+      printContent += `
+          </tbody>
+        </table>
+      `;
     }
 
     printContent += `
@@ -481,8 +735,16 @@ const CommissionsPage: React.FC = () => {
     
     // Wait for content to load then print
     printWindow.onload = () => {
+      const closeWindow = () => {
+        try {
+          printWindow.close();
+        } catch (_) {
+          // Ignore close errors in restricted browser contexts
+        }
+      };
+      printWindow.addEventListener('afterprint', closeWindow, { once: true });
       printWindow.print();
-      printWindow.close();
+      setTimeout(closeWindow, 1500);
     };
   };
 
@@ -503,7 +765,7 @@ const CommissionsPage: React.FC = () => {
       );
     }
 
-    const data = [agentCommissions, agencyCommission, preaCommission][activeTab];
+    const data = [agentCommissions, agencyCommission, preaCommission, commissionAccount, commissionReports][activeTab];
     if (!data) {
       return (
         <Box p={3}>
@@ -683,6 +945,7 @@ const CommissionsPage: React.FC = () => {
 
     // Handle Agency Commission tab
     if (activeTab === 1) {
+      const agencyData = data as AgencyCommission;
       return (
         <Box>
           {/* Filter Controls for Agency Commission */}
@@ -821,10 +1084,10 @@ const CommissionsPage: React.FC = () => {
                   ` - ${getMonthName(agencySelectedMonth as number)} ${agencySelectedDay}`}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total {agencyFilterType} commission: {formatCurrency(data.total)}
+                Total {agencyFilterType} commission: {formatCurrency(agencyData.total)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Number of payments: {getFilteredAgencyCommissions().length} / {data.details.length}
+                Number of payments: {getFilteredAgencyCommissions().length} / {agencyData.details.length}
               </Typography>
             </Box>
           </Box>
@@ -867,6 +1130,7 @@ const CommissionsPage: React.FC = () => {
 
     // Handle PREA Commission tab
     if (activeTab === 2) {
+      const preaData = data as PREACommission;
       return (
         <Box>
           {/* Filter Controls for PREA Commission */}
@@ -926,10 +1190,10 @@ const CommissionsPage: React.FC = () => {
                 Showing PREA commission for {getMonthName(preaSelectedMonth)} {preaSelectedYear}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Properties found: {getFilteredPREACommissions().length} / {data.details.length}
+                Properties found: {getFilteredPREACommissions().length} / {preaData.details.length}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total commission: {formatCurrency(data.total)}
+                Total commission: {formatCurrency(preaData.total)}
               </Typography>
             </Box>
           </Box>
@@ -952,11 +1216,252 @@ const CommissionsPage: React.FC = () => {
                 ))}
                 <TableRow>
                   <TableCell><strong>Total</strong></TableCell>
-                  <TableCell align="right"><strong>{formatCurrency(data.total)}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(preaData.total)}</strong></TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           </TableContainer>
+        </Box>
+      );
+    }
+
+    if (activeTab === 3 && 'entries' in data) {
+      const accountData = data as CommissionAccountData;
+      return (
+        <Box>
+          <Box sx={{ mb: 3, p: 2, backgroundColor: 'background.paper', borderRadius: 1 }}>
+            <Typography variant="h6" gutterBottom>
+              Commission Account Summary
+            </Typography>
+            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>From Year</InputLabel>
+                  <Select
+                    value={commissionFromYear}
+                    label="From Year"
+                    onChange={(e) => {
+                      const nextFromYear = e.target.value as number;
+                      if (compareMonthYear(nextFromYear, commissionFromMonth, commissionToYear, commissionToMonth) > 0) {
+                        setCommissionToYear(nextFromYear);
+                        setCommissionToMonth(commissionFromMonth);
+                      }
+                      setCommissionFromYear(nextFromYear);
+                    }}
+                  >
+                    {getYearOptions().map((year) => (
+                      <MenuItem key={`commission-from-year-${year}`} value={year}>
+                        {year}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>From Month</InputLabel>
+                  <Select
+                    value={commissionFromMonth}
+                    label="From Month"
+                    onChange={(e) => {
+                      const nextFromMonth = e.target.value as number;
+                      if (compareMonthYear(commissionFromYear, nextFromMonth, commissionToYear, commissionToMonth) > 0) {
+                        setCommissionToYear(commissionFromYear);
+                        setCommissionToMonth(nextFromMonth);
+                      }
+                      setCommissionFromMonth(nextFromMonth);
+                    }}
+                  >
+                    {getMonthOptions().map((month) => (
+                      <MenuItem key={`commission-from-month-${month.value}`} value={month.value}>
+                        {month.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>To Year</InputLabel>
+                  <Select
+                    value={commissionToYear}
+                    label="To Year"
+                    onChange={(e) => {
+                      const nextToYear = e.target.value as number;
+                      if (compareMonthYear(commissionFromYear, commissionFromMonth, nextToYear, commissionToMonth) > 0) {
+                        setCommissionFromYear(nextToYear);
+                        setCommissionFromMonth(commissionToMonth);
+                      }
+                      setCommissionToYear(nextToYear);
+                    }}
+                  >
+                    {getYearOptions().map((year) => (
+                      <MenuItem key={`commission-to-year-${year}`} value={year}>
+                        {year}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>To Month</InputLabel>
+                  <Select
+                    value={commissionToMonth}
+                    label="To Month"
+                    onChange={(e) => {
+                      const nextToMonth = e.target.value as number;
+                      if (compareMonthYear(commissionFromYear, commissionFromMonth, commissionToYear, nextToMonth) > 0) {
+                        setCommissionFromYear(commissionToYear);
+                        setCommissionFromMonth(nextToMonth);
+                      }
+                      setCommissionToMonth(nextToMonth);
+                    }}
+                  >
+                    {getMonthOptions().map((month) => (
+                      <MenuItem key={`commission-to-month-${month.value}`} value={month.value}>
+                        {month.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+            <Box sx={{ mt: 1, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="subtitle2" color="text.secondary">
+                Period: {getCommissionRangeLabel()}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Opening balance: {formatCurrency(accountData.openingBalance || 0)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Total commission received: {formatCurrency(accountData.totalCommissionReceived)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Total commission paid out to agents: {formatCurrency(accountData.totalPayouts)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Current commission account balance: {formatCurrency(accountData.balance)}
+              </Typography>
+            </Box>
+          </Box>
+
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell align="right">Debit</TableCell>
+                  <TableCell align="right">Credit</TableCell>
+                  <TableCell align="right">Balance</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {accountData.entries.map((entry: any) => (
+                  <TableRow key={entry.entryId}>
+                    <TableCell>{formatDate(entry.date)}</TableCell>
+                    <TableCell>{entry.description}</TableCell>
+                    <TableCell align="right">{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</TableCell>
+                    <TableCell align="right">{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</TableCell>
+                    <TableCell align="right">{formatCurrency(entry.balance)}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow>
+                  <TableCell><strong>Total</strong></TableCell>
+                  <TableCell></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(accountData.totalPayouts)}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(accountData.totalCommissionReceived)}</strong></TableCell>
+                  <TableCell align="right"><strong>{formatCurrency(accountData.balance)}</strong></TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      );
+    }
+
+    if (activeTab === 4 && 'properties' in data) {
+      const reportsData = data as CommissionReportsData;
+      const filteredProperties = getFilteredCommissionReportProperties(reportsData);
+      return (
+        <Box>
+          <Box sx={{ mb: 3, p: 2, backgroundColor: 'background.paper', borderRadius: 1 }}>
+            <Typography variant="h6" gutterBottom>
+              Commission Reports
+            </Typography>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Type</InputLabel>
+                  <Select
+                    value={commissionReportFilter}
+                    label="Type"
+                    onChange={(e) => setCommissionReportFilter(e.target.value as 'all' | 'sales' | 'rentals')}
+                  >
+                    <MenuItem value="all">All</MenuItem>
+                    <MenuItem value="sales">Sales</MenuItem>
+                    <MenuItem value="rentals">Rentals</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+            <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Type: {getCommissionReportFilterLabel()}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Properties with payments: {filteredProperties.length}
+              </Typography>
+            </Box>
+          </Box>
+
+          {filteredProperties.map((property) => (
+            <Box key={property.propertyId} sx={{ mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle1">
+                  {property.propertyTitle}
+                </Typography>
+                <Button variant="outlined" size="small" onClick={() => printCommissionPropertyReport(property)}>
+                  Print
+                </Button>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {property.propertyAddress || 'Address not available'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Expected (Dr): {formatCurrency(property.totalExpectedCommission)} | Received (Cr): {formatCurrency(property.totalReceivedCommission)} | Balance: {formatCurrency(property.closingBalance)}
+              </Typography>
+
+              <details style={{ marginTop: 10 }}>
+                <summary style={{ cursor: 'pointer' }}>View transactions</summary>
+                <TableContainer sx={{ mt: 1 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell align="right">Dr</TableCell>
+                        <TableCell align="right">Cr</TableCell>
+                        <TableCell align="right">Balance</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {property.entries.map((entry) => (
+                        <TableRow key={entry.entryId}>
+                          <TableCell>{formatDate(entry.date)}</TableCell>
+                          <TableCell>{entry.description}</TableCell>
+                          <TableCell align="right">{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</TableCell>
+                          <TableCell align="right">{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</TableCell>
+                          <TableCell align="right">{formatCurrency(entry.balance)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </details>
+            </Box>
+          ))}
         </Box>
       );
     }
@@ -967,8 +1472,8 @@ const CommissionsPage: React.FC = () => {
 
   const downloadPDF = () => {
     const doc = new jsPDF();
-    const title = ['Agent Commissions', 'Agency Commission', 'PREA Commission'][activeTab];
-    const data = [agentCommissions, agencyCommission, preaCommission][activeTab];
+    const title = ['Agent Commissions', 'Agency Commission', 'PREA Commission', 'Commission Account', 'Commission Reports'][activeTab];
+    const data = [agentCommissions, agencyCommission, preaCommission, commissionAccount, commissionReports][activeTab];
     
     if (!data) {
       alert('No data available to download');
@@ -1046,7 +1551,7 @@ const CommissionsPage: React.FC = () => {
         if (agencySearchTerm.trim()) {
           doc.text(`Search: "${agencySearchTerm}"`, 14, 50);
         }
-      } else if (data && 'details' in data) {
+      } else if (data && activeTab === 2 && 'details' in data) {
         headers.push('Property Name', 'Amount');
         const filteredDetails = getFilteredPREACommissions();
         
@@ -1064,10 +1569,48 @@ const CommissionsPage: React.FC = () => {
         if (preaSearchTerm.trim()) {
           doc.text(`Search: "${preaSearchTerm}"`, 14, 50);
         }
+      } else if (data && activeTab === 3 && 'entries' in data) {
+        headers.push('Date', 'Description', 'Debit', 'Credit', 'Balance');
+        const commissionData = data as CommissionAccountData;
+
+        doc.text(`Period: ${getCommissionRangeLabel()}`, 14, 40);
+        doc.text(`Opening balance: ${formatCurrency(commissionData.openingBalance || 0)}`, 14, 45);
+        doc.text(`Total commission received: ${formatCurrency(commissionData.totalCommissionReceived)}`, 14, 50);
+        doc.text(`Total payouts: ${formatCurrency(commissionData.totalPayouts)}`, 14, 55);
+        doc.text(`Balance: ${formatCurrency(commissionData.balance)}`, 14, 60);
+
+        commissionData.entries.forEach((entry: any) => {
+          tableData.push([
+            new Date(entry.date).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            }),
+            entry.description,
+            entry.debit > 0 ? formatCurrency(entry.debit) : '-',
+            entry.credit > 0 ? formatCurrency(entry.credit) : '-',
+            formatCurrency(entry.balance)
+          ]);
+        });
+      } else if (data && activeTab === 4 && 'properties' in data) {
+        headers.push('Property', 'Address', 'Expected (Dr)', 'Received (Cr)', 'Balance');
+        const reportsData = data as CommissionReportsData;
+        const filteredProperties = getFilteredCommissionReportProperties(reportsData);
+        doc.text(`Type: ${getCommissionReportFilterLabel()}`, 14, 40);
+        doc.text(`Properties with payments: ${filteredProperties.length}`, 14, 45);
+        filteredProperties.forEach((property) => {
+          tableData.push([
+            property.propertyTitle,
+            property.propertyAddress || '-',
+            formatCurrency(property.totalExpectedCommission),
+            formatCurrency(property.totalReceivedCommission),
+            formatCurrency(property.closingBalance)
+          ]);
+        });
       }
 
       // Start table below the header information
-      const startY = 55;
+      const startY = activeTab === 3 ? 70 : 55;
       
       (doc as any).autoTable({
         head: [headers],
@@ -1088,8 +1631,8 @@ const CommissionsPage: React.FC = () => {
   };
 
   const downloadExcel = () => {
-    const title = ['Agent Commissions', 'Agency Commission', 'PREA Commission'][activeTab];
-    const data = [agentCommissions, agencyCommission, preaCommission][activeTab];
+    const title = ['Agent Commissions', 'Agency Commission', 'PREA Commission', 'Commission Account', 'Commission Reports'][activeTab];
+    const data = [agentCommissions, agencyCommission, preaCommission, commissionAccount, commissionReports][activeTab];
     
     if (!data) {
       alert('No data available to download');
@@ -1173,7 +1716,7 @@ const CommissionsPage: React.FC = () => {
             'Agency Share': detail.agencyShare
           }))
         ];
-      } else if ('details' in data) {
+      } else if (activeTab === 2 && 'details' in data) {
         // PREA Commission (monthly only)
         const filteredDetails = getFilteredPREACommissions();
         
@@ -1193,6 +1736,51 @@ const CommissionsPage: React.FC = () => {
           ...filteredDetails.map((detail: any) => ({
             'Property Name': detail.propertyName,
             'Amount': detail.commission
+          }))
+        ];
+      } else if (activeTab === 3 && 'entries' in data) {
+        // Commission Account
+        const commissionData = data as CommissionAccountData;
+        metadata.push(
+          { 'Period': getCommissionRangeLabel() },
+          { 'Opening Balance': formatCurrency(commissionData.openingBalance || 0) },
+          { 'Total Commission Received': formatCurrency(commissionData.totalCommissionReceived) },
+          { 'Total Payouts': formatCurrency(commissionData.totalPayouts) },
+          { 'Balance': formatCurrency(commissionData.balance) },
+          { '': '' }
+        );
+
+        worksheetData = [
+          ...metadata,
+          ...commissionData.entries.map((entry: any) => ({
+            'Date': new Date(entry.date).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            }),
+            'Description': entry.description,
+            'Debit': entry.debit,
+            'Credit': entry.credit,
+            'Balance': entry.balance
+          }))
+        ];
+      } else if (activeTab === 4 && 'properties' in data) {
+        const reportsData = data as CommissionReportsData;
+        const filteredProperties = getFilteredCommissionReportProperties(reportsData);
+        metadata.push(
+          { 'Type': getCommissionReportFilterLabel() },
+          { 'Properties with Payments': String(filteredProperties.length) },
+          { '': '' }
+        );
+
+        worksheetData = [
+          ...metadata,
+          ...filteredProperties.map((property) => ({
+            'Property': property.propertyTitle,
+            'Address': property.propertyAddress || '',
+            'Expected (Dr)': property.totalExpectedCommission,
+            'Received (Cr)': property.totalReceivedCommission,
+            'Balance': property.closingBalance
           }))
         ];
       }
@@ -1228,21 +1816,21 @@ const CommissionsPage: React.FC = () => {
             <Button 
               variant="contained" 
               onClick={downloadPDF}
-              disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
+              disabled={loading || (!agentCommissions && !agencyCommission && !preaCommission && !commissionAccount && !commissionReports)}
             >
               Download PDF
             </Button>
             <Button 
               variant="contained" 
               onClick={downloadExcel}
-              disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
+              disabled={loading || (!agentCommissions && !agencyCommission && !preaCommission && !commissionAccount && !commissionReports)}
             >
               Download Excel
             </Button>
             <Button 
               variant="contained" 
               onClick={printReport}
-              disabled={loading || !agentCommissions && !agencyCommission && !preaCommission}
+              disabled={loading || (!agentCommissions && !agencyCommission && !preaCommission && !commissionAccount && !commissionReports)}
             >
               Print Report
             </Button>
@@ -1254,6 +1842,8 @@ const CommissionsPage: React.FC = () => {
             <Tab label="Agent Commissions" />
             <Tab label="Agency Commission" />
             <Tab label="PREA Commission" />
+            <Tab label="Commission Account" />
+            <Tab label="Commission Reports" />
           </Tabs>
 
           <Box sx={{ p: 3 }}>

@@ -216,6 +216,25 @@ class AccountingIntegrationService {
                 catch (_c) {
                     // Non-fatal: accounting journal reversal remains source of truth.
                 }
+                // Keep VAT reporting aligned with accounting reversals.
+                try {
+                    yield VatRecord_1.VatRecord.updateOne({
+                        companyId: new mongoose_1.default.Types.ObjectId(companyId),
+                        transactionId: paymentId,
+                        sourceType: payment.paymentType
+                    }, {
+                        $set: {
+                            vatCollected: 0,
+                            vatPaid: 0,
+                            vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                            filingPeriod: filingPeriodFromDate(payment.paymentDate),
+                            status: 'reversed'
+                        }
+                    });
+                }
+                catch (_d) {
+                    // Non-fatal: VAT journal reversal remains source of truth.
+                }
             }
             catch (error) {
                 if (isDuplicateKeyError(error))

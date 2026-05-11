@@ -19,7 +19,8 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Alert
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -64,6 +65,9 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingProperties, setLoadingProperties] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_UPLOAD_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
 
   useEffect(() => {
     if (open) {
@@ -113,12 +117,35 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
-    if (!files) return;
+    if (!files || !files.length) return;
 
     try {
+      setUploadError(null);
       setLoading(true);
       const formData = new FormData();
-      Array.from(files).forEach(file => {
+
+      const fileList = Array.from(files);
+      const validFiles: File[] = [];
+      const rejectedFiles: string[] = [];
+
+      fileList.forEach((file) => {
+        if (!ALLOWED_UPLOAD_MIME_TYPES.includes(file.type)) {
+          rejectedFiles.push(`${file.name} (invalid type)`);
+          return;
+        }
+        if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+          rejectedFiles.push(`${file.name} (exceeds 10MB)`);
+          return;
+        }
+        validFiles.push(file);
+      });
+
+      if (!validFiles.length) {
+        setUploadError('No valid files selected. Only PDF/JPG/PNG/WEBP up to 10MB are allowed.');
+        return;
+      }
+
+      validFiles.forEach((file) => {
         formData.append('files', file);
       });
 
@@ -127,10 +154,18 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
         ...prev,
         attachments: [...(prev.attachments || []), ...response.data]
       }));
+
+      if (rejectedFiles.length > 0) {
+        setUploadError(
+          `Some files were skipped: ${rejectedFiles.join(', ')}. Only PDF/JPG/PNG/WEBP up to 10MB are allowed.`
+        );
+      }
     } catch (err) {
       console.error('Error uploading files:', err);
+      setUploadError('Failed to upload quotation. Please try again.');
     } finally {
       setLoading(false);
+      event.target.value = '';
     }
   };
 
@@ -154,6 +189,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
         description: formData.description,
         priority: formData.priority,
         estimatedCost: formData.estimatedCost,
+        attachments: formData.attachments,
       });
       onClose();
     } catch (err) {
@@ -171,7 +207,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
               <Grid item xs={12}>
                 <TextField
                   label="Title"
-                  value={formData.title}
+                  value={formData.title || ''}
                   onChange={(e) =>
                     setFormData({ ...formData, title: e.target.value })
                   }
@@ -203,7 +239,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
                 <FormControl fullWidth>
                   <InputLabel>Category</InputLabel>
                   <Select
-                    value={formData.category}
+                    value={formData.category || ''}
                     label="Category"
                     onChange={(e) =>
                       setFormData({ ...formData, category: e.target.value as MaintenanceCategory })
@@ -242,7 +278,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
               <Grid item xs={12}>
                 <TextField
                   label="Description"
-                  value={formData.description}
+                  value={formData.description || ''}
                   onChange={(e) =>
                     setFormData({ ...formData, description: e.target.value })
                   }
@@ -257,7 +293,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
                 <TextField
                   label="Estimated Cost"
                   type="number"
-                  value={formData.estimatedCost}
+                  value={formData.estimatedCost ?? 0}
                   onChange={(e) =>
                     setFormData({ ...formData, estimatedCost: parseFloat(e.target.value) || 0 })
                   }
@@ -271,7 +307,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
               <Grid item xs={12} sm={6}>
                 <TextField
                   label="Created By"
-                  value={formData.createdByName}
+                  value={formData.createdByName || ''}
                   onChange={(e) =>
                     setFormData({ ...formData, createdByName: e.target.value })
                   }
@@ -282,7 +318,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
               <Grid item xs={12} sm={6}>
                 <DatePicker
                   label="Access Window Start"
-                  value={formData.accessWindow?.start}
+                  value={formData.accessWindow?.start || null}
                   onChange={(date) => date && handleAccessWindowChange('start', date)}
                   slotProps={{
                     textField: {
@@ -295,7 +331,7 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
               <Grid item xs={12} sm={6}>
                 <DatePicker
                   label="Access Window End"
-                  value={formData.accessWindow?.end}
+                  value={formData.accessWindow?.end || null}
                   onChange={(date) => date && handleAccessWindowChange('end', date)}
                   slotProps={{
                     textField: {
@@ -303,6 +339,51 @@ export const MaintenanceRequestForm: React.FC<MaintenanceRequestFormProps> = ({
                     },
                   }}
                 />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                  Quotation Attachments (PDF/Image)
+                </Typography>
+                <Button
+                  variant="outlined"
+                  component="label"
+                  disabled={loading}
+                >
+                  Upload Quotation
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    multiple
+                    hidden
+                    onChange={handleFileUpload}
+                  />
+                </Button>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Allowed: PDF, JPG, PNG, WEBP. Max size: 10MB per file.
+                </Typography>
+                {uploadError && (
+                  <Alert severity="error" sx={{ mt: 1 }}>
+                    {uploadError}
+                  </Alert>
+                )}
+                {!!formData.attachments?.length && (
+                  <List dense sx={{ mt: 1 }}>
+                    {formData.attachments.map((attachment: any, index: number) => (
+                      <ListItem key={`${attachment?.url || 'attachment'}-${index}`}>
+                        <ListItemText
+                          primary={attachment?.name || `Attachment ${index + 1}`}
+                          secondary={attachment?.type || ''}
+                        />
+                        <ListItemSecondaryAction>
+                          <IconButton edge="end" onClick={() => handleRemoveAttachment(index)}>
+                            <DeleteIcon />
+                          </IconButton>
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
               </Grid>
             </Grid>
           </LocalizationProvider>

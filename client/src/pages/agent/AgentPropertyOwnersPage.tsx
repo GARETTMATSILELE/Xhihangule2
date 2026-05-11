@@ -29,7 +29,8 @@ import {
   CardActions,
   Divider,
   Snackbar,
-  Tooltip
+  Tooltip,
+  InputAdornment
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -38,7 +39,8 @@ import {
   Business as BusinessIcon,
   Person as PersonIcon,
   Email as EmailIcon,
-  Phone as PhoneIcon
+  Phone as PhoneIcon,
+  Search as SearchIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentPropertyOwnerService, PropertyOwner } from '../../services/agentPropertyOwnerService';
@@ -60,6 +62,7 @@ interface Property {
   name: string;
   address: string;
   ownerId?: string;
+  propertyOwnerId?: string;
 }
 
 const initialFormData: PropertyOwnerFormData = {
@@ -70,6 +73,17 @@ const initialFormData: PropertyOwnerFormData = {
   password: '',
   companyId: '',
   propertyIds: [],
+};
+
+const getReferenceId = (value: any): string => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    if (value.$oid) return value.$oid;
+    if (value._id) return getReferenceId(value._id);
+    if (value.id) return getReferenceId(value.id);
+  }
+  return '';
 };
 
 const AgentPropertyOwnersPage: React.FC = () => {
@@ -90,6 +104,7 @@ const AgentPropertyOwnersPage: React.FC = () => {
     severity: 'success'
   });
   const [propertySelectOpen, setPropertySelectOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -119,12 +134,7 @@ const AgentPropertyOwnersPage: React.FC = () => {
     if (owner) {
       setSelectedOwner(owner);
       
-      const propertyIds = owner.properties?.map(p => {
-        if (typeof p === 'string') return p;
-        if (typeof p === 'object' && p && '$oid' in p) return p.$oid;
-        if (typeof p === 'object' && p && '_id' in p) return (p as any)._id;
-        return p;
-      }) || [];
+      const propertyIds = owner.properties?.map(getReferenceId).filter(Boolean) || [];
       
       setFormData({
         firstName: owner.firstName,
@@ -227,15 +237,49 @@ const AgentPropertyOwnersPage: React.FC = () => {
   };
 
   const getOwnerProperties = (owner: PropertyOwner) => {
-    const ownerPropertyIds = owner.properties?.map(p => {
-      if (typeof p === 'string') return p;
-      if (typeof p === 'object' && p && '$oid' in p) return p.$oid;
-      if (typeof p === 'object' && p && '_id' in p) return (p as any)._id;
-      return p;
-    }) || [];
+    const ownerPropertyIds = owner.properties?.map(getReferenceId).filter(Boolean) || [];
     
     return properties.filter(prop => ownerPropertyIds.includes(prop._id));
   };
+
+  const assignedPropertyIds = React.useMemo(() => {
+    const ids = new Set<string>();
+
+    owners.forEach((owner) => {
+      if (selectedOwner && owner._id === selectedOwner._id) return;
+
+      owner.properties?.forEach((property) => {
+        const propertyId = getReferenceId(property);
+        if (propertyId) ids.add(propertyId);
+      });
+    });
+
+    return ids;
+  }, [owners, selectedOwner]);
+
+  const selectedPropertyIds = React.useMemo(() => new Set(formData.propertyIds), [formData.propertyIds]);
+
+  const availablePropertiesForAssignment = React.useMemo(() => {
+    return properties.filter((property) => {
+      const propertyId = getReferenceId(property._id);
+      if (selectedPropertyIds.has(propertyId)) return true;
+
+      const propertyOwnerId = getReferenceId((property as any).propertyOwnerId);
+      const isLinkedToAnotherOwner = propertyOwnerId && propertyOwnerId !== selectedOwner?._id;
+
+      return !assignedPropertyIds.has(propertyId) && !isLinkedToAnotherOwner;
+    });
+  }, [assignedPropertyIds, properties, selectedOwner, selectedPropertyIds]);
+
+  const filteredOwners = React.useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    if (!normalizedSearch) return owners;
+
+    return owners.filter((owner) => {
+      const fullName = `${owner.firstName || ''} ${owner.lastName || ''}`.trim().toLowerCase();
+      return fullName.includes(normalizedSearch);
+    });
+  }, [owners, searchTerm]);
 
   if (loading) {
     return (
@@ -268,9 +312,24 @@ const AgentPropertyOwnersPage: React.FC = () => {
       )}
 
 
+      <TextField
+        fullWidth
+        label="Search property owners"
+        placeholder="Search by owner name"
+        value={searchTerm}
+        onChange={(event) => setSearchTerm(event.target.value)}
+        sx={{ mb: 3 }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon color="action" />
+            </InputAdornment>
+          ),
+        }}
+      />
 
       <Grid container spacing={3}>
-        {owners.map((owner) => (
+        {filteredOwners.map((owner) => (
           <Grid item xs={12} md={6} lg={4} key={owner._id}>
             <Card>
               <CardContent>
@@ -364,6 +423,17 @@ const AgentPropertyOwnersPage: React.FC = () => {
         </Paper>
       )}
 
+      {owners.length > 0 && filteredOwners.length === 0 && !loading && (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No Matching Property Owners
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Try searching for a different owner name.
+          </Typography>
+        </Paper>
+      )}
+
       {/* Add/Edit Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
         <DialogTitle>
@@ -453,7 +523,11 @@ const AgentPropertyOwnersPage: React.FC = () => {
                       </Box>
                     )}
                   >
-                    {properties.map((property) => (
+                    {availablePropertiesForAssignment.length === 0 ? (
+                      <MenuItem disabled>
+                        No unassigned properties available
+                      </MenuItem>
+                    ) : availablePropertiesForAssignment.map((property) => (
                       <MenuItem key={property._id} value={property._id}>
                         {property.name} - {property.address}
                       </MenuItem>

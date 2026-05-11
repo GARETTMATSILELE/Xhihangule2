@@ -80,6 +80,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>('');
   const [vatIncluded, setVatIncluded] = useState<boolean>(false);
   const [vatRatePercent, setVatRatePercent] = useState<number>(DEFAULT_SALE_VAT_RATE_PERCENT);
+  const [applyVatOnCommission, setApplyVatOnCommission] = useState<boolean>(false);
   const propertyOptions = useMemo(() => {
     const out: any[] = [];
     const seen = new Set<string>();
@@ -106,6 +107,11 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     setSaleId(String((initialData as any).saleId || ''));
     setAmountPaid(String(Math.abs(Number((initialData as any).amount || 0))));
     setVatIncluded(Boolean((initialData as any).vatIncluded));
+    setApplyVatOnCommission(
+      typeof (initialData as any).applyVatOnCommission === 'boolean'
+        ? Boolean((initialData as any).applyVatOnCommission)
+        : Number((initialData as any)?.commissionDetails?.vatOnCommission || 0) > 0
+    );
     const vr = Number((initialData as any).vatRate);
     if (Number.isFinite(vr) && vr >= 0) {
       setVatRatePercent(vr <= 1 ? vr * 100 : vr);
@@ -355,17 +361,25 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     const paid = Number(amountPaid) || 0;
     const taxableBase = Math.max(0, paid - vatAmountOnPayment);
     const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
-    const vatOnCommission = vatRate * commissionOnPaid;
+    const vatOnCommission = applyVatOnCommission ? vatRate * commissionOnPaid : 0;
     return Math.max(0, taxableBase - commissionOnPaid - vatOnCommission);
-  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
+  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission, applyVatOnCommission]);
 
   const ownerAmountForThisPayment = useMemo(() => {
     const paid = Number(amountPaid) || 0;
     const taxableBase = Math.max(0, paid - vatAmountOnPayment);
     const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
-    const vatOnCommission = vatRate * commissionOnPaid;
+    const vatOnCommission = applyVatOnCommission ? vatRate * commissionOnPaid : 0;
     return Math.max(0, taxableBase - commissionOnPaid - vatOnCommission);
-  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
+  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission, applyVatOnCommission]);
+
+  const commissionVatRatePercent = Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.155) * 100).toFixed(2));
+
+  const vatOnCommissionAmount = useMemo(() => {
+    if (!applyVatOnCommission) return 0;
+    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
+    return Number((commissionOnPaid * vatRate).toFixed(2));
+  }, [applyVatOnCommission, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
 
   const handleSubmit = async () => {
     try {
@@ -409,6 +423,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
           preaFee: Number(preaShare.toFixed(2)),
           agentShare: Number(agentShare.toFixed(2)),
           agencyShare: Number(agencyShare.toFixed(2)),
+          vatOnCommission: vatOnCommissionAmount,
           ownerAmount: Number(ownerAmountForThisPayment.toFixed(2))
         },
         processedBy: user?._id || '',
@@ -420,6 +435,10 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         vatIncluded,
         vatRate: vatIncluded ? vatRateDecimal : undefined,
         vatAmount: vatIncluded ? Number(vatAmountOnPayment.toFixed(2)) : 0,
+        applyVatOnCommission,
+        vatOnCommissionRate: applyVatOnCommission
+          ? Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)))
+          : undefined,
         // Explicitly include buyer/seller fields for backend persistence
         buyerName,
         sellerName
@@ -644,6 +663,20 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         <Grid item xs={12} md={4}>
           <TextField id="commissionPercent" name="commissionPercent" fullWidth label="Commission %" type="number" value={commissionPercent} onChange={(e) => setCommissionPercent(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />
         </Grid>
+        <Grid item xs={12} md={4}>
+          <FormControlLabel
+            control={<Switch checked={applyVatOnCommission} onChange={(_, checked) => setApplyVatOnCommission(checked)} color="primary" />}
+            label={applyVatOnCommission ? 'VAT on Commission: ON' : 'VAT on Commission: OFF'}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Optional {commissionVatRatePercent}% VAT charged on the commission fee.
+          </Typography>
+          {applyVatOnCommission && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              VAT on commission: {vatOnCommissionAmount.toFixed(2)} {currency}
+            </Typography>
+          )}
+        </Grid>
 
         <Grid item xs={12}>
           <Paper variant="outlined" sx={{ p: 2 }}>
@@ -659,7 +692,7 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
                 <TextField id="preaShare" name="preaShare" fullWidth label="PREA Share" type="number" value={preaShare} onChange={(e) => setPreaShare(Number(e.target.value))} inputProps={{ min: 0, step: '0.01' }} />
               </Grid>
               <Grid item xs={12} md={3}>
-                <TextField id="sellerRevenue" name="sellerRevenue" fullWidth label={`Seller Revenue (paid - commission - VAT ${Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.155) * 100).toFixed(2))}% on commission)`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
+                <TextField id="sellerRevenue" name="sellerRevenue" fullWidth label={`Seller Revenue (paid - commission${applyVatOnCommission ? ` - VAT ${commissionVatRatePercent}% on commission` : ''})`} value={sellerRevenue.toFixed(2)} InputProps={{ readOnly: true }} />
               </Grid>
               <Grid item xs={12} md={3}>
                 <TextField id="agencyPercent" name="agencyPercent" fullWidth label="Agency % of Remaining" type="number" value={agencyPercent} onChange={(e) => handleAgencyPercentChange(Number(e.target.value))} inputProps={{ min: 0, max: 100, step: '0.1' }} />

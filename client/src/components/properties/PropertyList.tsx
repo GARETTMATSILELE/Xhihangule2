@@ -24,6 +24,7 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Add as AddIcon,
+  RestoreFromTrash as RestoreFromTrashIcon,
 } from '@mui/icons-material';
 import { Property, PropertyFormData } from '../../types/property';
 import PropertyForm from './PropertyForm';
@@ -36,6 +37,7 @@ interface PropertyListProps {
   // Optional, for admin dashboard customizations
   isAdminRoute?: boolean;
   agentNamesById?: Record<string, string>;
+  isDeletedView?: boolean;
 }
 
 const PropertyList: React.FC<PropertyListProps> = ({
@@ -45,6 +47,7 @@ const PropertyList: React.FC<PropertyListProps> = ({
   onAddProperty,
   isAdminRoute,
   agentNamesById,
+  isDeletedView = false,
 }) => {
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -75,14 +78,16 @@ const PropertyList: React.FC<PropertyListProps> = ({
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-        <Typography variant="h4">Properties</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={onAddProperty}
-        >
-          Add Property
-        </Button>
+        <Typography variant="h4">{isDeletedView ? 'Deleted Properties' : 'Properties'}</Typography>
+        {!isDeletedView && (
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={onAddProperty}
+          >
+            Add Property
+          </Button>
+        )}
       </Box>
 
       <TableContainer component={Paper}>
@@ -104,11 +109,11 @@ const PropertyList: React.FC<PropertyListProps> = ({
             {properties.map((property) => (
               <TableRow 
                 key={property._id}
-                onClick={() => property.status === 'available' && handleEditClick(property)}
+                onClick={() => !isDeletedView && property.status === 'available' && handleEditClick(property)}
                 sx={{ 
-                  cursor: property.status === 'available' ? 'pointer' : 'default',
+                  cursor: !isDeletedView && property.status === 'available' ? 'pointer' : 'default',
                   '&:hover': {
-                    backgroundColor: property.status === 'available' ? 'action.hover' : 'inherit'
+                    backgroundColor: !isDeletedView && property.status === 'available' ? 'action.hover' : 'inherit'
                   }
                 }}
               >
@@ -145,18 +150,30 @@ const PropertyList: React.FC<PropertyListProps> = ({
                 <TableCell>{property.bathrooms}</TableCell>
                 <TableCell>{property.area} sq ft</TableCell>
                 <TableCell>
-                  <IconButton onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditClick(property);
-                  }}>
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteProperty(property._id);
-                  }}>
-                    <DeleteIcon />
-                  </IconButton>
+                  {!isDeletedView && (
+                    <>
+                      <IconButton onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditClick(property);
+                      }}>
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProperty(property._id);
+                      }}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </>
+                  )}
+                  {isDeletedView && (
+                    <IconButton onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteProperty(property._id);
+                    }}>
+                      <RestoreFromTrashIcon />
+                    </IconButton>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

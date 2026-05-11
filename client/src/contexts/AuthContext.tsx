@@ -5,6 +5,8 @@ import { User } from '../types/auth';
 import { AxiosError } from 'axios';
 import { getDashboardPath } from '../utils/registrationUtils';
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
 function getSafeNextPathFromUrlSearch(search: string): string | null {
   try {
     const next = new URLSearchParams(search || '').get('next');
@@ -23,6 +25,7 @@ function getSafeNextPathFromUrlSearch(search: string): string | null {
 function pickRoleForPath(nextPath: string, roles: string[]): string | null {
   const has = (r: string) => roles.includes(r);
   if (nextPath.startsWith('/accountant-dashboard')) {
+    if (has('admin')) return 'admin';
     if (has('accountant')) return 'accountant';
     if (has('principal')) return 'principal';
     if (has('prea')) return 'prea';
@@ -189,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             } catch {}
             if (storedImpersonating) {
               // When impersonating, do not auto-redirect away; keep current path
-              console.log('Resuming impersonation session');
+              if (isDevelopment) console.log('Resuming impersonation session');
             }
             
             // Fetch company data if available
@@ -202,7 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             }
           } catch (authError) {
-            console.warn('Token validation failed, trying to refresh token:', authError);
+            if (isDevelopment) console.warn('Token validation failed, trying to refresh token:', authError);
             
             // Try to refresh the token (short timeout as well)
             try {
@@ -239,11 +242,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             } catch (refreshError) {
               if (isTransientNetworkError(refreshError)) {
-                console.warn('Token refresh deferred due to temporary network/backend outage');
+                if (isDevelopment) console.warn('Token refresh deferred due to temporary network/backend outage');
                 setError('Temporary connection issue. Retrying automatically...');
                 return;
               }
-              console.warn('Token refresh failed, clearing all tokens and redirecting to login:', refreshError);
+              if (isDevelopment) console.warn('Token refresh failed, clearing all tokens and redirecting to login:', refreshError);
               
               // Clear all tokens and redirect to login
               setTokens(null, null);
@@ -256,7 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               
               // Don't redirect on payments page - allow it to work without authentication
               if (window.location.pathname.includes('/payments')) {
-                console.log('Auth initialization failed on payments page - not redirecting');
+                if (isDevelopment) console.log('Auth initialization failed on payments page - not redirecting');
                 return;
               }
               
@@ -280,7 +283,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Don't redirect on payments page - allow it to work without authentication
         if (window.location.pathname.includes('/payments')) {
-          console.log('Auth initialization failed on payments page - not redirecting');
+          if (isDevelopment) console.log('Auth initialization failed on payments page - not redirecting');
           return;
         }
         
@@ -298,7 +301,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Listen for auth errors from axios interceptor
     const handleAuthError = (event: CustomEvent) => {
-      console.log('Auth error received:', event.detail);
+      if (isDevelopment) console.log('Auth error received:', event.detail);
       setError(event.detail);
       setUser(null);
       setCompany(null);
@@ -360,17 +363,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(null);
       setLoading(true);
       
-      console.log('Starting login process for:', email);
-      
       const response = await api.post('/auth/login', { email, password });
       const { user: userData, company: companyData, token } = response.data;
-      
-      console.log('Login response received:', { 
-        hasUser: !!userData, 
-        hasToken: !!token, 
-        hasRefreshToken: false,
-        userRole: userData?.role 
-      });
       
       if (!token) {
         throw new Error('No access token received');
@@ -382,8 +376,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Store user data in localStorage for other services to access
       localStorage.setItem('user', JSON.stringify(userData));
-      
-      console.log('Tokens stored successfully');
       
       // Set user data
       setUser(userData);
@@ -418,16 +410,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return userData;
         } else {
           const dashboardPath = getDashboardPath(roles[0] as any);
-          console.log('Navigating to dashboard:', dashboardPath);
+          if (isDevelopment) console.log('Navigating to dashboard:', dashboardPath);
           navigate(dashboardPath);
         }
       } catch {}
-      
-      console.log('User state updated:', { 
-        isAuthenticated: true, 
-        userRole: userData.role,
-        userId: userData._id 
-      });
       
       setLoading(false);
 

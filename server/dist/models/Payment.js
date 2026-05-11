@@ -195,6 +195,18 @@ const PaymentSchema = new mongoose_1.Schema({
         min: 0,
         default: 0
     },
+    applyVatOnCommission: {
+        type: Boolean,
+        required: false,
+        default: false
+    },
+    vatOnCommissionRate: {
+        type: Number,
+        required: false,
+        min: 0,
+        max: 1,
+        default: 0
+    },
     status: {
         type: String,
         enum: ['pending', 'completed', 'failed', 'reversed', 'refunded'],
@@ -415,7 +427,8 @@ function isIllegalPaymentUpdate(update) {
                 'status', 'isProvisional', 'isInSuspense', 'commissionFinalized', 'provisionalRelationshipType',
                 'finalizedAt', 'finalizedBy', 'idempotencyKey', 'manualPropertyAddress', 'manualTenantName',
                 'buyerName', 'sellerName', 'saleId', 'developmentId', 'developmentUnitId', 'notes',
-                'postingStatus', 'reversalOfPaymentId', 'reversalPaymentId', 'correctedPaymentId',
+                'postingStatus', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate',
+                'reversalOfPaymentId', 'reversalPaymentId', 'correctedPaymentId',
                 'reversedBy', 'reversedAt', 'reversalReason', 'voidedBy', 'voidedAt', 'voidReason', 'isCorrectionEntry'
             ].includes(key))
                 continue;
@@ -427,17 +440,17 @@ function isIllegalPaymentUpdate(update) {
 }
 PaymentSchema.pre('save', function (next) {
     try {
-        if (!this.postingStatus) {
-            const status = String(this.status || '').toLowerCase();
-            if (status === 'completed')
-                this.postingStatus = 'posted';
-            else if (status === 'reversed')
-                this.postingStatus = 'reversed';
-            else if (status === 'failed')
-                this.postingStatus = 'voided';
-            else
-                this.postingStatus = 'draft';
-        }
+        // Keep postingStatus consistent with status to avoid "completed but draft" conflicts.
+        // This is critical for reversal eligibility and ledger posting correctness.
+        const status = String(this.status || '').toLowerCase();
+        if (status === 'completed')
+            this.postingStatus = 'posted';
+        else if (status === 'reversed')
+            this.postingStatus = 'reversed';
+        else if (status === 'failed')
+            this.postingStatus = 'voided';
+        else
+            this.postingStatus = 'draft';
         return next();
     }
     catch (e) {

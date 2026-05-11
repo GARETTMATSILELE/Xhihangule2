@@ -10,13 +10,14 @@ import { accountingConnection } from '../config/database';
  */
 export interface Transaction {
   _id?: Types.ObjectId;
-  type: 'income' | 'expense' | 'owner_payout' | 'repair' | 'maintenance' | 'other';
+  type: 'income' | 'expense' | 'owner_payout' | 'repair' | 'maintenance' | 'opening_balance' | 'other';
   amount: number;
   date: Date;
   paymentId?: Types.ObjectId;
   idempotencyKey?: string;
   description: string;
   category?: string;
+  direction?: 'credit' | 'debit';
   recipientId?: Types.ObjectId | string;
   recipientType?: 'owner' | 'contractor' | 'tenant' | 'other';
   referenceNumber?: string;
@@ -75,7 +76,7 @@ export interface IPropertyAccount extends Document {
 const TransactionSchema = new Schema<Transaction>({
   type: { 
     type: String, 
-    enum: ['income', 'expense', 'owner_payout', 'repair', 'maintenance', 'other'], 
+    enum: ['income', 'expense', 'owner_payout', 'repair', 'maintenance', 'opening_balance', 'other'], 
     required: true 
   },
   amount: { 
@@ -101,6 +102,10 @@ const TransactionSchema = new Schema<Transaction>({
   },
   category: { 
     type: String 
+  },
+  direction: {
+    type: String,
+    enum: ['credit', 'debit']
   },
   recipientId: { 
     type: Schema.Types.Mixed 
@@ -388,15 +393,19 @@ PropertyAccountSchema.pre('save', function(next) {
     .reduce((sum, t) => sum + t.amount, 0);
   
   this.totalExpenses = this.transactions
-    .filter(t => t.type !== 'income' && t.status === 'completed')
+    .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed')
     .reduce((sum, t) => sum + t.amount, 0);
   
   this.totalOwnerPayouts = this.ownerPayouts
     .filter(p => p.status === 'completed')
     .reduce((sum, p) => sum + p.amount, 0);
   
-  // Calculate running balance
-  this.runningBalance = this.totalIncome - this.totalExpenses - this.totalOwnerPayouts;
+  const openingBalance = this.transactions
+    .filter(t => t.type === 'opening_balance' && t.status === 'completed')
+    .reduce((sum, t) => sum + (t.direction === 'debit' ? -t.amount : t.amount), 0);
+  
+  // Calculate running balance. Opening balances affect availability without inflating income/expense totals.
+  this.runningBalance = this.totalIncome - this.totalExpenses - this.totalOwnerPayouts + openingBalance;
   
   // Update last dates
   const incomeTransactions = this.transactions.filter(t => t.type === 'income');

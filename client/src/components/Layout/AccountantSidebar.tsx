@@ -18,6 +18,7 @@ import {
   Description as DescriptionIcon,
   Settings as SettingsIcon,
   AccountBalance as AccountBalanceIcon,
+  RequestQuote as TaxIcon,
   ListAlt as LedgerIcon,
   Assignment as TaskIcon,
   Sync as SyncIcon,
@@ -34,24 +35,29 @@ interface AccountantSidebarProps {
 
 export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab, onTabChange }) => {
   const navigate = useNavigate();
-  const { loading: authLoading } = useAuth();
+  const { loading: authLoading, user } = useAuth();
   const { company } = useCompany();
+  const userRoles = ((user as any)?.roles as string[] | undefined) || (user?.role ? [user.role] : []);
+  const canManageSync = userRoles.includes('admin');
 
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/accountant-dashboard' },
     { text: 'Rent Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
+    { text: 'Sales Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/sales' },
     { text: 'Ledger', icon: <LedgerIcon />, path: '/accountant-dashboard/ledger' },
     { text: 'Levies', icon: <ReceiptIcon />, path: '/accountant-dashboard/levies' },
     { text: 'Invoices', icon: <ReceiptIcon />, path: '/accountant-dashboard/written-invoices' },
     { text: 'Property Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/property-accounts' },
     { text: 'Agent Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/agent-accounts' },
     { text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
+    { text: 'Tax', icon: <TaxIcon />, path: '/accountant-dashboard/tax' },
     { text: 'Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },
     { text: 'Trust A/c Reports', icon: <DescriptionIcon />, path: '/accountant-dashboard/trust-account-reports' },
     { text: 'Data Sync', icon: <SyncIcon />, path: '/accountant-dashboard/data-sync' },
     { text: 'Tasks', icon: <TaskIcon />, path: '/accountant-dashboard/tasks' },
     { text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' }
-  ];
+  ].map((item, index) => ({ ...item, index }))
+    .filter((item) => item.path !== '/accountant-dashboard/data-sync' || canManageSync);
 
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);
@@ -117,12 +123,12 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
         )}
 
         <List>
-          {menuItems.map((item, index) => (
+          {menuItems.map((item) => (
             <ListItem
               button
               key={item.text}
-              onClick={() => handleNavigation(item.path, index)}
-              selected={activeTab === index}
+              onClick={() => handleNavigation(item.path, item.index)}
+              selected={activeTab === item.index}
               sx={{
                 borderRadius: 2,
                 mb: 0.5,
@@ -137,13 +143,13 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
                 },
               }}
             >
-              <ListItemIcon sx={{ color: activeTab === index ? 'primary.main' : 'inherit' }}>
+              <ListItemIcon sx={{ color: activeTab === item.index ? 'primary.main' : 'inherit' }}>
                 {item.icon}
               </ListItemIcon>
               <ListItemText 
                 primary={item.text} 
                 primaryTypographyProps={{
-                  fontWeight: activeTab === index ? 600 : 400,
+                  fontWeight: activeTab === item.index ? 600 : 400,
                 }}
               />
             </ListItem>

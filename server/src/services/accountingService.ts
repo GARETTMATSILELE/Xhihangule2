@@ -9,6 +9,7 @@ import { BankTransaction } from '../models/BankTransaction';
 import { AccountingEventLog } from '../models/AccountingEventLog';
 import { Payment } from '../models/Payment';
 import dashboardKpiService from './dashboardKpiService';
+import type { DashboardOutstandingBreakdown } from './dashboardKpiService';
 
 export interface PostJournalLineInput {
   accountCode: string;
@@ -33,7 +34,7 @@ export interface PostTransactionInput {
     vatPaid?: number;
     vatRate?: number;
     filingPeriod?: string;
-    status?: 'pending' | 'submitted';
+    status?: 'pending' | 'submitted' | 'reversed';
   };
 }
 
@@ -428,7 +429,13 @@ class AccountingService {
         ]).option({ maxTimeMS: 15000 }),
         Payment.aggregate([
           { $match: { companyId: companyObjectId, status: 'completed' } },
-          { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
+          {
+            $group: {
+              _id: null,
+              amount: { $sum: '$commissionDetails.agencyShare' },
+              count: { $sum: 1 }
+            }
+          }
         ]).option({ maxTimeMS: 10000 }),
         dashboardKpiService.getCompanySnapshot(companyId)
       ]);
@@ -437,7 +444,10 @@ class AccountingService {
       const vatDueAmount = toMoney(balance?.vatPayable || 0);
       const ledgerRevenue = toMoney(balance?.totalRevenue || 0);
       const paymentRevenue = toMoney(completedPaymentRevenue[0]?.amount || 0);
-      const totalRevenue = toMoney(Math.max(ledgerRevenue, paymentRevenue));
+      const paymentRevenueCount = Number(completedPaymentRevenue[0]?.count || 0);
+      // Use persisted payment commission totals as the primary source of truth for company revenue.
+      // Keep a ledger fallback for legacy companies where payment commissions were not historically captured.
+      const totalRevenue = toMoney(paymentRevenueCount > 0 ? paymentRevenue : ledgerRevenue);
       const totalExpenses = toMoney(balance?.totalExpenses || 0);
       const netProfit = toMoney(totalRevenue - totalExpenses);
 
@@ -503,6 +513,10 @@ class AccountingService {
     }
   }
 
+  async getDashboardOutstanding(companyId: string): Promise<DashboardOutstandingBreakdown> {
+    return dashboardKpiService.getCompanyOutstandingBreakdown(companyId);
+  }
+
   async getTrend(companyId: string, accountType: 'revenue' | 'expense', months = 12): Promise<Array<{ month: string; total: number }>> {
     const companyObjectId = toObjectId(companyId);
     const since = new Date();
@@ -546,7 +560,7 @@ class AccountingService {
 
   async getVatStatus(
     companyId: string,
-    filters?: { filingPeriod?: string; status?: 'pending' | 'submitted' }
+    filters?: { filingPeriod?: string; status?: 'pending' | 'submitted' | 'reversed' }
   ): Promise<Array<{ filingPeriod: string; vatCollected: number; vatPaid: number; vatPayable: number; status: string }>> {
     const companyObjectId = toObjectId(companyId);
     const rows = await VatRecord.aggregate([

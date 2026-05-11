@@ -13,7 +13,7 @@ export const createMaintenanceRequest = async (req: Request, res: Response) => {
       throw new AppError('User authentication required', 401);
     }
 
-    const { propertyId, title, description, priority, estimatedCost } = req.body;
+    const { propertyId, title, description, priority, estimatedCost, attachments } = req.body;
 
     // Validate required fields
     if (!propertyId || !title || !description) {
@@ -39,6 +39,9 @@ export const createMaintenanceRequest = async (req: Request, res: Response) => {
       description,
       priority: priority || 'medium',
       estimatedCost: estimatedCost || 0,
+      attachments: Array.isArray(attachments)
+        ? attachments.filter((file: any) => file && file.name && file.url && file.type)
+        : [],
       status: 'pending'
     });
 
@@ -208,19 +211,6 @@ export const approveMaintenanceRequest = async (req: Request, res: Response) => 
     // Update status to approved
     maintenanceRequest.status = 'approved';
     await maintenanceRequest.save();
-
-    // After a short delay, change to pending_completion
-    setTimeout(async () => {
-      try {
-        const updatedRequest = await MaintenanceRequest.findById(id);
-        if (updatedRequest && updatedRequest.status === 'approved') {
-          updatedRequest.status = 'pending_completion';
-          await updatedRequest.save();
-        }
-      } catch (error) {
-        console.error('Error updating status to pending_completion:', error);
-      }
-    }, 1000);
 
     const updatedRequest = await MaintenanceRequest.findById(id)
       .populate('propertyId', 'name address')

@@ -13,12 +13,12 @@ router.get('/public/:id', leaseController.getLeaseByIdPublic.bind(leaseControlle
 router.use(auth);
 
 router.get('/', leaseController.getLeases.bind(leaseController) as RequestHandler);
+router.get('/stats/overview', leaseController.getLeaseStats.bind(leaseController) as RequestHandler);
+router.get('/active/list', leaseController.getActiveLeases.bind(leaseController) as RequestHandler);
+router.get('/expiring/list', leaseController.getExpiringLeases.bind(leaseController) as RequestHandler);
 router.get('/:id', leaseController.getLeaseById.bind(leaseController) as RequestHandler);
 router.post('/', leaseController.createLease.bind(leaseController) as RequestHandler);
 router.put('/:id', leaseController.updateLease.bind(leaseController) as RequestHandler);
 router.delete('/:id', leaseController.deleteLease.bind(leaseController) as RequestHandler);
-router.get('/stats/overview', leaseController.getLeaseStats.bind(leaseController) as RequestHandler);
-router.get('/active/list', leaseController.getActiveLeases.bind(leaseController) as RequestHandler);
-router.get('/expiring/list', leaseController.getExpiringLeases.bind(leaseController) as RequestHandler);
 
 export default router; 

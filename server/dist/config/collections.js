@@ -33,6 +33,7 @@ exports.COLLECTIONS = {
     TRUST_ACCOUNTS: 'trustaccounts',
     TRUST_TRANSACTIONS: 'trusttransactions',
     TAX_RECORDS: 'taxrecords',
+    TAX_PAYOUTS: 'taxpayouts',
     TRUST_SETTLEMENTS: 'trustsettlements',
     TRUST_AUDIT_LOGS: 'trustauditlogs',
     TRUST_EVENT_FAILURE_LOGS: 'trusteventfailurelogs',
@@ -42,4 +43,4 @@ exports.COLLECTIONS = {
     MIGRATION_STATE: 'migration_state'
 };
 // Backward-compatible augmentation for new collections
-exports.ensureCollections = Object.assign(Object.assign({}, exports.COLLECTIONS), { INSPECTIONS: exports.COLLECTIONS.INSPECTIONS || 'inspections', VAT_PAYOUTS: exports.COLLECTIONS.VAT_PAYOUTS || 'vatpayouts' });
+exports.ensureCollections = Object.assign(Object.assign({}, exports.COLLECTIONS), { INSPECTIONS: exports.COLLECTIONS.INSPECTIONS || 'inspections', VAT_PAYOUTS: exports.COLLECTIONS.VAT_PAYOUTS || 'vatpayouts', TAX_PAYOUTS: exports.COLLECTIONS.TAX_PAYOUTS || 'taxpayouts' });

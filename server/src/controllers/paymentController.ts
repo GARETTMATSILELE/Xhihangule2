@@ -87,6 +87,8 @@ const buildSaleCommissionDetails = async (input: {
   propertyId?: any;
   vatIncluded?: boolean;
   vatRate?: number;
+  applyVatOnCommission?: boolean;
+  vatOnCommissionRate?: number;
   existingSplit?: any;
   commissionPercentOverride?: number;
 }) => {
@@ -113,10 +115,13 @@ const buildSaleCommissionDetails = async (input: {
   }
 
   const computed = await CommissionService.calculate(commissionBaseAmount, commissionPercent, companyObjectId);
-  const company = await Company.findById(companyObjectId).lean();
-  const configuredVat = Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
+  const applyVatOnCommission = Boolean(input.applyVatOnCommission);
+  const company = applyVatOnCommission ? await Company.findById(companyObjectId).lean() : null;
+  const configuredVat = Number(input.vatOnCommissionRate ?? company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
   const vatOnCommissionRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
-  const vatOnCommission = Number((Number(computed.totalCommission || 0) * vatOnCommissionRate).toFixed(2));
+  const vatOnCommission = applyVatOnCommission
+    ? Number((Number(computed.totalCommission || 0) * vatOnCommissionRate).toFixed(2))
+    : 0;
   const result: any = {
     totalCommission: Number(Number(computed.totalCommission || 0).toFixed(2)),
     preaFee: Number(Number(computed.preaFee || 0).toFixed(2)),
@@ -895,6 +900,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
 
     // Calculate commission: apply "single-month" rule only for introduction; management uses full amount (including advance periods)
     let finalCommissionDetails = commissionDetails;
+    let resolvedOwnerId: string | undefined = rawOwnerId;
     try {
       const isRental = (paymentType || 'rental') === 'rental';
       const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
@@ -903,17 +909,20 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       const depositNum = Number(depositAmount || 0);
       const isDepositOnly = amountNum <= 0 && depositNum > 0;
 
-      // Fetch property to resolve commission percent and rentalType
+      // Fetch property to resolve commission percent, rentalType and owner fallback
       let commissionPercentResolved: number = (propertyType || 'residential') === 'residential' ? 15 : 10;
       let rentalTypeResolved: 'management' | 'introduction' | 'sale' | undefined = undefined;
       if (!manualProperty && rawPropertyId) {
-        const prop = await Property.findById(new mongoose.Types.ObjectId(rawPropertyId)).select('commission rentalType').lean();
+        const prop = await Property.findById(new mongoose.Types.ObjectId(rawPropertyId)).select('commission rentalType ownerId').lean();
         if (prop) {
           if (typeof (prop as any)?.commission === 'number') {
             commissionPercentResolved = Number((prop as any).commission);
           }
           if ((prop as any)?.rentalType) {
             rentalTypeResolved = (prop as any).rentalType as any;
+          }
+          if (!resolvedOwnerId && (prop as any)?.ownerId) {
+            resolvedOwnerId = String((prop as any).ownerId);
           }
         }
       }
@@ -1154,9 +1163,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
 
     if (!payment.isProvisional) {
-      if (paymentType === 'rental' && rawOwnerId) {
+      if ((paymentType === 'rental' || paymentType === 'introduction') && resolvedOwnerId) {
         await User.findByIdAndUpdate(
-          new mongoose.Types.ObjectId(rawOwnerId),
+          new mongoose.Types.ObjectId(resolvedOwnerId),
           { $inc: { balance: finalCommissionDetails.ownerAmount } },
           session ? { session } : undefined
         );
@@ -1356,10 +1365,13 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       developmentId,
       developmentUnitId,
       vatIncluded,
-      vatRate
+      vatRate,
+      applyVatOnCommission,
+      vatOnCommissionRate
     } = req.body as any;
     const normalizedVatIncluded = Boolean(vatIncluded);
     const saleVatRate = Math.max(0, Math.min(1, Number(vatRate ?? 0.155)));
+    const normalizedApplyVatOnCommission = Boolean(applyVatOnCommission);
     const grossAmount = Number(amount || 0);
     const vatAmount = normalizedVatIncluded ? Number((grossAmount - (grossAmount / (1 + saleVatRate))).toFixed(2)) : 0;
     const taxableAmountForAllocation = Number((grossAmount - vatAmount).toFixed(2));
@@ -1459,13 +1471,15 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     }
 
-    // Apply VAT on commission for sales using company-configured rate (default 15.5%)
+    let normalizedVatOnCommissionRate = 0;
+    // Apply VAT on commission only when selected for this sale.
     {
-      const company = await Company.findById(new mongoose.Types.ObjectId(user.companyId)).lean();
-      const configuredVat = Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
+      const company = normalizedApplyVatOnCommission ? await Company.findById(new mongoose.Types.ObjectId(user.companyId)).lean() : null;
+      const configuredVat = Number(vatOnCommissionRate ?? company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
       const vatRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
+      normalizedVatOnCommissionRate = normalizedApplyVatOnCommission ? vatRate : 0;
       const commissionBase = Number(((finalCommissionDetails as any)?.totalCommission) || 0);
-      const vatOnCommission = Number((commissionBase * vatRate).toFixed(2));
+      const vatOnCommission = normalizedApplyVatOnCommission ? Number((commissionBase * vatRate).toFixed(2)) : 0;
       (finalCommissionDetails as any).vatOnCommission = vatOnCommission;
       (finalCommissionDetails as any).ownerAmount = Number((taxableAmountForAllocation - commissionBase - vatOnCommission).toFixed(2));
     }
@@ -1557,6 +1571,8 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       vatIncluded: normalizedVatIncluded,
       vatRate: normalizedVatIncluded ? saleVatRate : 0,
       vatAmount,
+      applyVatOnCommission: normalizedApplyVatOnCommission,
+      vatOnCommissionRate: normalizedVatOnCommissionRate,
       status: 'completed',
       currency: currency || 'USD',
       rentalPeriodMonth: periodMonth,
@@ -1572,11 +1588,42 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       developmentUnitId: unitId
     });
 
-    await payment.save();
-
-    // Post company revenue and sync agent commission(s)
+    // Critical writes: keep payment insert and company revenue increment atomic where possible.
+    let session: mongoose.ClientSession | null = null;
+    let usedTransaction = false;
     try {
-      await Company.findByIdAndUpdate(new mongoose.Types.ObjectId(user.companyId), { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } });
+      session = await mongoose.startSession();
+      session.startTransaction();
+      usedTransaction = true;
+      await payment.save({ session });
+      await Company.findByIdAndUpdate(
+        new mongoose.Types.ObjectId(user.companyId),
+        { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } },
+        { session }
+      );
+      await session.commitTransaction();
+    } catch (txErr: any) {
+      if (usedTransaction && session) {
+        try { await session.abortTransaction(); } catch {}
+      }
+      // Some deployments do not support transactions; fallback to non-transactional writes.
+      if (txErr?.code === 20 || /Transaction numbers are only allowed/.test(String(txErr?.message || ''))) {
+        await payment.save();
+        await Company.findByIdAndUpdate(
+          new mongoose.Types.ObjectId(user.companyId),
+          { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } }
+        );
+      } else {
+        throw txErr;
+      }
+    } finally {
+      if (session) {
+        try { session.endSession(); } catch {}
+      }
+    }
+
+    // Non-transactional downstream syncs (idempotent/retry-safe services).
+    try {
       await agentAccountService.syncCommissionForPayment(payment._id.toString());
     } catch (e) {
       console.warn('Non-fatal: commission posting failed', e);
@@ -1653,7 +1700,7 @@ export const updatePayment = async (req: Request, res: Response) => {
       'paymentDate', 'paymentMethod', 'amount', 'depositAmount', 'referenceNumber', 'notes', 'currency',
       'rentalPeriodMonth', 'rentalPeriodYear', 'advanceMonthsPaid', 'advancePeriodStart', 'advancePeriodEnd',
       'manualPropertyAddress', 'manualTenantName', 'buyerName', 'sellerName', 'status', 'postingStatus',
-      'commissionDetails', 'vatIncluded', 'vatRate', 'vatAmount'
+      'commissionDetails', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate'
     ]);
     for (const [k, v] of Object.entries(req.body || {})) {
       if (!editableFields.has(k)) continue;
@@ -1683,6 +1730,8 @@ export const updatePayment = async (req: Request, res: Response) => {
         propertyId: (payment as any).propertyId,
         vatIncluded: Boolean((payment as any).vatIncluded),
         vatRate: Number((payment as any).vatRate ?? 0.155),
+        applyVatOnCommission: Boolean((payment as any).applyVatOnCommission),
+        vatOnCommissionRate: Number((payment as any).vatOnCommissionRate ?? 0.155),
         existingSplit: rawDetails?.agentSplit,
         commissionPercentOverride: explicitCommissionPercent
       });
@@ -2208,119 +2257,164 @@ export const reversePayment = async (req: Request, res: Response) => {
       if (String((original as any).postingStatus || '') === 'reversed' || String(original.status || '') === 'reversed') {
         throw new AppError('Payment is already reversed.', 409);
       }
+      if ((original as any).reversalPaymentId) {
+        throw new AppError('Payment already has a reversal entry.', 409);
+      }
+
+      // Atomic guard to prevent duplicate reversals under concurrent requests.
+      // Only one request can transition this payment into the in-progress reversal state.
+      const lockedQuery = Payment.findOneAndUpdate(
+        {
+          _id: original._id,
+          companyId: req.user!.companyId,
+          reversalPaymentId: { $exists: false },
+          postingStatus: 'posted',
+          status: { $ne: 'reversed' }
+        },
+        {
+          $set: {
+            postingStatus: 'voided',
+            voidReason: 'reversal_in_progress'
+          }
+        },
+        { new: true }
+      );
+      const lockedOriginal = dbSession ? await lockedQuery.session(dbSession) : await lockedQuery;
+      if (!lockedOriginal) {
+        throw new AppError('Payment is no longer eligible for reversal (possibly already reversed).', 409);
+      }
 
       const before = paymentAuditSnapshot(original);
 
       const reversal = new Payment({
-        paymentType: original.paymentType,
-        saleMode: (original as any).saleMode,
-        propertyType: original.propertyType,
-        propertyId: original.propertyId,
-        tenantId: original.tenantId,
-        agentId: original.agentId,
-        companyId: original.companyId,
+        paymentType: lockedOriginal.paymentType,
+        saleMode: (lockedOriginal as any).saleMode,
+        propertyType: lockedOriginal.propertyType,
+        propertyId: lockedOriginal.propertyId,
+        tenantId: lockedOriginal.tenantId,
+        agentId: lockedOriginal.agentId,
+        companyId: lockedOriginal.companyId,
         paymentDate: new Date(),
-        paymentMethod: original.paymentMethod,
-        amount: -Math.abs(Number(original.amount || 0)),
-        depositAmount: -Math.abs(Number((original as any).depositAmount || 0)),
-        referenceNumber: `REV-${String(original.referenceNumber || original._id)}`,
-        rentalPeriodMonth: (original as any).rentalPeriodMonth,
-        rentalPeriodYear: (original as any).rentalPeriodYear,
-        advanceMonthsPaid: (original as any).advanceMonthsPaid,
-        advancePeriodStart: (original as any).advancePeriodStart,
-        advancePeriodEnd: (original as any).advancePeriodEnd,
-        notes: `Reversal of ${String(original.referenceNumber || original._id)}. Reason: ${reason}`,
+        paymentMethod: lockedOriginal.paymentMethod,
+        amount: -Math.abs(Number(lockedOriginal.amount || 0)),
+        depositAmount: -Math.abs(Number((lockedOriginal as any).depositAmount || 0)),
+        referenceNumber: `REV-${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
+        rentalPeriodMonth: (lockedOriginal as any).rentalPeriodMonth,
+        rentalPeriodYear: (lockedOriginal as any).rentalPeriodYear,
+        advanceMonthsPaid: (lockedOriginal as any).advanceMonthsPaid,
+        advancePeriodStart: (lockedOriginal as any).advancePeriodStart,
+        advancePeriodEnd: (lockedOriginal as any).advancePeriodEnd,
+        notes: `Reversal of ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}. Reason: ${reason}`,
         processedBy: new mongoose.Types.ObjectId(req.user!.userId),
-        commissionDetails: original.commissionDetails,
-        vatIncluded: (original as any).vatIncluded,
-        vatRate: (original as any).vatRate,
-        vatAmount: (original as any).vatAmount,
+        commissionDetails: lockedOriginal.commissionDetails,
+        vatIncluded: (lockedOriginal as any).vatIncluded,
+        vatRate: (lockedOriginal as any).vatRate,
+        vatAmount: (lockedOriginal as any).vatAmount,
+        applyVatOnCommission: (lockedOriginal as any).applyVatOnCommission,
+        vatOnCommissionRate: (lockedOriginal as any).vatOnCommissionRate,
         status: 'completed',
         postingStatus: 'posted',
-        currency: original.currency,
-        leaseId: (original as any).leaseId,
-        manualPropertyAddress: (original as any).manualPropertyAddress,
-        manualTenantName: (original as any).manualTenantName,
-        buyerName: (original as any).buyerName,
-        sellerName: (original as any).sellerName,
-        reversalOfPaymentId: original._id,
+        currency: lockedOriginal.currency,
+        leaseId: (lockedOriginal as any).leaseId,
+        manualPropertyAddress: (lockedOriginal as any).manualPropertyAddress,
+        manualTenantName: (lockedOriginal as any).manualTenantName,
+        buyerName: (lockedOriginal as any).buyerName,
+        sellerName: (lockedOriginal as any).sellerName,
+        reversalOfPaymentId: lockedOriginal._id,
         isCorrectionEntry: true,
         isProvisional: false,
         isInSuspense: false,
         commissionFinalized: true,
-        developmentId: (original as any).developmentId,
-        developmentUnitId: (original as any).developmentUnitId,
-        saleId: (original as any).saleId,
+        developmentId: (lockedOriginal as any).developmentId,
+        developmentUnitId: (lockedOriginal as any).developmentUnitId,
+        saleId: (lockedOriginal as any).saleId,
       });
       await reversal.save(dbSession ? { session: dbSession } : undefined);
 
       const correctedCommissionDetails = await buildSaleCommissionDetails({
-        amount: Math.max(0, Number(original.amount || 0)),
-        companyId: String(original.companyId || ''),
-        propertyId: (original as any).propertyId,
-        vatIncluded: Boolean((original as any).vatIncluded),
-        vatRate: Number((original as any).vatRate ?? 0.155),
-        existingSplit: (original as any)?.commissionDetails?.agentSplit
+        amount: Math.max(0, Number(lockedOriginal.amount || 0)),
+        companyId: String(lockedOriginal.companyId || ''),
+        propertyId: (lockedOriginal as any).propertyId,
+        vatIncluded: Boolean((lockedOriginal as any).vatIncluded),
+        vatRate: Number((lockedOriginal as any).vatRate ?? 0.155),
+        applyVatOnCommission: Boolean((lockedOriginal as any).applyVatOnCommission),
+        vatOnCommissionRate: Number((lockedOriginal as any).vatOnCommissionRate ?? 0.155),
+        existingSplit: (lockedOriginal as any)?.commissionDetails?.agentSplit
       });
 
       // Create a draft correction copy for manual accountant adjustments.
       const correctedDraft = new Payment({
-        paymentType: original.paymentType,
-        saleMode: (original as any).saleMode,
-        propertyType: original.propertyType,
-        propertyId: original.propertyId,
-        tenantId: original.tenantId,
-        agentId: original.agentId,
-        companyId: original.companyId,
-        paymentDate: original.paymentDate,
-        paymentMethod: original.paymentMethod,
-        amount: Number(original.amount || 0),
-        depositAmount: Number((original as any).depositAmount || 0),
-        referenceNumber: `CORR-${String(original.referenceNumber || original._id)}`,
-        rentalPeriodMonth: (original as any).rentalPeriodMonth,
-        rentalPeriodYear: (original as any).rentalPeriodYear,
-        advanceMonthsPaid: (original as any).advanceMonthsPaid,
-        advancePeriodStart: (original as any).advancePeriodStart,
-        advancePeriodEnd: (original as any).advancePeriodEnd,
-        notes: `Correction draft for ${String(original.referenceNumber || original._id)}`,
+        paymentType: lockedOriginal.paymentType,
+        saleMode: (lockedOriginal as any).saleMode,
+        propertyType: lockedOriginal.propertyType,
+        propertyId: lockedOriginal.propertyId,
+        tenantId: lockedOriginal.tenantId,
+        agentId: lockedOriginal.agentId,
+        companyId: lockedOriginal.companyId,
+        paymentDate: lockedOriginal.paymentDate,
+        paymentMethod: lockedOriginal.paymentMethod,
+        amount: Number(lockedOriginal.amount || 0),
+        depositAmount: Number((lockedOriginal as any).depositAmount || 0),
+        referenceNumber: `CORR-${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
+        rentalPeriodMonth: (lockedOriginal as any).rentalPeriodMonth,
+        rentalPeriodYear: (lockedOriginal as any).rentalPeriodYear,
+        advanceMonthsPaid: (lockedOriginal as any).advanceMonthsPaid,
+        advancePeriodStart: (lockedOriginal as any).advancePeriodStart,
+        advancePeriodEnd: (lockedOriginal as any).advancePeriodEnd,
+        notes: `Correction draft for ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
         processedBy: new mongoose.Types.ObjectId(req.user!.userId),
         commissionDetails: correctedCommissionDetails,
-        vatIncluded: (original as any).vatIncluded,
-        vatRate: (original as any).vatRate,
-        vatAmount: (original as any).vatAmount,
+        vatIncluded: (lockedOriginal as any).vatIncluded,
+        vatRate: (lockedOriginal as any).vatRate,
+        vatAmount: (lockedOriginal as any).vatAmount,
+        applyVatOnCommission: (lockedOriginal as any).applyVatOnCommission,
+        vatOnCommissionRate: (lockedOriginal as any).vatOnCommissionRate,
         status: 'pending',
         postingStatus: 'draft',
-        currency: original.currency,
-        leaseId: (original as any).leaseId,
-        manualPropertyAddress: (original as any).manualPropertyAddress,
-        manualTenantName: (original as any).manualTenantName,
-        buyerName: (original as any).buyerName,
-        sellerName: (original as any).sellerName,
+        currency: lockedOriginal.currency,
+        leaseId: (lockedOriginal as any).leaseId,
+        manualPropertyAddress: (lockedOriginal as any).manualPropertyAddress,
+        manualTenantName: (lockedOriginal as any).manualTenantName,
+        buyerName: (lockedOriginal as any).buyerName,
+        sellerName: (lockedOriginal as any).sellerName,
         isCorrectionEntry: true,
         isProvisional: false,
         isInSuspense: false,
         commissionFinalized: false,
-        developmentId: (original as any).developmentId,
-        developmentUnitId: (original as any).developmentUnitId,
-        saleId: (original as any).saleId,
+        developmentId: (lockedOriginal as any).developmentId,
+        developmentUnitId: (lockedOriginal as any).developmentUnitId,
+        saleId: (lockedOriginal as any).saleId,
       });
       await correctedDraft.save(dbSession ? { session: dbSession } : undefined);
 
-      original.status = 'reversed';
-      (original as any).postingStatus = 'reversed';
-      (original as any).reversedAt = new Date();
-      (original as any).reversedBy = new mongoose.Types.ObjectId(req.user!.userId);
-      (original as any).reversalReason = reason;
-      (original as any).reversalPaymentId = reversal._id;
-      (original as any).correctedPaymentId = correctedDraft._id;
-      await original.save(dbSession ? { session: dbSession } : undefined);
+      await Payment.updateOne(
+        { _id: lockedOriginal._id },
+        {
+          $set: {
+            status: 'reversed',
+            postingStatus: 'reversed',
+            reversedAt: new Date(),
+            reversedBy: new mongoose.Types.ObjectId(req.user!.userId),
+            reversalReason: reason,
+            reversalPaymentId: reversal._id,
+            correctedPaymentId: correctedDraft._id
+          }
+        },
+        dbSession ? { session: dbSession } : undefined
+      );
+
+      const updatedOriginalQuery = Payment.findById(lockedOriginal._id);
+      const updatedOriginal = dbSession ? await updatedOriginalQuery.session(dbSession) : await updatedOriginalQuery;
+      if (!updatedOriginal) {
+        throw new AppError('Payment not found after reversal update', 500);
+      }
 
       await logPaymentAudit({
-        paymentId: String(original._id),
-        companyId: String(original.companyId),
+        paymentId: String(updatedOriginal._id),
+        companyId: String(updatedOriginal.companyId),
         action: 'reverse',
         oldValues: before,
-        newValues: paymentAuditSnapshot(original),
+        newValues: paymentAuditSnapshot(updatedOriginal),
         reason,
         userId: req.user!.userId
       });
@@ -2337,11 +2431,11 @@ export const reversePayment = async (req: Request, res: Response) => {
         companyId: String(correctedDraft.companyId),
         action: 'create',
         newValues: paymentAuditSnapshot(correctedDraft),
-        reason: `Auto-created correction draft for ${String(original._id)}`,
+        reason: `Auto-created correction draft for ${String(updatedOriginal._id)}`,
         userId: req.user!.userId
       });
 
-      resultPayload = { original, reversal, correctedDraft };
+      resultPayload = { original: updatedOriginal, reversal, correctedDraft };
     };
 
     // Prefer ACID transaction on replica-set deployments.
@@ -2363,10 +2457,46 @@ export const reversePayment = async (req: Request, res: Response) => {
     // Domain propagation after DB commit (idempotent operations).
     const original = resultPayload?.original as any;
     const reversal = resultPayload?.reversal as any;
+    const propagationWarnings: string[] = [];
     if (original) {
-      await accountingIntegrationService.syncPaymentReversed(original, { createdBy: req.user.userId, reason });
-      await propertyAccountService.reverseIncomeFromPayment(String(original._id), { processedBy: req.user.userId, reason });
-      await agentAccountService.reverseCommissionForPayment(String(original._id), reason);
+      const companyRevenueShare = Number((original as any)?.commissionDetails?.agencyShare || 0);
+      const ownerIncomeAmount = Number((original as any)?.commissionDetails?.ownerAmount || 0);
+      let ownerUserId = String((original as any)?.ownerId || '');
+      if (!ownerUserId && (original.paymentType === 'rental' || original.paymentType === 'introduction')) {
+        try {
+          const property = await Property.findById((original as any).propertyId).select('ownerId').lean();
+          ownerUserId = String((property as any)?.ownerId || '');
+        } catch {}
+      }
+      const propagationResults = await Promise.allSettled([
+        accountingIntegrationService.syncPaymentReversed(original, { createdBy: req.user.userId, reason }),
+        propertyAccountService.reverseIncomeFromPayment(String(original._id), { processedBy: req.user.userId, reason }),
+        agentAccountService.reverseCommissionForPayment(String(original._id), reason),
+        companyRevenueShare > 0
+          ? Company.findByIdAndUpdate(
+              new mongoose.Types.ObjectId(String(original.companyId)),
+              { $inc: { revenue: -companyRevenueShare } }
+            )
+          : Promise.resolve(),
+        ownerUserId && ownerIncomeAmount > 0 && (original.paymentType === 'rental' || original.paymentType === 'introduction')
+          ? User.findByIdAndUpdate(
+              new mongoose.Types.ObjectId(ownerUserId),
+              { $inc: { balance: -ownerIncomeAmount } }
+            )
+          : Promise.resolve()
+      ]);
+      for (const [idx, result] of propagationResults.entries()) {
+        if (result.status === 'fulfilled') continue;
+        const subsystem =
+          idx === 0 ? 'accounting'
+            : idx === 1 ? 'property_account'
+              : idx === 2 ? 'agent_account'
+                : idx === 3 ? 'company_revenue'
+                  : 'owner_balance';
+        const message = result.reason?.message || `failed to sync ${subsystem}`;
+        propagationWarnings.push(`${subsystem}: ${message}`);
+        console.error(`Non-fatal reversal propagation failure [${subsystem}]`, result.reason);
+      }
       try {
         await emitEvent('payment.reversed', {
           eventId: `payment.reversed:${String(original._id)}`,
@@ -2393,10 +2523,13 @@ export const reversePayment = async (req: Request, res: Response) => {
     }
 
     return res.json({
-      message: 'Payment reversed. Draft correction created.',
+      message: propagationWarnings.length
+        ? 'Payment reversed. Draft correction created. Some ledgers are queued for retry.'
+        : 'Payment reversed. Draft correction created.',
       originalPayment: resultPayload?.original,
       reversalPayment: resultPayload?.reversal,
-      correctedPayment: resultPayload?.correctedDraft
+      correctedPayment: resultPayload?.correctedDraft,
+      warnings: propagationWarnings
     });
   } catch (error: any) {
     const status = Number(error?.statusCode || error?.status || 500);
@@ -3323,7 +3456,7 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
 
     await agentAccountService.syncCommissionForPayment(payment._id.toString());
 
-    if (payment.paymentType === 'rental' && (ownerId || (property as any).ownerId)) {
+    if ((payment.paymentType === 'rental' || payment.paymentType === 'introduction') && (ownerId || (property as any).ownerId)) {
       await User.findByIdAndUpdate(
         new mongoose.Types.ObjectId(ownerId || ((property as any).ownerId)),
         { $inc: { balance: finalCommission.ownerAmount } },

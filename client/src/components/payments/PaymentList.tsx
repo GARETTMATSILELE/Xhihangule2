@@ -118,6 +118,12 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
     return `${list[0]} – ${list[list.length - 1]} (${list.length})`;
   }, [getRentalMonthsList]);
 
+  const isPaymentReversible = useCallback((payment: Payment) => {
+    const postingStatus = String((payment as any).postingStatus || '').toLowerCase();
+    const status = String((payment as any).status || '').toLowerCase();
+    return postingStatus === 'posted' && status !== 'reversed';
+  }, []);
+
   type PropertyFilterOption = {
     id: string; // propertyId or manual:<address>
     idKind: 'propertyId' | 'manualAddress';
@@ -503,7 +509,7 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
               <EditIcon />
             </IconButton>
           )}
-          {onReverse && (String((payment as any).postingStatus || '') === 'posted' || String(payment.status || '') === 'completed') && String(payment.status || '') !== 'reversed' && (
+          {onReverse && isPaymentReversible(payment) && (
             <IconButton
               size="small"
               onClick={() => onReverse(payment)}
@@ -706,7 +712,12 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
             fullWidth
             size="small"
             label="Search (reference, notes, etc.)"
-            value={(filters as any).search || ''}
+            value={(() => {
+              const raw = (filters as any).search;
+              if (typeof raw !== 'string') return '';
+              const v = raw.trim();
+              return v.toLowerCase() === 'undefined' ? '' : v;
+            })()}
             onChange={(e) => {
               const val = e.target.value;
               if (val !== (filters as any).search) {
@@ -811,7 +822,7 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
                         <EditIcon />
                       </IconButton>
                     )}
-                    {onReverse && (String((payment as any).postingStatus || '') === 'posted' || String(payment.status || '') === 'completed') && String(payment.status || '') !== 'reversed' && (
+                    {onReverse && isPaymentReversible(payment) && (
                       <IconButton
                         size="small"
                         onClick={() => onReverse(payment)}

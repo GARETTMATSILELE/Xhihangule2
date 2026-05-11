@@ -112,6 +112,7 @@ export const getOwnerProperties = async (req: Request, res: Response) => {
         type: property.type,
         status: property.status,
         rent: property.rent,
+        commission: property.commission || 0,
         bedrooms: property.bedrooms,
         bathrooms: property.bathrooms,
         area: property.area,
@@ -209,6 +210,7 @@ export const getOwnerPropertyById = async (req: Request, res: Response, next: an
       type: property.type,
       status: property.status,
       rent: property.rent,
+      commission: property.commission || 0,
       bedrooms: property.bedrooms,
       bathrooms: property.bathrooms,
       area: property.area,
@@ -341,6 +343,7 @@ export const getOwnerMaintenanceRequests = async (req: Request, res: Response) =
           priority: request.priority || 'medium',
           status: request.status || 'pending',
           estimatedCost: request.estimatedCost || 0,
+          attachments: Array.isArray((request as any).attachments) ? (request as any).attachments : [],
           createdAt: request.createdAt
         };
       } catch (transformError) {
@@ -356,6 +359,7 @@ export const getOwnerMaintenanceRequests = async (req: Request, res: Response) =
           priority: 'medium',
           status: 'pending',
           estimatedCost: 0,
+          attachments: [],
           createdAt: request.createdAt
         };
       }
@@ -608,19 +612,6 @@ export const approveOwnerMaintenanceRequest = async (req: Request, res: Response
     // Update status to approved
     maintenanceRequest.status = 'approved';
     await maintenanceRequest.save();
-
-    // After a short delay, change to pending_completion
-    setTimeout(async () => {
-      try {
-        const updatedRequest = await MaintenanceRequest.findById(requestId);
-        if (updatedRequest && updatedRequest.status === 'approved') {
-          updatedRequest.status = 'pending_completion';
-          await updatedRequest.save();
-        }
-      } catch (error) {
-        console.error('Error updating status to pending_completion:', error);
-      }
-    }, 1000);
 
     const updatedRequest = await MaintenanceRequest.findById(requestId)
       .populate('propertyId', 'name address')

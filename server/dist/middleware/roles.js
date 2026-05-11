@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.canViewAgentAccounts = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
+exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.canViewAgentAccounts = exports.canViewAccountantDashboard = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
 const errorHandler_1 = require("./errorHandler");
 const isAgent = (req, res, next) => {
     if (!req.user) {
@@ -46,6 +46,18 @@ const isAccountant = (req, res, next) => {
     next();
 };
 exports.isAccountant = isAccountant;
+// Read-only accountant dashboard access for the same roles allowed into the dashboard shell.
+const canViewAccountantDashboard = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    const roles = req.user.roles || [req.user.role];
+    if (!roles.some(r => ['admin', 'accountant', 'principal', 'prea'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, Principal or PREA role required.', 403);
+    }
+    next();
+};
+exports.canViewAccountantDashboard = canViewAccountantDashboard;
 // Read-only access to agent accounts for Admin, Principal, PREA and Accountant
 const canViewAgentAccounts = (req, res, next) => {
     if (!req.user) {
@@ -80,26 +92,26 @@ const canManagePayments = (req, res, next) => {
     next();
 };
 exports.canManagePayments = canManagePayments;
-// Allow viewing sales payments for Admin/Accountant/Agent/Sales
+// Allow viewing sales payments for dashboard roles and sales staff.
 const canViewSalesPayments = (req, res, next) => {
     if (!req.user) {
         throw new errorHandler_1.AppError('Authentication required', 401);
     }
     const roles = req.user.roles || [req.user.role];
-    if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales'].includes(r))) {
-        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, Agent, or Sales role required to view sales payments.', 403);
+    if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales', 'principal', 'prea'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, Principal, PREA, Agent, or Sales role required to view sales payments.', 403);
     }
     next();
 };
 exports.canViewSalesPayments = canViewSalesPayments;
-// Allow viewing commission reports for Admins and Accountants
+// Allow viewing commission reports for accountant dashboard read-only roles.
 const canViewCommissions = (req, res, next) => {
     if (!req.user) {
         throw new errorHandler_1.AppError('Authentication required', 401);
     }
     const roles = req.user.roles || [req.user.role];
-    if (!roles.some(r => ['admin', 'accountant'].includes(r))) {
-        throw new errorHandler_1.AppError('Access denied. Admin or Accountant role required to view commissions.', 403);
+    if (!roles.some(r => ['admin', 'accountant', 'principal', 'prea'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin, Accountant, Principal or PREA role required to view commissions.', 403);
     }
     next();
 };

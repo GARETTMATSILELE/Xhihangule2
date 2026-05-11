@@ -30,9 +30,11 @@ export const getAgentProperties = async (req: Request, res: Response) => {
     });
 
     // Get only properties where the agent is the owner (ownerId matches the agent's userId)
-    const query = { 
+    const showDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
+    const query = {
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Only properties owned by this agent
+      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Only properties owned by this agent
+      isDeleted: showDeleted ? true : { $ne: true }
     };
     
     console.log('Agent properties query:', query);
@@ -596,7 +598,8 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
     const existing = await Property.findOne({
       _id: new mongoose.Types.ObjectId(propertyId),
       ownerId: new mongoose.Types.ObjectId(req.user.userId),
-      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      isDeleted: { $ne: true }
     });
 
     if (!existing) {
@@ -642,6 +645,100 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
   }
 };
 
+// Soft delete a property owned by the agent
+export const deleteAgentProperty = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('Authentication required', 401);
+    }
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    const propertyId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(propertyId)) {
+      return res.status(400).json({ message: 'Invalid property ID format.' });
+    }
+
+    const property = await Property.findOneAndUpdate(
+      {
+        _id: new mongoose.Types.ObjectId(propertyId),
+        ownerId: new mongoose.Types.ObjectId(req.user.userId),
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        isDeleted: { $ne: true }
+      },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: new mongoose.Types.ObjectId(req.user.userId),
+          updatedAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!property) {
+      return res.status(404).json({ message: 'Property not found or already deleted.' });
+    }
+
+    return res.json({ message: 'Property moved to deleted properties.', property });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error deleting agent property:', error);
+    return res.status(500).json({ message: 'Error deleting property' });
+  }
+};
+
+// Restore a soft-deleted property owned by the agent
+export const restoreAgentProperty = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('Authentication required', 401);
+    }
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    const propertyId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(propertyId)) {
+      return res.status(400).json({ message: 'Invalid property ID format.' });
+    }
+
+    const property = await Property.findOneAndUpdate(
+      {
+        _id: new mongoose.Types.ObjectId(propertyId),
+        ownerId: new mongoose.Types.ObjectId(req.user.userId),
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        isDeleted: true
+      },
+      {
+        $set: {
+          isDeleted: false,
+          deletedAt: null,
+          deletedBy: null,
+          updatedAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!property) {
+      return res.status(404).json({ message: 'Deleted property not found.' });
+    }
+
+    return res.json({ message: 'Property restored successfully.', property });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error restoring agent property:', error);
+    return res.status(500).json({ message: 'Error restoring property' });
+  }
+};
+
 // Create a new payment for the agent
 export const createAgentPayment = async (req: Request, res: Response) => {
   try {
@@ -680,7 +777,8 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
 
     // Validate required fields
-    if (!propertyId || !tenantId || !amount || !paymentDate || !paymentMethod) {
+    const amountMissing = amount === undefined || amount === null || Number.isNaN(Number(amount));
+    if (!propertyId || !tenantId || amountMissing || !paymentDate || !paymentMethod) {
       return res.status(400).json({
         status: 'error',
         message: 'Missing required fields: propertyId, tenantId, amount, paymentDate, paymentMethod',

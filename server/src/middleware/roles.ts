@@ -53,6 +53,20 @@ export const isAccountant = (req: Request, res: Response, next: NextFunction) =>
   next();
 };
 
+// Read-only accountant dashboard access for the same roles allowed into the dashboard shell.
+export const canViewAccountantDashboard = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some(r => ['admin', 'accountant', 'principal', 'prea'].includes(r))) {
+    throw new AppError('Access denied. Admin, Accountant, Principal or PREA role required.', 403);
+  }
+
+  next();
+};
+
 // Read-only access to agent accounts for Admin, Principal, PREA and Accountant
 export const canViewAgentAccounts = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) {
@@ -91,27 +105,27 @@ export const canManagePayments = (req: Request, res: Response, next: NextFunctio
   next();
 }; 
 
-// Allow viewing sales payments for Admin/Accountant/Agent/Sales
+// Allow viewing sales payments for dashboard roles and sales staff.
 export const canViewSalesPayments = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) {
     throw new AppError('Authentication required', 401);
   }
   const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
-  if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales'].includes(r))) {
-    throw new AppError('Access denied. Admin, Accountant, Agent, or Sales role required to view sales payments.', 403);
+  if (!roles.some(r => ['admin', 'accountant', 'agent', 'sales', 'principal', 'prea'].includes(r))) {
+    throw new AppError('Access denied. Admin, Accountant, Principal, PREA, Agent, or Sales role required to view sales payments.', 403);
   }
   next();
 };
 
-// Allow viewing commission reports for Admins and Accountants
+// Allow viewing commission reports for accountant dashboard read-only roles.
 export const canViewCommissions = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) {
     throw new AppError('Authentication required', 401);
   }
 
   const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
-  if (!roles.some(r => ['admin', 'accountant'].includes(r))) {
-    throw new AppError('Access denied. Admin or Accountant role required to view commissions.', 403);
+  if (!roles.some(r => ['admin', 'accountant', 'principal', 'prea'].includes(r))) {
+    throw new AppError('Access denied. Admin, Accountant, Principal or PREA role required to view commissions.', 403);
   }
 
   next();

@@ -351,7 +351,7 @@ class AccountingService {
                 return existingInFlight;
             }
             const loader = (() => __awaiter(this, void 0, void 0, function* () {
-                var _a, _b, _c, _d, _e;
+                var _a, _b, _c, _d, _e, _f;
                 const companyObjectId = toObjectId(companyId);
                 yield this.ensureCompanyBalance(companyId);
                 const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis] = yield Promise.all([
@@ -375,7 +375,13 @@ class AccountingService {
                     ]).option({ maxTimeMS: 15000 }),
                     Payment_1.Payment.aggregate([
                         { $match: { companyId: companyObjectId, status: 'completed' } },
-                        { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
+                        {
+                            $group: {
+                                _id: null,
+                                amount: { $sum: '$commissionDetails.agencyShare' },
+                                count: { $sum: 1 }
+                            }
+                        }
                     ]).option({ maxTimeMS: 10000 }),
                     dashboardKpiService_1.default.getCompanySnapshot(companyId)
                 ]);
@@ -383,7 +389,10 @@ class AccountingService {
                 const vatDueAmount = toMoney((balance === null || balance === void 0 ? void 0 : balance.vatPayable) || 0);
                 const ledgerRevenue = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalRevenue) || 0);
                 const paymentRevenue = toMoney(((_b = completedPaymentRevenue[0]) === null || _b === void 0 ? void 0 : _b.amount) || 0);
-                const totalRevenue = toMoney(Math.max(ledgerRevenue, paymentRevenue));
+                const paymentRevenueCount = Number(((_c = completedPaymentRevenue[0]) === null || _c === void 0 ? void 0 : _c.count) || 0);
+                // Use persisted payment commission totals as the primary source of truth for company revenue.
+                // Keep a ledger fallback for legacy companies where payment commissions were not historically captured.
+                const totalRevenue = toMoney(paymentRevenueCount > 0 ? paymentRevenue : ledgerRevenue);
                 const totalExpenses = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalExpenses) || 0);
                 const netProfit = toMoney(totalRevenue - totalExpenses);
                 // Self-heal stale dashboard snapshots so subsequent calls stay stable.
@@ -402,17 +411,17 @@ class AccountingService {
                     totalExpenses,
                     netProfit,
                     vatPayable: vatDueAmount,
-                    commissionLiability: toMoney((balance === null || balance === void 0 ? void 0 : balance.commissionLiability) || ((_c = unpaidCommissions[0]) === null || _c === void 0 ? void 0 : _c.amount) || 0),
+                    commissionLiability: toMoney((balance === null || balance === void 0 ? void 0 : balance.commissionLiability) || ((_d = unpaidCommissions[0]) === null || _d === void 0 ? void 0 : _d.amount) || 0),
                     cashBalance,
                     unreconciledBankTransactions: unreconciledBank,
                     vatDuePeriods: pendingVat,
                     pendingExpenses: pendingExpense,
-                    unpaidCommissions: Math.max(0, toMoney(((_d = unpaidCommissions[0]) === null || _d === void 0 ? void 0 : _d.amount) || 0)),
+                    unpaidCommissions: Math.max(0, toMoney(((_e = unpaidCommissions[0]) === null || _e === void 0 ? void 0 : _e.amount) || 0)),
                     expenses: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.expenses) || 0)),
                     invoices: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.invoices) || 0)),
                     outstandingRentals: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.outstandingRentals) || 0)),
                     outstandingLevies: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.outstandingLevies) || 0)),
-                    lastUpdated: ((_e = balance === null || balance === void 0 ? void 0 : balance.lastUpdated) === null || _e === void 0 ? void 0 : _e.toISOString()) || new Date().toISOString()
+                    lastUpdated: ((_f = balance === null || balance === void 0 ? void 0 : balance.lastUpdated) === null || _f === void 0 ? void 0 : _f.toISOString()) || new Date().toISOString()
                 };
                 this.dashboardSummaryCache.set(companyId, {
                     value: summary,
@@ -436,6 +445,11 @@ class AccountingService {
             finally {
                 this.dashboardSummaryInFlight.delete(companyId);
             }
+        });
+    }
+    getDashboardOutstanding(companyId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return dashboardKpiService_1.default.getCompanyOutstandingBreakdown(companyId);
         });
     }
     getTrend(companyId_1, accountType_1) {

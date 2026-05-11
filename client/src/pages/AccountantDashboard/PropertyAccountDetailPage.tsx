@@ -47,7 +47,7 @@ import {
   Print as PrintIcon
 } from '@mui/icons-material';
 import { usePropertyService } from '../../services/propertyService';
-import { propertyAccountService, PropertyAccount, Transaction, OwnerPayout, ExpenseData, PayoutData } from '../../services/propertyAccountService';
+import { propertyAccountService, PropertyAccount, Transaction, OwnerPayout, ExpenseData, OpeningBalanceData, PayoutData } from '../../services/propertyAccountService';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyOwnerService, PropertyOwner } from '../../services/propertyOwnerService';
 import paymentService from '../../services/paymentService';
@@ -94,6 +94,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   
   // Dialog states
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
+  const [openingBalanceDialogOpen, setOpeningBalanceDialogOpen] = useState(false);
   const [payoutDialogOpen, setPayoutDialogOpen] = useState(false);
   const [statementDialogOpen, setStatementDialogOpen] = useState(false);
   const [expenseData, setExpenseData] = useState<ExpenseData>({
@@ -101,6 +102,13 @@ const PropertyAccountDetailPage: React.FC = () => {
     date: new Date(),
     description: '',
     category: 'general',
+    notes: ''
+  });
+  const [openingBalanceData, setOpeningBalanceData] = useState<OpeningBalanceData>({
+    amount: 0,
+    direction: 'credit',
+    date: new Date(),
+    description: '',
     notes: ''
   });
   const [payoutData, setPayoutData] = useState<PayoutData>({
@@ -289,6 +297,36 @@ const PropertyAccountDetailPage: React.FC = () => {
       setSuccess('Expense added successfully!');
     } catch (err: any) {
       setSubmitError(err.message || 'Failed to add expense');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAddOpeningBalanceAdjustment = async () => {
+    if (!propertyId) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+    setSuccess(null);
+
+    try {
+      const updatedAccount = await propertyAccountService.addOpeningBalanceAdjustment(
+        propertyId,
+        openingBalanceData,
+        (account?.ledgerType as 'rental' | 'sale' | undefined)
+      );
+      setAccount(updatedAccount);
+      setOpeningBalanceDialogOpen(false);
+      setOpeningBalanceData({
+        amount: 0,
+        direction: 'credit',
+        date: new Date(),
+        description: '',
+        notes: ''
+      });
+      setSuccess('Opening balance adjustment added successfully!');
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to add opening balance adjustment');
     } finally {
       setSubmitting(false);
     }
@@ -663,7 +701,7 @@ const PropertyAccountDetailPage: React.FC = () => {
           </div>
           
           <div class="transactions-table">
-            <h3>Income & Expense Transactions</h3>
+            <h3>Income, Expense & Opening Balance Transactions</h3>
             <table>
               <thead>
                 <tr>
@@ -683,21 +721,25 @@ const PropertyAccountDetailPage: React.FC = () => {
                   .filter(transaction => transaction.type !== 'owner_payout')
                   .map(transaction => {
                     const isIncome = transaction.type === 'income';
-                    const isExpense = transaction.type === 'expense';
+                    const isOpeningCredit = transaction.type === 'opening_balance' && transaction.direction !== 'debit';
                     const totalPaid = Number(transaction.amount || 0);
-                    const amountDisplay = (isIncome ? '+' : '-') + propertyAccountService.formatCurrency(totalPaid);
+                    const isPositive = isIncome || isOpeningCredit;
+                    const amountDisplay = (isPositive ? '+' : '-') + propertyAccountService.formatCurrency(totalPaid);
                     const pid = String((transaction as any)?.paymentId || '');
                     const breakdown = pid ? commissionByPaymentId[pid] : undefined;
                     const commissionCell = breakdown ? propertyAccountService.formatCurrency(breakdown.totalCommission || 0) : (isIncome ? '-' : '');
                     const vatCell = breakdown ? propertyAccountService.formatCurrency(breakdown.vatOnCommission || 0) : (isIncome ? '-' : '');
                     const ownerCell = breakdown ? propertyAccountService.formatCurrency(breakdown.ownerAmount || 0) : (isIncome ? '-' : '');
+                    const typeLabel = transaction.type === 'opening_balance'
+                      ? `Opening Balance ${transaction.direction === 'debit' ? 'Debit' : 'Credit'}`
+                      : propertyAccountService.getTransactionTypeLabel(transaction.type);
                     
                     return `
-                      <tr class="${isIncome ? 'income-row' : 'expense-row'}">
+                      <tr class="${isPositive ? 'income-row' : 'expense-row'}">
                         <td>${new Date(transaction.date).toLocaleDateString()}</td>
-                        <td>${propertyAccountService.getTransactionTypeLabel(transaction.type)}</td>
+                        <td>${typeLabel}</td>
                         <td>${transaction.description}</td>
-                        <td style="color: ${isIncome ? '#4caf50' : '#f44336'};">
+                        <td style="color: ${isPositive ? '#4caf50' : '#f44336'};">
                           ${amountDisplay}
                         </td>
                         <td>${isIncome ? commissionCell : '-'}</td>
@@ -1008,6 +1050,14 @@ const PropertyAccountDetailPage: React.FC = () => {
           Add Expense
         </Button>
         <Button
+          variant="outlined"
+          startIcon={<AccountBalanceIcon />}
+          onClick={() => setOpeningBalanceDialogOpen(true)}
+          sx={{ mr: 2 }}
+        >
+          Add Opening Balance
+        </Button>
+        <Button
           variant="contained"
           color="secondary"
           startIcon={<PaymentIcon />}
@@ -1060,13 +1110,19 @@ const PropertyAccountDetailPage: React.FC = () => {
                   <TableCell>{new Date(transaction.date).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <Chip
-                      label={propertyAccountService.getTransactionTypeLabel(transaction.type)}
+                      label={
+                        transaction.type === 'opening_balance'
+                          ? `Opening Balance ${transaction.direction === 'debit' ? 'Debit' : 'Credit'}`
+                          : propertyAccountService.getTransactionTypeLabel(transaction.type)
+                      }
                       color={
-                        transaction.type === 'income'
+                        transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit')
                           ? 'success'
                           : (transaction.type === 'expense'
                               ? 'error'
-                              : (transaction.type === 'owner_payout' ? 'warning' : 'default'))
+                              : (transaction.type === 'opening_balance'
+                                  ? 'warning'
+                                  : (transaction.type === 'owner_payout' ? 'warning' : 'default')))
                       }
                       size="small"
                     />
@@ -1075,12 +1131,12 @@ const PropertyAccountDetailPage: React.FC = () => {
                   <TableCell>
                     <Typography
                       color={
-                        transaction.type === 'income'
+                        transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit')
                           ? 'success.main'
                           : (transaction.type === 'owner_payout' ? 'warning.main' : 'error.main')
                       }
                     >
-                      {transaction.type === 'income' ? '+' : '-'}
+                      {transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit') ? '+' : '-'}
                       {propertyAccountService.formatCurrency(transaction.amount)}
                     </Typography>
                   </TableCell>
@@ -1336,6 +1392,14 @@ const PropertyAccountDetailPage: React.FC = () => {
                     variant="outlined"
                     fullWidth
                     sx={{ mb: 1 }}
+                    onClick={() => setOpeningBalanceDialogOpen(true)}
+                  >
+                    Add Opening Balance
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    sx={{ mb: 1 }}
                     onClick={handleOpenPayoutDialog}
                     disabled={account.runningBalance <= 0}
                   >
@@ -1384,6 +1448,74 @@ const PropertyAccountDetailPage: React.FC = () => {
           </Grid>
         </Grid>
       </TabPanel>
+
+      {/* Add Opening Balance Dialog */}
+      <Dialog open={openingBalanceDialogOpen} onClose={() => setOpeningBalanceDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Opening Balance Adjustment</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Amount"
+                type="number"
+                value={openingBalanceData.amount}
+                onChange={(e) => setOpeningBalanceData({ ...openingBalanceData, amount: Number(e.target.value) })}
+                fullWidth
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Direction</InputLabel>
+                <Select
+                  value={openingBalanceData.direction}
+                  onChange={(e) => setOpeningBalanceData({ ...openingBalanceData, direction: e.target.value as 'credit' | 'debit' })}
+                  label="Direction"
+                >
+                  <MenuItem value="credit">Credit - increase balance</MenuItem>
+                  <MenuItem value="debit">Debit - decrease balance</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Effective Date"
+                type="date"
+                value={openingBalanceData.date.toISOString().split('T')[0]}
+                onChange={(e) => setOpeningBalanceData({ ...openingBalanceData, date: new Date(e.target.value) })}
+                fullWidth
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                label="Description"
+                value={openingBalanceData.description}
+                onChange={(e) => setOpeningBalanceData({ ...openingBalanceData, description: e.target.value })}
+                fullWidth
+                placeholder="Opening balance carried forward"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                label="Notes"
+                value={openingBalanceData.notes}
+                onChange={(e) => setOpeningBalanceData({ ...openingBalanceData, notes: e.target.value })}
+                fullWidth
+                multiline
+                rows={3}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpeningBalanceDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleAddOpeningBalanceAdjustment} variant="contained" disabled={submitting}>
+            {submitting ? <CircularProgress size={24} /> : 'Add Adjustment'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Add Expense Dialog */}
       <Dialog open={expenseDialogOpen} onClose={() => setExpenseDialogOpen(false)} maxWidth="sm" fullWidth>

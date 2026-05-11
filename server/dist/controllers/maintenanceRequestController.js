@@ -25,7 +25,7 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
         if (!userId) {
             throw new errorHandler_1.AppError('User authentication required', 401);
         }
-        const { propertyId, title, description, priority, estimatedCost } = req.body;
+        const { propertyId, title, description, priority, estimatedCost, attachments } = req.body;
         // Validate required fields
         if (!propertyId || !title || !description) {
             throw new errorHandler_1.AppError('Property ID, title, and description are required', 400);
@@ -47,6 +47,9 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
             description,
             priority: priority || 'medium',
             estimatedCost: estimatedCost || 0,
+            attachments: Array.isArray(attachments)
+                ? attachments.filter((file) => file && file.name && file.url && file.type)
+                : [],
             status: 'pending'
         });
         yield maintenanceRequest.save();
@@ -200,19 +203,6 @@ const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0
         // Update status to approved
         maintenanceRequest.status = 'approved';
         yield maintenanceRequest.save();
-        // After a short delay, change to pending_completion
-        setTimeout(() => __awaiter(void 0, void 0, void 0, function* () {
-            try {
-                const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id);
-                if (updatedRequest && updatedRequest.status === 'approved') {
-                    updatedRequest.status = 'pending_completion';
-                    yield updatedRequest.save();
-                }
-            }
-            catch (error) {
-                console.error('Error updating status to pending_completion:', error);
-            }
-        }), 1000);
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(id)
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName')

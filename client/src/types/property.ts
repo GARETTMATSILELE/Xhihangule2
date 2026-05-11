@@ -48,6 +48,9 @@ export interface Property {
   // New fields for levy/municipal fees
   levyOrMunicipalType?: 'levy' | 'municipal';
   levyOrMunicipalAmount?: number;
+  isDeleted?: boolean;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
 }
 
 export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'createdAt' | 'updatedAt' | 'status' | 'occupiedUnits'> {

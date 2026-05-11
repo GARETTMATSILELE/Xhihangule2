@@ -23,7 +23,7 @@ export const Properties: React.FC = () => {
   const { company: companyDetails } = useCompany();
   const location = useLocation();
   const { properties: contextProperties, loading: contextLoading, error: contextError, addProperty: contextAddProperty, updateProperty: contextUpdateProperty, deleteProperty: contextDeleteProperty } = useProperties();
-  const { getAdminDashboardProperties, addProperty: adminAddProperty, updateProperty: adminUpdateProperty, deleteProperty: adminDeleteProperty } = useAdminDashboardService();
+  const { getAdminDashboardProperties, addProperty: adminAddProperty, updateProperty: adminUpdateProperty, deleteProperty: adminDeleteProperty, restoreProperty: adminRestoreProperty } = useAdminDashboardService();
   
   // Check if we're on an admin route
   const isAdminRoute = location.pathname.includes('/admin-dashboard') || 
@@ -53,6 +53,7 @@ export const Properties: React.FC = () => {
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentTenants, setAgentTenants] = useState<Tenant[]>([]);
+  const [showDeletedProperties, setShowDeletedProperties] = useState(false);
   // Admin: users (for agent mapping via ownerId) and developments
   const [users, setUsers] = useState<any[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
@@ -106,7 +107,7 @@ export const Properties: React.FC = () => {
         try {
           setAdminLoading(true);
           setAdminError(null);
-          const fetchedProperties = await getAdminDashboardProperties();
+          const fetchedProperties = await getAdminDashboardProperties({ deleted: showDeletedProperties });
           setAdminProperties(fetchedProperties);
         } catch (err) {
           console.error('Error fetching admin properties:', err);
@@ -118,7 +119,7 @@ export const Properties: React.FC = () => {
       
       fetchAdminProperties();
     }
-  }, [isAdminRoute, getAdminDashboardProperties]);
+  }, [isAdminRoute, getAdminDashboardProperties, showDeletedProperties]);
 
   // Fetch agents and developments on admin route
   useEffect(() => {
@@ -157,7 +158,7 @@ export const Properties: React.FC = () => {
           setAgentError(null);
           console.log('Properties component - Fetching agent properties...');
           const [fetchedProperties, fetchedTenants] = await Promise.all([
-            agentService.getProperties(),
+            agentService.getProperties({ deleted: showDeletedProperties }),
             agentService.getTenants()
           ]);
           console.log('Properties component - Agent properties fetched:', fetchedProperties);
@@ -173,7 +174,7 @@ export const Properties: React.FC = () => {
       
       fetchAgentProperties();
     }
-  }, [isAgentRoute]);
+  }, [isAgentRoute, showDeletedProperties]);
 
   function getId(id: any): string {
     if (!id) return '';
@@ -343,11 +344,22 @@ export const Properties: React.FC = () => {
       if (isAdminRoute) {
         // Use admin dashboard service for admin routes
         console.log('Properties: Using admin dashboard service for property deletion');
-        await adminDeleteProperty(propertyId, user);
+        if (showDeletedProperties) {
+          await adminRestoreProperty(propertyId, user);
+        } else {
+          await adminDeleteProperty(propertyId, user);
+        }
         console.log('Properties: Property deleted via admin service');
         
         // Update local state
         setAdminProperties(prev => prev.filter(p => p._id !== propertyId));
+      } else if (isAgentRoute) {
+        if (showDeletedProperties) {
+          await agentService.restoreProperty(propertyId);
+        } else {
+          await agentService.deleteProperty(propertyId);
+        }
+        setAgentProperties(prev => prev.filter(p => p._id !== propertyId));
       } else {
         // Use context for non-admin routes
         await contextDeleteProperty(propertyId);
@@ -435,7 +447,7 @@ export const Properties: React.FC = () => {
           </Alert>
         )}
         <div className="properties-header">
-          <h1>Properties</h1>
+          <h1>{showDeletedProperties ? 'Deleted Properties' : 'Properties'}</h1>
           <div className="properties-actions">
             <div className="search-bar">
               <FontAwesomeIcon icon={faSearch} />
@@ -446,6 +458,17 @@ export const Properties: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            {(isAgentRoute || isAdminRoute) && (
+              <div className="listing-filter">
+                <select
+                  value={showDeletedProperties ? 'deleted' : 'active'}
+                  onChange={(e) => setShowDeletedProperties(e.target.value === 'deleted')}
+                >
+                  <option value="active">Active Properties</option>
+                  <option value="deleted">Deleted Properties</option>
+                </select>
+              </div>
+            )}
             {isAdminRoute && (
               <div className="agent-filter" style={{ minWidth: 220 }}>
                 <select
@@ -489,10 +512,11 @@ export const Properties: React.FC = () => {
             <button 
               className="add-button"
               onClick={() => setShowForm(true)}
-              disabled={!user?.companyId || !['admin', 'owner', 'agent'].includes(user?.role || '') || limitReached}
+              disabled={!user?.companyId || !['admin', 'owner', 'agent'].includes(user?.role || '') || limitReached || showDeletedProperties}
               title={!user?.companyId ? 'Company association required' : 
                      !['admin', 'owner', 'agent'].includes(user?.role || '') ? 'Admin, Owner, or Agent role required' : 
-                     (limitReached ? 'Property limit reached. Upgrade plan to add more.' : 'Add new property')}
+                     (showDeletedProperties ? 'Switch to active properties to add a new property.' :
+                     (limitReached ? 'Property limit reached. Upgrade plan to add more.' : 'Add new property'))}
             >
               <FontAwesomeIcon icon={faPlus} />
               Add Property
@@ -523,6 +547,7 @@ export const Properties: React.FC = () => {
           onAddProperty={() => setShowForm(true)}
           isAdminRoute={isAdminRoute}
           agentNamesById={agentNamesById}
+          isDeletedView={showDeletedProperties}
         />
 
         {isAdminRoute && (

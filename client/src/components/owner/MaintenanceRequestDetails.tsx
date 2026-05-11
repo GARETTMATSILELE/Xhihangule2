@@ -49,11 +49,12 @@ interface MaintenanceRequest {
     content: string;
     timestamp: string;
   }[];
-  attachment?: {
+  attachments?: {
+    name: string;
     url: string;
-    filename: string;
-    mimetype: string;
-  };
+    size: number;
+    type: string;
+  }[];
 }
 
 const MaintenanceRequestDetails: React.FC = () => {
@@ -236,18 +237,23 @@ const MaintenanceRequestDetails: React.FC = () => {
                 <Typography variant="body1">${request.estimatedCost}</Typography>
               </Grid>
               <Grid item xs={12}>
-                {request.attachment && (
+                {!!request.attachments?.length && (
                   <Box sx={{ my: 2 }}>
                     <Typography variant="subtitle1">Quotation Attachment</Typography>
-                    <Button
-                      variant="outlined"
-                      href={request.attachment.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      sx={{ mr: 2 }}
-                    >
-                      View/Download {request.attachment.filename}
-                    </Button>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {request.attachments.map((attachment, index) => (
+                        <Button
+                          key={`${attachment.url}-${index}`}
+                          variant="outlined"
+                          href={attachment.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{ mr: 2, justifyContent: 'flex-start' }}
+                        >
+                          View/Download {attachment.name || `Attachment ${index + 1}`}
+                        </Button>
+                      ))}
+                    </Box>
                   </Box>
                 )}
               </Grid>

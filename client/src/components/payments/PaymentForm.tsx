@@ -163,7 +163,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             propsList = await propertyService.searchPublicProperties({
               limit: 20,
               page: 1,
-              fields: 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
+              fields: 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,ownerId,propertyOwnerId,rentalType'
             });
           }
         } catch {}
@@ -213,7 +213,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     remoteSearchTimerRef.current = window.setTimeout(async () => {
       try {
         // Ask for lightweight projection so responses are tiny and fast
-        const fields = 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType';
+        const fields = 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,ownerId,propertyOwnerId,rentalType';
         const list = await propertyService.searchPublicProperties({
           q: propertySearchText || undefined,
           limit: 20,

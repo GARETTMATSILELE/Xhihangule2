@@ -105,6 +105,8 @@ export interface PaymentFormData {
   vatIncluded?: boolean;
   vatRate?: number;
   vatAmount?: number;
+  applyVatOnCommission?: boolean;
+  vatOnCommissionRate?: number;
 }
 
 export interface Payment {
@@ -162,6 +164,8 @@ export interface Payment {
   vatIncluded?: boolean;
   vatRate?: number;
   vatAmount?: number;
+  applyVatOnCommission?: boolean;
+  vatOnCommissionRate?: number;
   reversalOfPaymentId?: string;
   reversalPaymentId?: string;
   correctedPaymentId?: string;

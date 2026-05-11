@@ -61,6 +61,86 @@ export interface PREACommission {
   }[];
 }
 
+export interface CommissionAccountEntry {
+  entryId: string;
+  date: Date;
+  description: string;
+  propertyAddress?: string;
+  agentName?: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  sourceType: 'commission_received' | 'agent_payout';
+  reference?: string;
+}
+
+export interface CommissionAccountData {
+  totalCommissionReceived: number;
+  totalPayouts: number;
+  balance: number;
+  openingBalance?: number;
+  entries: CommissionAccountEntry[];
+}
+
+export interface PropertyCommissionReportEntry {
+  entryId: string;
+  accountKey: string;
+  date: Date;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  sourceType: 'opening' | 'payment';
+}
+
+export interface PropertyCommissionReport {
+  propertyId: string;
+  propertyTitle: string;
+  propertyAddress: string;
+  totalExpectedCommission: number;
+  totalReceivedCommission: number;
+  closingBalance: number;
+  entries: PropertyCommissionReportEntry[];
+}
+
+export interface CommissionReportsData {
+  properties: PropertyCommissionReport[];
+}
+
+export type TaxType = 'VAT' | 'VAT_ON_COMMISSION' | 'CGT';
+
+export interface TaxLedgerEntry {
+  entryId: string;
+  date: Date;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  sourceType: 'opening' | 'payout';
+  reference?: string;
+  payoutId?: string;
+  receiptFileName?: string;
+  receiptContentType?: string;
+  receiptUploadedAt?: string;
+}
+
+export interface TaxPropertyLedger {
+  propertyId: string;
+  trustAccountId: string;
+  propertyName: string;
+  propertyAddress: string;
+  totalDebit: number;
+  totalCredit: number;
+  closingBalance: number;
+  entries: TaxLedgerEntry[];
+}
+
+export interface TaxLedgersResponse {
+  VAT: TaxPropertyLedger[];
+  VAT_ON_COMMISSION: TaxPropertyLedger[];
+  CGT: TaxPropertyLedger[];
+}
+
 export const accountantService = {
   // Get agent commissions
   getAgentCommissions: async (): Promise<CommissionData> => {
@@ -105,6 +185,75 @@ export const accountantService = {
     return response.data;
   },
 
+  // Get company commission account ledger
+  getCommissionAccount: async (filters?: {
+    fromYear?: number;
+    fromMonth?: number; // 1-12
+    toYear?: number;
+    toMonth?: number; // 1-12
+  }): Promise<CommissionAccountData> => {
+    const params = new URLSearchParams();
+    if (filters?.fromYear !== undefined) params.append('fromYear', String(filters.fromYear));
+    if (filters?.fromMonth !== undefined) params.append('fromMonth', String(filters.fromMonth));
+    if (filters?.toYear !== undefined) params.append('toYear', String(filters.toYear));
+    if (filters?.toMonth !== undefined) params.append('toMonth', String(filters.toMonth));
+    const query = params.toString();
+    const response = await api.get(`/accountants/commission-account${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+
+  // Get per-property commission reports ledger
+  getCommissionReports: async (): Promise<CommissionReportsData> => {
+    const response = await api.get('/accountants/commission-reports');
+    return response.data;
+  },
+
+  getTaxLedgers: async (): Promise<TaxLedgersResponse> => {
+    const response = await api.get('/accountants/tax-ledgers');
+    return response.data;
+  },
+
+  createTaxPayout: async (payload: {
+    propertyId: string;
+    taxType: TaxType;
+    amount: number;
+    payoutDate?: string;
+    reference?: string;
+    notes?: string;
+  }) => {
+    const response = await api.post('/accountants/tax-payouts', payload);
+    return response.data;
+  },
+
+  uploadTaxPayoutReceipt: async (payoutId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('receipt', file);
+    const response = await api.post(`/accountants/tax-payouts/${encodeURIComponent(payoutId)}/receipt`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  openTaxPayoutReceipt: async (payoutId: string) => {
+    const response = await api.get(`/accountants/tax-payouts/${encodeURIComponent(payoutId)}/receipt`, {
+      responseType: 'blob'
+    } as any);
+    const blob = response?.data instanceof Blob ? response.data : new Blob([response?.data]);
+    const objectUrl = window.URL.createObjectURL(blob);
+    window.open(objectUrl, '_blank');
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+  },
+
+  openTaxPropertyReport: async (propertyId: string, taxType: TaxType) => {
+    const response = await api.get(`/accountants/tax-reports/${encodeURIComponent(propertyId)}?taxType=${encodeURIComponent(taxType)}`, {
+      responseType: 'blob'
+    } as any);
+    const blob = response?.data instanceof Blob ? response.data : new Blob([response?.data], { type: 'text/html' });
+    const objectUrl = window.URL.createObjectURL(blob);
+    window.open(objectUrl, '_blank');
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+  },
+
   // Get all commission data
   getAllCommissions: async (agencyFilters?: {
     year?: number;
@@ -112,17 +261,26 @@ export const accountantService = {
     week?: number;
     day?: number;
     filterType?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  }, commissionFilters?: {
+    fromYear?: number;
+    fromMonth?: number; // 1-12
+    toYear?: number;
+    toMonth?: number; // 1-12
   }) => {
-    const [agentData, agencyData, preaData] = await Promise.all([
+    const [agentData, agencyData, preaData, commissionAccountData, commissionReportsData] = await Promise.all([
       accountantService.getAgentCommissions(),
       accountantService.getAgencyCommission(agencyFilters),
-      accountantService.getPREACommission(agencyFilters)
+      accountantService.getPREACommission(agencyFilters),
+      accountantService.getCommissionAccount(commissionFilters),
+      accountantService.getCommissionReports()
     ]);
 
     return {
       agentCommissions: agentData,
       agencyCommission: agencyData,
-      preaCommission: preaData
+      preaCommission: preaData,
+      commissionAccount: commissionAccountData,
+      commissionReports: commissionReportsData
     };
   }
 };
