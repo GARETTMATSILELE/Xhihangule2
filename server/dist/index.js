@@ -531,10 +531,13 @@ if (runtimeFeatures.runHttpServer) {
 else {
     console.log('HTTP server disabled for this runtime role (worker mode).');
 }
-// Connect to MongoDB (non-fatal if it fails; readiness will report not ready)
-(0, database_1.connectDatabase)()
-    .then(() => __awaiter(void 0, void 0, void 0, function* () {
-    console.log('Connected to MongoDB');
+let databaseReconnectTimeout = null;
+let databaseServicesInitialized = false;
+let isShuttingDown = false;
+const initializeDatabaseBackedServices = () => __awaiter(void 0, void 0, void 0, function* () {
+    if (databaseServicesInitialized) {
+        return;
+    }
     try {
         if (runtimeFeatures.runTrustBackground) {
             // Trust listeners/reconciliation are background workloads and should run on worker/all roles.
@@ -652,19 +655,55 @@ else {
         else if (process.env.NODE_ENV === 'production') {
             console.log('Startup ledger maintenance skipped for this runtime role.');
         }
+        databaseServicesInitialized = true;
     }
     catch (error) {
-        console.error('Failed to initialize sync services:', error);
+        console.error('Failed to initialize database-backed services:', error);
     }
-}))
-    .catch((error) => {
-    console.error('Failed to connect to MongoDB:', error);
-    if (runtimeFeatures.runHttpServer) {
-        console.error('Server remains up for /health/live; /api/health/ready will be 503 until DB is healthy');
+});
+const scheduleDatabaseReconnect = (attempt) => {
+    var _a;
+    if (isShuttingDown) {
+        return;
     }
+    const initialDelayMs = Number(process.env.DB_RECONNECT_INITIAL_DELAY_MS || 10000);
+    const maxDelayMs = Number(process.env.DB_RECONNECT_MAX_DELAY_MS || 60000);
+    const delayMs = Math.min(initialDelayMs * Math.pow(2, Math.max(0, attempt - 1)), maxDelayMs);
+    console.warn(`MongoDB is not ready; retrying connection in ${Math.round(delayMs / 1000)}s`);
+    databaseReconnectTimeout = setTimeout(() => {
+        connectDatabaseWithRetry(attempt + 1).catch((error) => {
+            console.error('Unexpected MongoDB reconnect loop error:', error);
+            scheduleDatabaseReconnect(attempt + 1);
+        });
+    }, delayMs);
+    (_a = databaseReconnectTimeout.unref) === null || _a === void 0 ? void 0 : _a.call(databaseReconnectTimeout);
+};
+const connectDatabaseWithRetry = (...args_1) => __awaiter(void 0, [...args_1], void 0, function* (attempt = 1) {
+    try {
+        yield (0, database_1.connectDatabase)();
+        console.log('Connected to MongoDB');
+        yield initializeDatabaseBackedServices();
+    }
+    catch (error) {
+        console.error('Failed to connect to MongoDB:', error);
+        if (runtimeFeatures.runHttpServer) {
+            console.error('Server remains up for /health/live; /api/health/ready will be 503 until DB is healthy');
+        }
+        scheduleDatabaseReconnect(attempt);
+    }
+});
+// Connect to MongoDB in the background. If Cosmos is slow or temporarily unavailable,
+// keep retrying while liveness remains available and DB-backed API routes return 503.
+connectDatabaseWithRetry().catch((error) => {
+    console.error('Unexpected MongoDB startup loop error:', error);
+    scheduleDatabaseReconnect(1);
 });
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
+    isShuttingDown = true;
+    if (databaseReconnectTimeout) {
+        clearTimeout(databaseReconnectTimeout);
+    }
     console.log('SIGTERM received. Closing HTTP server...');
     httpServer.close(() => __awaiter(void 0, void 0, void 0, function* () {
         console.log('HTTP server closed');

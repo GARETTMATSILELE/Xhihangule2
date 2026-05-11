@@ -515,148 +515,192 @@ if (runtimeFeatures.runHttpServer) {
   console.log('HTTP server disabled for this runtime role (worker mode).');
 }
 
-// Connect to MongoDB (non-fatal if it fails; readiness will report not ready)
-connectDatabase()
-  .then(async () => {
-    console.log('Connected to MongoDB');
+let databaseReconnectTimeout: NodeJS.Timeout | null = null;
+let databaseServicesInitialized = false;
+let isShuttingDown = false;
 
+const initializeDatabaseBackedServices = async () => {
+  if (databaseServicesInitialized) {
+    return;
+  }
+
+  try {
+    if (runtimeFeatures.runTrustBackground) {
+      // Trust listeners/reconciliation are background workloads and should run on worker/all roles.
+      startTrustEventListener();
+      startTrustReconciliationJob();
+    } else {
+      console.log('Trust background services disabled for this runtime role.');
+    }
+
+    // Ensure a hard-coded System Admin user exists (requested)
+    // Creates or updates the user with email/password and system_admin role.
+    // Runs in all environments; idempotent.
     try {
-      if (runtimeFeatures.runTrustBackground) {
-        // Trust listeners/reconciliation are background workloads and should run on worker/all roles.
-        startTrustEventListener();
-        startTrustReconciliationJob();
+      const targetEmail = 'garet.matsi@gmail.com';
+      const targetPassword = 'Moreen@1981';
+      const firstName = 'System';
+      const lastName = 'Admin';
+
+      let user = await User.findOne({ email: targetEmail }).maxTimeMS(5000);
+      if (!user) {
+        user = new User({
+          email: targetEmail,
+          password: targetPassword,
+          firstName,
+          lastName,
+          role: 'admin',
+          roles: ['admin', 'system_admin'],
+          isActive: true
+        } as any);
+        await user.save();
+        console.log('Hardcoded system admin user created:', { email: targetEmail, id: user._id });
       } else {
-        console.log('Trust background services disabled for this runtime role.');
-      }
-
-      // Ensure a hard-coded System Admin user exists (requested)
-      // Creates or updates the user with email/password and system_admin role.
-      // Runs in all environments; idempotent.
-      try {
-        const targetEmail = 'garet.matsi@gmail.com';
-        const targetPassword = 'Moreen@1981';
-        const firstName = 'System';
-        const lastName = 'Admin';
-
-        let user = await User.findOne({ email: targetEmail }).maxTimeMS(5000);
-        if (!user) {
-          user = new User({
-            email: targetEmail,
-            password: targetPassword,
-            firstName,
-            lastName,
-            role: 'admin',
-            roles: ['admin', 'system_admin'],
-            isActive: true
-          } as any);
-          await user.save();
-          console.log('Hardcoded system admin user created:', { email: targetEmail, id: user._id });
-        } else {
-          let changed = false;
-          // Ensure primary role is admin for compatibility
-          if (user.role !== 'admin') {
-            (user as any).role = 'admin';
-            changed = true;
-          }
-          // Ensure roles include system_admin
-          const rolesArr: string[] = Array.isArray((user as any).roles) ? ((user as any).roles as string[]) : [];
-          if (!rolesArr.includes('system_admin')) {
-            (user as any).roles = Array.from(new Set([...(rolesArr || []), 'admin', 'system_admin'])) as any;
-            changed = true;
-          }
-          // Ensure account is active
-          if (!user.isActive) {
-            user.isActive = true;
-            changed = true;
-          }
-          // If password differs, reset to requested one
-          try {
-            const matches = await user.comparePassword(targetPassword);
-            if (!matches) {
-              (user as any).password = targetPassword;
-              changed = true;
-            }
-          } catch {
+        let changed = false;
+        // Ensure primary role is admin for compatibility
+        if (user.role !== 'admin') {
+          (user as any).role = 'admin';
+          changed = true;
+        }
+        // Ensure roles include system_admin
+        const rolesArr: string[] = Array.isArray((user as any).roles) ? ((user as any).roles as string[]) : [];
+        if (!rolesArr.includes('system_admin')) {
+          (user as any).roles = Array.from(new Set([...(rolesArr || []), 'admin', 'system_admin'])) as any;
+          changed = true;
+        }
+        // Ensure account is active
+        if (!user.isActive) {
+          user.isActive = true;
+          changed = true;
+        }
+        // If password differs, reset to requested one
+        try {
+          const matches = await user.comparePassword(targetPassword);
+          if (!matches) {
             (user as any).password = targetPassword;
             changed = true;
           }
-          if (changed) {
-            await user.save();
-            console.log('Hardcoded system admin user updated:', { email: targetEmail, id: user._id });
-          } else {
-            console.log('Hardcoded system admin user already up to date:', { email: targetEmail, id: user._id });
-          }
+        } catch {
+          (user as any).password = targetPassword;
+          changed = true;
         }
-      } catch (seedErr) {
-        console.error('Failed to ensure hardcoded system admin user:', seedErr);
+        if (changed) {
+          await user.save();
+          console.log('Hardcoded system admin user updated:', { email: targetEmail, id: user._id });
+        } else {
+          console.log('Hardcoded system admin user already up to date:', { email: targetEmail, id: user._id });
+        }
       }
+    } catch (seedErr) {
+      console.error('Failed to ensure hardcoded system admin user:', seedErr);
+    }
 
-      // Removed legacy bootstrap block referencing Xhihangule
+    // Removed legacy bootstrap block referencing Xhihangule
 
-      // Ensure critical property account indexes are in place at startup
-      try {
-        await initializePropertyAccountIndexes();
-        console.log('Property account indexes ensured');
-      } catch (idxErr) {
-        console.warn('Failed to ensure property account indexes:', idxErr);
-      }
+    // Ensure critical property account indexes are in place at startup
+    try {
+      await initializePropertyAccountIndexes();
+      console.log('Property account indexes ensured');
+    } catch (idxErr) {
+      console.warn('Failed to ensure property account indexes:', idxErr);
+    }
 
-      if (runtimeFeatures.runSyncSchedules) {
-        await initializeSyncServices();
-        console.log('Database synchronization services initialized');
-      } else {
-        console.log('Scheduled synchronization services disabled for this runtime role.');
-      }
+    if (runtimeFeatures.runSyncSchedules) {
+      await initializeSyncServices();
+      console.log('Database synchronization services initialized');
+    } else {
+      console.log('Scheduled synchronization services disabled for this runtime role.');
+    }
 
-      // One-time ledger maintenance at boot (production only)
-      if (process.env.NODE_ENV === 'production' && runtimeFeatures.runStartupMaintenance) {
-        (async () => {
-          const maintenanceKey = 'ledger_maintenance_v1';
+    // One-time ledger maintenance at boot (production only)
+    if (process.env.NODE_ENV === 'production' && runtimeFeatures.runStartupMaintenance) {
+      (async () => {
+        const maintenanceKey = 'ledger_maintenance_v1';
+        try {
+          // Single-key lock record to avoid duplicate-key upsert races.
+          const record = await SystemSetting.findOneAndUpdate(
+            { key: maintenanceKey },
+            { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } },
+            { upsert: true, new: true }
+          ).lean();
+          if (record && record.completedAt) {
+            console.log('Startup ledger maintenance already completed previously - skipping.');
+            return;
+          }
+          console.log('Starting startup ledger maintenance (one-time) across all companies...');
+          const result = await runPropertyLedgerMaintenance({});
+          await SystemSetting.updateOne(
+            { key: maintenanceKey },
+            { $set: { completedAt: new Date(), value: result, lastError: undefined } }
+          );
+          console.log('Startup ledger maintenance completed.');
+        } catch (e: any) {
+          console.error('Startup ledger maintenance failed:', e?.message || e);
           try {
-            // Single-key lock record to avoid duplicate-key upsert races.
-            const record = await SystemSetting.findOneAndUpdate(
-              { key: maintenanceKey },
-              { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } },
-              { upsert: true, new: true }
-            ).lean();
-            if (record && record.completedAt) {
-              console.log('Startup ledger maintenance already completed previously - skipping.');
-              return;
-            }
-            console.log('Starting startup ledger maintenance (one-time) across all companies...');
-            const result = await runPropertyLedgerMaintenance({});
             await SystemSetting.updateOne(
               { key: maintenanceKey },
-              { $set: { completedAt: new Date(), value: result, lastError: undefined } }
+              { $set: { lastError: e?.message || String(e) } },
+              { upsert: true }
             );
-            console.log('Startup ledger maintenance completed.');
-          } catch (e: any) {
-            console.error('Startup ledger maintenance failed:', e?.message || e);
-            try {
-              await SystemSetting.updateOne(
-                { key: maintenanceKey },
-                { $set: { lastError: e?.message || String(e) } },
-                { upsert: true }
-              );
-            } catch {}
-          }
-        })().catch(() => {});
-      } else if (process.env.NODE_ENV === 'production') {
-        console.log('Startup ledger maintenance skipped for this runtime role.');
-      }
-    } catch (error) {
-      console.error('Failed to initialize sync services:', error);
+          } catch {}
+        }
+      })().catch(() => {});
+    } else if (process.env.NODE_ENV === 'production') {
+      console.log('Startup ledger maintenance skipped for this runtime role.');
     }
-  })
-  .catch((error) => {
+
+    databaseServicesInitialized = true;
+  } catch (error) {
+    console.error('Failed to initialize database-backed services:', error);
+  }
+};
+
+const scheduleDatabaseReconnect = (attempt: number) => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  const initialDelayMs = Number(process.env.DB_RECONNECT_INITIAL_DELAY_MS || 10000);
+  const maxDelayMs = Number(process.env.DB_RECONNECT_MAX_DELAY_MS || 60000);
+  const delayMs = Math.min(initialDelayMs * Math.pow(2, Math.max(0, attempt - 1)), maxDelayMs);
+
+  console.warn(`MongoDB is not ready; retrying connection in ${Math.round(delayMs / 1000)}s`);
+  databaseReconnectTimeout = setTimeout(() => {
+    connectDatabaseWithRetry(attempt + 1).catch((error) => {
+      console.error('Unexpected MongoDB reconnect loop error:', error);
+      scheduleDatabaseReconnect(attempt + 1);
+    });
+  }, delayMs);
+  databaseReconnectTimeout.unref?.();
+};
+
+const connectDatabaseWithRetry = async (attempt = 1): Promise<void> => {
+  try {
+    await connectDatabase();
+    console.log('Connected to MongoDB');
+    await initializeDatabaseBackedServices();
+  } catch (error) {
     console.error('Failed to connect to MongoDB:', error);
     if (runtimeFeatures.runHttpServer) {
       console.error('Server remains up for /health/live; /api/health/ready will be 503 until DB is healthy');
     }
-  });
+    scheduleDatabaseReconnect(attempt);
+  }
+};
+
+// Connect to MongoDB in the background. If Cosmos is slow or temporarily unavailable,
+// keep retrying while liveness remains available and DB-backed API routes return 503.
+connectDatabaseWithRetry().catch((error) => {
+  console.error('Unexpected MongoDB startup loop error:', error);
+  scheduleDatabaseReconnect(1);
+});
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
+  isShuttingDown = true;
+  if (databaseReconnectTimeout) {
+    clearTimeout(databaseReconnectTimeout);
+  }
   console.log('SIGTERM received. Closing HTTP server...');
   httpServer.close(async () => {
     console.log('HTTP server closed');
