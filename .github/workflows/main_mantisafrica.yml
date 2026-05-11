@@ -1,0 +1,63 @@
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: Build and deploy container app to Azure Web App - mantisafrica
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to container registry
+        uses: docker/login-action@v2
+        with:
+          registry: xhihangule-awh3hparcbdpcnbw.azurecr.io/
+          username: ${{ secrets.AZUREAPPSERVICE_CONTAINERUSERNAME_A618E247BBAB4C4CABF022F1F0CB6CDE }}
+          password: ${{ secrets.AZUREAPPSERVICE_CONTAINERPASSWORD_2563FFD5C7AD414FB5062E0DDF3B5C24 }}
+
+      - name: Build and push container image to registry
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: xhihangule-awh3hparcbdpcnbw.azurecr.io/${{ secrets.AZUREAPPSERVICE_CONTAINERUSERNAME_A618E247BBAB4C4CABF022F1F0CB6CDE }}/xhihangule2:${{ github.sha }}
+          file: ./Dockerfile
+
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
+
+    needs: build
+    
+    steps:
+      
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_3406B9888F3E43CAB5FD7913957D77C2 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_38F2A2CBD7E94230B1E00E47765D0949 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B339E8E2FD0F4443A087746609249502 }}
+
+      - name: Deploy to Azure Web App
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: 'mantisafrica'
+          slot-name: 'Production'
+          images: 'xhihangule-awh3hparcbdpcnbw.azurecr.io/${{ secrets.AZUREAPPSERVICE_CONTAINERUSERNAME_A618E247BBAB4C4CABF022F1F0CB6CDE }}/xhihangule2:${{ github.sha }}'
+          
