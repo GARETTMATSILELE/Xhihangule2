@@ -12,11 +12,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOwnerNetIncome = exports.addOwnerMaintenanceMessage = exports.rejectOwnerMaintenanceRequest = exports.approveOwnerMaintenanceRequest = exports.updateOwnerMaintenanceRequest = exports.getOwnerMaintenanceRequestById = exports.getOwnerMaintenanceRequests = exports.getOwnerPropertyById = exports.getOwnerProperties = void 0;
+exports.getOwnerMaintenanceSummaryReport = exports.getOwnerNetIncome = exports.addOwnerMaintenanceMessage = exports.rejectOwnerMaintenanceRequest = exports.approveOwnerMaintenanceRequest = exports.updateOwnerMaintenanceRequest = exports.getOwnerMaintenanceRequestById = exports.getOwnerMaintenanceRequests = exports.getOwnerPropertyById = exports.getOwnerProperties = void 0;
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const Property_1 = require("../models/Property");
 const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
 const User_1 = require("../models/User");
+const maintenanceStatus_1 = require("../utils/maintenanceStatus");
+const maintenanceManagementService_1 = require("../services/maintenanceManagementService");
+const maintenanceManagementService_2 = require("../services/maintenanceManagementService");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 // Helper function to get property owner context (from either PropertyOwner or User collection)
@@ -551,12 +554,23 @@ const approveOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, v
             throw new errorHandler_1.AppError('Maintenance request not found or access denied', 404);
         }
         // Check if request is in the correct status for approval
-        if (maintenanceRequest.status !== 'pending_approval') {
-            throw new errorHandler_1.AppError('Only requests with pending approval status can be approved', 400);
+        const approvalPending = maintenanceStatus_1.APPROVAL_STATUSES.includes(maintenanceRequest.status) ||
+            (0, maintenanceStatus_1.normalizeMaintenanceStatus)(maintenanceRequest.status) === 'awaiting_approval' ||
+            maintenanceRequest.status === 'pending';
+        if (!approvalPending) {
+            throw new errorHandler_1.AppError('Only requests awaiting approval can be approved', 400);
         }
         // Update status to approved
         maintenanceRequest.status = 'approved';
+        maintenanceRequest.lastActivityAt = new Date();
         yield maintenanceRequest.save();
+        yield (0, maintenanceManagementService_1.logMaintenanceActivity)({
+            requestId: maintenanceRequest._id,
+            companyId: maintenanceRequest.companyId,
+            action: 'Approved By Owner',
+            description: 'Maintenance request approved by property owner',
+            createdBy: ownerId,
+        });
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId)
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName email')
@@ -623,12 +637,14 @@ const rejectOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found or access denied', 404);
         }
-        // Only allow rejecting if pending approval or pending
-        if (!['pending_approval', 'pending'].includes(maintenanceRequest.status)) {
-            throw new errorHandler_1.AppError('Only requests pending approval can be rejected', 400);
+        // Only allow rejecting if pending approval or draft
+        const rejectable = ['pending_approval', 'pending', 'awaiting_approval', 'draft'].includes(maintenanceRequest.status);
+        if (!rejectable) {
+            throw new errorHandler_1.AppError('Only requests awaiting approval can be rejected', 400);
         }
-        // Update status to cancelled and add a message for audit trail
-        maintenanceRequest.status = 'cancelled';
+        // Update status to rejected and add a message for audit trail
+        maintenanceRequest.status = 'rejected';
+        maintenanceRequest.lastActivityAt = new Date();
         maintenanceRequest.messages = maintenanceRequest.messages || [];
         maintenanceRequest.messages.push({
             sender: propertyOwnerContext._id,
@@ -636,6 +652,13 @@ const rejectOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
             timestamp: new Date()
         });
         yield maintenanceRequest.save();
+        yield (0, maintenanceManagementService_1.logMaintenanceActivity)({
+            requestId: maintenanceRequest._id,
+            companyId: maintenanceRequest.companyId,
+            action: 'Rejected',
+            description: reason || 'Owner rejected the maintenance request',
+            createdBy: ownerId,
+        });
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findById(requestId)
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName email')
@@ -806,3 +829,39 @@ const getOwnerNetIncome = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getOwnerNetIncome = getOwnerNetIncome;
+const getOwnerMaintenanceSummaryReport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        let ownerId;
+        let companyId;
+        if ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) {
+            ownerId = req.user.userId;
+            companyId = req.user.companyId;
+        }
+        else {
+            ownerId = req.query.userId;
+            companyId = req.query.companyId;
+            if (!ownerId) {
+                return res.status(400).json({ message: 'userId is required as query parameter' });
+            }
+        }
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        let propertyIds = [];
+        if ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) {
+            propertyIds = propertyOwnerContext.properties.map((id) => String(id));
+        }
+        else {
+            const owned = yield Property_1.Property.find(Object.assign({ ownerId }, (companyId ? { companyId } : {}))).select('_id').lean();
+            propertyIds = owned.map((p) => String(p._id));
+        }
+        const summary = yield (0, maintenanceManagementService_2.getOwnerMaintenanceSummary)(propertyIds, companyId || ((_c = propertyOwnerContext.companyId) === null || _c === void 0 ? void 0 : _c.toString()));
+        res.json(summary);
+    }
+    catch (error) {
+        if (error instanceof errorHandler_1.AppError)
+            throw error;
+        console.error('Error fetching owner maintenance summary:', error);
+        throw new errorHandler_1.AppError('Error fetching maintenance summary', 500);
+    }
+});
+exports.getOwnerMaintenanceSummaryReport = getOwnerMaintenanceSummaryReport;

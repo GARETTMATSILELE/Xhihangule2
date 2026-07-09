@@ -37,7 +37,10 @@ exports.BillingPayment = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const billingPaymentSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true },
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false, index: true },
     subscriptionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Subscription' },
+    onboardingSessionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'OnboardingSession', required: false, index: true },
+    paymentSessionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'PaymentSession', required: false, index: true },
     plan: { type: String, enum: ['INDIVIDUAL', 'SME', 'ENTERPRISE'], required: true },
     cycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     amount: { type: Number, required: true },
@@ -46,8 +49,15 @@ const billingPaymentSchema = new mongoose_1.Schema({
     provider: { type: String, enum: ['paynow', 'cash'], required: true },
     providerRef: { type: String },
     pollUrl: { type: String },
+    idempotencyKey: { type: String, index: true },
+    invoiceRef: { type: String, index: true },
     status: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending' },
+    paidAt: { type: Date },
+    failedAt: { type: Date },
+    reconciledAt: { type: Date },
     rawResponse: { type: mongoose_1.Schema.Types.Mixed }
 }, { timestamps: true });
+billingPaymentSchema.index({ provider: 1, providerRef: 1 }, { sparse: true });
+billingPaymentSchema.index({ companyId: 1, status: 1, createdAt: -1 });
 exports.BillingPayment = mongoose_1.default.model('BillingPayment', billingPaymentSchema);
 exports.default = exports.BillingPayment;

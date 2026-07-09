@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Grid,
@@ -16,29 +16,51 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Stack,
+  Avatar,
+  IconButton,
+  Tooltip,
+  Badge,
+  Menu,
+  ListItemIcon,
 } from '@mui/material';
 import {
-  TrendingUp as TrendingUpIcon,
   Business as BusinessIcon,
   People as PeopleIcon,
   Description as DescriptionIcon,
   Payment as PaymentIcon,
+  Add as AddIcon,
+  UploadFile as UploadFileIcon,
+  Build as BuildIcon,
+  NotificationsNone as NotificationsNoneIcon,
+  CalendarToday as CalendarTodayIcon,
+  LightbulbOutlined as LightbulbIcon,
+  ArrowForward as ArrowForwardIcon,
+  HomeWork as HomeWorkIcon,
+  PersonAdd as PersonAddIcon,
+  Person as PersonIcon,
+  SwapHoriz as SwapHorizIcon,
+  Settings as SettingsIcon,
+  Logout as LogoutIcon,
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
   ReceiptLong as ReceiptLongIcon,
 } from '@mui/icons-material';
 import { AgentSidebar } from '../components/Layout/AgentSidebar';
-import { Header } from '../components/Layout/Header';
+import { useNotification } from '../components/Layout/Header';
 import { Properties } from './Properties/Properties';
 import { Tenants } from './Tenants/Tenants';
 import AgentLeasesPage from './agent/AgentLeasesPage';
 import AgentPropertyOwnersPage from './agent/AgentPropertyOwnersPage';
+import OwnerPortfolioHub from './agent/OwnerPortfolioHub';
 import PaymentsPage from './PaymentsPage';
 import api from '../api/axios';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { Files } from './Files/Files';
 import { Maintenance } from './Maintenance/Maintenance';
-import { Inspections } from './Inspections/Inspections';
-import { Settings } from './Settings/Settings';
+import { MaintenanceVendorsPage } from './Maintenance/MaintenanceVendorsPage';
+import { InspectionComplianceCenter as Inspections } from './Inspections/InspectionComplianceCenter';
 import { AgentSettings } from './Settings/AgentSettings';
 // Removed MaintenancePageWrapper to avoid double sidebar/layout
 import LevyPaymentsPage from './agent/LevyPaymentsPage';
@@ -47,40 +69,79 @@ import paymentService from '../services/paymentService';
 import AgentLeadsPage from './agent/AgentLeadsPage';
 import PropertyDetailsPage from './agent/PropertyDetailsPage';
 import { User } from '../types/auth';
+import { RentalWorkflowCenter, WorkflowStatusChip } from '../components/rentalWorkflow';
+import { buildPortfolioWorkflowSummary } from '../utils/rentalWorkflow';
+import notificationService from '../services/notificationService';
+import { getDashboardPath } from '../utils/registrationUtils';
 
-const StatCard = ({ title, value, icon, color, loading, onClick }: { title: string; value: string; icon: React.ReactNode; color: string; loading?: boolean; onClick?: () => void }) => (
-  <Card onClick={onClick} sx={{ cursor: onClick ? 'pointer' : 'default' }}>
-    <CardContent>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+const softCardSx = {
+  borderRadius: 5,
+  border: '1px solid rgba(15, 23, 42, 0.07)',
+  boxShadow: '0 18px 45px rgba(15, 23, 42, 0.06)',
+  background: 'rgba(255, 255, 255, 0.92)',
+  transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease',
+  '&:hover': {
+    transform: 'translateY(-3px)',
+    boxShadow: '0 24px 60px rgba(15, 23, 42, 0.09)',
+    borderColor: 'rgba(59, 130, 246, 0.20)',
+  },
+};
+
+const StatCard = ({
+  title,
+  value,
+  icon,
+  color,
+  loading,
+  onClick,
+  subtitle,
+  progress = 70,
+}: {
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  color: string;
+  loading?: boolean;
+  onClick?: () => void;
+  subtitle?: string;
+  progress?: number;
+}) => (
+  <Card onClick={onClick} sx={{ ...softCardSx, cursor: onClick ? 'pointer' : 'default', height: '100%' }}>
+    <CardContent sx={{ p: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 3 }}>
+        <Box>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, mb: 1 }}>
+            {title}
+          </Typography>
+          {loading ? (
+            <CircularProgress size={24} />
+          ) : (
+            <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: '-0.04em', color: '#101828' }}>
+              {value}
+            </Typography>
+          )}
+        </Box>
         <Box
           sx={{
             backgroundColor: `${color}15`,
-            borderRadius: 2,
-            p: 1,
-            mr: 2,
+            borderRadius: 3,
+            p: 1.25,
             color: color,
           }}
         >
           {icon}
         </Box>
-        <Typography variant="h6" color="text.secondary">
-          {title}
-        </Typography>
       </Box>
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
-          <CircularProgress size={24} />
-        </Box>
-      ) : (
-        <Typography variant="h4" sx={{ mb: 1, fontWeight: 600 }}>
-          {value}
+      {subtitle && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {subtitle}
         </Typography>
       )}
       <LinearProgress
         variant="determinate"
-        value={70}
+        value={progress}
         sx={{
-          height: 6,
+          height: 5,
           borderRadius: 3,
           backgroundColor: `${color}15`,
           '& .MuiLinearProgress-bar': {
@@ -142,6 +203,11 @@ function getOutstandingRangeForLease(
 
 const AgentDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const shouldLoadDashboardData =
+    location.pathname === '/agent-dashboard' ||
+    location.pathname === '/agent-dashboard/' ||
+    location.pathname === '/agent-dashboard/workflow';
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('sessionId');
@@ -164,6 +230,7 @@ const AgentDashboard: React.FC = () => {
   const [properties, setProperties] = useState<any[]>([]);
   const [tenants, setTenants] = useState<any[]>([]);
   const [leases, setLeases] = useState<any[]>([]);
+  const [inspections, setInspections] = useState<any[]>([]);
   const [propertyById, setPropertyById] = useState<Record<string, any>>({});
   const [tenantById, setTenantById] = useState<Record<string, any>>({});
   const [tenantToActivePropertyId, setTenantToActivePropertyId] = useState<Record<string, string>>({});
@@ -181,192 +248,13 @@ const AgentDashboard: React.FC = () => {
   const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
   const [payments, setPayments] = useState<any[]>([]);
   const [levyPayments, setLevyPayments] = useState<any[]>([]);
-  const [outstandingRentals, setOutstandingRentals] = useState<number>(0);
-  const [outstandingLevies, setOutstandingLevies] = useState<number>(0);
-
-  // Computed total outstanding levies across all properties based on unpaid months in lease periods
-  const computedOutstandingLevies = React.useMemo<number | null>(() => {
-    if (!companyCtx) return null;
-    try {
-      const now = new Date();
-      const currentMonth = now.getMonth() + 1;
-      const currentYear = now.getFullYear();
-      const cutY = (companyCtx as any)?.receivablesCutover?.year;
-      const cutM = (companyCtx as any)?.receivablesCutover?.month;
-      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
-      const ymKey = (y: number, m: number) => `${y}-${m}`;
-      const paidByProperty: Record<string, Set<string>> = {};
-      const pushPaid = (propId: string, y: number, m: number) => {
-        const key = ymKey(y, m);
-        if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
-        paidByProperty[propId].add(key);
-      };
-      for (const p of levyPayments || []) {
-        const status = (p?.status || '').toString().toLowerCase();
-        const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
-        if (!isCompleted) continue;
-        const propertyId = getId(p.propertyId) || getId(p.property) || getId(p?.property?._id) || getId(p?.property?.id);
-        if (!propertyId) continue;
-        const monthsPaid: number = Number((p as any).advanceMonthsPaid || 1);
-        const startY = Number((p as any)?.advancePeriodStart?.year);
-        const startM = Number((p as any)?.advancePeriodStart?.month);
-        const endY = Number((p as any)?.advancePeriodEnd?.year);
-        const endM = Number((p as any)?.advancePeriodEnd?.month);
-        if (monthsPaid > 1 && startY && startM && endY && endM) {
-          let y = startY;
-          let m = startM;
-          while (y < endY || (y === endY && m <= endM)) {
-            pushPaid(propertyId, y, m);
-            m += 1; if (m > 12) { m = 1; y += 1; }
-          }
-        } else {
-          const m = (p as any).rentalPeriodMonth || (p as any).levyPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
-          const y = (p as any).rentalPeriodYear || (p as any).levyPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
-          if (y && m) pushPaid(propertyId, Number(y), Number(m));
-        }
-      }
-
-      // Sum owed across properties of levy type only
-      let total = 0;
-      const iterateMonths = (
-        start: Date,
-        end: Date,
-        cb: (y: number, m: number) => void,
-        hardCapMonths: number = 240
-      ) => {
-        let y = start.getFullYear();
-        let m = start.getMonth() + 1;
-        let count = 0;
-        while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
-          cb(y, m);
-          m += 1; if (m > 12) { m = 1; y += 1; }
-          count += 1;
-        }
-      };
-
-      for (const prop of properties || []) {
-        if (prop?.levyOrMunicipalType !== 'levy') continue;
-        const pid = getId(prop._id) || getId(prop.id);
-        if (!pid) continue;
-        const monthlyLevy = Number(prop?.levyOrMunicipalAmount) || 0;
-        if (!monthlyLevy) continue;
-        const paidKeys = paidByProperty[pid] || new Set<string>();
-
-        // Union of missing months across leases
-        const missingKeys = new Set<string>();
-        const leasesForProperty = (leases || []).filter((l: any) => (getId(l.propertyId) || '') === pid);
-        for (const l of leasesForProperty) {
-          const range = getOutstandingRangeForLease(
-            l,
-            prop,
-            new Date(currentYear, currentMonth - 1, 1),
-            cutoverDate
-          );
-          if (!range) continue;
-          iterateMonths(range.start, range.end, (y, m) => {
-            const key = ymKey(y, m);
-            if (!paidKeys.has(key)) missingKeys.add(key);
-          });
-        }
-        total += missingKeys.size * monthlyLevy;
-      }
-      // Strictly from cutoff onward: do not include any opening balance
-      return total;
-    } catch {
-      return 0;
-    }
-  }, [properties, leases, levyPayments, companyCtx]);
-
-  // Computed total outstanding rentals across all properties based on unpaid months in lease periods
-  const computedOutstandingRentals = React.useMemo<number | null>(() => {
-    if (!companyCtx) return null;
-    try {
-      const now = new Date();
-      const currentMonth = now.getMonth() + 1;
-      const currentYear = now.getFullYear();
-      const cutY = (companyCtx as any)?.receivablesCutover?.year;
-      const cutM = (companyCtx as any)?.receivablesCutover?.month;
-      const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
-      const ymKey = (y: number, m: number) => `${y}-${m}`;
-      const paidByProperty: Record<string, Set<string>> = {};
-      const pushPaid = (propId: string, y: number, m: number) => {
-        const key = ymKey(y, m);
-        if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
-        paidByProperty[propId].add(key);
-      };
-      for (const p of payments || []) {
-        const t = (p?.paymentType || p?.type || '').toString().toLowerCase();
-        if (t === 'levy' || t === 'municipal') continue;
-        const status = (p?.status || '').toString().toLowerCase();
-        const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
-        if (!isCompleted) continue;
-        const propertyId = getId(p.propertyId) || getId(p.property) || getId(p?.property?._id) || getId(p?.property?.id);
-        if (!propertyId) continue;
-        const monthsPaid: number = Number((p as any).advanceMonthsPaid || 1);
-        const startY = Number((p as any)?.advancePeriodStart?.year);
-        const startM = Number((p as any)?.advancePeriodStart?.month);
-        const endY = Number((p as any)?.advancePeriodEnd?.year);
-        const endM = Number((p as any)?.advancePeriodEnd?.month);
-        if (monthsPaid > 1 && startY && startM && endY && endM) {
-          let y = startY;
-          let m = startM;
-          while (y < endY || (y === endY && m <= endM)) {
-            pushPaid(propertyId, y, m);
-            m += 1; if (m > 12) { m = 1; y += 1; }
-          }
-        } else {
-          const m = (p as any).rentalPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
-          const y = (p as any).rentalPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
-          if (y && m) pushPaid(propertyId, Number(y), Number(m));
-        }
-      }
-
-      let total = 0;
-      const iterateMonths = (
-        start: Date,
-        end: Date,
-        cb: (y: number, m: number) => void,
-        hardCapMonths: number = 240
-      ) => {
-        let y = start.getFullYear();
-        let m = start.getMonth() + 1;
-        let count = 0;
-        while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
-          cb(y, m);
-          m += 1; if (m > 12) { m = 1; y += 1; }
-          count += 1;
-        }
-      };
-
-      for (const prop of properties || []) {
-        const pid = getId(prop._id) || getId(prop.id);
-        if (!pid) continue;
-        const monthlyRent = Number(prop?.rent) || 0;
-        if (!monthlyRent) continue;
-        const paidKeys = paidByProperty[pid] || new Set<string>();
-        const missingKeys = new Set<string>();
-        const leasesForProperty = (leases || []).filter((l: any) => (getId(l.propertyId) || '') === pid);
-        for (const l of leasesForProperty) {
-          const range = getOutstandingRangeForLease(
-            l,
-            prop,
-            new Date(currentYear, currentMonth - 1, 1),
-            cutoverDate
-          );
-          if (!range) continue;
-          iterateMonths(range.start, range.end, (y, m) => {
-            const key = ymKey(y, m);
-            if (!paidKeys.has(key)) missingKeys.add(key);
-          });
-        }
-        total += missingKeys.size * monthlyRent;
-      }
-      // Strictly from cutoff onward: do not include any opening balance
-      return total;
-    } catch {
-      return 0;
-    }
-  }, [properties, leases, payments, companyCtx]);
+  const { notifications, markAllRead } = useNotification();
+  const [notifAnchorEl, setNotifAnchorEl] = useState<null | HTMLElement>(null);
+  const [workspaceAnchorEl, setWorkspaceAnchorEl] = useState<null | HTMLElement>(null);
+  const kpiScrollerRef = useRef<HTMLDivElement | null>(null);
+  const kpiDetailRef = useRef<HTMLDivElement | null>(null);
+  const authControls = useAuth() as any;
+  const { logout, stopImpersonation, isImpersonating, setActiveRole } = authControls;
 
   // Expand advance payments across covered months for per-month filtering
   const expandedCommissionPayments = React.useMemo(() => {
@@ -448,6 +336,7 @@ const AgentDashboard: React.FC = () => {
           commissionResponse,
           paymentsResponse,
           levyPaymentsResponse,
+          inspectionsResponse,
         ] = await Promise.all([
           api.get('/agents/properties'),
           api.get('/agents/tenants'),
@@ -455,6 +344,7 @@ const AgentDashboard: React.FC = () => {
           api.get('/agents/commission'),
           api.get('/agents/payments').catch(() => ({ data: [] })),
           api.get('/agents/levy-payments').catch(() => ({ data: [] })),
+          api.get('/inspections').catch(() => ({ data: [] })),
         ]);
 
         const properties = propertiesResponse.data;
@@ -463,6 +353,7 @@ const AgentDashboard: React.FC = () => {
         const commission = commissionResponse.data;
         const paymentsData = Array.isArray(paymentsResponse?.data) ? paymentsResponse.data : [];
         const levyPaysData = Array.isArray(levyPaymentsResponse?.data) ? levyPaymentsResponse.data : [];
+        const inspectionsData = Array.isArray(inspectionsResponse?.data) ? inspectionsResponse.data : [];
 
         // Exclude sale/sales properties from rental dashboard
         const rentalProperties = (properties || []).filter((p: any) => {
@@ -494,33 +385,7 @@ const AgentDashboard: React.FC = () => {
         setLeases(leases);
         setPayments(paymentsData);
         setLevyPayments(levyPaysData);
-
-        // Compute outstanding amounts for rentals and levies (non-completed statuses)
-        const sumOutstanding = (arr: any[]) =>
-          (arr || []).reduce((sum: number, p: any) => {
-            const status = (p?.status || '').toString().toLowerCase();
-            const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
-            const amount = Number(p?.amount) || 0;
-            return sum + (isCompleted ? 0 : amount);
-          }, 0);
-        const isNonLevyOrMunicipal = (p: any) => {
-          const t = (p?.paymentType || p?.type || '').toString().toLowerCase();
-          return t !== 'levy' && t !== 'municipal';
-        };
-        const getPaymentPropertyId = (p: any) =>
-          getId(p?.propertyId) || getId(p?.property) || getId(p?.property?._id) || getId(p?.property?.id);
-        setOutstandingRentals(
-          sumOutstanding(
-            paymentsData
-              .filter(isNonLevyOrMunicipal)
-              .filter((p: any) => allowedPropertyIds.has(getPaymentPropertyId(p) || ''))
-          )
-        );
-        setOutstandingLevies(
-          sumOutstanding(
-            levyPaysData.filter((p: any) => allowedPropertyIds.has(getPaymentPropertyId(p) || ''))
-          )
-        );
+        setInspections(inspectionsData);
 
         // Build fast lookup maps to avoid ID shape issues and O(n^2) lookups
         const propMap: Record<string, any> = {};
@@ -553,23 +418,30 @@ const AgentDashboard: React.FC = () => {
       }
     };
 
-    if (user && user.role === 'agent') {
+    if (user && user.role === 'agent' && shouldLoadDashboardData) {
       fetchDashboardData();
+    } else if (user && user.role === 'agent') {
+      setLoading(false);
     } else if (user && user.role !== 'agent') {
       setError('Access denied. Agent role required.');
       setLoading(false);
     }
-    // Listen for payment changes to refresh data live
+    // Listen for operational changes so workflow progress stays current across nested routes.
+    const refreshWorkflowData = () => {
+      if (shouldLoadDashboardData) fetchDashboardData();
+    };
     const onPaymentsChanged = () => {
-      fetchDashboardData();
+      refreshWorkflowData();
       // Also refresh commission series so Monthly Commission reflects new payments
       fetchCommissionPaymentsForYear(selectedYear);
     };
+    window.addEventListener('rental-workflow:changed', refreshWorkflowData as EventListener);
     window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
     return () => {
+      window.removeEventListener('rental-workflow:changed', refreshWorkflowData as EventListener);
       window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
     };
-  }, [user, selectedYear]);
+  }, [user, selectedYear, shouldLoadDashboardData]);
 
   // Helper resolvers
   const resolvePropertyForTenant = (tenant: any) => {
@@ -583,137 +455,991 @@ const AgentDashboard: React.FC = () => {
 
   const resolvePropertyById = (propertyId: any) => propertyById[getId(propertyId)];
   const resolveTenantById = (tenantId: any) => tenantById[getId(tenantId)];
+  const workflowSummary = React.useMemo(
+    () => buildPortfolioWorkflowSummary({ properties, tenants, leases, payments, inspections }, '/agent-dashboard'),
+    [properties, tenants, leases, payments, inspections]
+  );
+  const greeting = React.useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  }, []);
+  const agentFirstName = user?.firstName || (user as any)?.name?.split(' ')[0] || 'there';
+  const agentDisplayName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || (user as any)?.name || user?.email || 'Agent';
+  const unreadNotifications = notifications.filter((notification) => !notification.read).length;
+  const activeOccupancyCount = workflowSummary.states.filter((state) => state.status === 'Active Occupancy').length;
+  const completedPayments = payments.filter((payment: any) => {
+    const status = String(payment?.status || '').toLowerCase();
+    const type = String(payment?.paymentType || '').toLowerCase();
+    return ['completed', 'paid', 'success'].includes(status) && type !== 'levy' && type !== 'municipal' && type !== 'sale';
+  });
+  const rentalIncome = completedPayments.reduce((sum: number, payment: any) => sum + (Number(payment?.amount) || 0), 0);
+  const leaseReminderItems = leases
+    .map((lease: any) => {
+      const end = lease?.endDate ? new Date(lease.endDate) : null;
+      if (!end || Number.isNaN(end.getTime())) return null;
+      const days = Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (days < 0 || days > 60) return null;
+      const property = resolvePropertyById(lease.propertyId);
+      return {
+        title: 'Lease expiring',
+        date: end,
+        detail: `${property?.name || 'Property'} expires in ${days} day${days === 1 ? '' : 's'}`,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 3) as Array<{ title: string; date: Date; detail: string }>;
+  const quickActions = [
+    { label: 'Add Tenant', icon: <PersonAddIcon />, path: '/agent-dashboard/tenants', color: '#2563eb' },
+    { label: 'Create Lease', icon: <DescriptionIcon />, path: '/agent-dashboard/leases', color: '#16a34a' },
+    { label: 'Assign Owner', icon: <PeopleIcon />, path: '/agent-dashboard/property-owners', color: '#f97316' },
+    { label: 'Record Payment', icon: <PaymentIcon />, path: '/agent-dashboard/payments', color: '#7c3aed' },
+    { label: 'Upload Documents', icon: <UploadFileIcon />, path: '/agent-dashboard/files', color: '#0891b2' },
+    { label: 'Create Maintenance', icon: <BuildIcon />, path: '/agent-dashboard/maintenance', color: '#dc2626' },
+  ];
+  const queueItems = workflowSummary.states
+    .filter((state) => state.status !== 'Active Occupancy' || state.completion < 100)
+    .sort((a, b) => a.completion - b.completion)
+    .slice(0, 4);
+  const outstandingRentalRows = React.useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+    const ymKey = (y: number, m: number) => `${y}-${m}`;
+    const paidByProperty: Record<string, Set<string>> = {};
+    const pushPaid = (propId: string, y: number, m: number) => {
+      const key = ymKey(y, m);
+      if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
+      paidByProperty[propId].add(key);
+    };
+
+    for (const payment of payments || []) {
+      const paymentType = (payment?.paymentType || payment?.type || '').toString().toLowerCase();
+      if (paymentType === 'levy' || paymentType === 'municipal') continue;
+      const status = (payment?.status || '').toString().toLowerCase();
+      const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
+      if (!isCompleted) continue;
+
+      const propertyId =
+        getId(payment.propertyId) ||
+        getId(payment.property) ||
+        getId(payment?.property?._id) ||
+        getId(payment?.property?.id);
+      if (!propertyId) continue;
+
+      const monthsPaid = Number((payment as any).advanceMonthsPaid || 1);
+      const startYear = Number((payment as any)?.advancePeriodStart?.year);
+      const startMonth = Number((payment as any)?.advancePeriodStart?.month);
+      const endYear = Number((payment as any)?.advancePeriodEnd?.year);
+      const endMonth = Number((payment as any)?.advancePeriodEnd?.month);
+
+      if (monthsPaid > 1 && startYear && startMonth && endYear && endMonth) {
+        let y = startYear;
+        let m = startMonth;
+        while (y < endYear || (y === endYear && m <= endMonth)) {
+          pushPaid(propertyId, y, m);
+          m += 1;
+          if (m > 12) {
+            m = 1;
+            y += 1;
+          }
+        }
+      } else {
+        const month = (payment as any).rentalPeriodMonth || (payment.paymentDate ? (new Date(payment.paymentDate).getMonth() + 1) : undefined);
+        const year = (payment as any).rentalPeriodYear || (payment.paymentDate ? (new Date(payment.paymentDate).getFullYear()) : undefined);
+        if (year && month) pushPaid(propertyId, Number(year), Number(month));
+      }
+    }
+
+    const iterateMonths = (
+      start: Date,
+      end: Date,
+      cb: (y: number, m: number, label: string) => void,
+      hardCapMonths: number = 240
+    ) => {
+      let y = start.getFullYear();
+      let m = start.getMonth() + 1;
+      let count = 0;
+      while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
+        const label = new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'short', year: 'numeric' });
+        cb(y, m, label);
+        m += 1;
+        if (m > 12) {
+          m = 1;
+          y += 1;
+        }
+        count += 1;
+      }
+    };
+
+    return (properties || [])
+      .map((property: any) => {
+        const propertyId = getId(property._id) || getId(property.id);
+        if (!propertyId) return null;
+
+        const paidKeys = paidByProperty[propertyId] || new Set<string>();
+        const propertyLeases = (leases || []).filter((lease: any) => (getId(lease.propertyId) || '') === propertyId);
+        const cutoverYear = (companyCtx as any)?.receivablesCutover?.year;
+        const cutoverMonth = (companyCtx as any)?.receivablesCutover?.month;
+        const cutoverDate = (cutoverYear && cutoverMonth) ? new Date(Number(cutoverYear), Number(cutoverMonth) - 1, 1) : null;
+        const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
+        const missingSet = new Set<string>();
+        const missingLabels: string[] = [];
+
+        for (const lease of propertyLeases) {
+          const range = getOutstandingRangeForLease(
+            lease,
+            property,
+            new Date(currentYear, currentMonth - 1, 1),
+            cutoverDate
+          );
+          if (!range) continue;
+
+          const labels: string[] = [];
+          iterateMonths(range.start, range.end, (year, month, label) => {
+            const key = ymKey(year, month);
+            if (!paidKeys.has(key)) {
+              labels.push(label);
+              if (!missingSet.has(key)) {
+                missingSet.add(key);
+                missingLabels.push(label);
+              }
+            }
+          });
+
+          if (labels.length > 0) {
+            const tenantId = getId(lease.tenantId) || '';
+            const tenant = resolveTenantById(tenantId);
+            const tenantName = tenant
+              ? (`${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || tenant.name || tenant.fullName || 'Unknown Tenant')
+              : 'Unknown Tenant';
+            perTenantMissing.push({ tenantId, tenantName, labels });
+          }
+        }
+
+        const missed = missingSet.size;
+        const monthlyRent = Number(property?.rent) || 0;
+        const propertyTotalAmount = missed * monthlyRent;
+        return { prop: property, pid: propertyId, missed, missingLabels, perTenantMissing, propertyTotalAmount };
+      })
+      .filter(Boolean)
+      .filter((row: any) => (row.missed || 0) > 0)
+      .sort((a: any, b: any) => b.missed - a.missed);
+  }, [properties, leases, payments, tenantById, companyCtx]);
+  const displayedOutstandingRentals = outstandingRentalRows.reduce((sum: number, row: any) => sum + Number(row.propertyTotalAmount || 0), 0);
+  const outstandingLevyRows = React.useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+    const ymKey = (y: number, m: number) => `${y}-${m}`;
+    const cutoverYear = (companyCtx as any)?.receivablesCutover?.year;
+    const cutoverMonth = (companyCtx as any)?.receivablesCutover?.month;
+    const cutoverDate = (cutoverYear && cutoverMonth) ? new Date(Number(cutoverYear), Number(cutoverMonth) - 1, 1) : null;
+    const paidByProperty: Record<string, Set<string>> = {};
+    const pushPaid = (propertyId: string, y: number, m: number) => {
+      const key = ymKey(y, m);
+      if (!paidByProperty[propertyId]) paidByProperty[propertyId] = new Set();
+      paidByProperty[propertyId].add(key);
+    };
+
+    for (const payment of levyPayments || []) {
+      const status = (payment?.status || '').toString().toLowerCase();
+      const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
+      if (!isCompleted) continue;
+
+      const propertyId =
+        getId(payment.propertyId) ||
+        getId(payment.property) ||
+        getId(payment?.property?._id) ||
+        getId(payment?.property?.id);
+      if (!propertyId) continue;
+
+      const monthsPaid = Number((payment as any).advanceMonthsPaid || 1);
+      const startYear = Number((payment as any)?.advancePeriodStart?.year);
+      const startMonth = Number((payment as any)?.advancePeriodStart?.month);
+      const endYear = Number((payment as any)?.advancePeriodEnd?.year);
+      const endMonth = Number((payment as any)?.advancePeriodEnd?.month);
+
+      if (monthsPaid > 1 && startYear && startMonth && endYear && endMonth) {
+        let y = startYear;
+        let m = startMonth;
+        while (y < endYear || (y === endYear && m <= endMonth)) {
+          pushPaid(propertyId, y, m);
+          m += 1;
+          if (m > 12) {
+            m = 1;
+            y += 1;
+          }
+        }
+      } else {
+        const month =
+          (payment as any).rentalPeriodMonth ||
+          (payment as any).levyPeriodMonth ||
+          (payment.paymentDate ? (new Date(payment.paymentDate).getMonth() + 1) : undefined);
+        const year =
+          (payment as any).rentalPeriodYear ||
+          (payment as any).levyPeriodYear ||
+          (payment.paymentDate ? (new Date(payment.paymentDate).getFullYear()) : undefined);
+        if (year && month) pushPaid(propertyId, Number(year), Number(month));
+      }
+    }
+
+    const iterateMonths = (
+      start: Date,
+      end: Date,
+      cb: (y: number, m: number, label: string) => void,
+      hardCapMonths: number = 240
+    ) => {
+      let y = start.getFullYear();
+      let m = start.getMonth() + 1;
+      let count = 0;
+      while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
+        const label = new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'short', year: 'numeric' });
+        cb(y, m, label);
+        m += 1;
+        if (m > 12) {
+          m = 1;
+          y += 1;
+        }
+        count += 1;
+      }
+    };
+
+    return (properties || [])
+      .filter((property: any) => property?.levyOrMunicipalType === 'levy')
+      .map((property: any) => {
+        const propertyId = getId(property._id) || getId(property.id);
+        if (!propertyId) return null;
+
+        const paidKeys = paidByProperty[propertyId] || new Set<string>();
+        const propertyLeases = (leases || []).filter((lease: any) => (getId(lease.propertyId) || '') === propertyId);
+        const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] }> = [];
+        let propertyTotalMissing = 0;
+        let propertyTotalAmount = 0;
+        const monthlyLevy = Number(property?.levyOrMunicipalAmount) || 0;
+
+        for (const lease of propertyLeases) {
+          const range = getOutstandingRangeForLease(
+            lease,
+            property,
+            new Date(currentYear, currentMonth - 1, 1),
+            cutoverDate
+          );
+          if (!range) continue;
+
+          const labels: string[] = [];
+          iterateMonths(
+            range.start,
+            new Date(range.end.getFullYear(), range.end.getMonth(), 1),
+            (y, m, label) => {
+              if (!paidKeys.has(ymKey(y, m))) labels.push(label);
+            }
+          );
+
+          if (labels.length > 0) {
+            const tenantId = getId(lease.tenantId) || '';
+            const tenant = resolveTenantById(tenantId);
+            const tenantName = tenant
+              ? (`${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || tenant.name || tenant.fullName || 'Unknown Tenant')
+              : 'Unknown Tenant';
+            perTenantMissing.push({ tenantId, tenantName, labels });
+            propertyTotalMissing += labels.length;
+            propertyTotalAmount += labels.length * monthlyLevy;
+          }
+        }
+
+        return { prop: property, pid: propertyId, perTenantMissing, propertyTotalMissing, propertyTotalAmount };
+      })
+      .filter(Boolean)
+      .filter((row: any) => (row.perTenantMissing || []).length > 0)
+      .sort((a: any, b: any) => (b.propertyTotalMissing || 0) - (a.propertyTotalMissing || 0));
+  }, [properties, leases, levyPayments, tenantById, companyCtx]);
+  const displayedOutstandingLevies = outstandingLevyRows.reduce((sum: number, row: any) => sum + Number(row.propertyTotalAmount || 0), 0);
+  const pendingRentalPaymentCount = payments.filter((payment: any) => {
+    const status = String(payment?.status || '').toLowerCase();
+    const type = String(payment?.paymentType || payment?.type || '').toLowerCase();
+    return !['completed', 'success', 'paid'].includes(status) && type !== 'levy' && type !== 'municipal' && type !== 'sale';
+  }).length;
+  const pendingLevyPaymentCount = levyPayments.filter((payment: any) => {
+    const status = String(payment?.status || '').toLowerCase();
+    return !['completed', 'success', 'paid'].includes(status);
+  }).length;
+  const outstandingRentalProgress = rentalIncome > 0
+    ? Math.min(100, Math.round((displayedOutstandingRentals / Math.max(rentalIncome + displayedOutstandingRentals, 1)) * 100))
+    : (displayedOutstandingRentals > 0 ? 75 : 8);
+  const outstandingLevyProgress = displayedOutstandingLevies > 0 ? Math.min(100, 35 + pendingLevyPaymentCount * 10) : 8;
+  const availableRoles = Array.isArray((user as any)?.roles) && (user as any).roles.length > 0
+    ? (user as any).roles
+    : [user?.role].filter(Boolean);
+  const dashboardLabels: Record<string, string> = {
+    admin: 'Admin Dashboard',
+    agent: 'Agent Dashboard',
+    owner: 'Owner Dashboard',
+    accountant: 'Accountant Dashboard',
+    sales: 'Sales Dashboard',
+    principal: 'Admin Dashboard',
+    prea: 'Admin Dashboard',
+  };
+  const handleNotifOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setNotifAnchorEl(event.currentTarget);
+    markAllRead();
+  };
+  const handleNotifClose = () => setNotifAnchorEl(null);
+  const handleWorkspaceMenuOpen = (event: React.MouseEvent<HTMLElement>) => setWorkspaceAnchorEl(event.currentTarget);
+  const handleWorkspaceMenuClose = () => setWorkspaceAnchorEl(null);
+  const handleLogout = async () => {
+    handleWorkspaceMenuClose();
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+  const handleStopImpersonation = async () => {
+    handleWorkspaceMenuClose();
+    try {
+      await stopImpersonation();
+    } catch (error) {
+      console.error('Stop impersonation failed:', error);
+    }
+  };
+  const scrollKpiCards = (direction: 'left' | 'right') => {
+    const node = kpiScrollerRef.current;
+    if (!node) return;
+    node.scrollBy({ left: direction === 'left' ? -360 : 360, behavior: 'smooth' });
+  };
+  const resetDashboardDrilldown = () => {
+    setShowLeaseInsights(false);
+    setShowCommissionDetails(false);
+    setShowActiveTenants(false);
+    setShowPropertiesList(false);
+    setShowOutstandingRentals(false);
+    setShowOutstandingLevies(false);
+  };
+  const revealKpiDetail = () => {
+    window.setTimeout(() => {
+      kpiDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f6f8fb' }}>
       <AgentSidebar activeTab={activeTab} onTabChange={setActiveTab} />
       <Box sx={{ flexGrow: 1 }}>
-        <Header />
-        <Box sx={{ p: 3, mt: 8 }}>
+        <Box sx={{ px: { xs: 2, md: 4, xl: 6 }, py: { xs: 3, md: 5 } }}>
           <Routes>
             <Route index element={
               <>
-                <Typography variant="h4" sx={{ mb: 4, fontWeight: 600 }}>
-                  Agent Dashboard
-                </Typography>
                 {error && (
                   <Alert severity="error" sx={{ mb: 3 }}>
                     {error}
                   </Alert>
                 )}
-                <Grid container spacing={3}>
-                  <Grid item xs={12} md={6} lg={3}>
-                    <StatCard
-                      title="My Properties"
-                      value={dashboardData.totalProperties.toString()}
-                      icon={<BusinessIcon />}
-                      color="#5E72E4"
-                      loading={loading}
-                      onClick={() => {
-                        setShowPropertiesList(true);
-                        setShowLeaseInsights(false);
-                        setShowCommissionDetails(false);
-                        setShowActiveTenants(false);
-                        setShowOutstandingRentals(false);
-                        setShowOutstandingLevies(false);
+                <Stack spacing={4.5}>
+                  <Card
+                    sx={{
+                      ...softCardSx,
+                      overflow: 'hidden',
+                      background: 'linear-gradient(135deg, rgba(255,255,255,0.96), rgba(239,246,255,0.94))',
+                    }}
+                  >
+                    <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} spacing={3}>
+                        <Box>
+                          <Typography variant="overline" sx={{ color: '#64748b', fontWeight: 800, letterSpacing: '0.12em' }}>
+                            Rental operations workspace
+                          </Typography>
+                          <Typography variant="h3" sx={{ mt: 1, fontWeight: 850, letterSpacing: '-0.05em', color: '#0f172a' }}>
+                            {greeting}, {agentFirstName}
+                          </Typography>
+                          <Typography variant="subtitle1" color="text.secondary" sx={{ mt: 1 }}>
+                            Here's what's happening in your portfolio today.
+                          </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={2} alignItems="center" sx={{ width: { xs: '100%', md: 'auto' } }}>
+                          <Box sx={{ minWidth: { xs: 0, sm: 260 }, flex: { xs: 1, md: 'unset' } }}>
+                            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 700, color: '#334155' }}>
+                                Portfolio readiness
+                              </Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 800, color: '#2563eb' }}>
+                                {workflowSummary.completionAverage}%
+                              </Typography>
+                            </Stack>
+                            <LinearProgress
+                              variant="determinate"
+                              value={workflowSummary.completionAverage}
+                              sx={{ height: 7, borderRadius: 99, bgcolor: 'rgba(37,99,235,0.10)', '& .MuiLinearProgress-bar': { borderRadius: 99, bgcolor: '#2563eb' } }}
+                            />
+                            <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/agent-dashboard/workflow')} sx={{ mt: 1, px: 0, textTransform: 'none', fontWeight: 700 }}>
+                              View details
+                            </Button>
+                          </Box>
+                          <Tooltip title={unreadNotifications ? `${unreadNotifications} unread notification${unreadNotifications === 1 ? '' : 's'}` : 'No unread notifications'}>
+                            <IconButton onClick={handleNotifOpen} sx={{ bgcolor: 'white', boxShadow: '0 10px 25px rgba(15,23,42,0.08)' }}>
+                              <Badge badgeContent={unreadNotifications} color="error">
+                                <NotificationsNoneIcon />
+                              </Badge>
+                            </IconButton>
+                          </Tooltip>
+                          <Stack
+                            direction="row"
+                            spacing={1.25}
+                            alignItems="center"
+                            onClick={handleWorkspaceMenuOpen}
+                            sx={{
+                              bgcolor: 'rgba(255,255,255,0.78)',
+                              border: '1px solid rgba(15,23,42,0.06)',
+                              borderRadius: 99,
+                              py: 0.75,
+                              pl: 0.75,
+                              pr: 1.5,
+                              cursor: 'pointer',
+                              transition: 'box-shadow 180ms ease, transform 180ms ease',
+                              '&:hover': {
+                                transform: 'translateY(-1px)',
+                                boxShadow: '0 12px 30px rgba(15,23,42,0.08)',
+                              },
+                            }}
+                          >
+                            <Avatar sx={{ width: 38, height: 38, bgcolor: '#2563eb', fontWeight: 800 }}>
+                              {(agentFirstName || 'A').charAt(0).toUpperCase()}
+                            </Avatar>
+                            <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
+                              <Typography variant="body2" sx={{ fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                                {agentDisplayName}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Agent workspace
+                              </Typography>
+                            </Box>
+                          </Stack>
+                          <Menu
+                            anchorEl={notifAnchorEl}
+                            open={Boolean(notifAnchorEl)}
+                            onClose={handleNotifClose}
+                            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                            PaperProps={{ sx: { minWidth: 340, borderRadius: 4, mt: 1, boxShadow: '0 24px 70px rgba(15,23,42,0.18)' } }}
+                          >
+                            <Box sx={{ p: 2, pb: 1 }}>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Notifications</Typography>
+                              <Typography variant="caption" color="text.secondary">Recent operational updates</Typography>
+                            </Box>
+                            <Divider />
+                            {notifications.length === 0 ? (
+                              <MenuItem disabled>No notifications</MenuItem>
+                            ) : (
+                              notifications.slice(0, 6).map((notification) => (
+                                <MenuItem
+                                  key={notification.id}
+                                  selected={!notification.read}
+                                  onClick={async () => {
+                                    try { await notificationService.markRead(notification.id); } catch {}
+                                    handleNotifClose();
+                                    if (notification.link) navigate(notification.link);
+                                  }}
+                                  sx={{ alignItems: 'flex-start', py: 1.5, whiteSpace: 'normal' }}
+                                >
+                                  <Box>
+                                    <Typography variant="body2" sx={{ fontWeight: notification.read ? 600 : 800 }}>
+                                      {notification.title}
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                      {notification.message}
+                                    </Typography>
+                                    {notification.createdAt && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        {notification.createdAt.toLocaleString()}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </MenuItem>
+                              ))
+                            )}
+                          </Menu>
+                          <Menu
+                            anchorEl={workspaceAnchorEl}
+                            open={Boolean(workspaceAnchorEl)}
+                            onClose={handleWorkspaceMenuClose}
+                            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                            PaperProps={{ sx: { minWidth: 260, borderRadius: 4, mt: 1, boxShadow: '0 24px 70px rgba(15,23,42,0.18)' } }}
+                          >
+                            <Box sx={{ p: 2 }}>
+                              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{agentDisplayName}</Typography>
+                              <Typography variant="caption" color="text.secondary">{user?.email || 'Agent workspace'}</Typography>
+                            </Box>
+                            <Divider />
+                            <MenuItem onClick={() => { handleWorkspaceMenuClose(); navigate('/profile'); }}>
+                              <ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>
+                              Profile
+                            </MenuItem>
+                            {availableRoles.length > 0 && (
+                              <>
+                                <Divider />
+                                {availableRoles.map((role: string) => (
+                                  <MenuItem
+                                    key={role}
+                                    onClick={() => {
+                                      handleWorkspaceMenuClose();
+                                      try { setActiveRole && setActiveRole(role as any); } catch {}
+                                      navigate(getDashboardPath(role as any));
+                                    }}
+                                  >
+                                    <ListItemIcon><SwapHorizIcon fontSize="small" /></ListItemIcon>
+                                    {dashboardLabels[role] || role}
+                                  </MenuItem>
+                                ))}
+                              </>
+                            )}
+                            {isImpersonating && (
+                              <MenuItem onClick={handleStopImpersonation}>
+                                <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
+                                Stop Impersonating
+                              </MenuItem>
+                            )}
+                            <Divider />
+                            <MenuItem onClick={() => { handleWorkspaceMenuClose(); navigate('/agent-dashboard/settings'); }}>
+                              <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
+                              Settings
+                            </MenuItem>
+                            <MenuItem onClick={handleLogout}>
+                              <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
+                              Logout
+                            </MenuItem>
+                          </Menu>
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+
+                  <Card sx={{ ...softCardSx, borderRadius: 6 }}>
+                    <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2} sx={{ mb: 3 }}>
+                        <Box>
+                          <Typography variant="h5" sx={{ fontWeight: 850, letterSpacing: '-0.03em' }}>
+                            Needs Attention
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            The most important operational gaps across your rentals.
+                          </Typography>
+                        </Box>
+                        <Button variant="outlined" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/agent-dashboard/workflow')} sx={{ borderRadius: 99, textTransform: 'none', fontWeight: 700 }}>
+                          Review workflow
+                        </Button>
+                      </Stack>
+                      <Grid container spacing={2}>
+                        {(workflowSummary.alerts.length ? workflowSummary.alerts.slice(0, 4) : [{ key: 'healthy', title: 'Portfolio healthy', description: 'All core rental workflows are currently healthy.', count: 0, severity: 'success' as const, path: '/agent-dashboard/workflow' }]).map((alert) => (
+                          <Grid item xs={12} md={6} key={alert.key}>
+                            <Box
+                              sx={{
+                                p: 2.5,
+                                borderRadius: 4,
+                                bgcolor: alert.severity === 'error' ? '#fff1f2' : alert.severity === 'warning' ? '#fff7ed' : alert.severity === 'success' ? '#f0fdf4' : '#eff6ff',
+                                display: 'flex',
+                                gap: 2,
+                                alignItems: 'center',
+                                transition: 'transform 180ms ease, background-color 180ms ease',
+                                '&:hover': { transform: 'translateY(-2px)' },
+                              }}
+                            >
+                              <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.85)', color: alert.severity === 'error' ? '#e11d48' : alert.severity === 'warning' ? '#f97316' : alert.severity === 'success' ? '#16a34a' : '#2563eb' }}>
+                                <HomeWorkIcon />
+                              </Avatar>
+                              <Box sx={{ flex: 1 }}>
+                                <Typography sx={{ fontWeight: 800, color: '#0f172a' }}>
+                                  {alert.count > 0 ? `${alert.count} ${alert.title.toLowerCase()}` : alert.title}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {alert.description}
+                                </Typography>
+                              </Box>
+                              <Button size="small" variant="contained" onClick={() => navigate(alert.path)} sx={{ borderRadius: 99, textTransform: 'none', boxShadow: 'none' }}>
+                                Review
+                              </Button>
+                            </Box>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </CardContent>
+                  </Card>
+
+                  <Grid container spacing={2.5}>
+                    {quickActions.map((action) => (
+                      <Grid item xs={6} md={4} lg={2} key={action.label}>
+                        <Card onClick={() => navigate(action.path)} sx={{ ...softCardSx, cursor: 'pointer', height: '100%' }}>
+                          <CardContent sx={{ p: 2.5 }}>
+                            <Avatar sx={{ bgcolor: `${action.color}14`, color: action.color, mb: 2 }}>
+                              {action.icon}
+                            </Avatar>
+                            <Typography variant="body2" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                              {action.label}
+                            </Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                  </Grid>
+
+                  <Box>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                      <Box>
+                        <Typography variant="h6" sx={{ fontWeight: 850, letterSpacing: '-0.03em' }}>
+                          Portfolio Metrics
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Scroll through operational KPIs and open drill-downs.
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={1}>
+                        <IconButton onClick={() => scrollKpiCards('left')} sx={{ bgcolor: 'white', boxShadow: '0 10px 25px rgba(15,23,42,0.08)' }}>
+                          <ChevronLeftIcon />
+                        </IconButton>
+                        <IconButton onClick={() => scrollKpiCards('right')} sx={{ bgcolor: 'white', boxShadow: '0 10px 25px rgba(15,23,42,0.08)' }}>
+                          <ChevronRightIcon />
+                        </IconButton>
+                      </Stack>
+                    </Stack>
+                    <Box
+                      ref={kpiScrollerRef}
+                      sx={{
+                        display: 'grid',
+                        gridAutoFlow: 'column',
+                        gridAutoColumns: { xs: '86%', sm: '48%', lg: '24%' },
+                        gap: 2.5,
+                        overflowX: 'auto',
+                        scrollSnapType: 'x mandatory',
+                        pb: 1,
+                        scrollbarWidth: 'none',
+                        '&::-webkit-scrollbar': { display: 'none' },
+                        '& > *': { scrollSnapAlign: 'start' },
                       }}
-                    />
-                    <Box sx={{ mt: 2 }}>
-                    <StatCard
-                      title="Outstanding rentals"
-                      value={`$${Number((computedOutstandingRentals ?? 0) || 0).toLocaleString()}`}
-                      icon={<PaymentIcon />}
-                      color="#F5365C"
-                      loading={loading}
-                      onClick={() => {
-                        setShowOutstandingRentals(true);
-                        setShowOutstandingLevies(false);
-                        setShowCommissionDetails(false);
-                        setShowLeaseInsights(false);
-                        setShowActiveTenants(false);
-                        setShowPropertiesList(false);
-                      }}
-                    />
+                    >
+                      <Box>
+                        <StatCard
+                          title="My Properties"
+                          value={dashboardData.totalProperties.toString()}
+                          subtitle={`${workflowSummary.vacantCount} vacant • ${activeOccupancyCount} occupied`}
+                          icon={<BusinessIcon />}
+                          color="#2563eb"
+                          loading={loading}
+                          progress={dashboardData.totalProperties ? Math.min(100, (activeOccupancyCount / dashboardData.totalProperties) * 100) : 0}
+                          onClick={() => {
+                            resetDashboardDrilldown();
+                            setShowPropertiesList(true);
+                          }}
+                        />
+                      </Box>
+                      <Box>
+                        <StatCard
+                          title="Active Tenants"
+                          value={dashboardData.activeTenants.toString()}
+                          subtitle={`${workflowSummary.vacantCount} vacant propert${workflowSummary.vacantCount === 1 ? 'y' : 'ies'} awaiting placement`}
+                          icon={<PeopleIcon />}
+                          color="#0891b2"
+                          loading={loading}
+                          progress={dashboardData.totalProperties ? Math.min(100, (dashboardData.activeTenants / dashboardData.totalProperties) * 100) : 0}
+                          onClick={() => {
+                            resetDashboardDrilldown();
+                            setShowActiveTenants(true);
+                          }}
+                        />
+                      </Box>
+                      <Box>
+                        <StatCard
+                          title="Active Leases"
+                          value={dashboardData.activeLeases.toString()}
+                          subtitle={`${workflowSummary.expiringLeaseCount} expiring within 60 days`}
+                          icon={<DescriptionIcon />}
+                          color="#16a34a"
+                          loading={loading}
+                          progress={dashboardData.totalProperties ? Math.min(100, (dashboardData.activeLeases / dashboardData.totalProperties) * 100) : 0}
+                          onClick={() => {
+                            resetDashboardDrilldown();
+                            setShowLeaseInsights(true);
+                            setSelectedLeaseCategory('all');
+                          }}
+                        />
+                      </Box>
+                      <Box>
+                        <StatCard
+                          title="Monthly Commission"
+                          value={`$${((filteredMonthlyAgentShare != null ? filteredMonthlyAgentShare : dashboardData.monthlyCommission) || 0).toLocaleString()}`}
+                          subtitle="Click to view paid commissions"
+                          icon={<PaymentIcon />}
+                          color="#f97316"
+                          loading={loading}
+                          onClick={() => {
+                            resetDashboardDrilldown();
+                            setShowCommissionDetails(true);
+                            loadCommissionPayments();
+                          }}
+                        />
+                      </Box>
+                      <Box>
+                        <StatCard
+                          title="Outstanding Rentals"
+                          value={`$${Number(displayedOutstandingRentals || 0).toLocaleString()}`}
+                          subtitle={`${pendingRentalPaymentCount} pending rental payment${pendingRentalPaymentCount === 1 ? '' : 's'} • click for detail`}
+                          icon={<PaymentIcon />}
+                          color="#e11d48"
+                          loading={loading}
+                          progress={outstandingRentalProgress}
+                          onClick={() => {
+                            resetDashboardDrilldown();
+                            setShowOutstandingRentals(true);
+                            revealKpiDetail();
+                          }}
+                        />
+                      </Box>
+                      <Box>
+                        <StatCard
+                          title="Outstanding Levies"
+                          value={`$${Number(displayedOutstandingLevies || 0).toLocaleString()}`}
+                          subtitle={`${pendingLevyPaymentCount} pending levy payment${pendingLevyPaymentCount === 1 ? '' : 's'} • click for detail`}
+                          icon={<ReceiptLongIcon />}
+                          color="#f59e0b"
+                          loading={loading}
+                          progress={outstandingLevyProgress}
+                          onClick={() => {
+                            resetDashboardDrilldown();
+                            setShowOutstandingLevies(true);
+                            revealKpiDetail();
+                          }}
+                        />
+                      </Box>
                     </Box>
+                    {showCommissionDetails && (
+                      <Card sx={{ ...softCardSx, mt: 2.5 }}>
+                        <CardContent sx={{ p: 3 }}>
+                          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} spacing={2} sx={{ mb: 2 }}>
+                            <Box>
+                              <Typography variant="h6" sx={{ fontWeight: 850 }}>Paid Commissions</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Agent share payments for the selected period.
+                              </Typography>
+                            </Box>
+                            <Button size="small" onClick={() => setShowCommissionDetails(false)} sx={{ textTransform: 'none', fontWeight: 800 }}>
+                              Hide
+                            </Button>
+                          </Stack>
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+                            <FormControl size="small" sx={{ minWidth: 180 }}>
+                              <InputLabel id="commission-month-inline-label">Month</InputLabel>
+                              <Select
+                                labelId="commission-month-inline-label"
+                                value={selectedMonth}
+                                label="Month"
+                                onChange={(event) => setSelectedMonth(Number(event.target.value))}
+                              >
+                                {['January','February','March','April','May','June','July','August','September','October','November','December'].map((month, index) => (
+                                  <MenuItem key={month} value={index + 1}>{month}</MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                            <FormControl size="small" sx={{ minWidth: 140 }}>
+                              <InputLabel id="commission-year-inline-label">Year</InputLabel>
+                              <Select
+                                labelId="commission-year-inline-label"
+                                value={selectedYear}
+                                label="Year"
+                                onChange={async (event) => {
+                                  const year = Number(event.target.value);
+                                  setSelectedYear(year);
+                                  await fetchCommissionPaymentsForYear(year);
+                                }}
+                              >
+                                {Array.from({ length: 8 }).map((_, index) => {
+                                  const year = new Date().getFullYear() - 5 + index;
+                                  return <MenuItem key={year} value={year}>{year}</MenuItem>;
+                                })}
+                              </Select>
+                            </FormControl>
+                          </Stack>
+                          {commissionLoading ? (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+                              <CircularProgress />
+                            </Box>
+                          ) : commissionError ? (
+                            <Alert severity="error">{commissionError}</Alert>
+                          ) : (
+                            (() => {
+                              const filteredPayments = expandedCommissionPayments.filter((payment: any) => {
+                                const rentMonth = payment.rentalPeriodMonth || (payment.paymentDate ? (new Date(payment.paymentDate).getMonth() + 1) : undefined);
+                                const rentYear = payment.rentalPeriodYear || (payment.paymentDate ? (new Date(payment.paymentDate).getFullYear()) : undefined);
+                                return rentMonth === selectedMonth && rentYear === selectedYear;
+                              });
+                              const totalAgentShare = filteredPayments.reduce((sum: number, payment: any) => sum + (payment._distributedAgentShare || payment.commissionDetails?.agentShare || 0), 0);
+                              return (
+                                <Stack spacing={1.5}>
+                                  <Chip
+                                    label={`Total paid commission: $${totalAgentShare.toLocaleString()}`}
+                                    color="success"
+                                    sx={{ alignSelf: 'flex-start', borderRadius: 99, fontWeight: 800 }}
+                                  />
+                                  {!filteredPayments.length ? (
+                                    <Typography color="text.secondary">No paid commission records found for the selected period.</Typography>
+                                  ) : (
+                                    filteredPayments.slice(0, 6).map((payment: any) => {
+                                      const propertyId = getId(payment.propertyId) || getId(payment.property) || getId(payment?.property?._id) || getId(payment?.property?.id);
+                                      const tenantId = getId(payment.tenantId) || getId(payment.tenant) || getId(payment?.tenant?._id) || getId(payment?.tenant?.id);
+                                      const propertyObj = resolvePropertyById(propertyId);
+                                      const tenantObj = resolveTenantById(tenantId);
+                                      const propertyName = propertyObj?.name || payment?.property?.name || payment?.propertyName || 'Unknown Property';
+                                      const tenantName = tenantObj
+                                        ? `${tenantObj.firstName || ''} ${tenantObj.lastName || ''}`.trim() || 'Unknown Tenant'
+                                        : `${payment?.tenant?.firstName || ''} ${payment?.tenant?.lastName || ''}`.trim() || payment?.tenantName || 'Unknown Tenant';
+                                      const paymentDate = payment.paymentDate ? new Date(payment.paymentDate) : null;
+                                      const agentShare = payment._distributedAgentShare || payment.commissionDetails?.agentShare || 0;
+                                      return (
+                                        <Box key={`${payment._id}-${payment.rentalPeriodMonth || ''}-${payment.rentalPeriodYear || ''}`} sx={{ p: 2, borderRadius: 4, bgcolor: '#f8fafc', display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                                          <Box>
+                                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{propertyName}</Typography>
+                                            <Typography variant="body2" color="text.secondary">Tenant: {tenantName}</Typography>
+                                          </Box>
+                                          <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+                                            <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>${Number(agentShare || 0).toLocaleString()}</Typography>
+                                            <Typography variant="caption" color="text.secondary">{paymentDate ? paymentDate.toLocaleDateString() : 'No payment date'}</Typography>
+                                          </Box>
+                                        </Box>
+                                      );
+                                    })
+                                  )}
+                                </Stack>
+                              );
+                            })()
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+                  </Box>
+
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} lg={5}>
+                      <Card sx={softCardSx}>
+                        <CardContent sx={{ p: 3 }}>
+                          <Typography variant="h6" sx={{ fontWeight: 850, mb: 0.5 }}>
+                            Operational Queue
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            Recommended next steps by property.
+                          </Typography>
+                          <Stack spacing={1.5}>
+                            {queueItems.length ? queueItems.map((state) => (
+                              <Box key={state.propertyId} sx={{ display: 'flex', gap: 2, p: 1.5, borderRadius: 4, bgcolor: '#f8fafc', alignItems: 'center' }}>
+                                <Avatar variant="rounded" sx={{ width: 58, height: 58, borderRadius: 3, bgcolor: '#e0f2fe', color: '#0369a1' }}>
+                                  <BusinessIcon />
+                                </Avatar>
+                                <Box sx={{ flex: 1, minWidth: 0 }}>
+                                  <Typography sx={{ fontWeight: 800 }} noWrap>{state.property.name || 'Unnamed property'}</Typography>
+                                  <Typography variant="body2" color="text.secondary" noWrap>{state.property.address}</Typography>
+                                  <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                    Next step: {state.missingSteps[0]?.missingLabel || 'Review property'}
+                                  </Typography>
+                                </Box>
+                                <Stack spacing={1} alignItems="flex-end">
+                                  <WorkflowStatusChip status={state.status} />
+                                  <Button size="small" onClick={() => navigate(`/agent-dashboard/properties/${state.propertyId}`)} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                                    Open Hub
+                                  </Button>
+                                </Stack>
+                              </Box>
+                            )) : (
+                              <Typography variant="body2" color="text.secondary">No open workflow items right now.</Typography>
+                            )}
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} lg={4}>
+                      <Card sx={softCardSx}>
+                        <CardContent sx={{ p: 3 }}>
+                          <Typography variant="h6" sx={{ fontWeight: 850, mb: 2 }}>
+                            Recent Activity
+                          </Typography>
+                          <Stack spacing={2}>
+                            {workflowSummary.activity.slice(0, 5).map((item) => (
+                              <Stack direction="row" spacing={1.5} key={item.id}>
+                                <Avatar sx={{ width: 34, height: 34, bgcolor: '#eef2ff', color: '#4f46e5' }}>
+                                  <AddIcon fontSize="small" />
+                                </Avatar>
+                                <Box>
+                                  <Typography variant="body2" sx={{ fontWeight: 800 }}>{item.label}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{item.description}{item.date ? ` • ${item.date.toLocaleDateString()}` : ''}</Typography>
+                                </Box>
+                              </Stack>
+                            ))}
+                            {!workflowSummary.activity.length && <Typography variant="body2" color="text.secondary">Activity appears here as rental operations move forward.</Typography>}
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} lg={3}>
+                      <Stack spacing={3}>
+                        <Card sx={softCardSx}>
+                          <CardContent sx={{ p: 3 }}>
+                            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+                              <CalendarTodayIcon color="primary" />
+                              <Typography variant="h6" sx={{ fontWeight: 850 }}>Calendar & Reminders</Typography>
+                            </Stack>
+                            <Stack spacing={1.25}>
+                              {leaseReminderItems.length ? leaseReminderItems.map((item) => (
+                                <Box key={`${item.title}-${item.detail}`} sx={{ p: 1.5, borderRadius: 3, bgcolor: '#fff7ed' }}>
+                                  <Typography variant="caption" sx={{ color: '#f97316', fontWeight: 800 }}>{item.date.toLocaleDateString()}</Typography>
+                                  <Typography variant="body2" sx={{ fontWeight: 800 }}>{item.title}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{item.detail}</Typography>
+                                </Box>
+                              )) : <Typography variant="body2" color="text.secondary">No urgent reminders for the next 60 days.</Typography>}
+                            </Stack>
+                          </CardContent>
+                        </Card>
+                        <Card sx={softCardSx}>
+                          <CardContent sx={{ p: 3 }}>
+                            <Typography variant="h6" sx={{ fontWeight: 850, mb: 2 }}>Portfolio Snapshot</Typography>
+                            {[
+                              ['Rental income', `$${rentalIncome.toLocaleString()}`],
+                              ['Outstanding rentals', `$${Number(displayedOutstandingRentals || 0).toLocaleString()}`],
+                              ['Outstanding levies', `$${Number(displayedOutstandingLevies || 0).toLocaleString()}`],
+                              ['Net income', `$${Math.max(0, rentalIncome - Number(displayedOutstandingRentals || 0)).toLocaleString()}`],
+                            ].map(([label, value]) => (
+                              <Stack direction="row" justifyContent="space-between" key={label} sx={{ py: 0.75 }}>
+                                <Typography variant="body2" color="text.secondary">{label}</Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 800 }}>{value}</Typography>
+                              </Stack>
+                            ))}
+                          </CardContent>
+                        </Card>
+                      </Stack>
+                    </Grid>
                   </Grid>
-                  <Grid item xs={12} md={6} lg={3}>
-                    <StatCard
-                      title="Active Tenants"
-                      value={dashboardData.activeTenants.toString()}
-                      icon={<PeopleIcon />}
-                      color="#11CDEF"
-                      loading={loading}
-                      onClick={() => {
-                        setShowActiveTenants(true);
-                        setShowLeaseInsights(false);
-                        setShowCommissionDetails(false);
-                        setShowPropertiesList(false);
-                        setShowOutstandingRentals(false);
-                        setShowOutstandingLevies(false);
-                      }}
-                    />
-                    <Box sx={{ mt: 2 }}>
-                    <StatCard
-                      title="Outstanding levies"
-                      value={`$${Number((computedOutstandingLevies ?? 0) || 0).toLocaleString()}`}
-                      icon={<ReceiptLongIcon />}
-                      color="#FFA534"
-                      loading={loading}
-                      onClick={() => {
-                        setShowOutstandingLevies(true);
-                        setShowOutstandingRentals(false);
-                        setShowCommissionDetails(false);
-                        setShowLeaseInsights(false);
-                        setShowActiveTenants(false);
-                        setShowPropertiesList(false);
-                      }}
-                    />
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} md={6} lg={3}>
-                    <StatCard
-                      title="Active Leases"
-                      value={dashboardData.activeLeases.toString()}
-                      icon={<DescriptionIcon />}
-                      color="#2DCE89"
-                      loading={loading}
-                      onClick={() => {
-                        setShowLeaseInsights(true);
-                        setSelectedLeaseCategory('all');
-                        setShowCommissionDetails(false);
-                        setShowActiveTenants(false);
-                        setShowPropertiesList(false);
-                        setShowOutstandingRentals(false);
-                        setShowOutstandingLevies(false);
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={6} lg={3}>
-                    <StatCard
-                      title="Monthly Commission"
-                      value={`$${(
-                        (filteredMonthlyAgentShare != null
-                          ? filteredMonthlyAgentShare
-                          : dashboardData.monthlyCommission) || 0
-                      ).toLocaleString()}`}
-                      icon={<PaymentIcon />}
-                      color="#FB6340"
-                      loading={loading}
-                      onClick={() => {
-                        setShowCommissionDetails(true);
-                        setShowLeaseInsights(false);
-                        setShowActiveTenants(false);
-                        setShowPropertiesList(false);
-                        setShowOutstandingRentals(false);
-                        setShowOutstandingLevies(false);
-                        loadCommissionPayments();
-                      }}
-                    />
-                  </Grid>
+
+                  <Card sx={{ ...softCardSx, background: 'linear-gradient(135deg, #eff6ff, #ffffff)' }}>
+                    <CardContent sx={{ p: 3 }}>
+                      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }} justifyContent="space-between">
+                        <Stack direction="row" spacing={2} alignItems="center">
+                          <Avatar sx={{ bgcolor: '#dbeafe', color: '#2563eb' }}>
+                            <LightbulbIcon />
+                          </Avatar>
+                          <Box>
+                            <Typography sx={{ fontWeight: 850 }}>Complete property setups to improve portfolio readiness.</Typography>
+                            <Typography variant="body2" color="text.secondary">Focus on missing owners, tenants, leases, and billing to keep operations calm and predictable.</Typography>
+                          </Box>
+                        </Stack>
+                        <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/agent-dashboard/workflow')} sx={{ borderRadius: 99, textTransform: 'none', fontWeight: 800, boxShadow: 'none' }}>
+                          Open workflow
+                        </Button>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+
+                  <Grid container spacing={3} ref={kpiDetailRef}>
                   <Grid item xs={12}>
                     <Card>
                       <CardContent>
-                        {showCommissionDetails ? (
+                        {false && showCommissionDetails ? (
                           <>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                               <Typography variant="h6">Commission Payments</Typography>
@@ -849,102 +1575,7 @@ const AgentDashboard: React.FC = () => {
                               </Box>
                             ) : (
                               (() => {
-                                const now = new Date();
-                                const currentMonth = now.getMonth() + 1; // 1-12
-                                const currentYear = now.getFullYear();
-                                const ymKey = (y: number, m: number) => `${y}-${m}`;
-                                const cutY = (companyCtx as any)?.receivablesCutover?.year;
-                                const cutM = (companyCtx as any)?.receivablesCutover?.month;
-                                const cutoverDate = (cutY && cutM) ? new Date(Number(cutY), Number(cutM) - 1, 1) : null;
-                                const paidByProperty: Record<string, Set<string>> = {};
-                                const pushPaid = (propId: string, y: number, m: number) => {
-                                  const key = ymKey(y, m);
-                                  if (!paidByProperty[propId]) paidByProperty[propId] = new Set();
-                                  paidByProperty[propId].add(key);
-                                };
-                                for (const p of levyPayments || []) {
-                                  const status = (p?.status || '').toString().toLowerCase();
-                                  const isCompleted = status === 'completed' || status === 'success' || status === 'paid';
-                                  if (!isCompleted) continue;
-                                  const propertyId = getId(p.propertyId) || getId(p.property) || getId(p?.property?._id) || getId(p?.property?.id);
-                                  if (!propertyId) continue;
-                                  const monthsPaid: number = Number((p as any).advanceMonthsPaid || 1);
-                                  const startY = Number((p as any)?.advancePeriodStart?.year);
-                                  const startM = Number((p as any)?.advancePeriodStart?.month);
-                                  const endY = Number((p as any)?.advancePeriodEnd?.year);
-                                  const endM = Number((p as any)?.advancePeriodEnd?.month);
-                                  if (monthsPaid > 1 && startY && startM && endY && endM) {
-                                    let y = startY;
-                                    let m = startM;
-                                    while (y < endY || (y === endY && m <= endM)) {
-                                      pushPaid(propertyId, y, m);
-                                      m += 1; if (m > 12) { m = 1; y += 1; }
-                                    }
-                                  } else {
-                                    const m = (p as any).rentalPeriodMonth || (p as any).levyPeriodMonth || (p.paymentDate ? (new Date(p.paymentDate).getMonth() + 1) : undefined);
-                                    const y = (p as any).rentalPeriodYear || (p as any).levyPeriodYear || (p.paymentDate ? (new Date(p.paymentDate).getFullYear()) : undefined);
-                                    if (y && m) pushPaid(propertyId, Number(y), Number(m));
-                                  }
-                                }
-                                // Helper: iterate months between two dates inclusive by month
-                                const iterateMonths = (
-                                  start: Date,
-                                  end: Date,
-                                  cb: (y: number, m: number, label: string) => void,
-                                  hardCapMonths: number = 240
-                                ) => {
-                                  let y = start.getFullYear();
-                                  let m = start.getMonth() + 1;
-                                  let count = 0;
-                                  while ((y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth() + 1)) && count < hardCapMonths) {
-                                    const label = new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'short', year: 'numeric' });
-                                    cb(y, m, label);
-                                    m += 1; if (m > 12) { m = 1; y += 1; }
-                                    count += 1;
-                                  }
-                                };
-
-                                // Build items per property; for each lease (tenant), list missing levy months within lease period
-                                const items = (properties || [])
-                                  .filter((prop: any) => prop?.levyOrMunicipalType === 'levy')
-                                  .map((prop: any) => {
-                                    const pid = getId(prop._id) || getId(prop.id);
-                                    const paidKeys = paidByProperty[pid] || new Set<string>();
-                                    // Collect leases for this property (use full lease history)
-                                    const leasesForProperty = (leases || []).filter((l: any) => (getId(l.propertyId) || '') === pid);
-                                    // For each lease, compute missing months attributed to the lease tenant
-                                    const perTenantMissing: Array<{ tenantId: string; tenantName: string; labels: string[] } > = [];
-                                    let propertyTotalMissing = 0;
-                                    let propertyTotalAmount = 0;
-                                    const monthlyLevy = Number(prop?.levyOrMunicipalAmount) || 0;
-                                    for (const l of leasesForProperty) {
-                                      const range = getOutstandingRangeForLease(
-                                        l,
-                                        prop,
-                                        new Date(currentYear, currentMonth - 1, 1),
-                                        cutoverDate
-                                      );
-                                      if (!range) continue;
-                                      const labels: string[] = [];
-                                      iterateMonths(
-                                        range.start,
-                                        new Date(range.end.getFullYear(), range.end.getMonth(), 1),
-                                        (y, m, label) => {
-                                        if (!paidKeys.has(ymKey(y, m))) labels.push(label);
-                                      });
-                                      if (labels.length > 0) {
-                                        const tid = getId(l.tenantId) || '';
-                                        const t = resolveTenantById(tid);
-                                        const tName = t ? (`${t.firstName || ''} ${t.lastName || ''}`.trim() || t.name || t.fullName || 'Unknown Tenant') : 'Unknown Tenant';
-                                        perTenantMissing.push({ tenantId: tid, tenantName: tName, labels });
-                                        propertyTotalMissing += labels.length;
-                                        propertyTotalAmount += labels.length * monthlyLevy;
-                                      }
-                                    }
-                                    return { prop, pid, perTenantMissing, propertyTotalMissing, propertyTotalAmount };
-                                  })
-                                  .filter((row: any) => (row.perTenantMissing || []).length > 0)
-                                  .sort((a: any, b: any) => (b.propertyTotalMissing || 0) - (a.propertyTotalMissing || 0));
+                                const items = outstandingLevyRows;
                                 if (!items.length) {
                                   return <Typography color="text.secondary">All levy-paying properties have payments recorded for the lease periods.</Typography>;
                                 }
@@ -1406,9 +2037,7 @@ const AgentDashboard: React.FC = () => {
                                 <CircularProgress />
                               </Box>
                             ) : (
-                              <Typography color="text.secondary">
-                                No recent activity to display
-                              </Typography>
+                              <RentalWorkflowCenter summary={workflowSummary} title="Operational Activity" />
                             )}
                           </>
                         )}
@@ -1416,13 +2045,16 @@ const AgentDashboard: React.FC = () => {
                     </Card>
                   </Grid>
                 </Grid>
+                </Stack>
               </>
             } />
+            <Route path="workflow" element={<RentalWorkflowCenter summary={workflowSummary} />} />
             <Route path="properties" element={<Properties />} />
             <Route path="properties/:propertyId" element={<PropertyDetailsPage />} />
             <Route path="tenants" element={<Tenants />} />
             <Route path="leases" element={<AgentLeasesPage />} />
             <Route path="property-owners" element={<AgentPropertyOwnersPage />} />
+            <Route path="property-owners/:ownerId" element={<OwnerPortfolioHub />} />
             <Route
               path="payments"
               element={
@@ -1443,6 +2075,14 @@ const AgentDashboard: React.FC = () => {
                     isAuthenticated={!!isAuthenticated}
                     authLoading={authLoading}
                   />
+                </Box>
+              }
+            />
+            <Route
+              path="maintenance-vendors"
+              element={
+                <Box sx={{ ml: -3, p: 0 }}>
+                  <MaintenanceVendorsPage />
                 </Box>
               }
             />

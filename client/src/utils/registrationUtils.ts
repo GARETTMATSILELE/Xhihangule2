@@ -65,18 +65,52 @@ export const validateRegistrationForm = (data: SignUpData): string[] => {
   return errors;
 };
 
+export interface OnboardingValidationData {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  name: string;
+  plan: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
+  companyType: 'INDIVIDUAL_LANDLORD' | 'REGISTERED_BUSINESS';
+  companyName: string;
+  companyEmail?: string;
+  address?: string;
+  phone?: string;
+  registrationNumber?: string;
+  tinNumber?: string;
+}
+
+export const validateOnboardingForm = (data: OnboardingValidationData): string[] => {
+  const errors: string[] = [];
+  if (!data.name.trim()) errors.push('Full name is required');
+  if (!data.email.trim()) errors.push('Email is required');
+  else if (!/\S+@\S+\.\S+/.test(data.email)) errors.push('Email is invalid');
+  if (!data.password) errors.push('Password is required');
+  if (data.password !== data.confirmPassword) errors.push('Passwords do not match');
+  if (!data.companyName.trim()) errors.push('Company/workspace name is required');
+  if (data.companyEmail && !/\S+@\S+\.\S+/.test(data.companyEmail)) errors.push('Company email is invalid');
+  if (data.companyType === 'REGISTERED_BUSINESS') {
+    if (!data.address?.trim()) errors.push('Business address is required');
+    if (!data.phone?.trim()) errors.push('Business phone is required');
+    if (!data.registrationNumber?.trim()) errors.push('Registration number is required for registered businesses');
+    if (!data.tinNumber?.trim()) errors.push('TIN number is required for registered businesses');
+  }
+  return errors;
+};
+
 export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant' | 'sales' | 'principal' | 'prea' | 'system_admin';
 
-export const getDashboardPath = (role: UserRole): string => {
+export const getDashboardPath = (role: UserRole, company?: { workspaceType?: 'agency' | 'individual'; plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE' } | null): string => {
+  const isIndividualWorkspace = company?.workspaceType === 'individual' || company?.plan === 'INDIVIDUAL';
   switch (role) {
     case 'system_admin':
       return '/system-admin';
     case 'admin':
-      return '/admin-dashboard';
+      return isIndividualWorkspace ? '/individual-dashboard' : '/admin-dashboard';
     case 'principal':
-      return '/admin-dashboard';
+      return isIndividualWorkspace ? '/individual-dashboard' : '/admin-dashboard';
     case 'prea':
-      return '/admin-dashboard';
+      return isIndividualWorkspace ? '/individual-dashboard' : '/admin-dashboard';
     case 'agent':
       return '/agent-dashboard';
     case 'owner':

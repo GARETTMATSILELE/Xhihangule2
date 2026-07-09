@@ -18,6 +18,27 @@ import { BankAccount } from './BankAccount';
 import { BankTransaction } from './BankTransaction';
 import { MaintenanceJob } from './MaintenanceJob';
 import DashboardKpiSnapshot from './DashboardKpiSnapshot';
+import { OnboardingSession } from './OnboardingSession';
+import { PaymentSession } from './PaymentSession';
+import { AuditLog } from './AuditLog';
+import { MaintenanceContractor } from './MaintenanceContractor';
+import { MaintenanceWorkOrder } from './MaintenanceWorkOrder';
+import { MaintenanceActivity } from './MaintenanceActivity';
+import { MaintenanceAttachmentRecord } from './MaintenanceAttachment';
+import { MaintenanceQuote } from './MaintenanceQuote';
+import { MaintenanceVerification } from './MaintenanceVerification';
+import { OwnerDocument } from './OwnerDocument';
+import { OwnerBankingDetails } from './OwnerBankingDetails';
+import { OwnerPreferences } from './OwnerPreferences';
+import { OwnershipHistory } from './OwnershipHistory';
+import { Plan } from './Plan';
+import { PlatformInvoice } from './PlatformInvoice';
+import { CashPayment } from './CashPayment';
+import { SupportTicket } from './SupportTicket';
+import { DutyRosterShift } from './DutyRosterShift';
+import { AgentAvailability } from './AgentAvailability';
+import { LeaveRequest } from './LeaveRequest';
+import { PublicHoliday } from './PublicHoliday';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -106,7 +127,28 @@ export async function createIndexes() {
       { model: BankAccount, name: 'BankAccount' },
       { model: BankTransaction, name: 'BankTransaction' },
       { model: MaintenanceJob, name: 'MaintenanceJob' },
-      { model: DashboardKpiSnapshot, name: 'DashboardKpiSnapshot' }
+      { model: DashboardKpiSnapshot, name: 'DashboardKpiSnapshot' },
+      { model: OnboardingSession, name: 'OnboardingSession' },
+      { model: PaymentSession, name: 'PaymentSession' },
+      { model: AuditLog, name: 'AuditLog' },
+      { model: MaintenanceContractor, name: 'MaintenanceContractor' },
+      { model: MaintenanceWorkOrder, name: 'MaintenanceWorkOrder' },
+      { model: MaintenanceActivity, name: 'MaintenanceActivity' },
+      { model: MaintenanceAttachmentRecord, name: 'MaintenanceAttachmentRecord' },
+      { model: MaintenanceQuote, name: 'MaintenanceQuote' },
+      { model: MaintenanceVerification, name: 'MaintenanceVerification' },
+      { model: OwnerDocument, name: 'OwnerDocument' },
+      { model: OwnerBankingDetails, name: 'OwnerBankingDetails' },
+      { model: OwnerPreferences, name: 'OwnerPreferences' },
+      { model: OwnershipHistory, name: 'OwnershipHistory' },
+      { model: Plan, name: 'Plan' },
+      { model: PlatformInvoice, name: 'PlatformInvoice' },
+      { model: CashPayment, name: 'CashPayment' },
+      { model: SupportTicket, name: 'SupportTicket' },
+      { model: DutyRosterShift, name: 'DutyRosterShift' },
+      { model: AgentAvailability, name: 'AgentAvailability' },
+      { model: LeaveRequest, name: 'LeaveRequest' },
+      { model: PublicHoliday, name: 'PublicHoliday' },
     ];
 
     for (const { model, name } of models) {

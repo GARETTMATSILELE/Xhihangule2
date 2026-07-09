@@ -1,11 +1,23 @@
 export type PropertyStatus = 'available' | 'rented' | 'maintenance' | 'under_offer' | 'sold';
 export type PropertyType = 'apartment' | 'house' | 'commercial' | 'land';
+export type PropertyCategory = 'Residential' | 'Commercial' | 'Land' | 'Special Use';
+export type PropertyOperationalStatus = 'Vacant' | 'Occupied' | 'Under Maintenance' | 'Reserved' | 'Archived';
+export type PropertyUse = 'Rental' | 'Sale' | 'Both' | 'Internal';
 
 export interface Property {
   _id: string;
   name: string;
   address: string;
   type: PropertyType;
+  /**
+   * Additive, optional fields for the classification engine.
+   * Backwards compatible: legacy records may not have these fields.
+   */
+  propertyCategory?: PropertyCategory;
+  propertySubtype?: string;
+  propertySpecifications?: Record<string, unknown>;
+  propertyOperationalStatus?: PropertyOperationalStatus;
+  propertyUse?: PropertyUse;
   status: PropertyStatus;
   rent: number;
   price?: number;
@@ -51,6 +63,13 @@ export interface Property {
   isDeleted?: boolean;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  monthlyIncome?: number;
+  monthlyExpenses?: number;
+  netProfit?: number;
+  occupancyPercent?: number;
+  collectionPercent?: number;
+  profitabilityPercent?: number;
+  expenseRatio?: number;
 }
 
 export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'createdAt' | 'updatedAt' | 'status' | 'occupiedUnits'> {

@@ -19,18 +19,13 @@ import maintenanceJobQueueService from '../services/maintenanceJobQueueService';
 export const getPropertyAccount = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const ledgerRaw = String(req.query.ledger || '').toLowerCase();
-    const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined)) as
-      | 'rental'
-      | 'sale'
-      | undefined;
     
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
     }
 
     // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
-    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
+    const account = await propertyAccountService.getPropertyAccount(propertyId);
     
     res.json({
       success: true,
@@ -223,11 +218,6 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
       includePayoutsRaw === '1' ||
       includePayoutsRaw === 'true' ||
       includePayoutsRaw === 'yes';
-    const ledgerRaw = String(req.query.ledger || '').toLowerCase();
-    const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined)) as
-      | 'rental'
-      | 'sale'
-      | undefined;
     
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
@@ -240,7 +230,7 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
     if (category) filters.category = category;
     if (status) filters.status = status;
 
-    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters, ledger as any);
+    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters);
     if (!includePayouts) {
       return res.json({
         success: true,
@@ -248,7 +238,7 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
       });
     }
 
-    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger as any);
+    const account = await propertyAccountService.getPropertyAccount(propertyId);
     const payoutTransactions = (account.ownerPayouts || []).map((payout: any) => ({
       _id: String(payout?._id || ''),
       type: 'owner_payout',
@@ -295,10 +285,6 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
 export const addExpense = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const ledger = (String(req.query?.ledger || '').toLowerCase() === 'sale' ? 'sale' : (String(req.query?.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined)) as
-      | 'rental'
-      | 'sale'
-      | undefined;
     const { 
       amount, 
       date, 
@@ -339,7 +325,7 @@ export const addExpense = async (req: Request, res: Response) => {
       idempotencyKey
     };
 
-    const account = await propertyAccountService.addExpense(propertyId, expenseData, ledger);
+    const account = await propertyAccountService.addExpense(propertyId, expenseData);
     if (req.user?.companyId) {
       await accountingIntegrationService.syncExpenseCreated({
         companyId: String(req.user.companyId),
@@ -386,10 +372,6 @@ export const addExpense = async (req: Request, res: Response) => {
 export const addOpeningBalanceAdjustment = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const ledger = (String(req.query?.ledger || '').toLowerCase() === 'sale' ? 'sale' : (String(req.query?.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined)) as
-      | 'rental'
-      | 'sale'
-      | undefined;
     const { amount, direction, date, description, notes } = req.body;
 
     if (!propertyId) {
@@ -424,8 +406,7 @@ export const addOpeningBalanceAdjustment = async (req: Request, res: Response) =
         processedBy: req.user.userId,
         notes,
         idempotencyKey
-      },
-      ledger
+      }
     );
 
     if (idempotencyKey) {
@@ -461,10 +442,6 @@ export const addOpeningBalanceAdjustment = async (req: Request, res: Response) =
 export const createOwnerPayout = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const ledger = (String(req.query?.ledger || '').toLowerCase() === 'sale' ? 'sale' : (String(req.query?.ledger || '').toLowerCase() === 'rental' ? 'rental' : undefined)) as
-      | 'rental'
-      | 'sale'
-      | undefined;
     const {
       amount,
       paymentMethod, 
@@ -492,7 +469,7 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
     }
 
     // Get the property account to access owner information
-    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger);
+    const account = await propertyAccountService.getPropertyAccount(propertyId);
     
     // Use provided recipientId or fall back to property owner
     let finalRecipientId = recipientId;
@@ -524,7 +501,7 @@ export const createOwnerPayout = async (req: Request, res: Response) => {
       idempotencyKey
     };
 
-    const { account: updatedAccount, payout } = await propertyAccountService.createOwnerPayout(propertyId, payoutData, ledger);
+    const { account: updatedAccount, payout } = await propertyAccountService.createOwnerPayout(propertyId, payoutData);
     // Echo back generated/used idempotency key
     if ((payout as any)?.idempotencyKey) {
       try { res.setHeader('Idempotency-Key', String((payout as any).idempotencyKey)); } catch {}
@@ -646,11 +623,10 @@ export const getPayoutHistory = async (req: Request, res: Response) => {
 export const reconcilePropertyDuplicates = async (req: Request, res: Response) => {
   try {
     const { propertyId } = req.params;
-    const ledger = (req.query.ledger as string) === 'sale' ? 'sale' : 'rental';
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
     }
-    const result = await reconcilePropertyLedgerDuplicates(propertyId, ledger as any);
+    const result = await reconcilePropertyLedgerDuplicates(propertyId);
     return res.json({ success: true, message: 'Reconciliation completed', data: result });
   } catch (error) {
     logger.error('Error in reconcilePropertyDuplicates:', error);
@@ -968,20 +944,14 @@ export const mergePropertyAccountDuplicatesForProperty = async (req: Request, re
       return res.status(500).json({ success: false, message: 'Merge operation not available' });
     }
     const groupsChanged = await service.mergeDuplicateAccounts(accounts);
-    // Reconcile duplicate income transactions on both potential ledgers
-    let rentalRecon: any = null;
-    let saleRecon: any = null;
-    try { rentalRecon = await reconcilePropertyLedgerDuplicates(propertyId, 'rental' as any); } catch {}
-    try { saleRecon = await reconcilePropertyLedgerDuplicates(propertyId, 'sale' as any); } catch {}
+    let reconciliation: any = null;
+    try { reconciliation = await reconcilePropertyLedgerDuplicates(propertyId); } catch {}
     return res.json({
       success: true,
       message: 'Property ledgers merged and reconciled (if applicable)',
       data: {
         merged: groupsChanged,
-        reconciled: {
-          rental: rentalRecon,
-          sale: saleRecon
-        }
+        reconciled: reconciliation
       }
     });
   } catch (error) {

@@ -10,6 +10,7 @@ import { AccountingEventLog } from '../models/AccountingEventLog';
 import { Payment } from '../models/Payment';
 import dashboardKpiService from './dashboardKpiService';
 import type { DashboardOutstandingBreakdown } from './dashboardKpiService';
+import propertyAccountService from './propertyAccountService';
 
 export interface PostJournalLineInput {
   accountCode: string;
@@ -408,7 +409,7 @@ class AccountingService {
     const loader = (async (): Promise<Record<string, number | string>> => {
       const companyObjectId = toObjectId(companyId);
       await this.ensureCompanyBalance(companyId);
-      const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis] = await Promise.all([
+      const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis, passThroughSummary] = await Promise.all([
         CompanyBalance.findOne({ companyId: companyObjectId }).maxTimeMS(10000).lean(),
         BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]).option({ maxTimeMS: 10000 }),
         BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }).maxTimeMS(10000),
@@ -437,7 +438,13 @@ class AccountingService {
             }
           }
         ]).option({ maxTimeMS: 10000 }),
-        dashboardKpiService.getCompanySnapshot(companyId)
+        dashboardKpiService.getCompanySnapshot(companyId),
+        propertyAccountService.getCompanyPassThroughSummary(companyId).catch(() => ({
+          totalCollected: 0,
+          totalPaid: 0,
+          totalOutstanding: 0,
+          byType: {}
+        }))
       ]);
 
       const cashBalance = toMoney(cash[0]?.total || 0);
@@ -482,6 +489,10 @@ class AccountingService {
         invoices: toMoney(Number(dashboardKpis?.invoices || 0)),
         outstandingRentals: toMoney(Number(dashboardKpis?.outstandingRentals || 0)),
         outstandingLevies: toMoney(Number((dashboardKpis as any)?.outstandingLevies || 0)),
+        passThroughCollected: toMoney(Number((passThroughSummary as any)?.totalCollected || 0)),
+        passThroughPaid: toMoney(Number((passThroughSummary as any)?.totalPaid || 0)),
+        passThroughOutstanding: toMoney(Number((passThroughSummary as any)?.totalOutstanding || 0)),
+        passThroughByType: (passThroughSummary as any)?.byType || {},
         lastUpdated: balance?.lastUpdated?.toISOString() || new Date().toISOString()
       };
 
@@ -514,7 +525,22 @@ class AccountingService {
   }
 
   async getDashboardOutstanding(companyId: string): Promise<DashboardOutstandingBreakdown> {
-    return dashboardKpiService.getCompanyOutstandingBreakdown(companyId);
+    const [breakdown, passThroughSummary] = await Promise.all([
+      dashboardKpiService.getCompanyOutstandingBreakdown(companyId),
+      propertyAccountService.getCompanyPassThroughSummary(companyId).catch(() => ({
+        totalCollected: 0,
+        totalPaid: 0,
+        totalOutstanding: 0,
+        byType: {}
+      }))
+    ]);
+    return {
+      ...(breakdown as any),
+      passThroughCollected: toMoney(Number((passThroughSummary as any)?.totalCollected || 0)),
+      passThroughPaid: toMoney(Number((passThroughSummary as any)?.totalPaid || 0)),
+      passThroughOutstanding: toMoney(Number((passThroughSummary as any)?.totalOutstanding || 0)),
+      passThroughByType: (passThroughSummary as any)?.byType || {}
+    } as any;
   }
 
   async getTrend(companyId: string, accountType: 'revenue' | 'expense', months = 12): Promise<Array<{ month: string; total: number }>> {

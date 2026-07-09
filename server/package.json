@@ -16,6 +16,11 @@
     "reconcile:apply": "npm run build && node dist/scripts/reconcile.js --apply",
     "ledger:maintain": "npm run build && node dist/scripts/ledgerMaintenance.js",
     "ledger:backfill-keys": "npm run build && node dist/scripts/backfillIdempotencyKeys.js",
+    "inspections:backfill:dry": "npm run build && node dist/scripts/backfillInspectionCompliance.js --dry-run --no-reminder-spam",
+    "inspections:backfill:apply": "npm run build && node dist/scripts/backfillInspectionCompliance.js --apply --no-reminder-spam",
+    "companies:workspace-type:dry": "npm run build && node dist/scripts/migrateCompanyWorkspaceType.js",
+    "companies:workspace-type:apply": "npm run build && node dist/scripts/migrateCompanyWorkspaceType.js --apply",
+    "saas:indexes": "npm run build && node dist/scripts/saasSafeIndexes.js",
     "test": "jest"
   },
   "keywords": [],

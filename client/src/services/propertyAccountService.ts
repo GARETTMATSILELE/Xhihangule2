@@ -35,11 +35,16 @@ export interface PropertyAccount {
   ownerId?: string;
   ownerName?: string;
   transactions: Transaction[];
+  passThroughAccounts?: PassThroughAccount[];
   ownerPayouts: OwnerPayout[];
   runningBalance: number;
   totalIncome: number;
   totalExpenses: number;
   totalOwnerPayouts: number;
+  passThroughOutstanding?: number;
+  passThroughCollected?: number;
+  passThroughPaid?: number;
+  netOwnerBalance?: number;
   lastIncomeDate?: Date;
   lastExpenseDate?: Date;
   lastPayoutDate?: Date;
@@ -57,6 +62,11 @@ export interface Transaction {
   paymentId?: string;
   description: string;
   category?: string;
+  transactionCategory?: 'RENT' | 'PASS_THROUGH' | 'MAINTENANCE' | 'OWNER_PAYOUT' | 'COMMISSION' | 'OPENING_BALANCE' | 'DEPOSIT' | 'OTHER';
+  accountingTreatment?: 'PROPERTY_INCOME' | 'PROPERTY_EXPENSE' | 'PASS_THROUGH' | 'OWNER_WITHDRAWAL' | 'SYSTEM';
+  chargeTypeCode?: string;
+  chargeTypeId?: string;
+  passThroughType?: string;
   direction?: 'credit' | 'debit';
   recipientId?: string;
   recipientType?: 'owner' | 'contractor' | 'tenant' | 'other';
@@ -68,6 +78,35 @@ export interface Transaction {
   createdAt: Date;
   updatedAt: Date;
   runningBalance?: number;
+}
+
+export interface PassThroughTransaction {
+  _id?: string;
+  type: 'collection' | 'payment' | 'adjustment';
+  amount: number;
+  date: Date;
+  paymentId?: string;
+  levyPaymentId?: string;
+  chargeTypeCode?: string;
+  chargeTypeId?: string;
+  idempotencyKey?: string;
+  description: string;
+  referenceNumber?: string;
+  status: 'pending' | 'completed' | 'failed' | 'cancelled';
+  processedBy?: string;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PassThroughAccount {
+  type: string;
+  label?: string;
+  runningBalance: number;
+  totalCollected: number;
+  totalPaid: number;
+  transactions: PassThroughTransaction[];
+  lastUpdated?: Date;
 }
 
 export interface OwnerPayout {
@@ -186,11 +225,9 @@ class PropertyAccountService {
   /**
    * Get property account by ID
    */
-  async getPropertyAccount(propertyId: string, ledger?: 'rental' | 'sale'): Promise<PropertyAccount> {
+  async getPropertyAccount(propertyId: string): Promise<PropertyAccount> {
     try {
-      const response = await api.get(`/accountants/property-accounts/${propertyId}`, {
-        params: ledger ? { ledger } : {}
-      });
+      const response = await api.get(`/accountants/property-accounts/${propertyId}`);
       return response.data.data;
     } catch (error) {
       console.error('Error fetching property account:', error);
@@ -227,13 +264,13 @@ class PropertyAccountService {
   /**
    * Add expense to property account
    */
-  async addExpense(propertyId: string, expenseData: ExpenseData, ledger?: 'rental' | 'sale'): Promise<PropertyAccount> {
+  async addExpense(propertyId: string, expenseData: ExpenseData): Promise<PropertyAccount> {
     try {
       const key = `expense:${generateId()}`;
       const response = await api.post(
         `/accountants/property-accounts/${propertyId}/expense`,
         { ...expenseData },
-        { params: ledger ? { ledger } : {}, headers: { 'Idempotency-Key': key } }
+        { headers: { 'Idempotency-Key': key } }
       );
       return response.data.data;
     } catch (error) {
@@ -247,15 +284,14 @@ class PropertyAccountService {
    */
   async addOpeningBalanceAdjustment(
     propertyId: string,
-    openingBalanceData: OpeningBalanceData,
-    ledger?: 'rental' | 'sale'
+    openingBalanceData: OpeningBalanceData
   ): Promise<PropertyAccount> {
     try {
       const key = `opening-balance:${generateId()}`;
       const response = await api.post(
         `/accountants/property-accounts/${propertyId}/opening-balances`,
         { ...openingBalanceData },
-        { params: ledger ? { ledger } : {}, headers: { 'Idempotency-Key': key } }
+        { headers: { 'Idempotency-Key': key } }
       );
       return response.data.data;
     } catch (error) {
@@ -269,15 +305,14 @@ class PropertyAccountService {
    */
   async createOwnerPayout(
     propertyId: string,
-    payoutData: PayoutData,
-    ledger?: 'rental' | 'sale'
+    payoutData: PayoutData
   ): Promise<{ account: PropertyAccount; payout: OwnerPayout }> {
     try {
       const key = `payout:${generateId()}`;
       const response = await api.post(
         `/accountants/property-accounts/${propertyId}/payout`,
         { ...payoutData },
-        { params: ledger ? { ledger } : {}, headers: { 'Idempotency-Key': key } }
+        { headers: { 'Idempotency-Key': key } }
       );
       return response.data.data;
     } catch (error) {

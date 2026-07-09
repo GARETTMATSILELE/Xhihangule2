@@ -15,12 +15,16 @@ import './api';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 import ChooseDashboard from './pages/ChooseDashboard';
 import { salesOwnerTheme } from './themes/salesOwnerTheme';
+import DashboardRedirect from './components/DashboardRedirect';
+import AgencyDashboardGate from './components/AgencyDashboardGate';
 
 const LandingPage = lazyWithRetry(() => import('./pages/LandingPage'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
+const IndividualDashboard = lazyWithRetry(() => import('./pages/IndividualDashboard'));
 const SystemAdminDashboard = lazyWithRetry(() => import('./pages/SystemAdminDashboard'));
 // Ensure correct case to match actual folder name on disk (windows is case-insensitive)
 const CompanySetup = lazyWithRetry(() => import('./pages/admin/CompanySetup'));
+const WorkspaceSetup = lazyWithRetry(() => import('./pages/WorkspaceSetup'));
 const Login = lazyWithRetry(() => import('./components/Login'));
 const Signup = lazyWithRetry(() => import('./pages/Signup'));
 const ForgotPassword = lazyWithRetry(() => import('./pages/ForgotPassword'));
@@ -138,6 +142,15 @@ const App: React.FC = () => {
               <Route path="/billing/upgrade" element={<BillingSetup />} />
               <Route path="/checkout/paypal" element={<PaypalCheckout />} />
               <Route path="/checkout" element={<PaypalCheckout />} />
+              <Route path="/dashboard" element={
+                <PropertyProvider>
+                  <CompanyProvider>
+                    <ProtectedRoute requiredRoles={['admin','principal','prea']}>
+                      <DashboardRedirect />
+                    </ProtectedRoute>
+                  </CompanyProvider>
+                </PropertyProvider>
+              } />
               {/* System Admin (Global) */}
               <Route path="/system-admin/*" element={<SystemAdminDashboard />} />
               {/* Admin Dashboard Routes - Protected with authentication */}
@@ -145,7 +158,18 @@ const App: React.FC = () => {
                 <PropertyProvider>
                   <CompanyProvider>
                     <ProtectedRoute requiredRoles={['admin','principal','prea']}>
-                      <AdminDashboard />
+                      <AgencyDashboardGate>
+                        <AdminDashboard />
+                      </AgencyDashboardGate>
+                    </ProtectedRoute>
+                  </CompanyProvider>
+                </PropertyProvider>
+              } />
+              <Route path="/individual-dashboard/*" element={
+                <PropertyProvider>
+                  <CompanyProvider>
+                    <ProtectedRoute requiredRoles={['admin','principal','prea']}>
+                      <IndividualDashboard />
                     </ProtectedRoute>
                   </CompanyProvider>
                 </PropertyProvider>
@@ -156,6 +180,13 @@ const App: React.FC = () => {
                     <CompanySetup />
                   </CompanyProvider>
                 </ProtectedRoute>
+              } />
+              <Route path="/workspace-setup" element={
+                <CompanyProvider>
+                  <ProtectedRoute requiredRoles={['admin','principal','prea']}>
+                    <WorkspaceSetup />
+                  </ProtectedRoute>
+                </CompanyProvider>
               } />
               <Route path="/owner-dashboard/*" element={
                 <ProtectedRoute requiredRoles={['owner']}>

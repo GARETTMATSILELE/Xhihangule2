@@ -7,9 +7,11 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = require("dotenv");
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
+const crypto_1 = __importDefault(require("crypto"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const databaseCheck_1 = require("./middleware/databaseCheck");
 const auth_1 = __importDefault(require("./routes/auth"));
+const onboardingRoutes_1 = __importDefault(require("./routes/onboardingRoutes"));
 const agentRoutes_1 = __importDefault(require("./routes/agentRoutes"));
 const accountantRoutes_1 = __importDefault(require("./routes/accountantRoutes"));
 const chartRoutes_1 = __importDefault(require("./routes/chartRoutes"));
@@ -39,10 +41,12 @@ const developmentRoutes_1 = __importDefault(require("./routes/developmentRoutes"
 const developmentUnitRoutes_1 = __importDefault(require("./routes/developmentUnitRoutes"));
 const maintenanceRoutes_1 = __importDefault(require("./routes/maintenanceRoutes"));
 const paypalRoutes_1 = __importDefault(require("./routes/paypalRoutes"));
+const individualRoutes_1 = __importDefault(require("./routes/individualRoutes"));
 const levyPaymentRoutes_1 = __importDefault(require("./routes/levyPaymentRoutes"));
 const municipalPaymentRoutes_1 = __importDefault(require("./routes/municipalPaymentRoutes"));
 const paymentRequestRoutes_1 = __importDefault(require("./routes/paymentRequestRoutes"));
 const notificationRoutes_1 = __importDefault(require("./routes/notificationRoutes"));
+const agencyOperationsRoutes_1 = __importDefault(require("./routes/agencyOperationsRoutes"));
 // Load environment variables
 (0, dotenv_1.config)();
 const app = (0, express_1.default)();
@@ -80,6 +84,12 @@ const corsOptions = {
     maxAge: 86400 // 24 hours
 };
 // Middleware
+app.use((req, res, next) => {
+    const requestId = req.get('x-request-id') || crypto_1.default.randomUUID();
+    req.requestId = requestId;
+    res.setHeader('X-Request-Id', requestId);
+    next();
+});
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
@@ -108,6 +118,7 @@ app.use('/api/public/reports', publicReportRoutes_1.default);
 app.use(databaseCheck_1.checkDatabaseConnection);
 // Protected routes
 app.use('/api/auth', auth_1.default);
+app.use('/api/onboarding', onboardingRoutes_1.default);
 app.use('/api/agents', agentRoutes_1.default);
 app.use('/api/accountants', accountantRoutes_1.default);
 app.use('/api/charts', chartRoutes_1.default);
@@ -115,6 +126,7 @@ app.use('/api/reports', reportRoutes_1.default);
 app.use('/api/users', userRoutes_1.default);
 app.use('/api/properties', propertyRoutes_1.default);
 app.use('/api/maintenance', maintenanceRoutes_1.default);
+app.use('/api/individual', individualRoutes_1.default);
 app.use('/api/payments', paymentRoutes_1.default);
 app.use('/api/tenants', tenantRoutes_1.default);
 app.use('/api/leases', leaseRoutes_1.default);
@@ -139,6 +151,7 @@ app.use('/api/levy-payments', levyPaymentRoutes_1.default);
 app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
 app.use('/api/notifications', notificationRoutes_1.default);
+app.use('/api/agency-operations', agencyOperationsRoutes_1.default);
 app.use('/api/paypal', paypalRoutes_1.default);
 // Error handling
 app.use(errorHandler_1.errorHandler);

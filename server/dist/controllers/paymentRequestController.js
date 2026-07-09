@@ -44,6 +44,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPaymentRequestStats = exports.deletePaymentRequest = exports.rejectPaymentRequest = exports.approvePaymentRequest = exports.updatePaymentRequestStatus = exports.getPaymentRequest = exports.getPaymentRequests = exports.createPaymentRequest = void 0;
 const PaymentRequest_1 = require("../models/PaymentRequest");
+const maintenanceManagementService_1 = require("../services/maintenanceManagementService");
 const Notification_1 = require("../models/Notification");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
@@ -63,7 +64,7 @@ const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!companyId) {
             return res.status(400).json({ message: 'Company ID is required' });
         }
-        const { propertyId, tenantId, ownerId, amount, currency, reason, requestDate, dueDate, notes, payTo, reportHtml, developmentId, developmentUnitId } = req.body;
+        const { propertyId, tenantId, ownerId, amount, currency, reason, requestDate, dueDate, notes, payTo, reportHtml, developmentId, developmentUnitId, maintenanceRequestId, } = req.body;
         // Validate required fields (propertyId can be omitted for development/manual sales)
         if (!amount || !currency || !reason || !(payTo === null || payTo === void 0 ? void 0 : payTo.name) || !(payTo === null || payTo === void 0 ? void 0 : payTo.surname)) {
             return res.status(400).json({ message: 'Missing required fields' });
@@ -131,7 +132,8 @@ const createPaymentRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
             payTo,
             reportHtml,
             approval: { status: 'pending' },
-            readyForAccounting: false
+            readyForAccounting: false,
+            maintenanceRequestId: maintenanceRequestId || undefined,
         });
         yield paymentRequest.save();
         // Notify Principal and PREA users in the company (if roles exist)
@@ -278,6 +280,9 @@ const updatePaymentRequestStatus = (req, res) => __awaiter(void 0, void 0, void 
             paymentRequest.processedDate = new Date();
         }
         yield paymentRequest.save();
+        if (status === 'paid' && paymentRequest.maintenanceRequestId) {
+            yield (0, maintenanceManagementService_1.syncPaymentFromRequest)(String(paymentRequest._id), paymentRequest.amount, notes);
+        }
         // Populate the updated document
         const updatedRequest = yield PaymentRequest_1.PaymentRequest.findById(id)
             .populate('propertyId', 'name address')

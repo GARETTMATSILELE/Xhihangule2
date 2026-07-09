@@ -12,6 +12,7 @@ import {
   updateCurrentCompany
 } from '../controllers/companyController';
 import { auth, authWithCompany } from '../middleware/auth';
+import { authorize } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -44,9 +45,10 @@ router.put('/current', authWithCompany, asyncRoute(updateCurrentCompany));
 // Admin: change plan directly by company id (can be restricted later)
 router.put('/:id/plan', authWithCompany, asyncRoute(updateCompany));
 
-// Public routes
-router.get('/', asyncRoute(getCompanies));
-router.get('/:id', asyncRoute(getCompany));
+// Company metadata is tenant-sensitive. Keep /current for normal users and
+// restrict global/list-by-id access to platform admins.
+router.get('/', auth, authorize(['system_admin']), asyncRoute(getCompanies));
+router.get('/:id', auth, authorize(['system_admin']), asyncRoute(getCompany));
 
 // Protected routes
 // Allow creating a company even if user has no company yet

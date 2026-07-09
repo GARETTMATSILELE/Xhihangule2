@@ -2,10 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import { config } from 'dotenv';
 import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
 import { errorHandler } from './middleware/errorHandler';
 import { checkDatabaseConnection } from './middleware/databaseCheck';
 import { connectDatabase } from './config/database';
 import authRoutes from './routes/auth';
+import onboardingRoutes from './routes/onboardingRoutes';
 import agentRoutes from './routes/agentRoutes';
 import accountantRoutes from './routes/accountantRoutes';
 import chartRoutes from './routes/chartRoutes';
@@ -35,11 +37,13 @@ import developmentRoutes from './routes/developmentRoutes';
 import developmentUnitRoutes from './routes/developmentUnitRoutes';
 import maintenanceRoutes from './routes/maintenanceRoutes';
 import paypalRoutes from './routes/paypalRoutes';
+import individualRoutes from './routes/individualRoutes';
 
 import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
 import paymentRequestRoutes from './routes/paymentRequestRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import agencyOperationsRoutes from './routes/agencyOperationsRoutes';
 
 // Load environment variables
 config();
@@ -83,6 +87,12 @@ const corsOptions = {
 };
 
 // Middleware
+app.use((req, res, next) => {
+  const requestId = req.get('x-request-id') || crypto.randomUUID();
+  (req as any).requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  next();
+});
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
@@ -122,6 +132,7 @@ app.use(checkDatabaseConnection);
 
 // Protected routes
 app.use('/api/auth', authRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/accountants', accountantRoutes);
 app.use('/api/charts', chartRoutes);
@@ -129,6 +140,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
+app.use('/api/individual', individualRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/leases', leaseRoutes);
@@ -154,6 +166,7 @@ app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/agency-operations', agencyOperationsRoutes);
 app.use('/api/paypal', paypalRoutes);
 
 // Error handling

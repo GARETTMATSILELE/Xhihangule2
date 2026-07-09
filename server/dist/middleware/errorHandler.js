@@ -26,11 +26,12 @@ const errorHandler = (err, req, res, next) => {
         code: err instanceof AppError ? err.code : 'INTERNAL_SERVER_ERROR',
         details: err instanceof AppError ? err.details : undefined,
         path: req.path,
-        method: req.method
+        method: req.method,
+        requestId: req.requestId || req.get('x-request-id')
     });
     // Handle operational errors (AppError)
     if (err instanceof AppError) {
-        return res.status(err.statusCode).json(Object.assign({ status: err.status, message: err.message, code: err.code }, (process.env.NODE_ENV === 'development' && {
+        return res.status(err.statusCode).json(Object.assign({ status: err.status, message: err.message, code: err.code, requestId: req.requestId || req.get('x-request-id') }, (process.env.NODE_ENV === 'development' && {
             stack: err.stack,
             details: err.details
         })));
@@ -40,14 +41,16 @@ const errorHandler = (err, req, res, next) => {
         return res.status(401).json({
             status: 'error',
             message: 'Invalid token',
-            code: 'INVALID_TOKEN'
+            code: 'INVALID_TOKEN',
+            requestId: req.requestId || req.get('x-request-id')
         });
     }
     if (err.name === 'TokenExpiredError') {
         return res.status(401).json({
             status: 'error',
             message: 'Token expired',
-            code: 'TOKEN_EXPIRED'
+            code: 'TOKEN_EXPIRED',
+            requestId: req.requestId || req.get('x-request-id')
         });
     }
     // Handle MongoDB duplicate key errors
@@ -55,7 +58,8 @@ const errorHandler = (err, req, res, next) => {
         return res.status(400).json({
             status: 'error',
             message: 'Duplicate field value entered',
-            code: 'DUPLICATE_ENTRY'
+            code: 'DUPLICATE_ENTRY',
+            requestId: req.requestId || req.get('x-request-id')
         });
     }
     // Handle validation errors
@@ -64,11 +68,12 @@ const errorHandler = (err, req, res, next) => {
             status: 'error',
             message: 'Validation failed',
             code: 'VALIDATION_ERROR',
+            requestId: req.requestId || req.get('x-request-id'),
             details: Object.values(err.errors).map((e) => e.message)
         });
     }
     // Handle unknown errors
-    return res.status(500).json(Object.assign({ status: 'error', message: 'Something went wrong', code: 'INTERNAL_SERVER_ERROR' }, (process.env.NODE_ENV === 'development' && {
+    return res.status(500).json(Object.assign({ status: 'error', message: 'Something went wrong', code: 'INTERNAL_SERVER_ERROR', requestId: req.requestId || req.get('x-request-id') }, (process.env.NODE_ENV === 'development' && {
         stack: err.stack,
         error: err.message
     })));

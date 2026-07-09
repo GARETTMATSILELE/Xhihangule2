@@ -8,8 +8,16 @@ import mongoose from 'mongoose';
 import { updateChartMetrics } from './chartController';
 import { User } from '../models/User';
 import { SubscriptionService } from '../services/subscriptionService';
+import { escapeRegex, normalizeCompanyType, normalizeEmail, normalizeLegalIdentifier, normalizeWorkspaceType } from '../utils/normalization';
 
 const subscriptionService = SubscriptionService.getInstance();
+
+function isSuperAdmin(req: Request): boolean {
+  const roles: string[] = Array.isArray((req.user as any)?.roles)
+    ? (req.user as any).roles
+    : ((req.user as any)?.role ? [(req.user as any).role] : []);
+  return roles.includes('system_admin');
+}
 
 export const getCompanies = async (req: Request, res: Response) => {
   try {
@@ -55,15 +63,43 @@ export const getCompany = async (req: Request, res: Response) => {
 export const createCompany = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
+    const companyType = normalizeCompanyType(req.body?.companyType);
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedRegistrationNumber = normalizeLegalIdentifier(registrationNumber);
+    const normalizedTinNumber = normalizeLegalIdentifier(tinNumber);
     console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
 
-    // Check if company with same name or email already exists
-    const existingCompany = await Company.findOne({
-      $or: [
-        { name: { $regex: new RegExp(`^${name}$`, 'i') } },
-        { email: { $regex: new RegExp(`^${email}$`, 'i') } }
-      ]
-    });
+    const currentUserId = (req.user as JwtPayload).userId;
+    if (!currentUserId) {
+      throw new AppError('User not authenticated', 401);
+    }
+
+    if (!isSuperAdmin(req)) {
+      const alreadyLinkedCompanyId = req.user?.companyId;
+      const ownedCompany = await Company.findOne({ ownerId: currentUserId }).select('_id').lean();
+      if (alreadyLinkedCompanyId || ownedCompany) {
+        throw new AppError('User is already associated with a company', 409, 'COMPANY_ALREADY_EXISTS');
+      }
+    }
+
+    if (companyType === 'REGISTERED_BUSINESS' && (!registrationNumber || !tinNumber)) {
+      throw new AppError('Registration number and TIN number are required for registered businesses', 400, 'VALIDATION_ERROR');
+    }
+
+    // Check if company with same normalized identifiers already exists. Regex
+    // fallback preserves legacy data compatibility while escaping user input.
+    const duplicateClauses: any[] = [];
+    if (name) duplicateClauses.push({ name: { $regex: new RegExp(`^${escapeRegex(String(name).trim())}$`, 'i') } });
+    if (normalizedEmail) {
+      duplicateClauses.push({ normalizedEmail });
+      duplicateClauses.push({ email: { $regex: new RegExp(`^${escapeRegex(normalizedEmail)}$`, 'i') } });
+    }
+    if (normalizedRegistrationNumber) duplicateClauses.push({ normalizedRegistrationNumber });
+    if (normalizedTinNumber) duplicateClauses.push({ normalizedTinNumber });
+
+    const existingCompany = duplicateClauses.length > 0
+      ? await Company.findOne({ $or: duplicateClauses })
+      : null;
 
     if (existingCompany) {
       console.log('Company already exists:', existingCompany);
@@ -72,18 +108,24 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
 
     const plan: Plan = (req.body?.plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(req.body.plan)) ? req.body.plan : 'ENTERPRISE';
     const config = PLAN_CONFIG[plan];
+    const workspaceType = normalizeWorkspaceType(req.body?.workspaceType, config.workspaceType);
 
     const company = new Company({
       name,
       description,
-      email,
+      email: normalizedEmail,
+      normalizedEmail,
       address,
       phone,
       website,
       registrationNumber,
+      normalizedRegistrationNumber,
       tinNumber,
+      normalizedTinNumber,
       vatNumber,
-      ownerId: (req.user as JwtPayload).userId,
+      companyType,
+      workspaceType,
+      ownerId: currentUserId,
       plan,
       propertyLimit: config.propertyLimit,
       featureFlags: config.featureFlags
@@ -94,7 +136,6 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
     console.log('Company saved successfully:', company);
 
     // Link company to current user
-    const currentUserId = (req.user as JwtPayload).userId;
     if (currentUserId) {
       try {
         await User.findByIdAndUpdate(currentUserId, { companyId: company._id });
@@ -149,6 +190,21 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
   }
 };
 
+function pickWorkspaceFields(body: any) {
+  const updateData: any = {};
+  if (body.workspacePreferences !== undefined) updateData.workspacePreferences = body.workspacePreferences;
+  if (body.onboardingStatus !== undefined) updateData.onboardingStatus = body.onboardingStatus;
+  if (body.onboardingCompleted !== undefined) updateData.onboardingCompleted = Boolean(body.onboardingCompleted);
+  if (body.companyType !== undefined) updateData.companyType = normalizeCompanyType(body.companyType);
+  if (body.workspaceType !== undefined) updateData.workspaceType = normalizeWorkspaceType(body.workspaceType);
+  if (body.tenantStatus !== undefined && isSafeTenantStatus(body.tenantStatus)) updateData.tenantStatus = body.tenantStatus;
+  return updateData;
+}
+
+function isSafeTenantStatus(value: unknown): value is 'active' | 'suspended' | 'pending' | 'archived' {
+  return ['active', 'suspended', 'pending', 'archived'].includes(String(value));
+}
+
 export const updateCompany = async (req: Request, res: Response) => {
   try {
     const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
@@ -167,6 +223,7 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
     if (commissionConfig !== undefined) (updateData as any).commissionConfig = commissionConfig;
+    Object.assign(updateData as any, pickWorkspaceFields(req.body));
     if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
@@ -175,6 +232,9 @@ export const updateCompany = async (req: Request, res: Response) => {
       (updateData as any).plan = plan as Plan;
       (updateData as any).propertyLimit = cfg.propertyLimit;
       (updateData as any).featureFlags = cfg.featureFlags;
+      if ((req.body as any).workspaceType === undefined) {
+        (updateData as any).workspaceType = cfg.workspaceType;
+      }
     }
 
     const company = await Company.findByIdAndUpdate(
@@ -367,6 +427,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
     if (commissionConfig !== undefined) (updateData as any).commissionConfig = commissionConfig;
+    Object.assign(updateData as any, pickWorkspaceFields(req.body));
     if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
@@ -375,6 +436,9 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
       (updateData as any).plan = plan as Plan;
       (updateData as any).propertyLimit = cfg.propertyLimit;
       (updateData as any).featureFlags = cfg.featureFlags;
+      if ((req.body as any).workspaceType === undefined) {
+        (updateData as any).workspaceType = cfg.workspaceType;
+      }
     }
 
     const updatedCompany = await Company.findByIdAndUpdate(
@@ -448,6 +512,8 @@ export const getCompanyById = async (req: Request, res: Response) => {
         isActive: company.isActive,
         subscriptionStatus: company.subscriptionStatus,
         subscriptionEndDate: company.subscriptionEndDate,
+        companyType: (company as any).companyType,
+        workspaceType: (company as any).workspaceType || 'agency',
         bankAccounts: company.bankAccounts,
         commissionConfig: company.commissionConfig,
         plan: (company as any).plan,

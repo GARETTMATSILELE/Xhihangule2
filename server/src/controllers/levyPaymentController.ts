@@ -6,6 +6,7 @@ import { Lease } from '../models/Lease';
 import { Tenant } from '../models/Tenant';
 import { Company } from '../models/Company';
 import { Property } from '../models/Property';
+import propertyAccountService from '../services/propertyAccountService';
 
 export const createLevyPayment = async (req: Request, res: Response) => {
   try {
@@ -143,6 +144,23 @@ export const createLevyPayment = async (req: Request, res: Response) => {
 
     const levyPayment = new LevyPayment(levyPaymentData);
     await levyPayment.save();
+    try {
+      await propertyAccountService.recordPassThroughCollection({
+        propertyId: String(levyPayment.propertyId),
+        companyId: String(levyPayment.companyId),
+        chargeType: 'LEVY',
+        amount: Number(levyPayment.amount || 0),
+        date: levyPayment.paymentDate,
+        levyPaymentId: String(levyPayment._id),
+        referenceNumber: levyPayment.referenceNumber,
+        description: `Levies collected - ${levyPayment.referenceNumber || levyPayment._id}`,
+        processedBy: String(levyPayment.processedBy),
+        notes: levyPayment.notes,
+        idempotencyKey: `levy-payment:${String(levyPayment._id)}:collection`
+      });
+    } catch (ledgerErr) {
+      console.error('Failed to record levy pass-through collection:', ledgerErr);
+    }
     
     // Populate the created levy payment for response
     const populatedLevyPayment = await LevyPayment.findById(levyPayment._id)
@@ -280,6 +298,23 @@ export const initiateLevyPayout = async (req: Request, res: Response) => {
     // Update top-level status to paid_out for easier filtering
     levy.set('status', 'paid_out');
     await levy.save();
+    try {
+      await propertyAccountService.recordPassThroughPayment({
+        propertyId: String(levy.propertyId),
+        companyId: String(levy.companyId),
+        chargeType: 'LEVY',
+        amount: Number(levy.amount || 0),
+        date: payoutDate ? new Date(payoutDate) : new Date(),
+        levyPaymentId: String(levy._id),
+        referenceNumber: payoutReference || levy.referenceNumber,
+        description: `Levies paid - ${payoutReference || levy.referenceNumber || levy._id}`,
+        processedBy: String(req.user.userId),
+        notes,
+        idempotencyKey: `levy-payment:${String(levy._id)}:payout`
+      });
+    } catch (ledgerErr) {
+      console.error('Failed to record levy pass-through payout:', ledgerErr);
+    }
     const populated = await LevyPayment.findById(levy._id)
       .populate('propertyId', 'name address')
       .populate('processedBy', 'firstName lastName email');

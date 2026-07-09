@@ -38,6 +38,7 @@ export interface IPaymentRequest extends Document {
   };
   // When true, show in accountant tasks list
   readyForAccounting?: boolean;
+  maintenanceRequestId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -137,7 +138,8 @@ const PaymentRequestSchema = new Schema<IPaymentRequest>({
     approvedAt: { type: Date },
     notes: { type: String }
   },
-  readyForAccounting: { type: Boolean, default: false }
+  readyForAccounting: { type: Boolean, default: false },
+  maintenanceRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'MaintenanceRequest', index: true }
 }, {
   timestamps: true
 });

@@ -49,6 +49,13 @@ import {
   getPropertyMaintenanceJobStatus,
   listPropertyMaintenanceJobs
 } from '../controllers/propertyAccountController';
+import {
+  listChargeTypes,
+  createChargeType,
+  updateChargeType,
+  deactivateChargeType,
+  deleteChargeType
+} from '../controllers/chargeTypeController';
 import { getCompanyAccountSummary, getCompanyTransactions, createCompanyTransaction } from '../controllers/companyAccountController';
 import { createSalesContract, listSalesContracts, getSalesContract } from '../controllers/salesContractController';
 import { Request, Response } from 'express';
@@ -222,6 +229,11 @@ router.post('/payments/finalize-bulk', canManagePayments, async (req: Request, r
 });
 
 // Property Account routes - allow admin and accountant
+router.get('/charge-types', canViewCommissions, listChargeTypes);
+router.post('/charge-types', isAccountant, createChargeType);
+router.put('/charge-types/:id', isAccountant, updateChargeType);
+router.post('/charge-types/:id/deactivate', isAccountant, deactivateChargeType);
+router.delete('/charge-types/:id', isAccountant, deleteChargeType);
 router.get('/property-accounts', canViewCommissions, getCompanyPropertyAccounts);
 router.post('/property-accounts/migrate-legacy-ledgers', canViewCommissions, migrateLegacyLedgerTypes);
 router.get('/property-accounts/:propertyId', canViewCommissions, getPropertyAccount);

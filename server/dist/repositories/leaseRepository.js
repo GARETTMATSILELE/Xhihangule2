@@ -62,12 +62,16 @@ class LeaseRepository extends base_repository_1.BaseRepository {
     }
     updateLeaseStatus(id, status) {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.update(id, { status });
+            return this.update(id, { status, lifecycleStatusChangedAt: new Date() });
         });
     }
-    extendLease(id, newEndDate) {
+    linkSuccessor(previousLeaseId, successorLeaseId) {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.update(id, { endDate: newEndDate });
+            return this.update(previousLeaseId, {
+                successorLeaseId,
+                status: 'renewed',
+                lifecycleStatusChangedAt: new Date()
+            });
         });
     }
     bulkUpdateStatus(ids, status) {
@@ -100,7 +104,7 @@ class LeaseRepository extends base_repository_1.BaseRepository {
                 }),
                 this.model.countDocuments({
                     startDate: { $gt: now },
-                    status: 'pending'
+                    status: 'pending_approval'
                 })
             ]);
             return { total, active, expired, upcoming };

@@ -313,7 +313,8 @@ function sendMail(params) {
                 to: params.to,
                 subject: params.subject,
                 text: params.text,
-                html: params.html
+                html: params.html,
+                attachments: params.attachments
             });
         }
         catch (err) {

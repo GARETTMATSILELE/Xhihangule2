@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MaintenanceRequest = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const maintenanceStatus_1 = require("../utils/maintenanceStatus");
 const MaintenanceAttachmentSchema = new mongoose_1.Schema({
     name: {
         type: String,
@@ -85,13 +86,35 @@ const MaintenanceRequestSchema = new mongoose_1.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'pending_approval', 'approved', 'pending_completion', 'in_progress', 'completed', 'cancelled'],
-        default: 'pending'
+        enum: maintenanceStatus_1.MAINTENANCE_STATUSES,
+        default: 'draft'
+    },
+    category: {
+        type: String,
+        default: 'GENERAL'
+    },
+    inspectionId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Inspection',
+        index: true
     },
     estimatedCost: {
         type: Number,
         min: 0
     },
+    requestedAmount: { type: Number, min: 0 },
+    paidAmount: { type: Number, min: 0, default: 0 },
+    paymentStatus: {
+        type: String,
+        enum: ['awaiting_payment', 'partially_paid', 'paid'],
+        default: 'awaiting_payment'
+    },
+    paymentDate: { type: Date },
+    paymentReference: { type: String },
+    paymentRequestId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'PaymentRequest' },
+    contractorId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'MaintenanceContractor', index: true },
+    lastActivityAt: { type: Date, index: true },
+    followUpInspectionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Inspection' },
     attachments: [MaintenanceAttachmentSchema],
     messages: [{
             sender: {

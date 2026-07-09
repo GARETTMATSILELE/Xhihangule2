@@ -211,6 +211,78 @@ const LandingPage: React.FC = () => {
     } as const;
   }, [cycle]);
 
+  const pricingPlans = [
+    {
+      id: 'free',
+      name: 'Free Trial',
+      eyebrow: 'Start safely',
+      price: 'FREE',
+      suffix: '14 days',
+      badge: 'No card required',
+      badgeColor: 'success' as const,
+      borderColor: 'success.main',
+      cta: 'Start Free Trial',
+      to: '/admin-signup',
+      bestFor: 'Testing Mantis with real workflows',
+      range: 'Up to 10 properties',
+      users: 'Single admin',
+      billing: 'Trial access, cancel anytime',
+      features: ['No credit card required', 'Core property workflows', 'Guided workspace setup', 'Upgrade when ready']
+    },
+    {
+      id: 'individual',
+      name: 'Individual',
+      eyebrow: 'Solo landlords',
+      price: `$${prices.INDIVIDUAL}`,
+      suffix: cycle === 'monthly' ? '/mo' : '/yr',
+      badge: 'Best for landlords',
+      badgeColor: 'primary' as const,
+      borderColor: 'divider',
+      cta: 'Choose Individual',
+      to: '/signup?plan=INDIVIDUAL',
+      bestFor: 'Solo landlords managing rentals',
+      range: '1-10 properties',
+      users: 'Single admin',
+      billing: cycle === 'monthly' ? 'Monthly billing' : 'Annual billing',
+      features: ['Simple dashboard', 'Rent and occupancy tracking', 'Lease expirations', 'Maintenance requests']
+    },
+    {
+      id: 'sme',
+      name: 'SME',
+      eyebrow: 'Growing agencies',
+      price: `$${prices.SME}`,
+      suffix: cycle === 'monthly' ? '/mo' : '/yr',
+      badge: 'Recommended',
+      badgeColor: 'secondary' as const,
+      borderColor: 'primary.main',
+      highlighted: true,
+      cta: 'Choose SME',
+      to: '/signup?plan=SME',
+      bestFor: 'Agencies with teams and workflows',
+      range: '10-120 properties',
+      users: 'Multi-user teams',
+      billing: cycle === 'monthly' ? 'Monthly billing' : 'Annual billing',
+      features: ['Team activity', 'Agent performance', 'Commission tools', 'Approval queues']
+    },
+    {
+      id: 'enterprise',
+      name: 'Enterprise',
+      eyebrow: 'Large portfolios',
+      price: `$${prices.ENTERPRISE}`,
+      suffix: cycle === 'monthly' ? '/mo' : '/yr',
+      badge: 'Custom onboarding',
+      badgeColor: 'default' as const,
+      borderColor: 'divider',
+      cta: 'Choose Enterprise',
+      to: '/signup?plan=ENTERPRISE',
+      bestFor: 'Large portfolios and operations teams',
+      range: 'Unlimited units',
+      users: 'Advanced permissions',
+      billing: cycle === 'monthly' ? 'Monthly billing' : 'Annual billing',
+      features: ['Portfolio analytics', 'Audit alerts', 'Priority support', 'Operational KPIs']
+    }
+  ];
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* Hero Section */}
@@ -520,132 +592,66 @@ const LandingPage: React.FC = () => {
         </Box>
 
         <Grid container spacing={3}>
-          {/* Free Trial Card */}
-          <Grid item xs={12} md={4} id="pricing-free">
-            <Card elevation={0} sx={{ border: '2px solid', borderColor: 'success.main', borderRadius: 3, position: 'relative' }}>
-              <CardContent sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="h5">Free Trial</Typography>
-                  <Chip size="small" label="14 Days" color="success" sx={{ fontWeight: 700 }} />
-                </Box>
-                <Typography variant="h3" sx={{ fontWeight: 800, color: 'success.main' }}>
-                  FREE
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Full access to all features
-                </Typography>
-                <List dense sx={{ mt: 2 }}>
-                  {[ 'All core features', 'Up to 25 properties', 'Agent & property accounts', 'No credit card required', 'Cancel anytime' ].map((f) => (
-                    <ListItem key={f} sx={{ py: 0.5 }}>
-                      <ListItemIcon sx={{ minWidth: 28 }}>
-                        <CheckCircleOutlineIcon color="success" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary={f} primaryTypographyProps={{ variant: 'body2' }} />
-                    </ListItem>
-                  ))}
-                </List>
-              </CardContent>
-              <CardActions sx={{ px: 3, pb: 3 }}>
-                <Button component={RouterLink} to="/admin-signup" variant="contained" color="success" fullWidth>
-                  Start Free Trial
-                </Button>
-              </CardActions>
-            </Card>
-          </Grid>
-
-          {/* Individual */}
-          <Grid item xs={12} md={4} id="pricing-individual">
-            <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Basic
-                </Typography>
-                <Typography variant="h5" gutterBottom>
-                  Individual
-                </Typography>
-                <Typography variant="h3" sx={{ fontWeight: 800 }}>
-                  ${prices.INDIVIDUAL} {cycle === 'monthly' ? <Typography component="span" variant="subtitle2">/mo</Typography> : <Typography component="span" variant="subtitle2">/yr</Typography>}
-                </Typography>
-                <List dense sx={{ mt: 2 }}>
-                  {[ 'Up to 10 properties', 'Admin dashboard', 'Agent & property accounts', 'No commission on rental income' ].map((f) => (
-                    <ListItem key={f} sx={{ py: 0.5 }}>
-                      <ListItemIcon sx={{ minWidth: 28 }}>
-                        <CheckCircleOutlineIcon color="primary" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary={f} primaryTypographyProps={{ variant: 'body2' }} />
-                    </ListItem>
-                  ))}
-                </List>
-              </CardContent>
-              <CardActions sx={{ px: 3, pb: 3 }}>
-                <Button component={RouterLink} to="/signup?plan=INDIVIDUAL" variant="outlined" color="primary" fullWidth>
-                  Upgrade
-                </Button>
-              </CardActions>
-            </Card>
-          </Grid>
-
-          {/* SME - highlighted */}
-          <Grid item xs={12} md={4} id="pricing-sme">
-            <Card sx={{ borderRadius: 3, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
-              <CardContent sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="h5">SME</Typography>
-                  <Chip size="small" label="Best Deal" color="secondary" sx={{ fontWeight: 700 }} />
-                </Box>
-                <Typography variant="h3" sx={{ fontWeight: 900 }}>
-                  ${prices.SME} <Typography component="span" variant="subtitle2">{cycle === 'monthly' ? 'per month' : 'per year'}</Typography>
-                </Typography>
-                <List dense sx={{ mt: 2, color: 'primary.contrastText' }}>
-                  {[ 'Up to 120 properties', 'All core features', 'Agent & property accounts', 'Commission enabled', '10GB of storage' ].map((f) => (
-                    <ListItem key={f} sx={{ py: 0.5 }}>
-                      <ListItemIcon sx={{ minWidth: 28, color: 'primary.contrastText' }}>
-                        <CheckCircleOutlineIcon fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary={f} primaryTypographyProps={{ variant: 'body2' }} />
-                    </ListItem>
-                  ))}
-                </List>
-              </CardContent>
-              <CardActions sx={{ px: 3, pb: 3 }}>
-                <Button component={RouterLink} to="/signup?plan=SME" variant="contained" color="secondary" fullWidth>
-                  Upgrade
-                </Button>
-              </CardActions>
-            </Card>
-          </Grid>
-
-          {/* Enterprise */}
-          <Grid item xs={12} md={4} id="pricing-enterprise">
-            <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Advanced
-                </Typography>
-                <Typography variant="h5" gutterBottom>
-                  Enterprise
-                </Typography>
-                <Typography variant="h3" sx={{ fontWeight: 800 }}>
-                  ${prices.ENTERPRISE} {cycle === 'monthly' ? <Typography component="span" variant="subtitle2">/mo</Typography> : <Typography component="span" variant="subtitle2">/yr</Typography>}
-                </Typography>
-                <List dense sx={{ mt: 2 }}>
-                  {[ 'Unlimited properties', 'All features unlocked', 'Agent & property accounts', 'Commission enabled', 'Priority support' ].map((f) => (
-                    <ListItem key={f} sx={{ py: 0.5 }}>
-                      <ListItemIcon sx={{ minWidth: 28 }}>
-                        <CheckCircleOutlineIcon color="primary" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary={f} primaryTypographyProps={{ variant: 'body2' }} />
-                    </ListItem>
-                  ))}
-                </List>
-              </CardContent>
-              <CardActions sx={{ px: 3, pb: 3 }}>
-                <Button component={RouterLink} to="/signup?plan=ENTERPRISE" variant="contained" fullWidth>
-                  Upgrade
-                </Button>
-              </CardActions>
-            </Card>
-          </Grid>
+          {pricingPlans.map((plan) => (
+            <Grid item xs={12} md={3} key={plan.id} id={`pricing-${plan.id}`}>
+              <Card
+                elevation={plan.highlighted ? 6 : 0}
+                sx={{
+                  height: '100%',
+                  border: '2px solid',
+                  borderColor: plan.borderColor,
+                  borderRadius: 3,
+                  bgcolor: plan.highlighted ? 'primary.main' : 'background.paper',
+                  color: plan.highlighted ? 'primary.contrastText' : 'text.primary',
+                  position: 'relative'
+                }}
+              >
+                <CardContent sx={{ p: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+                    <Typography variant="subtitle2" sx={{ opacity: plan.highlighted ? 0.9 : 0.7 }}>
+                      {plan.eyebrow}
+                    </Typography>
+                    <Chip size="small" label={plan.badge} color={plan.badgeColor} sx={{ fontWeight: 700 }} />
+                  </Box>
+                  <Typography variant="h5" gutterBottom>{plan.name}</Typography>
+                  <Typography variant="h3" sx={{ fontWeight: 900 }}>
+                    {plan.price} <Typography component="span" variant="subtitle2">{plan.suffix}</Typography>
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1, opacity: plan.highlighted ? 0.9 : 0.75 }}>
+                    Best for: {plan.bestFor}
+                  </Typography>
+                  <Grid container spacing={1} sx={{ my: 2 }}>
+                    {[plan.range, plan.users, plan.billing].map((item) => (
+                      <Grid item xs={12} key={item}>
+                        <Chip size="small" variant={plan.highlighted ? 'filled' : 'outlined'} label={item} sx={{ width: '100%' }} />
+                      </Grid>
+                    ))}
+                  </Grid>
+                  <List dense sx={{ color: plan.highlighted ? 'primary.contrastText' : 'text.primary' }}>
+                    {plan.features.map((feature) => (
+                      <ListItem key={feature} sx={{ py: 0.5, px: 0 }}>
+                        <ListItemIcon sx={{ minWidth: 28, color: plan.highlighted ? 'primary.contrastText' : 'primary.main' }}>
+                          <CheckCircleOutlineIcon fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText primary={feature} primaryTypographyProps={{ variant: 'body2' }} />
+                      </ListItem>
+                    ))}
+                  </List>
+                </CardContent>
+                <CardActions sx={{ px: 3, pb: 3 }}>
+                  <Button
+                    component={RouterLink}
+                    to={plan.to}
+                    variant={plan.highlighted ? 'contained' : 'outlined'}
+                    color={plan.highlighted ? 'secondary' : 'primary'}
+                    fullWidth
+                  >
+                    {plan.cta}
+                  </Button>
+                </CardActions>
+              </Card>
+            </Grid>
+          ))}
         </Grid>
       </Container>
 

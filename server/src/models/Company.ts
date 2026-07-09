@@ -14,18 +14,37 @@ export interface IBankAccount {
 
 export interface ICompany extends Document {
   name: string;
+  tradingName?: string;
   address: string;
   phone: string;
   email: string;
+  country?: string;
+  defaultCurrency?: 'USD' | 'ZiG' | 'ZWL' | 'ZAR';
+  normalizedEmail?: string;
   website?: string;
-  registrationNumber: string;
-  tinNumber: string;
+  registrationNumber?: string;
+  normalizedRegistrationNumber?: string;
+  tinNumber?: string;
+  normalizedTinNumber?: string;
   vatNumber?: string;
   ownerId: Types.ObjectId;
+  companyType?: 'INDIVIDUAL_LANDLORD' | 'REGISTERED_BUSINESS';
+  workspaceType?: 'agency' | 'individual';
+  tenantStatus?: 'active' | 'suspended' | 'pending' | 'archived';
+  onboardingStatus?: 'PENDING_SETUP' | 'PENDING_PAYMENT' | 'PAYMENT_RECEIVED' | 'INITIALIZING_WORKSPACE' | 'ACTIVE' | 'FAILED_SETUP' | 'SUSPENDED';
+  onboardingSessionId?: Types.ObjectId;
+  onboardingCompleted?: boolean;
+  workspacePreferences?: {
+    currency?: 'USD' | 'ZiG';
+    timezone?: string;
+    measurementUnits?: 'metric' | 'imperial';
+    invoicePrefix?: string;
+    invoiceNotes?: string;
+  };
   description?: string;
   logo?: string;
   isActive: boolean;
-  subscriptionStatus: 'active' | 'inactive' | 'trial';
+  subscriptionStatus: 'active' | 'inactive' | 'trial' | 'past_due' | 'suspended' | 'cancelled' | 'expired' | 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED' | 'EXPIRED';
   subscriptionEndDate?: Date;
   bankAccounts: IBankAccount[];
   commissionConfig?: {
@@ -40,6 +59,12 @@ export interface ICompany extends Document {
     commissionEnabled: boolean;
     agentAccounts: boolean;
     propertyAccounts: boolean;
+    propertyOwners?: boolean;
+    commissions?: boolean;
+    trustAccounting?: boolean;
+    maintenanceApprovals?: boolean;
+    accounting?: boolean;
+    agents?: boolean;
   };
   fiscalConfig?: {
     enabled?: boolean;
@@ -59,6 +84,14 @@ export interface ICompany extends Document {
   rentReceivableOpeningBalance?: number;
   levyReceivableOpeningBalance?: number;
   revenue?: number;
+  storageUsedBytes?: number;
+  subscriptionOverride?: {
+    enabled?: boolean;
+    reason?: string;
+    expiresAt?: Date;
+    updatedBy?: Types.ObjectId;
+    updatedAt?: Date;
+  };
 }
 
 const bankAccountSchema = new Schema<IBankAccount>({
@@ -116,19 +149,35 @@ const companySchema = new Schema<ICompany>({
     trim: true,
     lowercase: true
   },
+  normalizedEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    index: true
+  },
   website: {
     type: String,
     trim: true
   },
   registrationNumber: {
     type: String,
-    required: true,
     trim: true
+  },
+  normalizedRegistrationNumber: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    index: true
   },
   tinNumber: {
     type: String,
-    required: true,
     trim: true
+  },
+  normalizedTinNumber: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    index: true
   },
   vatNumber: {
     type: String,
@@ -139,6 +188,48 @@ const companySchema = new Schema<ICompany>({
     ref: 'User',
     required: true
   },
+  companyType: {
+    type: String,
+    enum: ['INDIVIDUAL_LANDLORD', 'REGISTERED_BUSINESS'],
+    default: 'REGISTERED_BUSINESS',
+    index: true
+  },
+  workspaceType: {
+    type: String,
+    enum: ['agency', 'individual'],
+    default: 'agency',
+    index: true
+  },
+  tenantStatus: {
+    type: String,
+    enum: ['active', 'suspended', 'pending', 'archived'],
+    default: 'active',
+    index: true
+  },
+  onboardingStatus: {
+    type: String,
+    enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED'],
+    default: 'ACTIVE',
+    index: true
+  },
+  onboardingSessionId: {
+    type: Schema.Types.ObjectId,
+    ref: 'OnboardingSession',
+    required: false,
+    index: true
+  },
+  onboardingCompleted: {
+    type: Boolean,
+    default: true,
+    index: true
+  },
+  workspacePreferences: {
+    currency: { type: String, enum: ['USD', 'ZiG'], default: 'USD' },
+    timezone: { type: String, trim: true, default: 'Africa/Harare' },
+    measurementUnits: { type: String, enum: ['metric', 'imperial'], default: 'metric' },
+    invoicePrefix: { type: String, trim: true, default: 'INV' },
+    invoiceNotes: { type: String, trim: true }
+  },
   logo: {
     type: String
   },
@@ -148,7 +239,7 @@ const companySchema = new Schema<ICompany>({
   },
   subscriptionStatus: {
     type: String,
-    enum: ['active', 'inactive', 'trial'],
+    enum: ['active', 'inactive', 'trial', 'past_due', 'suspended', 'cancelled', 'expired', 'TRIAL', 'ACTIVE', 'PAST_DUE', 'SUSPENDED', 'CANCELLED', 'EXPIRED'],
     default: 'trial'
   },
   subscriptionEndDate: {
@@ -211,6 +302,30 @@ const companySchema = new Schema<ICompany>({
     propertyAccounts: {
       type: Boolean,
       default: true
+    },
+    propertyOwners: {
+      type: Boolean,
+      default: true
+    },
+    commissions: {
+      type: Boolean,
+      default: true
+    },
+    trustAccounting: {
+      type: Boolean,
+      default: true
+    },
+    maintenanceApprovals: {
+      type: Boolean,
+      default: true
+    },
+    accounting: {
+      type: Boolean,
+      default: true
+    },
+    agents: {
+      type: Boolean,
+      default: true
     }
   }
   ,
@@ -235,6 +350,54 @@ const companySchema = new Schema<ICompany>({
   revenue: { type: Number, default: 0, min: 0 }
 }, {
   timestamps: true
+});
+
+companySchema.add({
+  tradingName: { type: String, trim: true },
+  country: { type: String, trim: true, default: 'Zimbabwe' },
+  defaultCurrency: { type: String, enum: ['USD', 'ZiG', 'ZWL', 'ZAR'], default: 'USD' },
+  storageUsedBytes: { type: Number, default: 0, min: 0 },
+  subscriptionOverride: {
+    enabled: { type: Boolean, default: false, index: true },
+    reason: { type: String, trim: true },
+    expiresAt: { type: Date },
+    updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    updatedAt: { type: Date }
+  }
+});
+
+companySchema.index({ subscriptionStatus: 1, subscriptionEndDate: 1 });
+companySchema.index({ tenantStatus: 1, createdAt: -1 });
+
+function normalizeCompanyIdentifier(value: unknown): string | undefined {
+  const normalized = String(value || '').trim();
+  return normalized ? normalized.toUpperCase().replace(/\s+/g, '') : undefined;
+}
+
+companySchema.pre('validate', function(next) {
+  if (this.email) {
+    this.email = String(this.email).trim().toLowerCase();
+    this.normalizedEmail = this.email;
+  }
+  this.normalizedRegistrationNumber = normalizeCompanyIdentifier(this.registrationNumber);
+  this.normalizedTinNumber = normalizeCompanyIdentifier(this.tinNumber);
+
+  // Legacy companies may have placeholder or missing legal identifiers. Enforce
+  // stricter validation only for new/changed registered-business records.
+  const shouldEnforceBusinessFields =
+    this.isNew ||
+    this.isModified('companyType') ||
+    this.isModified('registrationNumber') ||
+    this.isModified('tinNumber');
+  if (shouldEnforceBusinessFields && (this.companyType || 'REGISTERED_BUSINESS') === 'REGISTERED_BUSINESS') {
+    if (!this.registrationNumber) {
+      this.invalidate('registrationNumber', 'Registration number is required for registered businesses');
+    }
+    if (!this.tinNumber) {
+      this.invalidate('tinNumber', 'TIN number is required for registered businesses');
+    }
+  }
+  next();
 });
 
 // Ensure agent + agency percentages of remaining equal 1.0

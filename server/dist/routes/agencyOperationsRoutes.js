@@ -1,0 +1,26 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const auth_1 = require("../middleware/auth");
+const agencyOperationsController_1 = require("../controllers/agencyOperationsController");
+const router = express_1.default.Router();
+router.use(auth_1.authWithCompany);
+router.get('/dashboard', agencyOperationsController_1.getExecutiveDashboard);
+router.get('/municipal-bills', agencyOperationsController_1.listMunicipalBillsOverview);
+router.get('/duty-roster/types', agencyOperationsController_1.getDutyTypes);
+router.get('/duty-roster/shifts', agencyOperationsController_1.listDutyShifts);
+router.post('/duty-roster/shifts', agencyOperationsController_1.createDutyShift);
+router.patch('/duty-roster/shifts/:id', agencyOperationsController_1.updateDutyShift);
+router.delete('/duty-roster/shifts/:id', agencyOperationsController_1.deleteDutyShift);
+router.post('/duty-roster/generate', agencyOperationsController_1.generateDutyRoster);
+router.get('/duty-roster/availability', agencyOperationsController_1.listAgentAvailability);
+router.put('/duty-roster/availability', agencyOperationsController_1.upsertAgentAvailability);
+router.get('/duty-roster/leave', agencyOperationsController_1.listLeaveRequests);
+router.post('/duty-roster/leave', agencyOperationsController_1.createLeaveRequest);
+router.patch('/duty-roster/leave/:id', agencyOperationsController_1.reviewLeaveRequest);
+router.get('/duty-roster/holidays', agencyOperationsController_1.listPublicHolidays);
+router.post('/duty-roster/holidays', agencyOperationsController_1.createPublicHoliday);
+exports.default = router;

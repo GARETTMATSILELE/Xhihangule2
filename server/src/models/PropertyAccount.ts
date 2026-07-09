@@ -1,6 +1,34 @@
 import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
 
+export type TransactionCategory =
+  | 'RENT'
+  | 'PASS_THROUGH'
+  | 'MAINTENANCE'
+  | 'OWNER_PAYOUT'
+  | 'COMMISSION'
+  | 'OPENING_BALANCE'
+  | 'DEPOSIT'
+  | 'OTHER';
+
+export type AccountingTreatment =
+  | 'PROPERTY_INCOME'
+  | 'PROPERTY_EXPENSE'
+  | 'PASS_THROUGH'
+  | 'OWNER_WITHDRAWAL'
+  | 'SYSTEM';
+
+export type PassThroughChargeType =
+  | 'LEVY'
+  | 'WATER'
+  | 'ELECTRICITY'
+  | 'RATES'
+  | 'SECURITY'
+  | 'INSURANCE'
+  | 'MUNICIPAL'
+  | 'OTHER'
+  | string;
+
 /**
  * SECURITY NOTE
  *  - Property account transactions represent an immutable ledger.
@@ -17,6 +45,11 @@ export interface Transaction {
   idempotencyKey?: string;
   description: string;
   category?: string;
+  transactionCategory?: TransactionCategory;
+  accountingTreatment?: AccountingTreatment;
+  chargeTypeCode?: string;
+  chargeTypeId?: Types.ObjectId;
+  passThroughType?: PassThroughChargeType;
   direction?: 'credit' | 'debit';
   recipientId?: Types.ObjectId | string;
   recipientType?: 'owner' | 'contractor' | 'tenant' | 'other';
@@ -27,6 +60,35 @@ export interface Transaction {
   attachments?: string[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface PassThroughTransaction {
+  _id?: Types.ObjectId;
+  type: 'collection' | 'payment' | 'adjustment';
+  amount: number;
+  date: Date;
+  paymentId?: Types.ObjectId;
+  levyPaymentId?: Types.ObjectId;
+  chargeTypeCode?: string;
+  chargeTypeId?: Types.ObjectId;
+  idempotencyKey?: string;
+  description: string;
+  referenceNumber?: string;
+  status: 'pending' | 'completed' | 'failed' | 'cancelled';
+  processedBy?: Types.ObjectId;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PassThroughAccount {
+  type: PassThroughChargeType;
+  label?: string;
+  runningBalance: number;
+  totalCollected: number;
+  totalPaid: number;
+  transactions: PassThroughTransaction[];
+  lastUpdated?: Date;
 }
 
 export interface OwnerPayout {
@@ -58,11 +120,16 @@ export interface IPropertyAccount extends Document {
   ownerId?: Types.ObjectId;
   ownerName?: string;
   transactions: Transaction[];
+  passThroughAccounts?: PassThroughAccount[];
   ownerPayouts: OwnerPayout[];
   runningBalance: number;
   totalIncome: number;
   totalExpenses: number;
   totalOwnerPayouts: number;
+  passThroughOutstanding?: number;
+  passThroughCollected?: number;
+  passThroughPaid?: number;
+  netOwnerBalance?: number;
   lastIncomeDate?: Date;
   lastExpenseDate?: Date;
   lastPayoutDate?: Date;
@@ -103,6 +170,31 @@ const TransactionSchema = new Schema<Transaction>({
   category: { 
     type: String 
   },
+  transactionCategory: {
+    type: String,
+    enum: ['RENT', 'PASS_THROUGH', 'MAINTENANCE', 'OWNER_PAYOUT', 'COMMISSION', 'OPENING_BALANCE', 'DEPOSIT', 'OTHER'],
+    required: false
+  },
+  accountingTreatment: {
+    type: String,
+    enum: ['PROPERTY_INCOME', 'PROPERTY_EXPENSE', 'PASS_THROUGH', 'OWNER_WITHDRAWAL', 'SYSTEM'],
+    required: false
+  },
+  chargeTypeCode: {
+    type: String,
+    required: false,
+    uppercase: true,
+    trim: true
+  },
+  chargeTypeId: {
+    type: Schema.Types.ObjectId,
+    ref: 'ChargeType',
+    required: false
+  },
+  passThroughType: {
+    type: String,
+    required: false
+  },
   direction: {
     type: String,
     enum: ['credit', 'debit']
@@ -139,6 +231,100 @@ const TransactionSchema = new Schema<Transaction>({
   updatedAt: { 
     type: Date, 
     default: Date.now 
+  }
+});
+
+const PassThroughTransactionSchema = new Schema<PassThroughTransaction>({
+  type: {
+    type: String,
+    enum: ['collection', 'payment', 'adjustment'],
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  date: {
+    type: Date,
+    required: true,
+    default: Date.now
+  },
+  paymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Payment'
+  },
+  levyPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'LevyPayment'
+  },
+  chargeTypeCode: {
+    type: String,
+    required: false,
+    uppercase: true,
+    trim: true
+  },
+  chargeTypeId: {
+    type: Schema.Types.ObjectId,
+    ref: 'ChargeType',
+    required: false
+  },
+  idempotencyKey: {
+    type: String
+  },
+  description: {
+    type: String,
+    required: true
+  },
+  referenceNumber: {
+    type: String
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed', 'cancelled'],
+    default: 'completed'
+  },
+  processedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  notes: {
+    type: String
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+const PassThroughAccountSchema = new Schema<PassThroughAccount>({
+  type: {
+    type: String,
+    required: true
+  },
+  label: {
+    type: String
+  },
+  runningBalance: {
+    type: Number,
+    default: 0
+  },
+  totalCollected: {
+    type: Number,
+    default: 0
+  },
+  totalPaid: {
+    type: Number,
+    default: 0
+  },
+  transactions: [PassThroughTransactionSchema],
+  lastUpdated: {
+    type: Date,
+    default: Date.now
   }
 });
 
@@ -228,6 +414,7 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
     type: String 
   },
   transactions: [TransactionSchema],
+  passThroughAccounts: [PassThroughAccountSchema],
   ownerPayouts: [OwnerPayoutSchema],
   runningBalance: { 
     type: Number, 
@@ -244,6 +431,22 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
   totalOwnerPayouts: { 
     type: Number, 
     default: 0 
+  },
+  passThroughOutstanding: {
+    type: Number,
+    default: 0
+  },
+  passThroughCollected: {
+    type: Number,
+    default: 0
+  },
+  passThroughPaid: {
+    type: Number,
+    default: 0
+  },
+  netOwnerBalance: {
+    type: Number,
+    default: 0
   },
   lastIncomeDate: { 
     type: Date 
@@ -335,6 +538,9 @@ function isIllegalLedgerMutation(update: Record<string, any>, rootArrays: string
     if (!payload || typeof payload !== 'object') continue;
     for (const path of Object.keys(payload)) {
       if (isAllowedSetPath(path)) continue;
+      if (path === 'passThroughAccounts') continue;
+      if (/^passThroughAccounts\.\$(?:\[[^\]]+\])?\.(runningBalance|totalCollected|totalPaid|lastUpdated)$/.test(path)) continue;
+      if (/^passThroughAccounts\..*transactions(?:\.|$)/.test(path)) return true;
       if (startsWithAny(path, rootArrays)) return true;
     }
   }
@@ -344,6 +550,7 @@ function isIllegalLedgerMutation(update: Record<string, any>, rootArrays: string
     const payload = (update as any)[op];
     if (!payload || typeof payload !== 'object') continue;
     for (const path of Object.keys(payload)) {
+      if (/^passThroughAccounts\..*transactions(?:\.|$)/.test(path)) return true;
       if (startsWithAny(path, rootArrays)) return true;
     }
   }
@@ -354,7 +561,7 @@ function isIllegalLedgerMutation(update: Record<string, any>, rootArrays: string
     if (!payload || typeof payload !== 'object') continue;
     for (const path of Object.keys(payload)) {
       // Only allow direct root paths (e.g., 'transactions' or 'ownerPayouts')
-      if (!rootArrays.includes(path)) return true;
+      if (!rootArrays.includes(path) && path !== 'passThroughAccounts') return true;
     }
   }
   return false;
@@ -364,7 +571,7 @@ function isIllegalLedgerMutation(update: Record<string, any>, rootArrays: string
 PropertyAccountSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
   try {
     const update = (this as any).getUpdate?.() || {};
-    const illegal = isIllegalLedgerMutation(update, ['transactions', 'ownerPayouts']);
+    const illegal = isIllegalLedgerMutation(update, ['transactions', 'ownerPayouts', 'passThroughAccounts.transactions']);
     if (illegal) {
       return next(new Error('PropertyAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
     }
@@ -389,11 +596,11 @@ PropertyAccountSchema.pre('findOneAndDelete', guardPropertyAccountDeletion as an
 PropertyAccountSchema.pre('save', function(next) {
   // Calculate totals from transactions
   this.totalIncome = this.transactions
-    .filter(t => t.type === 'income' && t.status === 'completed')
+    .filter(t => t.type === 'income' && t.status === 'completed' && t.accountingTreatment !== 'PASS_THROUGH')
     .reduce((sum, t) => sum + t.amount, 0);
   
   this.totalExpenses = this.transactions
-    .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed')
+    .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed' && t.accountingTreatment !== 'PASS_THROUGH')
     .reduce((sum, t) => sum + t.amount, 0);
   
   this.totalOwnerPayouts = this.ownerPayouts
@@ -403,9 +610,31 @@ PropertyAccountSchema.pre('save', function(next) {
   const openingBalance = this.transactions
     .filter(t => t.type === 'opening_balance' && t.status === 'completed')
     .reduce((sum, t) => sum + (t.direction === 'debit' ? -t.amount : t.amount), 0);
+
+  const passThroughAccounts = Array.isArray(this.passThroughAccounts) ? this.passThroughAccounts : [];
+  let passThroughCollected = 0;
+  let passThroughPaid = 0;
+  passThroughAccounts.forEach((account: any) => {
+    const entries = Array.isArray(account.transactions) ? account.transactions : [];
+    const collected = entries
+      .filter((t: any) => t.type === 'collection' && t.status === 'completed')
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+    const paid = entries
+      .filter((t: any) => t.type === 'payment' && t.status === 'completed')
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+    account.totalCollected = collected;
+    account.totalPaid = paid;
+    account.runningBalance = collected - paid;
+    passThroughCollected += collected;
+    passThroughPaid += paid;
+  });
   
   // Calculate running balance. Opening balances affect availability without inflating income/expense totals.
   this.runningBalance = this.totalIncome - this.totalExpenses - this.totalOwnerPayouts + openingBalance;
+  this.netOwnerBalance = this.runningBalance;
+  this.passThroughCollected = passThroughCollected;
+  this.passThroughPaid = passThroughPaid;
+  this.passThroughOutstanding = passThroughCollected - passThroughPaid;
   
   // Update last dates
   const incomeTransactions = this.transactions.filter(t => t.type === 'income');

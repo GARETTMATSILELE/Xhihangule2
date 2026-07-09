@@ -5,7 +5,6 @@ import { Development } from '../models/Development';
 import { DevelopmentUnit } from '../models/DevelopmentUnit';
 import { User } from '../models/User';
 import { PropertyOwner } from '../models/PropertyOwner';
-import { IPropertyAccount } from '../models/PropertyAccount';
 import { logger } from '../utils/logger';
 import { DatabaseService } from './databaseService';
 import SyncFailure from '../models/SyncFailure';
@@ -575,27 +574,8 @@ export class DatabaseSyncService extends EventEmitter {
    */
   private async syncPropertyToAccounting(property: any): Promise<void> {
     try {
-      // Always go through the service's idempotent entrypoint
-      const account = await propertyAccountService.getOrCreatePropertyAccount(property._id.toString(), 'rental');
-      // Update metadata on the canonical rental ledger
-      const updates: any = {
-        propertyName: property.name,
-        propertyAddress: property.address,
-        ownerId: property.ownerId,
-        isActive: property.isActive !== false,
-        lastUpdated: new Date()
-      };
-      if (property.ownerId) {
-        const owner = await User.findById(property.ownerId);
-        if (owner) {
-          updates.ownerName = `${owner.firstName} ${owner.lastName}`;
-        }
-      }
       await this.db.executeWithRetry(async () => {
-        await (await import('../models/PropertyAccount')).default.updateOne(
-          { _id: (account as any)._id },
-          { $set: updates }
-        );
+        await propertyAccountService.syncPropertyMetadata(property);
       });
       logger.info(`Ensured/updated property account for property ${property._id}`);
       
@@ -613,18 +593,13 @@ export class DatabaseSyncService extends EventEmitter {
   private async syncUserToAccounting(user: any): Promise<void> {
     try {
       // Update owner names in property accounts if this user is a property owner
-      const PropertyAccount = accountingConnection.model('PropertyAccount');
       const ownerName = `${user.firstName} ${user.lastName}`;
-      const res = await this.db.executeWithRetry(async () => {
-        return await PropertyAccount.updateMany(
-          { ownerId: user._id },
-          { $set: { ownerName, lastUpdated: new Date() } },
-          { maxTimeMS: 5000 } as any
-        );
+      const modifiedCount = await this.db.executeWithRetry(async () => {
+        return await propertyAccountService.updateOwnerNameForActiveAccounts(user._id, ownerName);
       });
 
-      if ((res as any)?.modifiedCount > 0) {
-        logger.info(`Updated owner name in ${(res as any).modifiedCount} property accounts for user ${user._id}`);
+      if (modifiedCount > 0) {
+        logger.info(`Updated owner name in ${modifiedCount} property accounts for user ${user._id}`);
       }
       
       this.recordSyncSuccess();
@@ -640,33 +615,9 @@ export class DatabaseSyncService extends EventEmitter {
    */
   private async removePaymentFromAccounting(paymentId: string): Promise<void> {
     try {
-      const PropertyAccount = accountingConnection.model('PropertyAccount');
-      
-      // Find property account with this payment
-      const propertyAccount = await PropertyAccount.findOne({
-        'transactions.paymentId': paymentId
-      });
-
-      if (propertyAccount) {
-        const transaction = propertyAccount.transactions.find(
-          (t: any) => t.paymentId && t.paymentId.toString() === paymentId
-        );
-
-        if (transaction) {
-          // Remove transaction and update totals
-          propertyAccount.transactions = propertyAccount.transactions.filter(
-            (t: any) => t.paymentId && t.paymentId.toString() !== paymentId
-          );
-          
-          propertyAccount.totalIncome -= transaction.amount;
-          propertyAccount.runningBalance -= transaction.amount;
-          propertyAccount.lastUpdated = new Date();
-
-          await this.db.executeWithRetry(async () => {
-            await propertyAccount.save();
-          });
-          logger.info(`Removed payment ${paymentId} from property account ${propertyAccount.propertyId}`);
-        }
+      const cancelled = await propertyAccountService.cancelPaymentReference(paymentId);
+      if (cancelled) {
+        logger.info(`Cancelled payment ${paymentId} on active property account`);
       }
       
       this.recordSyncSuccess();
@@ -683,13 +634,8 @@ export class DatabaseSyncService extends EventEmitter {
   private async removePropertyFromAccounting(propertyId: string): Promise<void> {
     try {
       // Do not delete immutable ledgers; archive/deactivate instead
-      const PropertyAccount = accountingConnection.model('PropertyAccount');
       await this.db.executeWithRetry(async () => {
-        await PropertyAccount.updateMany(
-          { propertyId },
-          { $set: { isActive: false, isArchived: true, lastUpdated: new Date() } },
-          { maxTimeMS: 5000 } as any
-        );
+        await propertyAccountService.archiveLedgersForProperty(propertyId);
       });
       logger.info(`Archived/deactivated property account(s) for property ${propertyId}`);
       
@@ -706,18 +652,9 @@ export class DatabaseSyncService extends EventEmitter {
    */
   private async removeUserFromAccounting(userId: string): Promise<void> {
     try {
-      const PropertyAccount = accountingConnection.model('PropertyAccount');
-      
       // Update property accounts to remove owner reference
       await this.db.executeWithRetry(async () => {
-        await PropertyAccount.updateMany(
-          { ownerId: userId },
-          { 
-            $unset: { ownerId: 1, ownerName: 1 },
-            $set: { lastUpdated: new Date() }
-          },
-          { maxTimeMS: 5000 } as any
-        );
+        await propertyAccountService.removeOwnerReferenceFromActiveAccounts(userId);
       });
 
       logger.info(`Removed user ${userId} from property accounts`);
@@ -1215,7 +1152,11 @@ export class DatabaseSyncService extends EventEmitter {
           properties,
           async (property) => {
             try {
-              const account = await PropertyAccount.findOne({ propertyId: property._id })
+              const account = await PropertyAccount.findOne({
+                propertyId: property._id,
+                isArchived: false,
+                isActive: { $ne: false }
+              })
                 .select('_id')
                 .lean();
               if (!account) {
@@ -1303,7 +1244,11 @@ export class DatabaseSyncService extends EventEmitter {
         );
 
         // Detect duplicate postings in recent ledgers (property)
-        const recentAccounts = await PropertyAccount.find({ lastUpdated: { $gte: since } })
+        const recentAccounts = await PropertyAccount.find({
+          lastUpdated: { $gte: since },
+          isArchived: false,
+          isActive: { $ne: false }
+        })
           .select('_id propertyId ledgerType transactions')
           .lean();
         for (const acc of recentAccounts) {
@@ -1406,7 +1351,7 @@ export class DatabaseSyncService extends EventEmitter {
           const occurrences = ((acc as any).transactions || []).filter((t: any) => String(t?.paymentId || '') === String(payment._id)).length;
           if (occurrences > 1) {
             try {
-              await reconcilePropertyLedgerDuplicates(String((acc as any).propertyId), (acc as any).ledgerType as any);
+              await reconcilePropertyLedgerDuplicates(String((acc as any).propertyId));
               logger.info(`verifyAndReconcile: deduped property ledger for property ${String((acc as any).propertyId)} (${(acc as any).ledgerType})`);
             } catch (dedupeErr) {
               logger.warn('verifyAndReconcile: failed to dedupe property ledger:', (dedupeErr as any)?.message || dedupeErr);

@@ -85,6 +85,11 @@ const propertyOwnerSchema = new mongoose_1.Schema({
             type: mongoose_1.Schema.Types.ObjectId,
             ref: 'Property'
         }],
+    nationalId: { type: String, trim: true },
+    passportNumber: { type: String, trim: true },
+    taxNumber: { type: String, trim: true },
+    address: { type: String, trim: true },
+    active: { type: Boolean, default: true, index: true },
     tokens: [{
             token: {
                 type: String,

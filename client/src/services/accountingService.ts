@@ -7,6 +7,10 @@ export interface DashboardSummary {
   invoices?: number;
   outstandingRentals?: number;
   outstandingLevies?: number;
+  passThroughCollected?: number;
+  passThroughPaid?: number;
+  passThroughOutstanding?: number;
+  passThroughByType?: Record<string, PassThroughBalanceRow>;
   netProfit: number;
   vatPayable: number;
   commissionLiability: number;
@@ -16,6 +20,13 @@ export interface DashboardSummary {
   pendingExpenses: number;
   unpaidCommissions: number;
   lastUpdated: string;
+}
+
+export interface PassThroughBalanceRow {
+  label: string;
+  collected: number;
+  paid: number;
+  outstanding: number;
 }
 
 export interface OutstandingTenantBreakdown {
@@ -38,6 +49,10 @@ export interface DashboardOutstandingBreakdown {
   invoices: number;
   outstandingRentals: number;
   outstandingLevies: number;
+  passThroughCollected?: number;
+  passThroughPaid?: number;
+  passThroughOutstanding?: number;
+  passThroughByType?: Record<string, PassThroughBalanceRow>;
   rentals: OutstandingPropertyBreakdown[];
   levies: OutstandingPropertyBreakdown[];
   lastUpdated: string;

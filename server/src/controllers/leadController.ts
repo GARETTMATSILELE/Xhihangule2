@@ -10,6 +10,26 @@ import { User } from '../models/User';
 
 const norm = (s: any) => String(s || '').trim().toLowerCase();
 const asNum = (v: any) => (v == null || v === '' || isNaN(Number(v)) ? undefined : Number(v));
+const PIPELINE_STAGES = ['NEW','CONTACTED','VIEWING_SCHEDULED','VIEWED','APPLICATION_RECEIVED','APPROVED','LEASE_PENDING','CONVERTED','LOST'];
+
+const addDays = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d;
+};
+
+const timelineLabelForStage = (stage: string) => {
+  switch (stage) {
+    case 'CONTACTED': return 'Lead Contacted';
+    case 'VIEWING_SCHEDULED': return 'Viewing Scheduled';
+    case 'VIEWED': return 'Viewing Completed';
+    case 'APPLICATION_RECEIVED': return 'Application Submitted';
+    case 'LEASE_PENDING': return 'Lease Pending';
+    case 'CONVERTED': return 'Lease Signed';
+    case 'LOST': return 'Lead Lost';
+    default: return 'Lead Updated';
+  }
+};
 
 function scorePropertyForLead(lead: any, p: any) {
   const reasons: string[] = [];
@@ -87,8 +107,27 @@ export const listLeads = async (req: Request, res: Response) => {
     if (!hasAnyRole(req, ['admin', 'accountant'])) {
       query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
     }
-    const leads = await Lead.find(query).sort({ createdAt: -1 });
-    res.json({ status: 'success', data: leads });
+    if (req.query.stage && PIPELINE_STAGES.includes(String(req.query.stage))) {
+      query.pipelineStage = String(req.query.stage);
+    }
+    if (req.query.search) {
+      const search = String(req.query.search).trim();
+      query.$or = [
+        { name: new RegExp(search, 'i') },
+        { email: new RegExp(search, 'i') },
+        { phone: new RegExp(search, 'i') },
+        { source: new RegExp(search, 'i') },
+        { interest: new RegExp(search, 'i') }
+      ];
+    }
+
+    const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 250);
+    const page = Math.max(Number(req.query.page || 1), 1);
+    const [leads, total] = await Promise.all([
+      Lead.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Lead.countDocuments(query)
+    ]);
+    res.json({ status: 'success', data: leads, pagination: { total, page, limit, pages: Math.ceil(total / limit) } });
   } catch (error) {
     if (error instanceof AppError) return res.status(error.statusCode).json({ status: 'error', message: error.message });
     res.status(500).json({ status: 'error', message: 'Failed to fetch leads' });
@@ -108,6 +147,13 @@ export const createLead = async (req: Request, res: Response) => {
       phone,
       status,
       notes,
+      pipelineStage,
+      leadScore,
+      nextFollowUpDate,
+      lastContactDate,
+      followUpStatus,
+      assignedAgent,
+      interestedPropertyIds,
       budgetMin,
       budgetMax,
       preferredSuburbs,
@@ -117,6 +163,46 @@ export const createLead = async (req: Request, res: Response) => {
     } = req.body;
     if (!name) throw new AppError('Name is required', 400);
 
+    const safePipelineStage = PIPELINE_STAGES.includes(String(pipelineStage)) ? String(pipelineStage) : 'NEW';
+    const initialFollowUpDate = nextFollowUpDate ? new Date(nextFollowUpDate) : addDays(1);
+    const initialTasks = [
+      {
+        type: 'follow_up_lead',
+        title: 'Follow-Up Lead',
+        dueDate: initialFollowUpDate,
+        status: 'pending',
+        notes: 'Automatic reminder created when lead was captured.'
+      },
+      {
+        type: 'call_lead',
+        title: 'Call Lead',
+        dueDate: addDays(3),
+        status: 'pending',
+        notes: 'Automatic reminder if no activity is recorded.'
+      },
+      {
+        type: 'schedule_viewing',
+        title: 'Schedule Viewing',
+        dueDate: addDays(7),
+        status: 'pending',
+        notes: 'Automatic reminder if no viewing has been scheduled.'
+      },
+      {
+        type: 'send_property_options',
+        title: 'Send Property Options',
+        dueDate: addDays(2),
+        status: 'pending',
+        notes: 'Automatic reminder to send matching properties.'
+      },
+      {
+        type: 'application_reminder',
+        title: 'Application Reminder',
+        dueDate: addDays(5),
+        status: 'pending',
+        notes: 'Automatic reminder to request or chase an application.'
+      }
+    ];
+
     const lead = await Lead.create({
       name,
       source: source || '',
@@ -125,6 +211,23 @@ export const createLead = async (req: Request, res: Response) => {
       email,
       phone,
       status: status || 'New',
+      pipelineStage: safePipelineStage,
+      leadScore: leadScore != null && !isNaN(Number(leadScore)) ? Math.max(0, Math.min(100, Number(leadScore))) : undefined,
+      nextFollowUpDate: initialFollowUpDate,
+      lastContactDate: lastContactDate ? new Date(lastContactDate) : undefined,
+      followUpStatus: followUpStatus || 'pending',
+      assignedAgent: assignedAgent && mongoose.Types.ObjectId.isValid(String(assignedAgent)) ? assignedAgent : req.user.userId,
+      interestedPropertyIds: Array.isArray(interestedPropertyIds)
+        ? interestedPropertyIds.filter((id: any) => mongoose.Types.ObjectId.isValid(String(id)))
+        : undefined,
+      activityTimeline: [{
+        type: 'lead_created',
+        label: 'Lead Created',
+        notes: source ? `Source: ${source}` : undefined,
+        createdAt: new Date(),
+        createdBy: req.user.userId
+      }],
+      followUpTasks: initialTasks,
       budgetMin: budgetMin != null && !isNaN(Number(budgetMin)) ? Number(budgetMin) : undefined,
       budgetMax: budgetMax != null && !isNaN(Number(budgetMax)) ? Number(budgetMax) : undefined,
       preferredSuburbs: Array.isArray(preferredSuburbs)
@@ -151,6 +254,29 @@ export const updateLead = async (req: Request, res: Response) => {
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
     const { id } = req.params;
     const updates = req.body || {};
+    if ('pipelineStage' in updates) {
+      if (!PIPELINE_STAGES.includes(String(updates.pipelineStage))) {
+        delete updates.pipelineStage;
+      }
+    }
+    if ('leadScore' in updates) {
+      updates.leadScore = updates.leadScore != null && !isNaN(Number(updates.leadScore))
+        ? Math.max(0, Math.min(100, Number(updates.leadScore)))
+        : undefined;
+    }
+    if ('nextFollowUpDate' in updates && updates.nextFollowUpDate) {
+      updates.nextFollowUpDate = new Date(updates.nextFollowUpDate);
+    }
+    if ('lastContactDate' in updates && updates.lastContactDate) {
+      updates.lastContactDate = new Date(updates.lastContactDate);
+    }
+    if ('interestedPropertyIds' in updates) {
+      updates.interestedPropertyIds = Array.isArray(updates.interestedPropertyIds)
+        ? updates.interestedPropertyIds.filter((id: any) => mongoose.Types.ObjectId.isValid(String(id)))
+        : undefined;
+    }
+    const timelineNote = typeof updates.activityNote === 'string' ? updates.activityNote.trim() : '';
+    delete updates.activityNote;
     // Normalize optional requirement fields if present
     if ('budgetMin' in updates) {
       updates.budgetMin = updates.budgetMin != null && !isNaN(Number(updates.budgetMin)) ? Number(updates.budgetMin) : undefined;
@@ -174,7 +300,22 @@ export const updateLead = async (req: Request, res: Response) => {
         : undefined;
     }
     const prev = await Lead.findOne({ _id: id, companyId: req.user.companyId });
-    const lead = await Lead.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, updates, { new: true });
+    const updateDoc: any = { $set: updates };
+    if (prev && updates.pipelineStage && updates.pipelineStage !== (prev as any).pipelineStage) {
+      updateDoc.$push = {
+        activityTimeline: {
+          type: String(updates.pipelineStage).toLowerCase(),
+          label: timelineLabelForStage(String(updates.pipelineStage)),
+          notes: timelineNote || undefined,
+          createdAt: new Date(),
+          createdBy: req.user.userId
+        }
+      };
+      if (updates.pipelineStage === 'CONTACTED' && !updates.lastContactDate) {
+        updateDoc.$set.lastContactDate = new Date();
+      }
+    }
+    const lead = await Lead.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, updateDoc, { new: true });
     if (!lead) throw new AppError('Lead not found', 404);
 
     // If lead transitioned to Won, create a Buyer record tied to a property

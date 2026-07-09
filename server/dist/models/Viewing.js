@@ -40,7 +40,13 @@ const ViewingSchema = new mongoose_1.Schema({
     buyerId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Buyer' },
     leadId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Lead' },
     when: { type: Date, required: true },
-    status: { type: String, enum: ['Scheduled', 'Done', 'No-show'], default: 'Scheduled' },
+    status: {
+        type: String,
+        enum: ['Scheduled', 'Done', 'No-show', 'Completed', 'Rescheduled', 'Cancelled', 'No Show'],
+        default: 'Scheduled'
+    },
+    outcome: { type: String, enum: ['Interested', 'Not Interested', 'Need Follow-Up', 'Applied'], required: false },
+    completedAt: { type: Date, required: false },
     notes: { type: String, default: '' },
     companyId: {
         type: mongoose_1.default.Schema.Types.ObjectId,
@@ -58,4 +64,5 @@ const ViewingSchema = new mongoose_1.Schema({
 ViewingSchema.index({ companyId: 1 });
 ViewingSchema.index({ ownerId: 1 });
 ViewingSchema.index({ propertyId: 1 });
+ViewingSchema.index({ companyId: 1, leadId: 1, when: -1 });
 exports.Viewing = mongoose_1.default.model('Viewing', ViewingSchema, 'viewings');

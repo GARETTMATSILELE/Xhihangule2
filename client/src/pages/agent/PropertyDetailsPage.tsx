@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Grid,
@@ -20,17 +20,27 @@ import {
   Button,
   IconButton,
   Divider,
-  Link as MuiLink
+  Link as MuiLink,
+  Stack,
+  List,
+  ListItem,
+  ListItemText
 } from '@mui/material';
+import ArrowBack from '@mui/icons-material/ArrowBack';
 import { usePropertyService } from '../../services/propertyService';
 import paymentService from '../../services/paymentService';
 import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
+import { OperationalEmptyState, PropertyWorkflowSummary, WorkflowStatusChip } from '../../components/rentalWorkflow';
+import { buildPropertyWorkflowState, buildWorkflowActivity } from '../../utils/rentalWorkflow';
+import { getLeaseLifecycleStatus, leaseStatusLabels } from '../../utils/leaseLifecycle';
+import PropertyMaintenanceHistory from '../../components/maintenance/PropertyMaintenanceHistory';
 
 const PropertyDetailsPage: React.FC = () => {
   const { propertyId } = useParams();
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isAgentRoute = location.pathname.includes('/agent-dashboard');
   const { getProperty } = usePropertyService();
 
@@ -41,6 +51,7 @@ const PropertyDetailsPage: React.FC = () => {
   const [leases, setLeases] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [levyPayments, setLevyPayments] = useState<any[]>([]);
+  const [inspections, setInspections] = useState<any[]>([]);
   const [files, setFiles] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [expensesAccessMessage, setExpensesAccessMessage] = useState<string | null>(null);
@@ -108,6 +119,12 @@ const PropertyDetailsPage: React.FC = () => {
         }
         setTenants(Array.isArray(tenantsResp) ? tenantsResp : (tenantsResp?.tenants || []));
         setLeases(Array.isArray(leasesResp) ? leasesResp : []);
+        try {
+          const inspectionResp = await api.get('/inspections', { params: { propertyId } }).then(r => r.data);
+          setInspections(Array.isArray(inspectionResp) ? inspectionResp : (inspectionResp?.data || []));
+        } catch {
+          setInspections([]);
+        }
 
         // Payments (filter by propertyId on client; server also supports filter for some routes)
         const basePayments = user?.role === 'agent'
@@ -170,6 +187,14 @@ const PropertyDetailsPage: React.FC = () => {
     return relevant.sort((a: any, b: any) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0] || null;
   }, [leases, propertyId]);
 
+  const propertyLeases = useMemo(() => {
+    if (!Array.isArray(leases)) return [];
+    const pid = String(propertyId);
+    return leases
+      .filter((l: any) => String(l.propertyId?._id || l.propertyId) === pid)
+      .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+  }, [leases, propertyId]);
+
   const filteredPayments = useMemo(() => {
     if (!paymentSearch) return payments;
     const q = paymentSearch.toLowerCase();
@@ -192,6 +217,19 @@ const PropertyDetailsPage: React.FC = () => {
     );
   }, [levyPayments, levySearch]);
 
+  const workflowState = useMemo(() => {
+    if (!property) return null;
+    return buildPropertyWorkflowState(property, { tenants, leases, payments, files });
+  }, [property, tenants, leases, payments, files]);
+
+  const activity = useMemo(() => buildWorkflowActivity({
+    properties: property ? [property] : [],
+    tenants: activeTenant ? [activeTenant] : [],
+    leases: currentLease ? [currentLease] : [],
+    payments,
+    files,
+  }, isAgentRoute ? '/agent-dashboard' : '/admin-dashboard'), [property, activeTenant, currentLease, payments, files, isAgentRoute]);
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
@@ -208,11 +246,38 @@ const PropertyDetailsPage: React.FC = () => {
     return <Alert severity="warning">Property not found</Alert>;
   }
 
+  const handleBack = () => {
+    const fallback = isAgentRoute ? '/agent-dashboard/properties' : '/admin-dashboard/properties';
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate(fallback);
+  };
+
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>{property.name}</Typography>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2} sx={{ mb: 3 }}>
+        <Box>
+          <Button
+            startIcon={<ArrowBack />}
+            onClick={handleBack}
+            sx={{ mb: 1, pl: 0, textTransform: 'none', fontWeight: 700 }}
+          >
+            Back
+          </Button>
+          <Typography variant="h4" sx={{ fontWeight: 600 }}>{property.name}</Typography>
+          <Typography color="text.secondary">{property.address}</Typography>
+        </Box>
+        {workflowState && <WorkflowStatusChip status={workflowState.status} size="medium" />}
+      </Stack>
       <Grid container spacing={3}>
         <Grid item xs={12} md={8}>
+          {workflowState && (
+            <Box sx={{ mb: 3 }}>
+              <PropertyWorkflowSummary state={workflowState} />
+            </Box>
+          )}
           <Card>
             <CardContent>
               <Typography variant="h6" sx={{ mb: 2 }}>Property Information</Typography>
@@ -236,16 +301,58 @@ const PropertyDetailsPage: React.FC = () => {
             <Card>
               <CardContent>
                 <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons allowScrollButtonsMobile>
-                  <Tab label="Tenant" />
-                  <Tab label="Lease" />
-                  <Tab label="Rental Payments" />
-                  <Tab label="Levy Payments" />
+                  <Tab label="Overview" />
+                  <Tab label="Owner" />
+                  <Tab label="Tenants" />
+                  <Tab label="Leases" />
+                  <Tab label="Inspections" />
+                  <Tab label="Payments" />
+                  <Tab label="Maintenance" />
                   <Tab label="Files" />
-                  <Tab label="Expenses" />
-                  <Tab label="Notes" />
+                  <Tab label="Reports" />
+                  <Tab label="Activity" />
                 </Tabs>
                 <Divider sx={{ my: 2 }} />
                 {tab === 0 && (
+                  <Box>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} md={4}>
+                        <Typography color="text.secondary">Occupancy</Typography>
+                        <Typography>{activeTenant ? 'Tenant linked' : 'Vacant'}</Typography>
+                      </Grid>
+                      <Grid item xs={12} md={4}>
+                        <Typography color="text.secondary">Lease</Typography>
+                        <Typography>{currentLease ? 'Lease on record' : 'Awaiting lease'}</Typography>
+                      </Grid>
+                      <Grid item xs={12} md={4}>
+                        <Typography color="text.secondary">Billing</Typography>
+                        <Typography>{payments.length ? `${payments.length} payment record(s)` : 'No payments yet'}</Typography>
+                      </Grid>
+                    </Grid>
+                    {workflowState?.recommendations.length ? (
+                      <Alert severity="info" sx={{ mt: 2 }}>
+                        <Typography variant="subtitle2">Recommended next action</Typography>
+                        <Typography variant="body2">{workflowState.recommendations[0]}</Typography>
+                      </Alert>
+                    ) : null}
+                  </Box>
+                )}
+                {tab === 1 && (
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Property Owner</Typography>
+                    <Typography>{ownerName || 'Not linked'}</Typography>
+                    {ownerEmail && <Typography color="text.secondary">{ownerEmail}</Typography>}
+                    {!ownerName && (
+                      <OperationalEmptyState
+                        title="Assign a property owner"
+                        description="Linking an owner gives this property clear operational responsibility and improves workflow completion."
+                        actionLabel="Assign Owner"
+                        onAction={() => navigate('/agent-dashboard/property-owners')}
+                      />
+                    )}
+                  </Box>
+                )}
+                {tab === 2 && (
                   <Box>
                     {activeTenant ? (
                       <>
@@ -255,33 +362,121 @@ const PropertyDetailsPage: React.FC = () => {
                         <Typography color="text.secondary">{activeTenant.email || activeTenant.phone || ''}</Typography>
                       </>
                     ) : (
-                      <Typography color="text.secondary">No active tenant.</Typography>
+                      <OperationalEmptyState
+                        title="Start by adding a tenant"
+                        description="Tenants can later be linked to leases, rent billing, files, and communications."
+                        actionLabel="Add Tenant"
+                        onAction={() => navigate('/agent-dashboard/tenants')}
+                      />
                     )}
                   </Box>
                 )}
-                {tab === 1 && (
+                {tab === 3 && (
                   <Box>
                     {currentLease ? (
-                      <Grid container spacing={2}>
-                        <Grid item xs={12} md={4}>
-                          <Typography color="text.secondary">Start</Typography>
-                          <Typography>{currentLease.startDate ? new Date(currentLease.startDate).toLocaleDateString() : 'N/A'}</Typography>
+                      <>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} md={4}>
+                            <Typography color="text.secondary">Start</Typography>
+                            <Typography>{currentLease.startDate ? new Date(currentLease.startDate).toLocaleDateString() : 'N/A'}</Typography>
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <Typography color="text.secondary">End</Typography>
+                            <Typography>{currentLease.endDate ? new Date(currentLease.endDate).toLocaleDateString() : 'N/A'}</Typography>
+                          </Grid>
+                          <Grid item xs={12} md={4}>
+                            <Typography color="text.secondary">Status</Typography>
+                            <Chip label={leaseStatusLabels[getLeaseLifecycleStatus(currentLease)]} size="small" />
+                          </Grid>
                         </Grid>
-                        <Grid item xs={12} md={4}>
-                          <Typography color="text.secondary">End</Typography>
-                          <Typography>{currentLease.endDate ? new Date(currentLease.endDate).toLocaleDateString() : 'N/A'}</Typography>
-                        </Grid>
-                        <Grid item xs={12} md={4}>
-                          <Typography color="text.secondary">Status</Typography>
-                          <Chip label={currentLease.status} size="small" />
-                        </Grid>
-                      </Grid>
+                        <Divider sx={{ my: 2 }} />
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Occupancy History</Typography>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Tenant</TableCell>
+                              <TableCell>Occupancy Period</TableCell>
+                              <TableCell>Status</TableCell>
+                              <TableCell>Rent</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {propertyLeases.map((lease: any) => {
+                              const tenant = lease.tenantId && typeof lease.tenantId === 'object' ? lease.tenantId : null;
+                              const status = getLeaseLifecycleStatus(lease);
+                              return (
+                                <TableRow key={lease._id}>
+                                  <TableCell>{tenant ? `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() : 'Historical tenant'}</TableCell>
+                                  <TableCell>
+                                    {lease.startDate ? new Date(lease.startDate).toLocaleDateString() : 'N/A'}
+                                    {' - '}
+                                    {lease.endDate ? new Date(lease.endDate).toLocaleDateString() : 'N/A'}
+                                  </TableCell>
+                                  <TableCell><Chip label={leaseStatusLabels[status]} size="small" /></TableCell>
+                                  <TableCell>${Number(lease.rentAmount || 0).toLocaleString()}</TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </>
                     ) : (
-                      <Typography color="text.secondary">No lease details.</Typography>
+                      <OperationalEmptyState
+                        title="Create the lease for this property"
+                        description="A lease connects the property, tenant, rent amount, deposit, and billing rules."
+                        actionLabel="Create Lease"
+                        onAction={() => navigate('/agent-dashboard/leases')}
+                      />
                     )}
                   </Box>
                 )}
-                {tab === 2 && (
+                {tab === 4 && (
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Inspection Timeline</Typography>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Type</TableCell>
+                          <TableCell>Status</TableCell>
+                          <TableCell>Condition</TableCell>
+                          <TableCell>Findings</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {inspections
+                          .slice()
+                          .sort((a: any, b: any) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime())
+                          .map((inspection: any) => (
+                            <TableRow key={inspection._id}>
+                              <TableCell>{inspection.scheduledDate ? new Date(inspection.scheduledDate).toLocaleDateString() : 'N/A'}</TableCell>
+                              <TableCell>{String(inspection.type || 'routine').replace('_', ' ')}</TableCell>
+                              <TableCell><Chip label={inspection.effectiveStatus || inspection.status || 'scheduled'} size="small" /></TableCell>
+                              <TableCell>
+                                {inspection.conditionScore !== undefined
+                                  ? `${inspection.conditionScore}/100 ${inspection.conditionRating ? `(${String(inspection.conditionRating).replace('_', ' ')})` : ''}`
+                                  : 'Not scored'}
+                              </TableCell>
+                              <TableCell>{inspection.report?.issuesFound || inspection.notes || 'No findings recorded'}</TableCell>
+                            </TableRow>
+                          ))}
+                        {!inspections.length && (
+                          <TableRow>
+                            <TableCell colSpan={5}>
+                              <OperationalEmptyState
+                                title="No inspections recorded"
+                                description="Lease-driven inspections will build a condition timeline for this property and occupancy period."
+                                actionLabel="Open Inspections"
+                                onAction={() => navigate('/agent-dashboard/inspections')}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </Box>
+                )}
+                {tab === 5 && (
                   <Box>
                     <Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
                       <TextField size="small" label="Search" value={paymentSearch} onChange={e => setPaymentSearch(e.target.value)} />
@@ -320,14 +515,23 @@ const PropertyDetailsPage: React.FC = () => {
                           </TableRow>
                         ))}
                         {!filteredPayments.length && (
-                          <TableRow><TableCell colSpan={5}><Typography color="text.secondary">No payments found.</Typography></TableCell></TableRow>
+                          <TableRow><TableCell colSpan={6}>
+                            <OperationalEmptyState
+                              title="Record the first rental payment"
+                              description="Payments linked to this property complete the billing step and keep the occupancy workflow healthy."
+                              actionLabel="Record Payment"
+                              onAction={() => navigate('/agent-dashboard/payments')}
+                            />
+                          </TableCell></TableRow>
                         )}
                       </TableBody>
                     </Table>
                   </Box>
                 )}
-                {tab === 3 && (
+                {tab === 5 && (
                   <Box>
+                    <Divider sx={{ my: 2 }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Levy Payments</Typography>
                     <Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
                       <TextField size="small" label="Search" value={levySearch} onChange={e => setLevySearch(e.target.value)} />
                     </Box>
@@ -358,7 +562,10 @@ const PropertyDetailsPage: React.FC = () => {
                     </Table>
                   </Box>
                 )}
-                {tab === 4 && (
+                {tab === 6 && propertyId && (
+                  <PropertyMaintenanceHistory propertyId={propertyId} />
+                )}
+                {tab === 7 && (
                   <Box>
                     <Table>
                       <TableHead>
@@ -387,13 +594,20 @@ const PropertyDetailsPage: React.FC = () => {
                           </TableRow>
                         ))}
                         {!files.length && (
-                          <TableRow><TableCell colSpan={5}><Typography color="text.secondary">No files uploaded.</Typography></TableCell></TableRow>
+                          <TableRow><TableCell colSpan={5}>
+                            <OperationalEmptyState
+                              title="Upload property files"
+                              description="Lease documents, inspection notes, and property files can be uploaded when they are ready."
+                              actionLabel="Upload Files"
+                              onAction={() => navigate('/agent-dashboard/files')}
+                            />
+                          </TableCell></TableRow>
                         )}
                       </TableBody>
                     </Table>
                   </Box>
                 )}
-                {tab === 5 && (
+                {tab === 8 && (
                   <Box>
                     {expensesAccessMessage && (
                       <Alert severity={user?.role === 'accountant' ? 'warning' : 'info'} sx={{ mb: 2 }}>
@@ -427,8 +641,20 @@ const PropertyDetailsPage: React.FC = () => {
                     </Table>
                   </Box>
                 )}
-                {tab === 6 && (
+                {tab === 9 && (
                   <Box>
+                    {activity.length > 0 && (
+                      <List dense sx={{ mb: 2 }}>
+                        {activity.map((item) => (
+                          <ListItem key={item.id} disableGutters>
+                            <ListItemText
+                              primary={item.label}
+                              secondary={`${item.description}${item.date ? ` - ${item.date.toLocaleDateString()}` : ''}`}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
                     <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                       <TextField fullWidth size="small" label="Add a note" id="note-input" />
                       <Button variant="contained" onClick={() => {

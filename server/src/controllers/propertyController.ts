@@ -170,6 +170,11 @@ export const getPublicProperties = async (req: Request, res: Response) => {
       projection = {
         name: 1,
         address: 1,
+        type: 1,
+        propertyCategory: 1,
+        propertySubtype: 1,
+        propertyOperationalStatus: 1,
+        propertyUse: 1,
         price: 1,
         commission: 1,
         commissionPreaPercent: 1,
@@ -552,7 +557,12 @@ export const createSalesProperty = async (req: Request, res: Response) => {
       commissionPreaPercent,
       commissionAgencyPercentRemaining,
       commissionAgentPercentRemaining,
-      sourceValuationId
+      sourceValuationId,
+      propertyCategory,
+      propertySubtype,
+      propertySpecifications,
+      propertyOperationalStatus,
+      propertyUse
     } = req.body || {};
 
     if (!name || !address) {
@@ -596,6 +606,11 @@ export const createSalesProperty = async (req: Request, res: Response) => {
       name,
       address,
       type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house') as any,
+      propertyCategory,
+      propertySubtype,
+      propertySpecifications: propertySpecifications && typeof propertySpecifications === 'object' ? propertySpecifications : {},
+      propertyOperationalStatus,
+      propertyUse: propertyUse || 'Sale',
       status: normalizedStatus,
       price: computedPrice,
       pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0,

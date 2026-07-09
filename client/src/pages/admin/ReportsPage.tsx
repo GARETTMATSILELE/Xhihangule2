@@ -3,10 +3,13 @@ import { useAuth } from '../../contexts/AuthContext';
 import OwnerStatementReport from '../../components/admin/reports/OwnerStatementReport';
 import IncomeExpenseReport from '../../components/admin/reports/IncomeExpenseReport';
 import RentRollReport from '../../components/admin/reports/RentRollReport';
+import TenantBuyerReportsSection from '../../components/admin/reports/TenantBuyerReportsSection';
+import RecentSaleTransactionsReport from '../../components/admin/reports/RecentSaleTransactionsReport';
 
 const TABS = [
   { label: 'Financial', key: 'financial' },
   { label: 'Operational', key: 'operational' },
+  { label: 'Parties & Sales', key: 'parties-sales' },
   { label: 'Tenant', key: 'tenant' },
   { label: 'Portfolio', key: 'portfolio' },
   { label: 'Legal', key: 'legal' },
@@ -61,10 +64,16 @@ const ReportsPage: React.FC = () => {
             <div className="p-4 bg-white rounded shadow text-gray-400">Operational reports coming soon...</div>
           </>
         )}
+        {activeTab === 'parties-sales' && (
+          <>
+            <TenantBuyerReportsSection companyName={company?.name} />
+            <RecentSaleTransactionsReport companyName={company?.name} />
+          </>
+        )}
         {activeTab === 'tenant' && (
           <>
+            <TenantBuyerReportsSection companyName={company?.name} />
             {/* TenantLedgerReport, DelinquencyReport, LeaseExpiryReport, etc. */}
-            <div className="p-4 bg-white rounded shadow text-gray-400">Tenant reports coming soon...</div>
           </>
         )}
         {activeTab === 'portfolio' && (

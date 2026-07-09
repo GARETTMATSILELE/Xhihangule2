@@ -30,13 +30,11 @@ const maintenanceJobQueueService_1 = __importDefault(require("../services/mainte
 const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { propertyId } = req.params;
-        const ledgerRaw = String(req.query.ledger || '').toLowerCase();
-        const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined));
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
         // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
-        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
         res.json({
             success: true,
             data: account
@@ -213,8 +211,6 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
         const includePayouts = includePayoutsRaw === '1' ||
             includePayoutsRaw === 'true' ||
             includePayoutsRaw === 'yes';
-        const ledgerRaw = String(req.query.ledger || '').toLowerCase();
-        const ledger = (ledgerRaw === 'sale' ? 'sale' : (ledgerRaw === 'rental' ? 'rental' : undefined));
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
@@ -229,14 +225,14 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
             filters.category = category;
         if (status)
             filters.status = status;
-        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters, ledger);
+        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters);
         if (!includePayouts) {
             return res.json({
                 success: true,
                 data: transactions
             });
         }
-        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
         const payoutTransactions = (account.ownerPayouts || []).map((payout) => ({
             _id: String((payout === null || payout === void 0 ? void 0 : payout._id) || ''),
             type: 'owner_payout',
@@ -276,10 +272,9 @@ exports.getPropertyTransactions = getPropertyTransactions;
  * Add expense to property account
  */
 const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c;
     try {
         const { propertyId } = req.params;
-        const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
         const { amount, date, description, category, recipientId, recipientType, notes } = req.body;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
@@ -290,10 +285,10 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!description) {
             return res.status(400).json({ message: 'Description is required' });
         }
-        if (!((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId)) {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
-        const idempotencyKey = req.headers['idempotency-key'] || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.idempotencyKey) || undefined;
+        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
         const expenseData = {
             amount: Number(amount),
             date: date ? new Date(date) : new Date(),
@@ -305,8 +300,8 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             notes,
             idempotencyKey
         };
-        const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData, ledger);
-        if ((_e = req.user) === null || _e === void 0 ? void 0 : _e.companyId) {
+        const account = yield propertyAccountService_1.default.addExpense(propertyId, expenseData);
+        if ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) {
             yield accountingIntegrationService_1.default.syncExpenseCreated({
                 companyId: String(req.user.companyId),
                 sourceId: `property:${propertyId}:${Date.now()}`,
@@ -323,7 +318,7 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             try {
                 res.setHeader('Idempotency-Key', idempotencyKey);
             }
-            catch (_f) { }
+            catch (_d) { }
         }
         res.json({
             success: true,
@@ -351,10 +346,9 @@ exports.addExpense = addExpense;
  * Add opening balance adjustment to property account
  */
 const addOpeningBalanceAdjustment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b;
     try {
         const { propertyId } = req.params;
-        const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
         const { amount, direction, date, description, notes } = req.body;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
@@ -365,14 +359,14 @@ const addOpeningBalanceAdjustment = (req, res) => __awaiter(void 0, void 0, void
         if (direction !== 'credit' && direction !== 'debit') {
             return res.status(400).json({ message: 'Direction must be credit or debit' });
         }
-        if (!((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId)) {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
         const effectiveDate = date ? new Date(date) : new Date();
         if (Number.isNaN(effectiveDate.getTime())) {
             return res.status(400).json({ message: 'Valid date is required' });
         }
-        const idempotencyKey = req.headers['idempotency-key'] || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.idempotencyKey) || undefined;
+        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
         const account = yield propertyAccountService_1.default.addOpeningBalanceAdjustment(propertyId, {
             amount: Number(amount),
             direction,
@@ -381,12 +375,12 @@ const addOpeningBalanceAdjustment = (req, res) => __awaiter(void 0, void 0, void
             processedBy: req.user.userId,
             notes,
             idempotencyKey
-        }, ledger);
+        });
         if (idempotencyKey) {
             try {
                 res.setHeader('Idempotency-Key', idempotencyKey);
             }
-            catch (_e) { }
+            catch (_c) { }
         }
         res.json({
             success: true,
@@ -414,10 +408,9 @@ exports.addOpeningBalanceAdjustment = addOpeningBalanceAdjustment;
  * Create owner payout
  */
 const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b;
     try {
         const { propertyId } = req.params;
-        const ledger = (String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.ledger) || '').toLowerCase() === 'sale' ? 'sale' : (String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.ledger) || '').toLowerCase() === 'rental' ? 'rental' : undefined));
         const { amount, paymentMethod, recipientId, recipientName, recipientBankDetails, notes, autoComplete } = req.body;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
@@ -428,11 +421,11 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!paymentMethod) {
             return res.status(400).json({ message: 'Payment method is required' });
         }
-        if (!((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId)) {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
         // Get the property account to access owner information
-        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
         // Use provided recipientId or fall back to property owner
         let finalRecipientId = recipientId;
         let finalRecipientName = recipientName;
@@ -446,7 +439,7 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!finalRecipientName) {
             return res.status(400).json({ message: 'Recipient name is required' });
         }
-        const idempotencyKey = req.headers['idempotency-key'] || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.idempotencyKey) || undefined;
+        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
         const payoutData = {
             amount: Number(amount),
             paymentMethod,
@@ -458,13 +451,13 @@ const createOwnerPayout = (req, res) => __awaiter(void 0, void 0, void 0, functi
             autoComplete: Boolean(autoComplete),
             idempotencyKey
         };
-        const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData, ledger);
+        const { account: updatedAccount, payout } = yield propertyAccountService_1.default.createOwnerPayout(propertyId, payoutData);
         // Echo back generated/used idempotency key
         if (payout === null || payout === void 0 ? void 0 : payout.idempotencyKey) {
             try {
                 res.setHeader('Idempotency-Key', String(payout.idempotencyKey));
             }
-            catch (_e) { }
+            catch (_c) { }
         }
         res.json({
             success: true,
@@ -566,11 +559,10 @@ exports.getPayoutHistory = getPayoutHistory;
 const reconcilePropertyDuplicates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { propertyId } = req.params;
-        const ledger = req.query.ledger === 'sale' ? 'sale' : 'rental';
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
-        const result = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId, ledger);
+        const result = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId);
         return res.json({ success: true, message: 'Reconciliation completed', data: result });
     }
     catch (error) {
@@ -876,26 +868,17 @@ const mergePropertyAccountDuplicatesForProperty = (req, res) => __awaiter(void 0
             return res.status(500).json({ success: false, message: 'Merge operation not available' });
         }
         const groupsChanged = yield service.mergeDuplicateAccounts(accounts);
-        // Reconcile duplicate income transactions on both potential ledgers
-        let rentalRecon = null;
-        let saleRecon = null;
+        let reconciliation = null;
         try {
-            rentalRecon = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId, 'rental');
+            reconciliation = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId);
         }
         catch (_a) { }
-        try {
-            saleRecon = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId, 'sale');
-        }
-        catch (_b) { }
         return res.json({
             success: true,
             message: 'Property ledgers merged and reconciled (if applicable)',
             data: {
                 merged: groupsChanged,
-                reconciled: {
-                    rental: rentalRecon,
-                    sale: saleRecon
-                }
+                reconciled: reconciliation
             }
         });
     }

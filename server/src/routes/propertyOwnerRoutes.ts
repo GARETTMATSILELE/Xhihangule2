@@ -12,6 +12,23 @@ import {
   updatePropertyOwnerPublic,
   deletePropertyOwnerPublic
 } from '../controllers/propertyOwnerController';
+import {
+  ownersDashboard,
+  ownerPortfolio,
+  ownerFinancials,
+  ownerMaintenance,
+  ownerDocumentsList,
+  ownerDocumentsUpload,
+  ownerBankingUpsert,
+  ownerPreferencesUpsert,
+  ownerProfileExtras,
+  ownerHistoryList,
+  ownershipHistoryCreate,
+  propertyOwnershipHistory,
+  ownerDocumentPdf,
+  ownerFullProfile,
+  ownerProfilePatch,
+} from '../controllers/ownerManagementController';
 
 const router = express.Router();
 
@@ -109,9 +126,29 @@ router.post('/public', authWithCompany, createPropertyOwnerPublic);
 router.patch('/public/:id', authWithCompany, updatePropertyOwnerPublic);
 router.delete('/public/:id', authWithCompany, deletePropertyOwnerPublic);
 
+// ORM management routes (before /:id)
+router.get('/dashboard', authWithCompany, ownersDashboard);
+router.post('/documents', authWithCompany, ownerDocumentsUpload);
+router.post('/banking', authWithCompany, ownerBankingUpsert);
+router.post('/preferences', authWithCompany, ownerPreferencesUpsert);
+router.post('/ownership-history', authWithCompany, ownershipHistoryCreate);
+router.get('/property-history/:propertyId', authWithCompany, propertyOwnershipHistory);
+
 // CRUD routes for property owners (company-scoped)
 router.post('/', authWithCompany, createPropertyOwner);
 router.get('/', authWithCompany, getPropertyOwners);
+router.get('/:ownerId/portfolio', authWithCompany, ownerPortfolio);
+router.get('/:ownerId/financials', authWithCompany, ownerFinancials);
+router.get('/:ownerId/maintenance', authWithCompany, ownerMaintenance);
+router.get('/:ownerId/documents', authWithCompany, ownerDocumentsList);
+router.get('/:ownerId/history', authWithCompany, ownerHistoryList);
+router.get('/:ownerId/profile-extras', authWithCompany, ownerProfileExtras);
+router.get('/:ownerId/full-profile', authWithCompany, ownerFullProfile);
+router.patch('/:ownerId/profile', authWithCompany, ownerProfilePatch);
+router.post('/:ownerId/banking', authWithCompany, ownerBankingUpsert);
+router.post('/:ownerId/preferences', authWithCompany, ownerPreferencesUpsert);
+router.post('/:ownerId/documents', authWithCompany, ownerDocumentsUpload);
+router.get('/:ownerId/documents/:docType', authWithCompany, ownerDocumentPdf);
 router.get('/:id', authWithCompany, getPropertyOwnerById);
 router.patch('/:id', authWithCompany, updatePropertyOwner);
 // Accept PUT for clients that use PUT semantics for updates

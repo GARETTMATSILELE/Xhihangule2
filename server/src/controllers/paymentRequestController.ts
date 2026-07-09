@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PaymentRequest } from '../models/PaymentRequest';
+import { syncPaymentFromRequest } from '../services/maintenanceManagementService';
 import { Notification } from '../models/Notification';
 import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
@@ -37,7 +38,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       payTo,
       reportHtml,
       developmentId,
-      developmentUnitId
+      developmentUnitId,
+      maintenanceRequestId,
     } = req.body;
 
     // Validate required fields (propertyId can be omitted for development/manual sales)
@@ -106,7 +108,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       payTo,
       reportHtml,
       approval: { status: 'pending' },
-      readyForAccounting: false
+      readyForAccounting: false,
+      maintenanceRequestId: maintenanceRequestId || undefined,
     });
 
     await paymentRequest.save();
@@ -263,6 +266,10 @@ export const updatePaymentRequestStatus = async (req: Request, res: Response) =>
     }
 
     await paymentRequest.save();
+
+    if (status === 'paid' && (paymentRequest as any).maintenanceRequestId) {
+      await syncPaymentFromRequest(String(paymentRequest._id), paymentRequest.amount, notes);
+    }
 
     // Populate the updated document
     const updatedRequest = await PaymentRequest.findById(id)

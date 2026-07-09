@@ -17,6 +17,8 @@ const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
 const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
+const maintenanceManagementService_1 = require("../services/maintenanceManagementService");
+const maintenanceStatus_1 = require("../utils/maintenanceStatus");
 // Create a new maintenance request
 const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -29,7 +31,7 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
         if (!companyId) {
             throw new errorHandler_1.AppError('Company context required', 403);
         }
-        const { propertyId, title, description, priority, estimatedCost, attachments } = req.body;
+        const { propertyId, title, description, priority, estimatedCost, attachments, category, inspectionId } = req.body;
         // Validate required fields
         if (!propertyId || !title || !description) {
             throw new errorHandler_1.AppError('Property ID, title, and description are required', 400);
@@ -51,12 +53,23 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
             description,
             priority: priority || 'medium',
             estimatedCost: estimatedCost || 0,
+            requestedAmount: estimatedCost || 0,
+            category: category || 'GENERAL',
+            inspectionId: inspectionId || undefined,
             attachments: Array.isArray(attachments)
                 ? attachments.filter((file) => file && file.name && file.url && file.type)
                 : [],
-            status: 'pending'
+            status: 'draft',
+            lastActivityAt: new Date(),
         });
         yield maintenanceRequest.save();
+        yield (0, maintenanceManagementService_1.logMaintenanceActivity)({
+            requestId: maintenanceRequest._id,
+            companyId: companyId,
+            action: 'Request Created',
+            description: title,
+            createdBy: userId,
+        });
         res.status(201).json(maintenanceRequest);
     }
     catch (error) {
@@ -76,9 +89,10 @@ const getPropertyMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, v
         const { propertyId } = req.params;
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find({
             propertyId,
-            tenantId: userId
+            requestedBy: userId
         })
-            .populate('tenantId', 'name email')
+            .populate('requestedBy', 'firstName lastName email')
+            .populate('propertyId', 'name address')
             .sort({ createdAt: -1 });
         res.json(maintenanceRequests);
     }
@@ -102,7 +116,6 @@ const addMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 0, fu
             _id: requestId,
             companyId,
             $or: [
-                { tenantId: userId },
                 { requestedBy: userId },
                 { ownerId: userId }
             ]
@@ -159,17 +172,43 @@ const updateMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
         if (!isRequester && !isOwner) {
             throw new errorHandler_1.AppError('Unauthorized - You can only update your own requests or requests for your properties', 403);
         }
+        const previousStatus = maintenanceRequest.status;
         // Update fields with validation
-        if (status && ['pending', 'pending_approval', 'approved', 'pending_completion', 'in_progress', 'completed', 'cancelled'].includes(status)) {
+        if (status && (0, maintenanceManagementService_1.isValidMaintenanceStatus)(status)) {
             maintenanceRequest.status = status;
         }
         if (estimatedCost !== undefined && estimatedCost >= 0) {
             maintenanceRequest.estimatedCost = estimatedCost;
+            if (!maintenanceRequest.requestedAmount)
+                maintenanceRequest.requestedAmount = estimatedCost;
         }
         if (attachments && Array.isArray(attachments)) {
             maintenanceRequest.attachments = attachments;
         }
+        maintenanceRequest.lastActivityAt = new Date();
         yield maintenanceRequest.save();
+        if (status && status !== previousStatus) {
+            const actionMap = {
+                awaiting_approval: 'Sent To Owner',
+                pending_approval: 'Sent To Owner',
+                approved: 'Approved By Owner',
+                awaiting_payment: 'Payment Requested',
+                funded: 'Payment Completed',
+                assigned: 'Assigned To Contractor',
+                in_progress: 'Work Started',
+                completed: 'Completed',
+                verified: 'Verified',
+                closed: 'Closed',
+                rejected: 'Rejected',
+            };
+            yield (0, maintenanceManagementService_1.logMaintenanceActivity)({
+                requestId: maintenanceRequest._id,
+                companyId,
+                action: actionMap[status] || 'Status Updated',
+                description: `Status changed from ${previousStatus} to ${status}`,
+                createdBy: userId,
+            });
+        }
         // Populate related data before sending response
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
@@ -207,8 +246,10 @@ const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
         }
         // Check if request is in the correct status for approval
-        if (maintenanceRequest.status !== 'pending_approval') {
-            throw new errorHandler_1.AppError('Only requests with pending approval status can be approved', 400);
+        const approvalPending = maintenanceStatus_1.APPROVAL_STATUSES.includes(maintenanceRequest.status) ||
+            (0, maintenanceStatus_1.normalizeMaintenanceStatus)(maintenanceRequest.status) === 'awaiting_approval';
+        if (!approvalPending) {
+            throw new errorHandler_1.AppError('Only requests awaiting approval can be approved', 400);
         }
         // Check if user is the owner of the property
         const property = yield Property_1.Property.findOne({ _id: maintenanceRequest.propertyId, companyId });
@@ -220,7 +261,15 @@ const approveMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0
         }
         // Update status to approved
         maintenanceRequest.status = 'approved';
+        maintenanceRequest.lastActivityAt = new Date();
         yield maintenanceRequest.save();
+        yield (0, maintenanceManagementService_1.logMaintenanceActivity)({
+            requestId: maintenanceRequest._id,
+            companyId,
+            action: 'Approved By Owner',
+            description: 'Maintenance request approved by property owner',
+            createdBy: userId,
+        });
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName')
@@ -257,16 +306,22 @@ const completeMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
         }
         // Check if request is in the correct status for completion
-        if (maintenanceRequest.status !== 'pending_completion') {
-            throw new errorHandler_1.AppError('Only requests with pending completion status can be marked as completed', 400);
-        }
-        // Check if user is the requester (agent)
-        if (maintenanceRequest.requestedBy.toString() !== userId) {
-            throw new errorHandler_1.AppError('Unauthorized - Only the requesting agent can complete the request', 403);
+        const completable = ['pending_completion', 'in_progress', 'completed'].includes(maintenanceRequest.status) ||
+            (0, maintenanceStatus_1.normalizeMaintenanceStatus)(maintenanceRequest.status) === 'in_progress';
+        if (!completable && maintenanceRequest.status !== 'pending_completion') {
+            throw new errorHandler_1.AppError('Only in-progress requests can be marked as completed', 400);
         }
         // Update status to completed
         maintenanceRequest.status = 'completed';
+        maintenanceRequest.lastActivityAt = new Date();
         yield maintenanceRequest.save();
+        yield (0, maintenanceManagementService_1.logMaintenanceActivity)({
+            requestId: maintenanceRequest._id,
+            companyId,
+            action: 'Completed',
+            description: 'Maintenance work marked as completed',
+            createdBy: userId,
+        });
         const updatedRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({ _id: id, companyId })
             .populate('propertyId', 'name address')
             .populate('requestedBy', 'firstName lastName')
@@ -289,17 +344,20 @@ const getMaintenanceRequestDetails = (req, res) => __awaiter(void 0, void 0, voi
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
         const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         const requestId = req.params.requestId || req.params.id;
+        if (!requestId || !mongoose_1.default.Types.ObjectId.isValid(requestId)) {
+            throw new errorHandler_1.AppError('Invalid maintenance request ID', 400);
+        }
         const maintenanceRequest = yield MaintenanceRequest_1.MaintenanceRequest.findOne({
             _id: requestId,
             companyId,
             $or: [
-                { tenantId: userId },
                 { requestedBy: userId },
                 { ownerId: userId }
             ]
         })
             .populate('propertyId', 'name address')
-            .populate('tenantId', 'name email');
+            .populate('requestedBy', 'firstName lastName email')
+            .populate('ownerId', 'firstName lastName');
         if (!maintenanceRequest) {
             throw new errorHandler_1.AppError('Maintenance request not found', 404);
         }
@@ -323,8 +381,8 @@ const deleteMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
             _id: requestId,
             companyId,
             $or: [
-                { tenantId: userId },
-                { requestedBy: userId }
+                { requestedBy: userId },
+                { ownerId: userId }
             ]
         });
         if (!maintenanceRequest) {
@@ -365,7 +423,8 @@ const getMaintenanceRequestsPublic = (req, res) => __awaiter(void 0, void 0, voi
             .populate('requestedBy', 'firstName lastName')
             .populate('propertyId', 'name address')
             .populate('ownerId', 'firstName lastName')
-            .sort({ createdAt: -1 });
+            .populate('contractorId', 'companyName trade')
+            .sort({ lastActivityAt: -1, createdAt: -1 });
         console.log('Found maintenance requests:', maintenanceRequests.length);
         // Return empty array if no requests found instead of error
         if (!maintenanceRequests || maintenanceRequests.length === 0) {
@@ -410,20 +469,21 @@ const getMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, f
         }
         // If role is specified as 'tenant', filter by maintenance requests created by the user
         else if (role === 'tenant') {
-            query.tenantId = userId;
+            query.requestedBy = userId;
         }
         else if (!canViewCompanyMaintenance) {
             // Non-elevated users can only see records tied directly to them.
             query.$or = [
-                { tenantId: userId },
                 { requestedBy: userId },
                 { ownerId: userId }
             ];
         }
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find(query)
-            .populate('tenantId', 'name email')
+            .populate('requestedBy', 'firstName lastName email')
             .populate('propertyId', 'name address')
-            .sort({ createdAt: -1 });
+            .populate('ownerId', 'firstName lastName')
+            .populate('contractorId', 'companyName trade')
+            .sort({ lastActivityAt: -1, createdAt: -1 });
         res.json(maintenanceRequests);
     }
     catch (error) {

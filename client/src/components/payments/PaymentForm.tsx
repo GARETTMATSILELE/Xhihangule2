@@ -39,11 +39,20 @@ export interface PaymentFormProps {
   properties: Property[];
   tenants: Tenant[];
   loading?: boolean;
+  individualMode?: boolean;
 }
 
 // Helper to generate a reference number
 function generateReferenceNumber() {
   return `REF-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+/** Levy-first split preview for combined rent+levy payments. */
+function previewCombinedAllocation(amount: number, levyRemaining: number, rentRemaining: number) {
+  const amt = Math.max(0, Number(amount || 0));
+  const levyAllocated = Math.min(amt, Math.max(0, levyRemaining));
+  const rentAllocated = Math.max(0, amt - levyAllocated);
+  return { levyAllocated, rentAllocated: Math.min(rentAllocated, Math.max(0, rentRemaining)) };
 }
 
 const PaymentForm: React.FC<PaymentFormProps> = ({
@@ -53,9 +62,11 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   properties,
   tenants,
   loading = false,
+  individualMode = false,
 }) => {
   const { user } = useAuth();
   const { company } = useCompany();
+  const isIndividualMode = individualMode || company?.workspaceType === 'individual' || company?.plan === 'INDIVIDUAL';
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +90,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const remoteRequestSeqRef = useRef(0);
   
   const [formData, setFormData] = useState<PaymentFormData>(() => ({
-    paymentType: initialData?.paymentType || 'rental',
+    paymentType: isIndividualMode ? 'rental' : initialData?.paymentType || 'rental',
     propertyType: initialData?.propertyType || 'residential',
     propertyId: initialData?.propertyId ? String(initialData.propertyId) : '',
     tenantId: initialData?.tenantId ? String(initialData.tenantId) : '',
@@ -133,8 +144,14 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [advanceStartMonth, setAdvanceStartMonth] = useState(formData.rentalPeriodMonth);
   const [advanceStartYear, setAdvanceStartYear] = useState(formData.rentalPeriodYear);
   const [propertyRent, setPropertyRent] = useState<number | null>(null);
+  const [propertyLevy, setPropertyLevy] = useState<number | null>(null);
   const [remainingForPeriod, setRemainingForPeriod] = useState<number | null>(null);
+  const [rentRemainingForPeriod, setRentRemainingForPeriod] = useState<number | null>(null);
+  const [levyRemainingForPeriod, setLevyRemainingForPeriod] = useState<number | null>(null);
   const [depositOnly, setDepositOnly] = useState(false);
+
+  const hasCombinedLevy = formData.paymentType === 'rental' && propertyLevy != null && propertyLevy > 0;
+  const monthlyCombinedDue = (propertyRent || 0) + (hasCombinedLevy ? (propertyLevy || 0) : 0);
 
   // Regenerate reference number every time the form is opened for a new payment
   useEffect(() => {
@@ -194,6 +211,17 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [properties?.length, tenants?.length]);
+
+  useEffect(() => {
+    if (!isIndividualMode) return;
+    setUseManualProperty(false);
+    setUseManualTenant(false);
+    setFormData(prev => ({
+      ...prev,
+      paymentType: 'rental',
+      agentId: prev.agentId || (user?._id ? String(user._id) : '')
+    }));
+  }, [isIndividualMode, user?._id]);
 
   // Debounced server-side search for properties (fast, queries DB)
   useEffect(() => {
@@ -260,7 +288,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         advanceMonthsPaid: advanceMonths,
         advancePeriodStart: { month: advanceStartMonth, year: advanceStartYear },
         advancePeriodEnd: calculateAdvanceEnd(advanceStartMonth, advanceStartYear, advanceMonths),
-        amount: propertyRent ? propertyRent * advanceMonths : 0,
+        amount: propertyRent != null ? (hasCombinedLevy ? monthlyCombinedDue : propertyRent) * advanceMonths : 0,
+        rentUsed: propertyRent ?? undefined,
+        levyUsed: hasCombinedLevy ? propertyLevy ?? undefined : undefined,
       }));
     } else {
       setFormData(prev => ({
@@ -272,7 +302,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       }));
     }
     // eslint-disable-next-line
-  }, [isAdvance, advanceMonths, advanceStartMonth, advanceStartYear, propertyRent]);
+  }, [isAdvance, advanceMonths, advanceStartMonth, advanceStartYear, propertyRent, propertyLevy, hasCombinedLevy, monthlyCombinedDue]);
 
   // When propertyId or paymentType changes, fetch rent or levy
   useEffect(() => {
@@ -301,46 +331,70 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         if (!cancelled) setPropertyRent(typeof levyAmount === 'number' && !isNaN(levyAmount) ? levyAmount : null);
         return;
       }
-      // Rental/other flow: use rent
+      // Rental/other flow: use rent (+ levy when property has levies)
       let rentAmount: number | null = null;
+      let levyAmount: number | null = null;
       if (typeof propertySummary?.rent !== 'undefined' && propertySummary?.rent !== null) {
         rentAmount = Number((propertySummary as any).rent);
       }
-      if (rentAmount === null || isNaN(rentAmount)) {
+      if (formData.paymentType === 'rental' && propertySummary?.levyOrMunicipalType === 'levy' && typeof propertySummary.levyOrMunicipalAmount !== 'undefined') {
+        levyAmount = Number(propertySummary.levyOrMunicipalAmount as any);
+      }
+      if (rentAmount === null || isNaN(rentAmount) || (formData.paymentType === 'rental' && levyAmount === null)) {
         try {
           const full = await propertyService.getProperty(pid);
           if (!cancelled && typeof full?.rent !== 'undefined' && full?.rent !== null) {
             rentAmount = Number((full as any).rent);
           }
+          if (!cancelled && formData.paymentType === 'rental' && full?.levyOrMunicipalType === 'levy' && typeof full.levyOrMunicipalAmount !== 'undefined') {
+            levyAmount = Number((full as any).levyOrMunicipalAmount);
+          }
         } catch {}
       }
-      if (!cancelled) setPropertyRent(typeof rentAmount === 'number' && !isNaN(rentAmount) ? rentAmount : null);
+      if (!cancelled) {
+        setPropertyRent(typeof rentAmount === 'number' && !isNaN(rentAmount) ? rentAmount : null);
+        setPropertyLevy(formData.paymentType === 'rental' && typeof levyAmount === 'number' && !isNaN(levyAmount) ? levyAmount : null);
+      }
     };
     loadAmounts();
     return () => { cancelled = true; };
   }, [formData.propertyId, formData.paymentType, internalProperties, propertyService]);
 
-  // Fetch remaining balance for the selected rental period (only for real property/tenant and rental payments)
+  // Fetch remaining balance for the selected rental period
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
       try {
         setRemainingForPeriod(null);
+        setRentRemainingForPeriod(null);
+        setLevyRemainingForPeriod(null);
         if (
           formData.paymentType === 'rental' &&
           !useManualProperty && !useManualTenant &&
-          formData.propertyId && formData.tenantId && propertyRent
+          formData.propertyId && formData.tenantId && propertyRent != null
         ) {
-          const { remaining } = await paymentService.getRemainingForPeriod({
-            tenantId: String(formData.tenantId),
-            propertyId: String(formData.propertyId),
-            rentalPeriodMonth: Number(formData.rentalPeriodMonth),
-            rentalPeriodYear: Number(formData.rentalPeriodYear),
-            rent: Number(propertyRent)
-          });
-          if (!cancelled) setRemainingForPeriod(remaining);
-        } else {
-          if (!cancelled) setRemainingForPeriod(null);
+          if (hasCombinedLevy) {
+            const data = await paymentService.getCombinedRemaining({
+              tenantId: String(formData.tenantId),
+              propertyId: String(formData.propertyId),
+              rentalPeriodMonth: Number(formData.rentalPeriodMonth),
+              rentalPeriodYear: Number(formData.rentalPeriodYear),
+            });
+            if (!cancelled) {
+              setRentRemainingForPeriod(data.rentRemaining);
+              setLevyRemainingForPeriod(data.levyRemaining);
+              setRemainingForPeriod(data.combinedRemaining);
+            }
+          } else {
+            const { remaining } = await paymentService.getRemainingForPeriod({
+              tenantId: String(formData.tenantId),
+              propertyId: String(formData.propertyId),
+              rentalPeriodMonth: Number(formData.rentalPeriodMonth),
+              rentalPeriodYear: Number(formData.rentalPeriodYear),
+              rent: Number(propertyRent)
+            });
+            if (!cancelled) setRemainingForPeriod(remaining);
+          }
         }
       } catch {
         if (!cancelled) setRemainingForPeriod(null);
@@ -348,7 +402,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     };
     run();
     return () => { cancelled = true; };
-  }, [formData.paymentType, formData.propertyId, formData.tenantId, formData.rentalPeriodMonth, formData.rentalPeriodYear, propertyRent, useManualProperty, useManualTenant]);
+  }, [formData.paymentType, formData.propertyId, formData.tenantId, formData.rentalPeriodMonth, formData.rentalPeriodYear, propertyRent, propertyLevy, hasCombinedLevy, useManualProperty, useManualTenant]);
 
   // When rent or advance months change, update amount
   useEffect(() => {
@@ -364,22 +418,25 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       });
       return;
     }
-    if (propertyRent) {
+    if (propertyRent != null) {
+      const perMonthTotal = hasCombinedLevy ? monthlyCombinedDue : propertyRent;
       if (isAdvance) {
         setFormData(prev => ({
           ...prev,
-          amount: propertyRent * advanceMonths,
+          amount: perMonthTotal * advanceMonths,
           rentUsed: propertyRent,
+          levyUsed: hasCombinedLevy ? propertyLevy ?? undefined : undefined,
         }));
       } else {
         setFormData(prev => ({
           ...prev,
-          amount: propertyRent,
+          amount: perMonthTotal,
           rentUsed: propertyRent,
+          levyUsed: hasCombinedLevy ? propertyLevy ?? undefined : undefined,
         }));
       }
     }
-  }, [propertyRent, isAdvance, advanceMonths, depositOnly]);
+  }, [propertyRent, propertyLevy, hasCombinedLevy, monthlyCombinedDue, isAdvance, advanceMonths, depositOnly]);
 
   function calculateAdvanceEnd(startMonth: number, startYear: number, months: number) {
     const endMonth = ((startMonth - 1 + months - 1) % 12) + 1;
@@ -395,7 +452,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         let agentsList = await paymentService.getAgents();
         if (!Array.isArray(agentsList)) agentsList = [] as any[];
         // INDIVIDUAL plan fallback: if no agents, use logged-in user as the sole agent option
-        if ((company?.plan === 'INDIVIDUAL') && agentsList.length === 0 && user) {
+      if (isIndividualMode && agentsList.length === 0 && user) {
           agentsList = [{ _id: user._id, firstName: (user as any).firstName || '', lastName: (user as any).lastName || '', email: (user as any).email || '' }];
         }
         setAgents(agentsList);
@@ -408,7 +465,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     };
 
     fetchAgents();
-  }, []); // Only run once on mount
+  }, [isIndividualMode, user]); // Only run once on mount for agency; refresh if individual user context resolves
 
   // Clear agentId if current value does not exist in options
   useEffect(() => {
@@ -422,12 +479,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
   // Auto-select current user as agent in INDIVIDUAL plan when no agent is preselected and available
   useEffect(() => {
-    if (company?.plan !== 'INDIVIDUAL') return;
+    if (!isIndividualMode) return;
     if (!formData.agentId && user && agents.some(a => String(a._id) === String(user._id))) {
       setFormData(prev => ({ ...prev, agentId: String(user._id) }));
     }
     // eslint-disable-next-line
-  }, [company?.plan, agents, user?._id]);
+  }, [isIndividualMode, agents, user?._id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -454,6 +511,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       }
 
       let dataToSubmit = { ...formData };
+      if (isIndividualMode) {
+        dataToSubmit.paymentType = 'rental';
+        dataToSubmit.agentId = dataToSubmit.agentId || (user?._id ? String(user._id) : '');
+      }
       if (depositOnly) {
         dataToSubmit.amount = 0;
         dataToSubmit.notes = `${dataToSubmit.notes ? dataToSubmit.notes + '\n' : ''}Deposit only payment`;
@@ -475,7 +536,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
       // Get commission percentage from selected property (only if not manual)
       let commissionPercent = 0;
-      if (!useManualProperty && formData.propertyId) {
+      if (!isIndividualMode && !useManualProperty && formData.propertyId) {
         commissionPercent = getCommissionForProperty(formData.propertyId, internalProperties);
       }
       const totalCommission = formData.amount * (commissionPercent / 100);
@@ -499,7 +560,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       }
 
       // Ensure ownerId is included (only if not manual property)
-      if (!useManualProperty && formData.propertyId) {
+      if (!isIndividualMode && !useManualProperty && formData.propertyId) {
         const property = internalProperties.find(p => String(p._id) === String(formData.propertyId));
         if (property && (property as any).ownerId) {
           const rawOwner = (property as any).ownerId;
@@ -507,17 +568,21 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         }
       }
 
-      // Inline guard: fully paid or exceeding remaining
-      if (formData.paymentType === 'rental' && remainingForPeriod !== null && !isAdvance) {
+      // Inline guard: fully paid or exceeding remaining (skip for deposit-only)
+      if (formData.paymentType === 'rental' && remainingForPeriod !== null && !isAdvance && !depositOnly) {
         const amount = Number(dataToSubmit.amount || 0);
         if (remainingForPeriod <= 0) {
-          setError('This month is fully paid.');
+          setError(hasCombinedLevy ? 'This month is fully paid (rent and levy).' : 'This month is fully paid.');
           return;
         }
         if (amount > remainingForPeriod) {
           setError(`Only ${remainingForPeriod.toFixed(2)} remains for this month. Enter an amount ≤ remaining.`);
           return;
         }
+      }
+
+      if (hasCombinedLevy && propertyLevy != null) {
+        dataToSubmit.levyUsed = propertyLevy;
       }
 
       await onSubmit(dataToSubmit);
@@ -587,23 +652,25 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       )}
       <form onSubmit={handleSubmit}>
         <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>Payment Type</InputLabel>
-              <Select
-                name="paymentType"
-                value={formData.paymentType}
-                onChange={handleInputChange}
-                label="Payment Type"
-                required
-              >
-                <MenuItem value="rental">Rental</MenuItem>
-                <MenuItem value="introduction">Introduction</MenuItem>
-                <MenuItem value="levy">Levies</MenuItem>
-                <MenuItem value="municipal">Municipal Payments</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
+          {!isIndividualMode && (
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Payment Type</InputLabel>
+                <Select
+                  name="paymentType"
+                  value={formData.paymentType}
+                  onChange={handleInputChange}
+                  label="Payment Type"
+                  required
+                >
+                  <MenuItem value="rental">Rental</MenuItem>
+                  <MenuItem value="introduction">Introduction</MenuItem>
+                  <MenuItem value="levy">Levies</MenuItem>
+                  <MenuItem value="municipal">Municipal Payments</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
 
           <Grid item xs={12}>
             <FormControl fullWidth>
@@ -621,17 +688,19 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </FormControl>
           </Grid>
 
-          <Grid item xs={12}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={useManualProperty}
-                  onChange={(e) => setUseManualProperty(e.target.checked)}
-                />
-              }
-              label="Manual Property Entry"
-            />
-          </Grid>
+          {!isIndividualMode && (
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={useManualProperty}
+                    onChange={(e) => setUseManualProperty(e.target.checked)}
+                  />
+                }
+                label="Manual Property Entry"
+              />
+            </Grid>
+          )}
 
           {useManualProperty ? (
             <Grid item xs={12}>
@@ -713,7 +782,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                     ...prev,
                     propertyId: newPropertyId,
                     tenantId: newPropertyId ? autoTenantId : '',
-                    agentId: newPropertyId ? (agentExists ? autoAgentId : '') : '',
+                    agentId: newPropertyId ? (isIndividualMode && user?._id ? String(user._id) : (agentExists ? autoAgentId : '')) : '',
                     propertyType: newPropertyType,
                     amount: (newRent ?? 0),
                   }));
@@ -741,17 +810,19 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </Grid>
           )}
 
-          <Grid item xs={12}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={useManualTenant}
-                  onChange={(e) => setUseManualTenant(e.target.checked)}
-                />
-              }
-              label="Manual Tenant Entry"
-            />
-          </Grid>
+          {!isIndividualMode && (
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={useManualTenant}
+                    onChange={(e) => setUseManualTenant(e.target.checked)}
+                  />
+                }
+                label="Manual Tenant Entry"
+              />
+            </Grid>
+          )}
 
           {useManualTenant ? (
             <Grid item xs={12}>
@@ -786,25 +857,27 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </Grid>
           )}
 
-          <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>Agent</InputLabel>
-              <Select
-                name="agentId"
-                value={agents.some(a => String(a._id) === String(formData.agentId)) ? formData.agentId : ''}
-                onChange={handleInputChange}
-                label="Agent"
-                required
-                disabled={loadingData}
-              >
-                {agents.map((agent) => (
-                  <MenuItem key={agent._id} value={agent._id}>
-                    {agent.firstName} {agent.lastName} - {agent.email}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
+          {!isIndividualMode && (
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Agent</InputLabel>
+                <Select
+                  name="agentId"
+                  value={agents.some(a => String(a._id) === String(formData.agentId)) ? formData.agentId : ''}
+                  onChange={handleInputChange}
+                  label="Agent"
+                  required
+                  disabled={loadingData}
+                >
+                  {agents.map((agent) => (
+                    <MenuItem key={agent._id} value={agent._id}>
+                      {agent.firstName} {agent.lastName} - {agent.email}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          )}
 
           <Grid item xs={12}>
             <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -843,7 +916,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             </FormControl>
           </Grid>
 
-          <Grid item xs={12}>
+          <Grid item xs={12} sm={hasCombinedLevy ? 6 : 12}>
             <TextField
               fullWidth
               label={formData.paymentType === 'levy' ? 'Monthly Levies' : formData.paymentType === 'municipal' ? 'Municipal Fees (for this month)' : 'Monthly Rent'}
@@ -870,6 +943,24 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
               }
             />
           </Grid>
+          {hasCombinedLevy && (
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Monthly Levy"
+                value={propertyLevy !== null ? propertyLevy : ''}
+                InputProps={{ readOnly: true }}
+                helperText="Levy is collected with rent in one payment."
+              />
+            </Grid>
+          )}
+          {hasCombinedLevy && (
+            <Grid item xs={12}>
+              <Typography variant="body2" color="textSecondary">
+                Combined due this month: ${monthlyCombinedDue.toFixed(2)} (rent ${(propertyRent || 0).toFixed(2)} + levy ${(propertyLevy || 0).toFixed(2)})
+              </Typography>
+            </Grid>
+          )}
 
           <Grid item xs={12}>
             <TextField
@@ -894,9 +985,29 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             <Grid item xs={12}>
               <Typography variant="body2" color={remainingForPeriod <= 0 ? 'error' : 'textSecondary'}>
                 {remainingForPeriod <= 0
-                  ? 'This month is fully paid. Change rental month or record a different period.'
-                  : `Remaining for ${new Date(0, Number(formData.rentalPeriodMonth) - 1).toLocaleString('default', { month: 'long' })} ${formData.rentalPeriodYear}: $${Number(remainingForPeriod).toFixed(2)}`}
+                  ? (hasCombinedLevy ? 'This month is fully paid (rent and levy). Change rental month or record a different period.' : 'This month is fully paid. Change rental month or record a different period.')
+                  : hasCombinedLevy
+                    ? `Remaining for ${new Date(0, Number(formData.rentalPeriodMonth) - 1).toLocaleString('default', { month: 'long' })} ${formData.rentalPeriodYear}: rent $${Number(rentRemainingForPeriod ?? 0).toFixed(2)} · levy $${Number(levyRemainingForPeriod ?? 0).toFixed(2)} · total $${Number(remainingForPeriod).toFixed(2)}`
+                    : `Remaining for ${new Date(0, Number(formData.rentalPeriodMonth) - 1).toLocaleString('default', { month: 'long' })} ${formData.rentalPeriodYear}: $${Number(remainingForPeriod).toFixed(2)}`}
               </Typography>
+            </Grid>
+          )}
+          {hasCombinedLevy && !depositOnly && Number(formData.amount || 0) > 0 && (
+            <Grid item xs={12}>
+              {(() => {
+                const preview = previewCombinedAllocation(
+                  Number(formData.amount || 0),
+                  levyRemainingForPeriod ?? propertyLevy ?? 0,
+                  rentRemainingForPeriod ?? propertyRent ?? 0
+                );
+                const dep = Number(formData.depositAmount || 0);
+                return (
+                  <Typography variant="body2" color="primary">
+                    Allocation preview: rent ${preview.rentAllocated.toFixed(2)} · levy ${preview.levyAllocated.toFixed(2)}
+                    {dep > 0 ? ` · deposit $${dep.toFixed(2)} · total receipt $${(Number(formData.amount || 0) + dep).toFixed(2)}` : ''}
+                  </Typography>
+                );
+              })()}
             </Grid>
           )}
 

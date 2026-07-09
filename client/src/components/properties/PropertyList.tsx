@@ -19,6 +19,8 @@ import {
   TextField,
   MenuItem,
   Chip,
+  LinearProgress,
+  Stack,
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -28,6 +30,8 @@ import {
 } from '@mui/icons-material';
 import { Property, PropertyFormData } from '../../types/property';
 import PropertyForm from './PropertyForm';
+import { WorkflowStatusChip } from '../rentalWorkflow';
+import { getWorkflowId, PropertyWorkflowState } from '../../utils/rentalWorkflow';
 
 interface PropertyListProps {
   properties: Property[];
@@ -38,6 +42,7 @@ interface PropertyListProps {
   isAdminRoute?: boolean;
   agentNamesById?: Record<string, string>;
   isDeletedView?: boolean;
+  workflowStatesByProperty?: Record<string, PropertyWorkflowState>;
 }
 
 const PropertyList: React.FC<PropertyListProps> = ({
@@ -48,6 +53,7 @@ const PropertyList: React.FC<PropertyListProps> = ({
   isAdminRoute,
   agentNamesById,
   isDeletedView = false,
+  workflowStatesByProperty = {},
 }) => {
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -99,6 +105,7 @@ const PropertyList: React.FC<PropertyListProps> = ({
               <TableCell>Type</TableCell>
               <TableCell>{isAgentRoute ? 'Rent' : 'Amount'}</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Setup</TableCell>
               <TableCell>Bedrooms</TableCell>
               <TableCell>Bathrooms</TableCell>
               <TableCell>Area</TableCell>
@@ -106,14 +113,16 @@ const PropertyList: React.FC<PropertyListProps> = ({
             </TableRow>
           </TableHead>
           <TableBody>
-            {properties.map((property) => (
-              <TableRow 
+            {properties.map((property) => {
+              const workflowState = workflowStatesByProperty[getWorkflowId(property._id)];
+              return (
+              <TableRow
                 key={property._id}
-                onClick={() => !isDeletedView && property.status === 'available' && handleEditClick(property)}
+                onClick={() => !isDeletedView && !isAgentRoute && property.status === 'available' && handleEditClick(property)}
                 sx={{ 
-                  cursor: !isDeletedView && property.status === 'available' ? 'pointer' : 'default',
+                  cursor: !isDeletedView && !isAgentRoute && property.status === 'available' ? 'pointer' : 'default',
                   '&:hover': {
-                    backgroundColor: !isDeletedView && property.status === 'available' ? 'action.hover' : 'inherit'
+                    backgroundColor: !isDeletedView && !isAgentRoute && property.status === 'available' ? 'action.hover' : 'inherit'
                   }
                 }}
               >
@@ -146,6 +155,34 @@ const PropertyList: React.FC<PropertyListProps> = ({
                     color={property.status === 'available' ? 'success' : 'default'}
                   />
                 </TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  {workflowState ? (
+                    <Box sx={{ minWidth: 170 }}>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
+                        <WorkflowStatusChip status={workflowState.status} />
+                        <Typography variant="caption" color="text.secondary">
+                          {workflowState.completion}%
+                        </Typography>
+                      </Stack>
+                      <LinearProgress variant="determinate" value={workflowState.completion} sx={{ height: 6, borderRadius: 3 }} />
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                        {workflowState.quickActions.slice(0, 3).map((action) => (
+                          <Button
+                            key={`${property._id}-${action.label}`}
+                            size="small"
+                            variant={action.intent === 'primary' ? 'contained' : 'outlined'}
+                            component={Link}
+                            to={action.path}
+                          >
+                            {action.label}
+                          </Button>
+                        ))}
+                      </Stack>
+                    </Box>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">Not tracked</Typography>
+                  )}
+                </TableCell>
                 <TableCell>{property.bedrooms}</TableCell>
                 <TableCell>{property.bathrooms}</TableCell>
                 <TableCell>{property.area} sq ft</TableCell>
@@ -176,7 +213,8 @@ const PropertyList: React.FC<PropertyListProps> = ({
                   )}
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>

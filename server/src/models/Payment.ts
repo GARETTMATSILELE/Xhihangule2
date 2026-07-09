@@ -23,6 +23,23 @@ export interface IPayment extends Document {
   advancePeriodStart?: { month: number; year: number };
   advancePeriodEnd?: { month: number; year: number };
   rentUsed?: number;
+  /** Portion of `amount` applied to rent (combined rent+levy payments). */
+  rentAllocated?: number;
+  /** Portion of `amount` applied to levy (combined rent+levy payments). */
+  levyAllocated?: number;
+  /** Monthly levy baseline at time of payment (like rentUsed). */
+  levyUsed?: number;
+  /** Linked levy ledger entry when levy is collected with rent. */
+  linkedLevyPaymentId?: mongoose.Types.ObjectId;
+  chargeTypeCode?: string;
+  paymentLines?: Array<{
+    chargeTypeCode: string;
+    chargeTypeId?: mongoose.Types.ObjectId;
+    amount: number;
+    description?: string;
+    referenceId?: string;
+    metadata?: Record<string, any>;
+  }>;
   notes: string;
   processedBy: mongoose.Types.ObjectId;
   commissionDetails: {
@@ -188,6 +205,59 @@ const PaymentSchema: Schema = new Schema({
     type: Number,
     required: false,
   },
+  rentAllocated: {
+    type: Number,
+    required: false,
+  },
+  levyAllocated: {
+    type: Number,
+    required: false,
+  },
+  levyUsed: {
+    type: Number,
+    required: false,
+  },
+  linkedLevyPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'LevyPayment',
+    required: false,
+  },
+  chargeTypeCode: {
+    type: String,
+    required: false,
+    uppercase: true,
+    trim: true
+  },
+  paymentLines: [{
+    chargeTypeCode: {
+      type: String,
+      required: true,
+      uppercase: true,
+      trim: true
+    },
+    chargeTypeId: {
+      type: Schema.Types.ObjectId,
+      ref: 'ChargeType',
+      required: false
+    },
+    amount: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    description: {
+      type: String,
+      required: false
+    },
+    referenceId: {
+      type: String,
+      required: false
+    },
+    metadata: {
+      type: Schema.Types.Mixed,
+      required: false
+    }
+  }],
   notes: {
     type: String,
   },
@@ -453,8 +523,8 @@ PaymentSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      externalProvider: { $exists: true, $type: 'string', $ne: '' },
-      externalTransactionId: { $exists: true, $type: 'string', $ne: '' }
+      externalProvider: { $exists: true, $type: 'string', $gt: '' },
+      externalTransactionId: { $exists: true, $type: 'string', $gt: '' }
     }
   }
 );
@@ -464,7 +534,7 @@ PaymentSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      referenceNumber: { $exists: true, $type: 'string', $ne: '' }
+      referenceNumber: { $exists: true, $type: 'string', $gt: '' }
     }
   }
 );
@@ -499,6 +569,10 @@ function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
 
 PaymentSchema.pre('save', function(next) {
   try {
+    const lines = Array.isArray((this as any).paymentLines) ? (this as any).paymentLines : [];
+    if (lines.length > 0) {
+      (this as any).amount = Number(lines.reduce((sum: number, line: any) => sum + Number(line?.amount || 0), 0).toFixed(2));
+    }
     // Keep postingStatus consistent with status to avoid "completed but draft" conflicts.
     // This is critical for reversal eligibility and ledger posting correctness.
     const status = String((this as any).status || '').toLowerCase();

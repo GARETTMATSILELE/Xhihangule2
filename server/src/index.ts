@@ -27,6 +27,7 @@ import levyPaymentRoutes from './routes/levyPaymentRoutes';
 import municipalPaymentRoutes from './routes/municipalPaymentRoutes';
 import paymentRequestRoutes from './routes/paymentRequestRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import agencyOperationsRoutes from './routes/agencyOperationsRoutes';
 import invoiceRoutes from './routes/invoiceRoutes';
 import syncRoutes from './routes/syncRoutes';
 import subscriptionRoutes from './routes/subscriptionRoutes';
@@ -44,6 +45,8 @@ import salesFileRoutes from './routes/salesFileRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import paypalRoutes from './routes/paypalRoutes';
 import paynowRoutes from './routes/paynowRoutes';
+import onboardingRoutes from './routes/onboardingRoutes';
+import individualRoutes from './routes/individualRoutes';
 import diagnosticsRoutes from './routes/diagnosticsRoutes';
 import accountingRoutes from './routes/accountingRoutes';
 import trustAccountRoutes from './routes/trustAccountRoutes';
@@ -67,6 +70,7 @@ import { User } from './models/User';
 import { getEmailConfigStatus, verifySmtpConnection } from './services/emailService';
 import { getClientIpForRateLimit, redactHeaders } from './utils/requestSecurity';
 import { getRuntimeFeatures } from './config/runtimeRole';
+import crypto from 'crypto';
 
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
@@ -77,8 +81,36 @@ dotenv.config({ path: ENV_PATH });
 const app = express();
 const runtimeFeatures = getRuntimeFeatures();
 
+function isMongoWaitQueueTimeout(error: any): boolean {
+  return (
+    error?.name === 'MongoWaitQueueTimeoutError' ||
+    error?.name === 'WaitQueueTimeoutError' ||
+    /Timed out while checking out a connection from connection pool/i.test(String(error?.message || ''))
+  );
+}
+
+process.on('uncaughtException', (error: any) => {
+  if (isMongoWaitQueueTimeout(error)) {
+    console.error('MongoDB connection pool timeout; keeping server alive while pool recovers:', error?.message || error);
+    return;
+  }
+  console.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  if (isMongoWaitQueueTimeout(reason)) {
+    console.error('Unhandled MongoDB connection pool timeout; keeping server alive while pool recovers:', reason?.message || reason);
+    return;
+  }
+  console.error('Unhandled promise rejection:', reason);
+});
+
 // Lightweight request latency instrumentation for endpoint profiling.
 app.use((req, res, next) => {
+  const requestId = req.get('x-request-id') || crypto.randomUUID();
+  (req as any).requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
   const startNs = process.hrtime.bigint();
   const originalEnd = res.end.bind(res) as any;
   (res as any).end = ((chunk?: any, encoding?: any, cb?: any) => {
@@ -373,10 +405,12 @@ app.use('/api/auth/reset-password', resetLimiter);
 app.use('/api/files/upload', fileLimiter);
 
 app.use('/api/auth', authRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/accountants', accountantRoutes);
+app.use('/api/individual', individualRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sales-files', salesFileRoutes);
@@ -397,6 +431,7 @@ app.use('/api/levy-payments', levyPaymentRoutes);
 app.use('/api/municipal-payments', municipalPaymentRoutes);
 app.use('/api/payment-requests', paymentRequestRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/agency-operations', agencyOperationsRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/billing', billingRoutes);
@@ -426,10 +461,12 @@ sessionRouter.use('/payments', paymentRoutes);
 sessionRouter.use('/webhooks', webhookRoutes);
 sessionRouter.use('/charts', chartRoutes);
 sessionRouter.use('/auth', authRoutes);
+sessionRouter.use('/onboarding', onboardingRoutes);
 sessionRouter.use('/companies', companyRoutes);
 sessionRouter.use('/users', userRoutes);
 sessionRouter.use('/agents', agentRoutes);
 sessionRouter.use('/accountants', accountantRoutes);
+sessionRouter.use('/individual', individualRoutes);
 sessionRouter.use('/files', fileRoutes);
 sessionRouter.use('/upload', uploadRoutes);
 sessionRouter.use('/property-owners', propertyOwnerRoutes);

@@ -43,6 +43,9 @@ export const apiService = {
   getCurrentCompany: () => apiInstance.get('/companies/current'),
   createCompany: (data: any) => apiInstance.post('/companies', data),
   updateCompany: (data: any) => apiInstance.put('/companies/current', data),
+  startOnboarding: (data: any, idempotencyKey?: string) => apiInstance.post('/onboarding/start', data, {
+    headers: idempotencyKey ? { 'idempotency-key': idempotencyKey } : undefined
+  }),
   uploadCompanyLogo: (companyId: string, formData: FormData) => {
     return apiInstance.post(`/companies/${companyId}/logo`, formData, {
       headers: {
@@ -205,6 +208,27 @@ export const apiService = {
   approveMaintenanceRequest: (requestId: string) => apiInstance.put(`/maintenance/${requestId}/approve`),
   completeMaintenanceRequest: (requestId: string) => apiInstance.put(`/maintenance/${requestId}/complete`),
   rejectMaintenanceRequest: (requestId: string, reason: string) => apiInstance.put(`/maintenance/${requestId}/reject`, { reason }),
+
+  // Enterprise maintenance management
+  getMaintenanceDashboard: () => apiInstance.get('/maintenance/dashboard'),
+  getMaintenanceTimeline: (id: string) => apiInstance.get(`/maintenance/timeline/${id}`),
+  getMaintenanceDetailBundle: (id: string) => apiInstance.get(`/maintenance/${id}/detail-bundle`),
+  createMaintenanceWorkOrder: (data: { maintenanceRequestId: string; notes?: string; targetCompletionDate?: string }) =>
+    apiInstance.post('/maintenance/work-order', data),
+  assignMaintenanceContractor: (data: { maintenanceRequestId: string; contractorId: string; targetCompletionDate?: string }) =>
+    apiInstance.post('/maintenance/assign-contractor', data),
+  uploadMaintenancePhoto: (requestId: string, data: { type: string; fileUrl: string; fileName?: string; mimeType?: string }) =>
+    apiInstance.post(`/maintenance/${requestId}/upload-photo`, { requestId, ...data }),
+  addMaintenanceQuotation: (requestId: string, data: any) => apiInstance.post(`/maintenance/${requestId}/quotation`, { requestId, ...data }),
+  recordMaintenanceVerification: (requestId: string, data: any) => apiInstance.post(`/maintenance/${requestId}/verification`, { requestId, ...data }),
+  getMaintenancePropertyHistory: (propertyId: string) => apiInstance.get(`/maintenance/property-history/${propertyId}`),
+  getMaintenanceContractors: (params?: any) => apiInstance.get('/maintenance/contractors', { params }),
+  createMaintenanceContractor: (data: any) => apiInstance.post('/maintenance/contractors', data),
+  getOwnerMaintenanceSummary: (userId?: string, companyId?: string) => {
+    const config: any = {};
+    if (userId || companyId) config.params = { userId, companyId };
+    return apiInstance.get('/owners/maintenance-summary', config);
+  },
 
   // Public Maintenance endpoints (for maintenance page)
   getMaintenanceRequestsPublic: (companyId?: string) => {

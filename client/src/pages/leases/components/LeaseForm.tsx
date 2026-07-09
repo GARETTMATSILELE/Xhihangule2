@@ -13,7 +13,11 @@ import {
   Typography,
   Paper,
   SelectChangeEvent,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -58,6 +62,24 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
 
   const [filteredTenants, setFilteredTenants] = useState<Tenant[]>(tenants);
 
+  const getPropertyLeaseDefaults = (property?: Property): { rent: number; deposit: number } => {
+    const specs = ((property as any)?.propertySpecifications || {}) as Record<string, any>;
+    const rent = Number((property as any)?.rent || (property as any)?.monthlyRent || 0);
+    const explicitDeposit = Number(
+      specs.depositAmount ??
+      specs.securityDeposit ??
+      specs.expectedDeposit ??
+      (property as any)?.depositAmount ??
+      (property as any)?.securityDeposit ??
+      0
+    );
+
+    return {
+      rent: Number.isFinite(rent) ? rent : 0,
+      deposit: Number.isFinite(explicitDeposit) ? explicitDeposit : 0,
+    };
+  };
+
   useEffect(() => {
     if (initialData) {
       // Ensure dates are properly formatted strings or empty strings
@@ -78,6 +100,23 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
       setFormData(formattedData);
     }
   }, [initialData]);
+
+  useEffect(() => {
+    const propertyId = getId(formData.propertyId);
+    if (!propertyId) return;
+    const selectedProperty = properties.find((property) => getId(property._id) === propertyId);
+    const defaults = getPropertyLeaseDefaults(selectedProperty);
+    if ((defaults.rent > 0 && (!formData.monthlyRent || formData.monthlyRent <= 0)) ||
+        (defaults.deposit > 0 && (!formData.securityDeposit || formData.securityDeposit <= 0))) {
+      setFormData((prev) => ({
+        ...prev,
+        monthlyRent: prev.monthlyRent && prev.monthlyRent > 0 ? prev.monthlyRent : defaults.rent,
+        rentAmount: prev.rentAmount && prev.rentAmount > 0 ? prev.rentAmount : defaults.rent,
+        securityDeposit: prev.securityDeposit && prev.securityDeposit > 0 ? prev.securityDeposit : defaults.deposit,
+        depositAmount: prev.depositAmount && prev.depositAmount > 0 ? prev.depositAmount : defaults.deposit,
+      }));
+    }
+  }, [formData.propertyId, formData.monthlyRent, formData.securityDeposit, properties]);
 
   // Helper to normalize various ID shapes to a string
   function getId(id: any): string {
@@ -276,103 +315,121 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
               />
             </Grid>
 
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Pet Deposit"
-                name="petDeposit"
-                type="number"
-                value={formData.petDeposit}
-                onChange={handleChange}
-              />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Maximum Occupants"
-                name="maxOccupants"
-                type="number"
-                value={formData.maxOccupants}
-                onChange={handleChange}
-                required
-              />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Rent Due Day"
-                name="rentDueDay"
-                type="number"
-                value={formData.rentDueDay}
-                onChange={handleChange}
-                required
-                inputProps={{ min: 1, max: 31 }}
-              />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Late Fee"
-                name="lateFee"
-                type="number"
-                value={formData.lateFee}
-                onChange={handleChange}
-              />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Grace Period (days)"
-                name="gracePeriod"
-                type="number"
-                value={formData.gracePeriod}
-                onChange={handleChange}
-              />
-            </Grid>
-
             <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={formData.isPetAllowed}
-                    onChange={handleSwitchChange}
-                    name="isPetAllowed"
-                  />
-                }
-                label="Pets Allowed"
-              />
-            </Grid>
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                      Advanced billing and occupancy settings
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Rent defaults are ready. Expand only when late fees, utilities, pets, or occupant limits need adjustment.
+                    </Typography>
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Pet Deposit"
+                        name="petDeposit"
+                        type="number"
+                        value={formData.petDeposit}
+                        onChange={handleChange}
+                      />
+                    </Grid>
 
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={formData.isUtilitiesIncluded}
-                    onChange={handleSwitchChange}
-                    name="isUtilitiesIncluded"
-                  />
-                }
-                label="Utilities Included"
-              />
-            </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Maximum Occupants"
+                        name="maxOccupants"
+                        type="number"
+                        value={formData.maxOccupants}
+                        onChange={handleChange}
+                        required
+                      />
+                    </Grid>
 
-            {formData.isUtilitiesIncluded && (
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Utilities Details"
-                  name="utilitiesDetails"
-                  value={formData.utilitiesDetails}
-                  onChange={handleChange}
-                  multiline
-                  rows={3}
-                />
-              </Grid>
-            )}
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Rent Due Day"
+                        name="rentDueDay"
+                        type="number"
+                        value={formData.rentDueDay}
+                        onChange={handleChange}
+                        required
+                        inputProps={{ min: 1, max: 31 }}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Late Fee"
+                        name="lateFee"
+                        type="number"
+                        value={formData.lateFee}
+                        onChange={handleChange}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Grace Period (days)"
+                        name="gracePeriod"
+                        type="number"
+                        value={formData.gracePeriod}
+                        onChange={handleChange}
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={formData.isPetAllowed}
+                            onChange={handleSwitchChange}
+                            name="isPetAllowed"
+                          />
+                        }
+                        label="Pets Allowed"
+                      />
+                    </Grid>
+
+                    <Grid item xs={12} md={6}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={formData.isUtilitiesIncluded}
+                            onChange={handleSwitchChange}
+                            name="isUtilitiesIncluded"
+                          />
+                        }
+                        label="Utilities Included"
+                      />
+                    </Grid>
+
+                    {formData.isUtilitiesIncluded && (
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          label="Utilities Details"
+                          name="utilitiesDetails"
+                          value={formData.utilitiesDetails}
+                          onChange={handleChange}
+                          multiline
+                          rows={3}
+                        />
+                      </Grid>
+                    )}
+                  </Grid>
+                </AccordionDetails>
+              </Accordion>
+            </Grid>
 
             <Grid item xs={12}>
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>

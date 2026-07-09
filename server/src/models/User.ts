@@ -5,14 +5,20 @@ import { COLLECTIONS } from '../config/collections';
 
 export interface IUser extends Document {
   email: string;
+  normalizedEmail?: string;
   password: string;
   firstName: string;
   lastName: string;
   role: UserRole;
   roles?: UserRole[];
   companyId?: Types.ObjectId;
+  sessionVersion?: number;
   isActive: boolean;
   lastLogin?: Date;
+  lastLoginIp?: string;
+  lastLogoutAt?: Date;
+  createdBy?: Types.ObjectId;
+  updatedBy?: Types.ObjectId;
   resetPasswordToken?: string;
   resetPasswordExpires?: Date;
   passwordChangedAt?: Date;
@@ -44,6 +50,12 @@ const userSchema = new Schema<IUser>({
     trim: true,
     lowercase: true
   },
+  normalizedEmail: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    index: true
+  },
   password: {
     type: String,
     required: true,
@@ -74,6 +86,11 @@ const userSchema = new Schema<IUser>({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Company',
     required: false
+  },
+  sessionVersion: {
+    type: Number,
+    default: 1,
+    min: 1
   },
   isActive: {
     type: Boolean,
@@ -111,6 +128,24 @@ const userSchema = new Schema<IUser>({
   lastLogin: {
     type: Date
   },
+  lastLoginIp: {
+    type: String,
+    required: false
+  },
+  lastLogoutAt: {
+    type: Date,
+    required: false
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
+  },
+  updatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
+  },
   resetPasswordToken: {
     type: String,
     required: false,
@@ -143,6 +178,11 @@ userSchema.add({
 
 // Hash password before saving
 userSchema.pre('save', async function(this: IUser, next) {
+  if (this.isModified('email') || !this.normalizedEmail) {
+    this.email = String(this.email || '').trim().toLowerCase();
+    this.normalizedEmail = this.email;
+  }
+
   if (!this.isModified('password')) return next();
 
   try {

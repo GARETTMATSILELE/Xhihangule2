@@ -26,6 +26,23 @@ import {
   deleteAgentProperty,
   restoreAgentProperty
 } from '../controllers/agentController';
+import {
+  ownersDashboard,
+  ownerPortfolio,
+  ownerFinancials,
+  ownerMaintenance,
+  ownerDocumentsList,
+  ownerDocumentsUpload,
+  ownerBankingUpsert,
+  ownerPreferencesUpsert,
+  ownerProfileExtras,
+  ownerHistoryList,
+  ownershipHistoryCreate,
+  ownerDocumentPdf,
+  ownerFullProfile,
+  ownerProfilePatch,
+  propertyLedgerSnapshot,
+} from '../controllers/ownerManagementController';
 
 const router = express.Router();
 
@@ -80,6 +97,24 @@ router.put('/payments/:id', updateAgentPayment);
 router.get('/payments', getAgentPayments);
 router.get('/levy-payments', getAgentLevyPayments);
 router.get('/commission', getAgentCommission);
+
+// Property owner ORM routes (before /:id)
+router.get('/property-owners/dashboard', ownersDashboard);
+router.get('/property-owners/properties/:propertyId/ledger', propertyLedgerSnapshot);
+router.post('/property-owners/documents', ownerDocumentsUpload);
+router.post('/property-owners/ownership-history', ownershipHistoryCreate);
+router.get('/property-owners/:ownerId/portfolio', ownerPortfolio);
+router.get('/property-owners/:ownerId/financials', ownerFinancials);
+router.get('/property-owners/:ownerId/maintenance', ownerMaintenance);
+router.get('/property-owners/:ownerId/documents', ownerDocumentsList);
+router.get('/property-owners/:ownerId/history', ownerHistoryList);
+router.get('/property-owners/:ownerId/profile-extras', ownerProfileExtras);
+router.get('/property-owners/:ownerId/full-profile', ownerFullProfile);
+router.patch('/property-owners/:ownerId/profile', ownerProfilePatch);
+router.post('/property-owners/:ownerId/banking', ownerBankingUpsert);
+router.post('/property-owners/:ownerId/preferences', ownerPreferencesUpsert);
+router.post('/property-owners/:ownerId/documents', ownerDocumentsUpload);
+router.get('/property-owners/:ownerId/documents/:docType', ownerDocumentPdf);
 
 // Property owner routes
 router.get('/property-owners', getAgentPropertyOwners);

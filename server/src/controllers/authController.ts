@@ -9,6 +9,8 @@ import { SignUpData, UserRole } from '../types/auth';
 import { AuthService } from '../services/authService';
 import { sendMail } from '../services/emailService';
 import { SubscriptionService } from '../services/subscriptionService';
+import { recordAuditEvent } from '../services/auditService';
+import { normalizeEmail, normalizeWorkspaceType } from '../utils/normalization';
 
 const authService = AuthService.getInstance();
 const subscriptionService = SubscriptionService.getInstance();
@@ -29,6 +31,21 @@ function getCookieDomain(): string | undefined {
   }
 }
 
+function clearAuthCookies(res: Response) {
+  const prod = process.env.NODE_ENV === 'production';
+  const domain = getCookieDomain();
+  const base: any = {
+    path: '/',
+    sameSite: prod ? 'strict' : 'lax',
+    secure: prod,
+    ...(prod && domain ? { domain } : {})
+  };
+
+  try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
+  try { res.clearCookie('accessToken', { ...base, httpOnly: true }); } catch {}
+  try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
+}
+
 // Signup with company details
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -37,7 +54,8 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
     }
 
-    const { email, password, name, company, plan: inputPlan } = req.body;
+    const { email: rawEmail, password, name, company, plan: inputPlan } = req.body;
+    const email = normalizeEmail(rawEmail);
 
     if (!email || !password || !name) {
       throw new AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
@@ -104,9 +122,11 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
           const { PLAN_CONFIG } = await import('../types/plan');
           const plan = (inputPlan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
           const cfg = PLAN_CONFIG[plan as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE'];
+          const workspaceType = normalizeWorkspaceType((company as any)?.workspaceType ?? req.body?.workspaceType, cfg.workspaceType);
           const companyDoc = new Company({
             ...autoCompany,
             ownerId: createdUser._id,
+            workspaceType,
             plan,
             propertyLimit: cfg.propertyLimit,
             featureFlags: cfg.featureFlags
@@ -162,6 +182,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
               const { PLAN_CONFIG } = await import('../types/plan');
               const plan = (inputPlan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
               const cfg = PLAN_CONFIG[plan as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE'];
+              const workspaceType = normalizeWorkspaceType((company as any)?.workspaceType ?? req.body?.workspaceType, cfg.workspaceType);
               const [firstNameRaw, ...lastParts2] = String(name).trim().split(/\s+/);
               const firstName2 = firstNameRaw || 'User';
               const lastName2 = lastParts2.join(' ') || firstNameRaw || 'Admin';
@@ -181,6 +202,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
               const newCompany = await Company.create({
                 ...autoCompany2,
                 ownerId: createdUser._id,
+                workspaceType,
                 plan,
                 propertyLimit: cfg.propertyLimit,
                 featureFlags: cfg.featureFlags
@@ -292,6 +314,15 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       company: companyData,
       token
     });
+    await recordAuditEvent({
+      req,
+      userId: savedUser!._id.toString(),
+      companyId: savedUser!.companyId?.toString?.(),
+      action: 'auth.signup',
+      entityType: 'User',
+      entityId: savedUser!._id.toString(),
+      metadata: { plan: inputPlan || null, hasCompany: Boolean(companyData) }
+    });
   } catch (error: any) {
     console.error('Signup error:', {
       message: error?.message,
@@ -322,9 +353,10 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
     // Use auth service for login
-    const { user: userData, token, refreshToken } = await authService.login(email, password);
+    const { user: userData, token, refreshToken } = await authService.login(normalizedEmail, password);
 
     // Get company details if user has a company
     let company = null;
@@ -392,6 +424,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         isActive: company.isActive,
         subscriptionStatus: company.subscriptionStatus,
         subscriptionEndDate: company.subscriptionEndDate,
+        companyType: (company as any).companyType,
+        workspaceType: (company as any).workspaceType,
         bankAccounts: company.bankAccounts,
         commissionConfig: company.commissionConfig,
         plan: (company as any).plan,
@@ -402,7 +436,22 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       } : null,
       token
     });
+    await recordAuditEvent({
+      req,
+      userId: userData.userId,
+      companyId: userData.companyId?.toString?.(),
+      action: 'auth.login',
+      entityType: 'User',
+      entityId: userData.userId
+    });
   } catch (error) {
+    await recordAuditEvent({
+      req,
+      action: 'auth.login_failed',
+      entityType: 'User',
+      status: 'failure',
+      metadata: { email: req.body?.email }
+    });
     console.error('Login error:', error);
     // Normalize known auth errors to 401 with message
     const message = (error as any)?.message || 'Authentication failed';
@@ -495,19 +544,14 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 };
 
 // Logout
-export const logout = (req: Request, res: Response) => {
-  // Clear refresh token + CSRF cookies with correct options
-  const prod = process.env.NODE_ENV === 'production';
-  const d = getCookieDomain();
-  const base: any = {
-    path: '/',
-    sameSite: prod ? 'strict' : 'lax',
-    secure: prod,
-    ...(prod && d ? { domain: d } : {})
-  };
-  try { res.clearCookie('refreshToken', { ...base, httpOnly: true }); } catch {}
-  try { res.clearCookie('accessToken', { ...base, httpOnly: true }); } catch {}
-  try { res.clearCookie('refreshCsrf', { ...base, httpOnly: false }); } catch {}
+export const logout = async (req: Request, res: Response) => {
+  clearAuthCookies(res);
+  await recordAuditEvent({
+    req,
+    action: 'auth.logout',
+    entityType: 'Session',
+    metadata: { hasAccessToken: Boolean(req.cookies?.accessToken) }
+  });
   res.json({ message: 'Logged out successfully' });
 };
 
@@ -605,6 +649,9 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
       token: newAccessToken
     });
   } catch (error) {
+    if (error instanceof AppError && (error.statusCode === 401 || error.statusCode === 403)) {
+      clearAuthCookies(res);
+    }
     console.error('Refresh token error:', error);
     next(error);
   }

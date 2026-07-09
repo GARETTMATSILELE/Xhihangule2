@@ -59,6 +59,7 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const agentPaymentNotificationService_1 = require("../services/agentPaymentNotificationService");
+const inspectionAutomationService_1 = require("../services/inspectionAutomationService");
 // Get properties managed by the agent
 const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -82,21 +83,6 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
             isDeleted: showDeleted ? true : { $ne: true }
         };
         console.log('Agent properties query:', query);
-        // First, let's see all properties in the company to understand the data
-        const allCompanyProperties = yield Property_1.Property.find({ companyId: req.user.companyId });
-        console.log('All company properties:', {
-            total: allCompanyProperties.length,
-            properties: allCompanyProperties.map(p => {
-                var _a, _b;
-                return ({
-                    id: p._id,
-                    name: p.name,
-                    ownerId: (_a = p.ownerId) === null || _a === void 0 ? void 0 : _a.toString(),
-                    agentUserId: req.user.userId,
-                    isOwnedByAgent: ((_b = p.ownerId) === null || _b === void 0 ? void 0 : _b.toString()) === req.user.userId
-                });
-            })
-        });
         const properties = yield Property_1.Property.find(query)
             .populate('ownerId', 'firstName lastName email')
             .populate('propertyOwnerId', 'firstName lastName email phone')
@@ -104,20 +90,7 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
         console.log('Found properties for agent:', {
             count: properties.length,
             agentId: req.user.userId,
-            query: query,
-            properties: properties.map(p => {
-                var _a;
-                return ({
-                    id: p._id,
-                    name: p.name,
-                    address: p.address,
-                    type: p.type,
-                    ownerId: ((_a = p.ownerId) === null || _a === void 0 ? void 0 : _a._id) || p.ownerId, // Show the actual ID, not the populated object
-                    ownerIdType: typeof p.ownerId,
-                    companyId: p.companyId,
-                    status: p.status
-                });
-            })
+            query
         });
         res.json(properties);
     }
@@ -219,6 +192,8 @@ const getAgentLeases = (req, res) => __awaiter(void 0, void 0, void 0, function*
         })
             .populate('propertyId', 'name address')
             .populate('tenantId', 'firstName lastName email')
+            .populate('previousLeaseId', 'startDate endDate status')
+            .populate('successorLeaseId', 'startDate endDate status')
             .sort({ createdAt: -1 });
         res.json(leases);
     }
@@ -494,7 +469,7 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.createAgentTenant = createAgentTenant;
 // Create a new lease for the agent
 const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'Authentication required' });
@@ -506,7 +481,7 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
         if (req.user.role !== 'agent') {
             return res.status(403).json({ message: 'Only agents can create leases via this endpoint.' });
         }
-        const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit, status, monthlyRent: rent, securityDeposit: deposit, petDeposit, isPetAllowed, maxOccupants, isUtilitiesIncluded, utilitiesDetails, rentDueDay, lateFee, gracePeriod } = req.body;
+        const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit, status, monthlyRent: rent, securityDeposit: deposit, petDeposit, isPetAllowed, maxOccupants, isUtilitiesIncluded, utilitiesDetails, rentDueDay, lateFee, gracePeriod, previousLeaseId } = req.body;
         // Use monthlyRent/securityDeposit if rentAmount/depositAmount are not provided
         const finalRentAmount = rentAmount !== undefined ? rentAmount : monthlyRent;
         const finalDepositAmount = depositAmount !== undefined ? depositAmount : securityDeposit;
@@ -554,6 +529,28 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
             status: status || 'active',
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Set the agent as the owner
+            previousLeaseId: previousLeaseId && mongoose_1.default.Types.ObjectId.isValid(previousLeaseId) ? new mongoose_1.default.Types.ObjectId(previousLeaseId) : null,
+            billingStatus: 'current',
+            billingRules: {
+                frequency: 'monthly',
+                rentDueDay: Number(rentDueDay || 1),
+                escalationPercent: Number(req.body.escalationPercent || ((_c = req.body.billingRules) === null || _c === void 0 ? void 0 : _c.escalationPercent) || 0),
+                escalationFrequencyMonths: Number(req.body.escalationFrequencyMonths || ((_d = req.body.billingRules) === null || _d === void 0 ? void 0 : _d.escalationFrequencyMonths) || 12),
+                nextEscalationDate: req.body.nextEscalationDate || ((_e = req.body.billingRules) === null || _e === void 0 ? void 0 : _e.nextEscalationDate)
+                    ? new Date(req.body.nextEscalationDate || req.body.billingRules.nextEscalationDate)
+                    : undefined,
+                recurringLevies: Number(req.body.recurringLevies || ((_f = req.body.billingRules) === null || _f === void 0 ? void 0 : _f.recurringLevies) || 0),
+                recurringServiceCharges: Number(req.body.recurringServiceCharges || ((_g = req.body.billingRules) === null || _g === void 0 ? void 0 : _g.recurringServiceCharges) || 0),
+                prorateMoveIn: (_k = (_h = req.body.prorateMoveIn) !== null && _h !== void 0 ? _h : (_j = req.body.billingRules) === null || _j === void 0 ? void 0 : _j.prorateMoveIn) !== null && _k !== void 0 ? _k : true,
+            },
+            financialSummary: {
+                totalBilled: 0,
+                totalPaid: 0,
+                outstandingBalance: 0,
+                depositHeld: Number(finalDepositAmount),
+                penalties: 0,
+                moveOutSettlement: 0,
+            },
             // Additional fields with defaults
             monthlyRent: Number(monthlyRent || finalRentAmount),
             securityDeposit: Number(securityDeposit || finalDepositAmount),
@@ -568,6 +565,18 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
         };
         const lease = new Lease_1.Lease(leaseData);
         yield lease.save();
+        if (leaseData.previousLeaseId) {
+            yield Lease_1.Lease.findByIdAndUpdate(leaseData.previousLeaseId, {
+                successorLeaseId: lease._id,
+                status: 'renewed',
+                lifecycleStatusChangedAt: new Date()
+            });
+        }
+        if (lease.status === 'active' || lease.status === 'pending_approval') {
+            (0, inspectionAutomationService_1.ensureLeaseInspectionSchedule)(lease, property.name || property.address || 'Property').catch((error) => {
+                console.error('Failed to create agent lease inspection schedule:', error);
+            });
+        }
         // Mark property as rented
         yield Property_1.Property.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(propertyId), { status: 'rented' });
         res.status(201).json(lease);
@@ -606,6 +615,11 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
             'name',
             'address',
             'type',
+            'propertyCategory',
+            'propertySubtype',
+            'propertySpecifications',
+            'propertyOperationalStatus',
+            'propertyUse',
             'status',
             'description',
             'rent',
@@ -721,7 +735,7 @@ const restoreAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.restoreAgentProperty = restoreAgentProperty;
 // Create a new payment for the agent
 const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'Authentication required' });
@@ -736,12 +750,19 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const { propertyId, tenantId, amount, paymentDate, paymentMethod, status, paymentType, propertyType, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Accept idempotency key from header or body
         const idempotencyKey = req.headers['idempotency-key'] || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.idempotencyKey) || undefined;
-        // Validate required fields
-        const amountMissing = amount === undefined || amount === null || Number.isNaN(Number(amount));
-        if (!propertyId || !tenantId || amountMissing || !paymentDate || !paymentMethod) {
+        // Validate required fields (allow deposit-only: amount=0 with depositAmount>0)
+        const numericAmount = Number(amount || 0);
+        const numericDeposit = Number(depositAmount || 0);
+        if (!propertyId || !tenantId || !paymentDate || !paymentMethod) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Missing required fields: propertyId, tenantId, amount, paymentDate, paymentMethod',
+                message: 'Missing required fields: propertyId, tenantId, paymentDate, paymentMethod',
+            });
+        }
+        if (numericAmount <= 0 && numericDeposit <= 0) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Either amount or depositAmount must be greater than 0',
             });
         }
         // Ensure the property belongs to this agent
@@ -754,6 +775,22 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (!tenant) {
             return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
         }
+        const propertyAccountService = (yield Promise.resolve().then(() => __importStar(require('../services/propertyAccountService')))).default;
+        const ledgerResolution = yield propertyAccountService.resolveLedgerTypeForProperty(propertyId, 'agentController.createPayment');
+        const suppliedPaymentType = paymentType ? String(paymentType).toLowerCase() : '';
+        if (suppliedPaymentType === 'sale' && ledgerResolution.ledgerType !== 'sale') {
+            return res.status(400).json({
+                status: 'error',
+                message: `Payment type sale does not match Property.rentalType (${ledgerResolution.businessType}) for property ${propertyId}`
+            });
+        }
+        if (suppliedPaymentType && suppliedPaymentType !== 'sale' && ledgerResolution.ledgerType !== 'rental') {
+            return res.status(400).json({
+                status: 'error',
+                message: `Payment type ${suppliedPaymentType} does not match Property.rentalType (${ledgerResolution.businessType}) for property ${propertyId}`
+            });
+        }
+        const resolvedPaymentType = paymentType || (ledgerResolution.ledgerType === 'sale' ? 'sale' : 'rental');
         // Short-circuit for duplicate submissions using idempotency key
         if (idempotencyKey) {
             const existing = yield Payment_1.Payment.findOne({
@@ -769,51 +806,94 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             }
         }
         // Prevent double-paying the same rental month; allow partials up to remaining
-        if ((paymentType || 'rental') === 'rental' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
-            const rent = (property === null || property === void 0 ? void 0 : property.rent) || 0;
-            if (advanceMonthsPaid && advanceMonthsPaid > 1) {
-                if (rent > 0) {
-                    const expectedAmount = rent * advanceMonthsPaid;
-                    if (Number(amount) !== expectedAmount) {
-                        return res.status(400).json({
-                            status: 'error',
-                            message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
-                        });
+        let combinedAllocation = null;
+        if (resolvedPaymentType !== 'sale' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
+            const allocationResult = yield (yield Promise.resolve().then(() => __importStar(require('../services/combinedPaymentService')))).resolveCombinedRentalAllocation({
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
+                amount: numericAmount,
+                depositAmount: numericDeposit,
+                rentalPeriodMonth,
+                rentalPeriodYear,
+                advanceMonthsPaid: Number(advanceMonthsPaid || 1),
+                rentUsed: typeof req.body.rentUsed === 'number' ? Number(req.body.rentUsed) : Number((property === null || property === void 0 ? void 0 : property.rent) || 0),
+                levyUsed: typeof req.body.levyUsed === 'number' ? Number(req.body.levyUsed) : undefined,
+            });
+            if ('status' in allocationResult) {
+                return res.status(allocationResult.status).json({
+                    status: 'error',
+                    message: allocationResult.message,
+                });
+            }
+            combinedAllocation = allocationResult;
+            if (!combinedAllocation.hasLevy) {
+                const rent = (property === null || property === void 0 ? void 0 : property.rent) || 0;
+                if (advanceMonthsPaid && advanceMonthsPaid > 1) {
+                    if (rent > 0) {
+                        const expectedAmount = rent * advanceMonthsPaid;
+                        if (Number(amount) !== expectedAmount) {
+                            return res.status(400).json({
+                                status: 'error',
+                                message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
+                            });
+                        }
+                    }
+                }
+                else if (rent > 0) {
+                    const periodFilter = {
+                        companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                        paymentType: 'rental',
+                        tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
+                        propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                        rentalPeriodYear,
+                        rentalPeriodMonth,
+                        status: { $in: ['pending', 'completed'] }
+                    };
+                    const [agg] = yield Payment_1.Payment.aggregate([
+                        { $match: periodFilter },
+                        {
+                            $group: {
+                                _id: null,
+                                total: {
+                                    $sum: {
+                                        $cond: [
+                                            { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
+                                            '$rentAllocated',
+                                            '$amount'
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]);
+                    const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                    const rentCents = Math.round((rent || 0) * 100);
+                    const remainingCents = rentCents - alreadyPaidCents;
+                    const amountCents = Math.round((Number(amount) || 0) * 100);
+                    const depositCents = Math.round(numericDeposit * 100);
+                    const isDepositOnly = amountCents === 0 && depositCents > 0;
+                    if (!isDepositOnly) {
+                        if (remainingCents <= 0) {
+                            return res.status(409).json({ status: 'error', message: 'This month is fully paid.' });
+                        }
+                        if (amountCents > remainingCents) {
+                            return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+                        }
                     }
                 }
             }
-            else if (rent > 0) {
-                const periodFilter = {
-                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-                    paymentType: 'rental',
-                    tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
-                    propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
-                    rentalPeriodYear,
-                    rentalPeriodMonth,
-                    status: { $in: ['pending', 'completed'] }
-                };
-                const [agg] = yield Payment_1.Payment.aggregate([
-                    { $match: periodFilter },
-                    { $group: { _id: null, total: { $sum: '$amount' } } }
-                ]);
-                const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
-                const rentCents = Math.round((rent || 0) * 100);
-                const remainingCents = rentCents - alreadyPaidCents;
-                if (remainingCents <= 0) {
-                    return res.status(409).json({ status: 'error', message: 'This month is fully paid.' });
-                }
-                const amountCents = Math.round((Number(amount) || 0) * 100);
-                if (amountCents > remainingCents) {
-                    return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
-                }
-            }
         }
+        const commissionBaseAmount = combinedAllocation ? combinedAllocation.rentAllocated : numericAmount;
         // Calculate commission based on property's commission percentage and company-specific splits
         const commissionPercentage = Number(property.commission || 0);
-        const commissionDetails = yield (yield Promise.resolve().then(() => __importStar(require('../services/commissionService')))).CommissionService.calculate(amount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        const commissionDetails = yield (yield Promise.resolve().then(() => __importStar(require('../services/commissionService')))).CommissionService.calculate(commissionBaseAmount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        if (combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.hasLevy) {
+            commissionDetails.ownerAmount = Number(commissionDetails.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
+        }
         // Create payment record
         const payment = new Payment_1.Payment({
-            paymentType: paymentType || 'rental',
+            paymentType: resolvedPaymentType,
             propertyType: propertyType || 'residential',
             propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
             tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
@@ -834,11 +914,40 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             advanceMonthsPaid: advanceMonthsPaid || 1,
             advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
             advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
+            rentUsed: (_d = combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentUsed) !== null && _d !== void 0 ? _d : req.body.rentUsed,
+            levyUsed: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyUsed,
+            rentAllocated: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentAllocated,
+            levyAllocated: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated,
             idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined
         });
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
+        if ((combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated) && combinedAllocation.levyAllocated > 0) {
+            const { createLinkedLevyPayment } = yield Promise.resolve().then(() => __importStar(require('../services/combinedPaymentService')));
+            const levyId = yield createLinkedLevyPayment({
+                _id: payment._id,
+                propertyId: payment.propertyId,
+                companyId: payment.companyId,
+                paymentDate: payment.paymentDate,
+                paymentMethod: payment.paymentMethod,
+                currency: payment.currency,
+                referenceNumber: payment.referenceNumber,
+                notes: payment.notes,
+                processedBy: payment.processedBy,
+                levyAllocated: combinedAllocation.levyAllocated,
+                levyUsed: combinedAllocation.levyUsed,
+                rentalPeriodMonth: payment.rentalPeriodMonth,
+                rentalPeriodYear: payment.rentalPeriodYear,
+                advanceMonthsPaid: payment.advanceMonthsPaid,
+                advancePeriodStart: payment.advancePeriodStart,
+                advancePeriodEnd: payment.advancePeriodEnd,
+            });
+            if (levyId) {
+                payment.linkedLevyPaymentId = levyId;
+                yield payment.save();
+            }
+        }
         // If depositAmount > 0, record in rentaldeposits (ledger)
         if (payment.depositAmount && payment.depositAmount > 0) {
             try {
@@ -873,7 +982,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // Sync commission from saved payment (SSOT)
         yield agentAccountService_1.default.syncCommissionForPayment(payment._id.toString());
         // If it's a rental payment, update property owner's balance
-        if ((paymentType || 'rental') === 'rental' && property.ownerId) {
+        if (resolvedPaymentType !== 'sale' && property.ownerId) {
             yield mongoose_1.default.model('User').findByIdAndUpdate(property.ownerId, {
                 $inc: {
                     balance: commissionDetails.ownerAmount,
@@ -882,7 +991,6 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         // Ensure owner income is recorded in property ledger (enqueue retry on failure)
         try {
-            const propertyAccountService = (yield Promise.resolve().then(() => __importStar(require('../services/propertyAccountService')))).default;
             yield propertyAccountService.recordIncomeFromPayment(payment._id.toString());
         }
         catch (e) {
@@ -890,7 +998,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_d) { }
+            catch (_e) { }
             console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
         // Notify agent by email with payment details (fire-and-forget)

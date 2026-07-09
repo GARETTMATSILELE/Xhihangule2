@@ -33,6 +33,27 @@ const BankAccount_1 = require("./BankAccount");
 const BankTransaction_1 = require("./BankTransaction");
 const MaintenanceJob_1 = require("./MaintenanceJob");
 const DashboardKpiSnapshot_1 = __importDefault(require("./DashboardKpiSnapshot"));
+const OnboardingSession_1 = require("./OnboardingSession");
+const PaymentSession_1 = require("./PaymentSession");
+const AuditLog_1 = require("./AuditLog");
+const MaintenanceContractor_1 = require("./MaintenanceContractor");
+const MaintenanceWorkOrder_1 = require("./MaintenanceWorkOrder");
+const MaintenanceActivity_1 = require("./MaintenanceActivity");
+const MaintenanceAttachment_1 = require("./MaintenanceAttachment");
+const MaintenanceQuote_1 = require("./MaintenanceQuote");
+const MaintenanceVerification_1 = require("./MaintenanceVerification");
+const OwnerDocument_1 = require("./OwnerDocument");
+const OwnerBankingDetails_1 = require("./OwnerBankingDetails");
+const OwnerPreferences_1 = require("./OwnerPreferences");
+const OwnershipHistory_1 = require("./OwnershipHistory");
+const Plan_1 = require("./Plan");
+const PlatformInvoice_1 = require("./PlatformInvoice");
+const CashPayment_1 = require("./CashPayment");
+const SupportTicket_1 = require("./SupportTicket");
+const DutyRosterShift_1 = require("./DutyRosterShift");
+const AgentAvailability_1 = require("./AgentAvailability");
+const LeaveRequest_1 = require("./LeaveRequest");
+const PublicHoliday_1 = require("./PublicHoliday");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const isRetryableMongoConnectionError = (error) => {
     const labels = error === null || error === void 0 ? void 0 : error[Symbol.for('errorLabels')];
@@ -112,7 +133,28 @@ function createIndexes() {
                 { model: BankAccount_1.BankAccount, name: 'BankAccount' },
                 { model: BankTransaction_1.BankTransaction, name: 'BankTransaction' },
                 { model: MaintenanceJob_1.MaintenanceJob, name: 'MaintenanceJob' },
-                { model: DashboardKpiSnapshot_1.default, name: 'DashboardKpiSnapshot' }
+                { model: DashboardKpiSnapshot_1.default, name: 'DashboardKpiSnapshot' },
+                { model: OnboardingSession_1.OnboardingSession, name: 'OnboardingSession' },
+                { model: PaymentSession_1.PaymentSession, name: 'PaymentSession' },
+                { model: AuditLog_1.AuditLog, name: 'AuditLog' },
+                { model: MaintenanceContractor_1.MaintenanceContractor, name: 'MaintenanceContractor' },
+                { model: MaintenanceWorkOrder_1.MaintenanceWorkOrder, name: 'MaintenanceWorkOrder' },
+                { model: MaintenanceActivity_1.MaintenanceActivity, name: 'MaintenanceActivity' },
+                { model: MaintenanceAttachment_1.MaintenanceAttachmentRecord, name: 'MaintenanceAttachmentRecord' },
+                { model: MaintenanceQuote_1.MaintenanceQuote, name: 'MaintenanceQuote' },
+                { model: MaintenanceVerification_1.MaintenanceVerification, name: 'MaintenanceVerification' },
+                { model: OwnerDocument_1.OwnerDocument, name: 'OwnerDocument' },
+                { model: OwnerBankingDetails_1.OwnerBankingDetails, name: 'OwnerBankingDetails' },
+                { model: OwnerPreferences_1.OwnerPreferences, name: 'OwnerPreferences' },
+                { model: OwnershipHistory_1.OwnershipHistory, name: 'OwnershipHistory' },
+                { model: Plan_1.Plan, name: 'Plan' },
+                { model: PlatformInvoice_1.PlatformInvoice, name: 'PlatformInvoice' },
+                { model: CashPayment_1.CashPayment, name: 'CashPayment' },
+                { model: SupportTicket_1.SupportTicket, name: 'SupportTicket' },
+                { model: DutyRosterShift_1.DutyRosterShift, name: 'DutyRosterShift' },
+                { model: AgentAvailability_1.AgentAvailability, name: 'AgentAvailability' },
+                { model: LeaveRequest_1.LeaveRequest, name: 'LeaveRequest' },
+                { model: PublicHoliday_1.PublicHoliday, name: 'PublicHoliday' },
             ];
             for (const { model, name } of models) {
                 // Try to create the collection if it doesn't exist yet

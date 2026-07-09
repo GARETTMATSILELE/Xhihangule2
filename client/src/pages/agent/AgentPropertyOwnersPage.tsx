@@ -1,50 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Box,
-  Typography,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Chip,
-  Alert,
-  CircularProgress,
-  Grid,
-  Card,
-  CardContent,
-  CardActions,
-  Divider,
-  Snackbar,
-  Tooltip,
-  InputAdornment
+  Box, Typography, Paper, IconButton, Button, Dialog, DialogTitle, DialogContent,
+  DialogActions, TextField, Chip, Alert, CircularProgress, Grid, Card, CardContent,
+  CardActions, Divider, Snackbar, Tooltip, InputAdornment, Stack, MenuItem, FormControl,
+  InputLabel, Select, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Business as BusinessIcon,
-  Person as PersonIcon,
-  Email as EmailIcon,
-  Phone as PhoneIcon,
-  Search as SearchIcon
+  Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, Person as PersonIcon,
+  Email as EmailIcon, Phone as PhoneIcon, Search as SearchIcon, OpenInNew as OpenIcon,
+  Login as LoginIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentPropertyOwnerService, PropertyOwner } from '../../services/agentPropertyOwnerService';
-import { usePropertyService } from '../../services/propertyService';
+import ownerManagementService from '../../services/ownerManagementService';
+import { OwnerListSummary, OwnersDashboardKpis } from '../../types/ownerManagement';
+import { SearchablePropertySelector } from '../../components/owners/SearchablePropertySelector';
 import api from '../../api/axios';
 
 interface PropertyOwnerFormData {
@@ -66,13 +37,7 @@ interface Property {
 }
 
 const initialFormData: PropertyOwnerFormData = {
-  firstName: '',
-  lastName: '',
-  email: '',
-  phone: '',
-  password: '',
-  companyId: '',
-  propertyIds: [],
+  firstName: '', lastName: '', email: '', phone: '', password: '', companyId: '', propertyIds: [],
 };
 
 const getReferenceId = (value: any): string => {
@@ -86,45 +51,66 @@ const getReferenceId = (value: any): string => {
   return '';
 };
 
+const softCardSx = {
+  borderRadius: 3,
+  border: '1px solid rgba(15, 23, 42, 0.07)',
+  boxShadow: '0 12px 32px rgba(15, 23, 42, 0.06)',
+  height: '100%',
+};
+
+const fmtMoney = (n: number) =>
+  new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+
+const KpiTile = ({ label, value, loading }: { label: string; value: string | number; loading?: boolean }) => (
+  <Paper sx={{ ...softCardSx, p: 2, textAlign: 'center' }}>
+    <Typography variant="caption" color="text.secondary" fontWeight={700}>{label}</Typography>
+    {loading ? <CircularProgress size={20} sx={{ mt: 1 }} /> : (
+      <Typography variant="h5" fontWeight={800} sx={{ mt: 0.5 }}>{value}</Typography>
+    )}
+  </Paper>
+);
+
 const AgentPropertyOwnersPage: React.FC = () => {
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, impersonate } = useAuth();
   const propertyOwnerService = useAgentPropertyOwnerService();
-  const propertyService = usePropertyService();
-  
-  const [owners, setOwners] = useState<PropertyOwner[]>([]);
+
+  const [summaries, setSummaries] = useState<OwnerListSummary[]>([]);
+  const [kpis, setKpis] = useState<OwnersDashboardKpis | null>(null);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [owners, setOwners] = useState<PropertyOwner[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedOwner, setSelectedOwner] = useState<PropertyOwner | null>(null);
   const [formData, setFormData] = useState<PropertyOwnerFormData>(initialFormData);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false,
-    message: '',
-    severity: 'success'
+    open: false, message: '', severity: 'success',
   });
-  const [propertySelectOpen, setPropertySelectOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [propertyFilter, setPropertyFilter] = useState('');
+  const [occupancyFilter, setOccupancyFilter] = useState<'all' | 'occupied' | 'vacant'>('all');
+  const [balanceFilter, setBalanceFilter] = useState<'all' | 'outstanding' | 'clear'>('all');
+  const [maintenanceFilter, setMaintenanceFilter] = useState<'all' | 'pending' | 'none'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      // Fetch property owners for the agent's company
-      const { owners } = await propertyOwnerService.getAll();
-      setOwners(owners);
-      
-      // Fetch properties managed by the agent
-      const response = await api.get('/agents/properties');
-      setProperties(response.data);
+      const [dashboard, ownersRes, propsRes] = await Promise.all([
+        ownerManagementService.getDashboard(),
+        propertyOwnerService.getAll(),
+        api.get('/agents/properties'),
+      ]);
+      setKpis(dashboard.kpis);
+      setSummaries(dashboard.owners);
+      setOwners(ownersRes.owners);
+      setProperties(propsRes.data);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch data');
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -133,24 +119,14 @@ const AgentPropertyOwnersPage: React.FC = () => {
   const handleOpenDialog = (owner?: PropertyOwner) => {
     if (owner) {
       setSelectedOwner(owner);
-      
       const propertyIds = owner.properties?.map(getReferenceId).filter(Boolean) || [];
-      
       setFormData({
-        firstName: owner.firstName,
-        lastName: owner.lastName,
-        email: owner.email,
-        phone: owner.phone,
-        password: '',
-        companyId: owner.companyId,
-        propertyIds: propertyIds,
+        firstName: owner.firstName, lastName: owner.lastName, email: owner.email, phone: owner.phone,
+        password: '', companyId: owner.companyId, propertyIds,
       });
     } else {
       setSelectedOwner(null);
-      setFormData({
-        ...initialFormData,
-        companyId: user?.companyId || '',
-      });
+      setFormData({ ...initialFormData, companyId: user?.companyId || '' });
     }
     setOpenDialog(true);
   };
@@ -163,123 +139,83 @@ const AgentPropertyOwnersPage: React.FC = () => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
-  const handlePropertyChange = (event: any) => {
-    const propertyIds = event.target.value as string[];
-    setFormData(prev => ({
-      ...prev,
-      propertyIds
-    }));
-    // After selecting, close the dropdown to return focus to the edit form
-    setPropertySelectOpen(false);
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       if (selectedOwner) {
-        const updateData = {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          phone: formData.phone,
-          propertyIds: formData.propertyIds
-        };
-        
-        await propertyOwnerService.update(selectedOwner._id, updateData);
-        setSnackbar({
-          open: true,
-          message: 'Property owner updated successfully',
-          severity: 'success'
+        await propertyOwnerService.update(selectedOwner._id, {
+          firstName: formData.firstName, lastName: formData.lastName, email: formData.email,
+          phone: formData.phone, propertyIds: formData.propertyIds,
         });
+        setSnackbar({ open: true, message: 'Property owner updated successfully', severity: 'success' });
       } else {
         await propertyOwnerService.create(formData);
-        setSnackbar({
-          open: true,
-          message: 'Property owner created successfully',
-          severity: 'success'
-        });
+        setSnackbar({ open: true, message: 'Property owner created successfully', severity: 'success' });
       }
       handleCloseDialog();
       fetchData();
     } catch (err: any) {
-      setSnackbar({
-        open: true,
-        message: err.message || 'Failed to save property owner',
-        severity: 'error'
-      });
+      setSnackbar({ open: true, message: err.message || 'Failed to save property owner', severity: 'error' });
     }
   };
 
   const handleDelete = async (ownerId: string) => {
-    if (window.confirm('Are you sure you want to delete this property owner?')) {
-      try {
-        await propertyOwnerService.remove(ownerId);
-        setSnackbar({
-          open: true,
-          message: 'Property owner deleted successfully',
-          severity: 'success'
-        });
-        fetchData();
-      } catch (err: any) {
-        setSnackbar({
-          open: true,
-          message: err.message || 'Failed to delete property owner',
-          severity: 'error'
-        });
-      }
+    if (!window.confirm('Are you sure you want to delete this property owner?')) return;
+    try {
+      await propertyOwnerService.remove(ownerId);
+      setSnackbar({ open: true, message: 'Property owner deleted successfully', severity: 'success' });
+      fetchData();
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err.message || 'Failed to delete', severity: 'error' });
     }
   };
 
-  const getOwnerProperties = (owner: PropertyOwner) => {
-    const ownerPropertyIds = owner.properties?.map(getReferenceId).filter(Boolean) || [];
-    
-    return properties.filter(prop => ownerPropertyIds.includes(prop._id));
-  };
-
-  const assignedPropertyIds = React.useMemo(() => {
+  const assignedPropertyIds = useMemo(() => {
     const ids = new Set<string>();
-
     owners.forEach((owner) => {
       if (selectedOwner && owner._id === selectedOwner._id) return;
-
       owner.properties?.forEach((property) => {
         const propertyId = getReferenceId(property);
         if (propertyId) ids.add(propertyId);
       });
     });
-
     return ids;
   }, [owners, selectedOwner]);
 
-  const selectedPropertyIds = React.useMemo(() => new Set(formData.propertyIds), [formData.propertyIds]);
-
-  const availablePropertiesForAssignment = React.useMemo(() => {
+  const availablePropertiesForAssignment = useMemo(() => {
+    const selectedPropertyIds = new Set(formData.propertyIds);
     return properties.filter((property) => {
       const propertyId = getReferenceId(property._id);
       if (selectedPropertyIds.has(propertyId)) return true;
-
       const propertyOwnerId = getReferenceId((property as any).propertyOwnerId);
       const isLinkedToAnotherOwner = propertyOwnerId && propertyOwnerId !== selectedOwner?._id;
-
       return !assignedPropertyIds.has(propertyId) && !isLinkedToAnotherOwner;
     });
-  }, [assignedPropertyIds, properties, selectedOwner, selectedPropertyIds]);
+  }, [assignedPropertyIds, properties, selectedOwner, formData.propertyIds]);
 
-  const filteredOwners = React.useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
-    if (!normalizedSearch) return owners;
-
-    return owners.filter((owner) => {
-      const fullName = `${owner.firstName || ''} ${owner.lastName || ''}`.trim().toLowerCase();
-      return fullName.includes(normalizedSearch);
+  const filteredSummaries = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return summaries.filter((o) => {
+      if (statusFilter === 'active' && !o.active) return false;
+      if (statusFilter === 'inactive' && o.active) return false;
+      if (q && !o.ownerName.toLowerCase().includes(q)) return false;
+      if (propertyFilter) {
+        const full = owners.find((x) => x._id === o._id);
+        const ids = full?.properties?.map(getReferenceId).filter(Boolean) || [];
+        if (!ids.includes(propertyFilter)) return false;
+      }
+      if (occupancyFilter === 'occupied' && o.occupiedCount === 0) return false;
+      if (occupancyFilter === 'vacant' && o.vacantCount === 0) return false;
+      if (balanceFilter === 'outstanding' && o.outstandingBalance <= 0) return false;
+      if (balanceFilter === 'clear' && o.outstandingBalance > 0) return false;
+      if (maintenanceFilter === 'pending' && o.pendingMaintenanceCount === 0) return false;
+      if (maintenanceFilter === 'none' && o.pendingMaintenanceCount > 0) return false;
+      return true;
     });
-  }, [owners, searchTerm]);
+  }, [summaries, searchTerm, statusFilter, propertyFilter, occupancyFilter, balanceFilter, maintenanceFilter, owners]);
 
   if (loading) {
     return (
@@ -290,113 +226,132 @@ const AgentPropertyOwnersPage: React.FC = () => {
   }
 
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1">
-          Property Owners
-        </Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpenDialog()}
-        >
+    <Box sx={{ p: { xs: 2, md: 3 } }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
+        <Typography variant="h4" fontWeight={800}>Property Owners</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpenDialog()}>
           Add Property Owner
         </Button>
       </Box>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
+      {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {[
+          ['Total Owners', kpis?.totalOwners ?? 0],
+          ['Total Properties', kpis?.totalProperties ?? 0],
+          ['Occupied Properties', kpis?.occupiedProperties ?? 0],
+          ['Vacant Properties', kpis?.vacantProperties ?? 0],
+          ['Owners Awaiting Approval', kpis?.ownersAwaitingApproval ?? 0],
+          ['Owners With Outstanding Balances', kpis?.ownersWithOutstandingBalances ?? 0],
+        ].map(([label, value]) => (
+          <Grid item xs={6} sm={4} md={2} key={String(label)}>
+            <KpiTile label={String(label)} value={value as number} />
+          </Grid>
+        ))}
+      </Grid>
 
-      <TextField
-        fullWidth
-        label="Search property owners"
-        placeholder="Search by owner name"
-        value={searchTerm}
-        onChange={(event) => setSearchTerm(event.target.value)}
-        sx={{ mb: 3 }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon color="action" />
-            </InputAdornment>
-          ),
-        }}
-      />
+      <Paper sx={{ p: 2, mb: 3, borderRadius: 3 }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={4}>
+            <TextField
+              fullWidth size="small" label="Owner Name" placeholder="Search by name"
+              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Property</InputLabel>
+              <Select value={propertyFilter} label="Property" onChange={(e) => setPropertyFilter(e.target.value)}>
+                <MenuItem value="">All</MenuItem>
+                {properties.map((p) => <MenuItem key={p._id} value={p._id}>{p.name}</MenuItem>)}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Occupancy</InputLabel>
+              <Select value={occupancyFilter} label="Occupancy" onChange={(e) => setOccupancyFilter(e.target.value as any)}>
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="occupied">Has Occupied</MenuItem>
+                <MenuItem value="vacant">Has Vacant</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Balance</InputLabel>
+              <Select value={balanceFilter} label="Balance" onChange={(e) => setBalanceFilter(e.target.value as any)}>
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="outstanding">Outstanding</MenuItem>
+                <MenuItem value="clear">Clear</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Maintenance</InputLabel>
+              <Select value={maintenanceFilter} label="Maintenance" onChange={(e) => setMaintenanceFilter(e.target.value as any)}>
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="pending">Pending</MenuItem>
+                <MenuItem value="none">None</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+        <ToggleButtonGroup
+          value={statusFilter} exclusive size="small" sx={{ mt: 2 }}
+          onChange={(_, v) => v && setStatusFilter(v)}
+        >
+          <ToggleButton value="all">All Owners</ToggleButton>
+          <ToggleButton value="active">Active Owners</ToggleButton>
+          <ToggleButton value="inactive">Inactive Owners</ToggleButton>
+        </ToggleButtonGroup>
+      </Paper>
 
       <Grid container spacing={3}>
-        {filteredOwners.map((owner) => (
+        {filteredSummaries.map((owner) => (
           <Grid item xs={12} md={6} lg={4} key={owner._id}>
-            <Card>
+            <Card sx={softCardSx}>
               <CardContent>
-                <Box display="flex" alignItems="center" mb={2}>
-                  <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
-                  <Typography variant="h6">
-                    {owner.firstName} {owner.lastName}
+                <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                  <PersonIcon color="primary" />
+                  <Typography variant="h6" fontWeight={700}>{owner.ownerName}</Typography>
+                  {!owner.active && <Chip label="Inactive" size="small" />}
+                </Stack>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  {owner.propertyCount} Properties · {owner.occupiedCount} Occupied · {owner.vacantCount} Vacant
+                </Typography>
+                <Divider sx={{ my: 1.5 }} />
+                <Stack spacing={0.5}>
+                  <Typography variant="body2"><strong>Monthly Revenue</strong> {fmtMoney(owner.monthlyRevenue)}</Typography>
+                  <Typography variant="body2"><strong>Outstanding Rent</strong> {fmtMoney(owner.outstandingBalance)}</Typography>
+                  <Typography variant="body2"><strong>Pending Maintenance</strong> {owner.pendingMaintenanceCount}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last Activity {new Date(owner.lastActivity).toLocaleDateString()}
                   </Typography>
-                </Box>
-                
-                <Box mb={2}>
-                  <Box display="flex" alignItems="center" mb={1}>
-                    <EmailIcon sx={{ mr: 1, fontSize: 'small', color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      {owner.email}
-                    </Typography>
-                  </Box>
-                  <Box display="flex" alignItems="center">
-                    <PhoneIcon sx={{ mr: 1, fontSize: 'small', color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      {owner.phone}
-                    </Typography>
-                  </Box>
-                </Box>
-
-                <Divider sx={{ my: 2 }} />
-
-                <Box mb={2}>
-                  <Typography variant="subtitle2" color="text.secondary" mb={1}>
-                    Properties:
-                  </Typography>
-                  {getOwnerProperties(owner).length > 0 ? (
-                    getOwnerProperties(owner).map((property) => (
-                      <Chip
-                        key={property._id}
-                        icon={<BusinessIcon />}
-                        label={`${property.name} - ${property.address}`}
-                        size="small"
-                        sx={{ mr: 1, mb: 1 }}
-                      />
-                    ))
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      No properties assigned
-                    </Typography>
-                  )}
+                </Stack>
+                <Box mt={1}>
+                  <EmailIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
+                  <Typography component="span" variant="caption">{owner.email}</Typography>
                 </Box>
               </CardContent>
-              
-              <CardActions>
-                <Tooltip title="Edit Property Owner">
-                  <IconButton
-                    size="small"
-                    onClick={() => handleOpenDialog(owner)}
-                    color="primary"
-                  >
-                    <EditIcon />
-                  </IconButton>
+              <CardActions sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                <Button size="small" variant="contained" endIcon={<OpenIcon />} onClick={() => navigate(`/agent-dashboard/property-owners/${owner._id}`)}>
+                  Open Portfolio
+                </Button>
+                <Tooltip title="Edit">
+                  <IconButton size="small" onClick={() => {
+                    const full = owners.find((o) => o._id === owner._id);
+                    if (full) handleOpenDialog(full);
+                  }}><EditIcon /></IconButton>
                 </Tooltip>
-                <Tooltip title="Delete Property Owner">
-                  <IconButton
-                    size="small"
-                    onClick={() => handleDelete(owner._id)}
-                    color="error"
-                  >
-                    <DeleteIcon />
-                  </IconButton>
+                <Tooltip title="Owner portal login">
+                  <IconButton size="small" onClick={() => impersonate(owner._id)}><LoginIcon /></IconButton>
+                </Tooltip>
+                <Tooltip title="Delete">
+                  <IconButton size="small" color="error" onClick={() => handleDelete(owner._id)}><DeleteIcon /></IconButton>
                 </Tooltip>
               </CardActions>
             </Card>
@@ -404,164 +359,57 @@ const AgentPropertyOwnersPage: React.FC = () => {
         ))}
       </Grid>
 
-      {owners.length === 0 && !loading && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No Property Owners Found
-          </Typography>
-          <Typography variant="body2" color="text.secondary" mb={3}>
-            Start by adding your first property owner to manage your properties.
-          </Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<AddIcon />}
-            onClick={() => handleOpenDialog()}
-          >
-            Add Property Owner
-          </Button>
+      {summaries.length === 0 && !loading && (
+        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3 }}>
+          <Typography variant="h6" color="text.secondary">No Property Owners Found</Typography>
+          <Button variant="contained" startIcon={<AddIcon />} sx={{ mt: 2 }} onClick={() => handleOpenDialog()}>Add Property Owner</Button>
         </Paper>
       )}
 
-      {owners.length > 0 && filteredOwners.length === 0 && !loading && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No Matching Property Owners
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Try searching for a different owner name.
-          </Typography>
+      {summaries.length > 0 && filteredSummaries.length === 0 && (
+        <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3 }}>
+          <Typography color="text.secondary">No owners match your filters.</Typography>
         </Paper>
       )}
 
-      {/* Add/Edit Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
-        <DialogTitle>
-          {selectedOwner ? 'Edit Property Owner' : 'Add Property Owner'}
-        </DialogTitle>
+        <DialogTitle>{selectedOwner ? 'Edit Property Owner' : 'Add Property Owner'}</DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent>
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="First Name"
-                  name="firstName"
-                  value={formData.firstName}
-                  onChange={handleInputChange}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Last Name"
-                  name="lastName"
-                  value={formData.lastName}
-                  onChange={handleInputChange}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Email"
-                  name="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Phone"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleInputChange}
-                  required
-                />
-              </Grid>
+              {(['firstName', 'lastName', 'email', 'phone'] as const).map((f) => (
+                <Grid item xs={12} sm={6} key={f}>
+                  <TextField fullWidth label={f.replace(/([A-Z])/g, ' $1')} name={f} value={(formData as any)[f]}
+                    onChange={handleInputChange} required={f !== 'phone' || !selectedOwner} />
+                </Grid>
+              ))}
               {!selectedOwner && (
                 <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Password"
-                    name="password"
-                    type="password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    required
-                    helperText="Password is required for new property owners"
-                  />
+                  <TextField fullWidth label="Password" name="password" type="password" value={formData.password}
+                    onChange={handleInputChange} required helperText="Required for new property owners" />
                 </Grid>
               )}
               <Grid item xs={12}>
-                <FormControl fullWidth>
-                  <InputLabel>Assign Properties</InputLabel>
-                  <Select
-                     multiple
-                     value={formData.propertyIds}
-                     onChange={handlePropertyChange}
-                     label="Assign Properties"
-                     open={propertySelectOpen}
-                     onOpen={() => setPropertySelectOpen(true)}
-                     onClose={() => setPropertySelectOpen(false)}
-                    renderValue={(selected) => (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                        {selected.map((value) => {
-                          const property = properties.find(p => p._id === value);
-                          return (
-                            <Chip
-                              key={value}
-                              label={property ? `${property.name} - ${property.address}` : value}
-                              size="small"
-                            />
-                          );
-                        })}
-                      </Box>
-                    )}
-                  >
-                    {availablePropertiesForAssignment.length === 0 ? (
-                      <MenuItem disabled>
-                        No unassigned properties available
-                      </MenuItem>
-                    ) : availablePropertiesForAssignment.map((property) => (
-                      <MenuItem key={property._id} value={property._id}>
-                        {property.name} - {property.address}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <SearchablePropertySelector
+                  properties={availablePropertiesForAssignment.map((p) => ({ _id: p._id, name: p.name, address: p.address }))}
+                  selectedIds={formData.propertyIds}
+                  onChange={(propertyIds) => setFormData((prev) => ({ ...prev, propertyIds }))}
+                />
               </Grid>
             </Grid>
           </DialogContent>
           <DialogActions>
             <Button onClick={handleCloseDialog}>Cancel</Button>
-            <Button type="submit" variant="contained" color="primary">
-              {selectedOwner ? 'Update' : 'Create'}
-            </Button>
+            <Button type="submit" variant="contained">{selectedOwner ? 'Update' : 'Create'}</Button>
           </DialogActions>
         </form>
       </Dialog>
 
-      {/* Snackbar for notifications */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
-      >
-        <Alert
-          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
+      <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={() => setSnackbar((p) => ({ ...p, open: false }))}>
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar((p) => ({ ...p, open: false }))}>{snackbar.message}</Alert>
       </Snackbar>
     </Box>
   );
 };
 
-export default AgentPropertyOwnersPage; 
+export default AgentPropertyOwnersPage;

@@ -42,11 +42,24 @@ const voucherSchema = new mongoose_1.Schema({
     cycle: { type: String, enum: ['monthly', 'yearly'], required: true },
     amount: { type: Number, required: true },
     validFrom: { type: Date },
-    validUntil: { type: Date },
+    validUntil: { type: Date, index: true },
     maxRedemptions: { type: Number, default: 1 },
+    status: { type: String, enum: ['Unused', 'Redeemed', 'Expired', 'Cancelled'], default: 'Unused', index: true },
     redeemedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company' },
     redeemedAt: { type: Date },
+    cancelledBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    cancelledAt: { type: Date },
+    auditHistory: [{
+            action: { type: String, required: true, trim: true },
+            userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+            companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company' },
+            plan: { type: String, enum: ['INDIVIDUAL', 'SME', 'ENTERPRISE'] },
+            details: { type: mongoose_1.Schema.Types.Mixed },
+            createdAt: { type: Date, default: Date.now }
+        }],
     metadata: { type: mongoose_1.Schema.Types.Mixed }
 }, { timestamps: true });
+voucherSchema.index({ status: 1, validUntil: 1 });
+voucherSchema.index({ redeemedBy: 1, redeemedAt: -1 });
 exports.Voucher = mongoose_1.default.model('Voucher', voucherSchema);
 exports.default = exports.Voucher;

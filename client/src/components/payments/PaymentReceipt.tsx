@@ -72,15 +72,30 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
     if (typeof receipt?.rentUsed === 'number') return Number(receipt.rentUsed);
     return Number(receipt?.amount || 0);
   }, [receipt?.rentAmount, receipt?.property, receipt?.rentUsed, receipt?.amount]);
+  const levyAmount = useMemo(() => {
+    if (typeof receipt?.levyAmount === 'number') return Number(receipt.levyAmount);
+    if (typeof receipt?.levyUsed === 'number') return Number(receipt.levyUsed);
+    return 0;
+  }, [receipt?.levyAmount, receipt?.levyUsed]);
+  const rentPaid = useMemo(() => {
+    if (typeof receipt?.rentAllocated === 'number') return Number(receipt.rentAllocated);
+    return Number(receipt?.amount || 0);
+  }, [receipt?.rentAllocated, receipt?.amount]);
+  const levyAllocated = useMemo(() => Number(receipt?.levyAllocated || 0), [receipt?.levyAllocated]);
   const depositAmount = useMemo(() => Number(receipt?.depositAmount || 0), [receipt?.depositAmount]);
   const totalPaid = useMemo(() => Number(receipt?.amount || 0) + depositAmount, [receipt?.amount, depositAmount]);
   const rentalOutstanding = useMemo(() => {
     const isSalePayment = (receipt?.paymentType || receipt?.type) === 'sale';
     if (isSalePayment) return null;
     if (serverRentalOutstanding != null) return serverRentalOutstanding;
-    const rentPaidOnly = Number(receipt?.amount || 0);
-    return Math.max(0, (rentAmount || 0) - rentPaidOnly);
-  }, [receipt?.paymentType, receipt?.type, receipt?.amount, rentAmount, serverRentalOutstanding]);
+    const rentPaidToDate = typeof receipt?.paidToDate === 'number' ? Number(receipt.paidToDate) : rentPaid;
+    return Math.max(0, (rentAmount || 0) - rentPaidToDate);
+  }, [receipt?.paymentType, receipt?.type, receipt?.paidToDate, rentAmount, rentPaid, serverRentalOutstanding]);
+  const levyOutstanding = useMemo(() => {
+    if (!isRental || levyAmount <= 0) return null;
+    if (typeof receipt?.levyOutstanding === 'number') return Number(receipt.levyOutstanding);
+    return Math.max(0, levyAmount - levyAllocated);
+  }, [isRental, levyAmount, levyAllocated, receipt?.levyOutstanding]);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,18 +198,26 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
                 <div class="detail-row"><span class="label">Paid To Date:</span><span class="value">${preferredCurrency} ${(paidToDate || 0).toLocaleString()}</span></div>
                 <div class="detail-row"><span class="label">Outstanding:</span><span class="value">${preferredCurrency} ${((preferredTotalSale || 0) - (paidToDate || 0) > 0 ? ((preferredTotalSale || 0) - (paidToDate || 0)) : 0).toLocaleString()}</span></div>
               ` : '';
-      const rentPaidOnly = Number(receipt.amount || 0);
-      const rentalOutstandingLocal = (serverRentalOutstanding != null ? serverRentalOutstanding : Math.max(0, (rentAmount || 0) - rentPaidOnly));
+      const rentPaidOnly = typeof receipt.rentAllocated === 'number' ? Number(receipt.rentAllocated) : Number(receipt.amount || 0);
+      const levyPaidOnly = Number(receipt.levyAllocated || 0);
+      const rentalOutstandingLocal = (serverRentalOutstanding != null ? serverRentalOutstanding : Math.max(0, (rentAmount || 0) - (typeof receipt?.paidToDate === 'number' ? Number(receipt.paidToDate) : rentPaidOnly)));
+      const levyOutstandingLocal = typeof receipt?.levyOutstanding === 'number'
+        ? Number(receipt.levyOutstanding)
+        : Math.max(0, (levyAmount || 0) - levyPaidOnly);
       const paidToDateRental = typeof receipt?.paidToDate === 'number' ? Number(receipt.paidToDate) : null;
       const rentalMonths = (isRental ? (Array.isArray(rentalMonthsList) ? rentalMonthsList : []) : []);
       const rentalPeriodHtml = (isRental && rentalMonths.length > 0) ? `
                 <div class="detail-row"><span class="label">Rental Period:</span><span class="value">${rentalMonths.join(', ')}</span></div>
               ` : '';
       const depositBreakdownHtml = `
-                <div class="detail-row"><span class="label">Rent Amount:</span><span class="value">$${(rentAmount || 0).toFixed(2)}</span></div>
+                <div class="detail-row"><span class="label">Monthly Rent:</span><span class="value">$${(rentAmount || 0).toFixed(2)}</span></div>
+                ${levyAmount > 0 ? `<div class="detail-row"><span class="label">Monthly Levy:</span><span class="value">$${(levyAmount || 0).toFixed(2)}</span></div>` : ''}
+                <div class="detail-row"><span class="label">Rent Paid:</span><span class="value">$${(rentPaidOnly || 0).toFixed(2)}</span></div>
+                ${levyPaidOnly > 0 ? `<div class="detail-row"><span class="label">Levy Allocated:</span><span class="value">$${(levyPaidOnly || 0).toFixed(2)}</span></div>` : ''}
                 ${depositAmount > 0 ? `<div class="detail-row"><span class="label">Deposit Amount:</span><span class="value">$${(depositAmount || 0).toFixed(2)}</span></div>` : ''}
-                ${paidToDateRental != null ? `<div class="detail-row"><span class="label">Paid To Date:</span><span class="value">$${(paidToDateRental || 0).toFixed(2)}</span></div>` : ''}
-                <div class="detail-row"><span class="label">Outstanding:</span><span class="value">$${(rentalOutstandingLocal || 0).toFixed(2)}</span></div>
+                ${paidToDateRental != null ? `<div class="detail-row"><span class="label">Rent Paid To Date:</span><span class="value">$${(paidToDateRental || 0).toFixed(2)}</span></div>` : ''}
+                <div class="detail-row"><span class="label">Rent Outstanding:</span><span class="value">$${(rentalOutstandingLocal || 0).toFixed(2)}</span></div>
+                ${levyAmount > 0 ? `<div class="detail-row"><span class="label">Levy Outstanding:</span><span class="value">$${(levyOutstandingLocal || 0).toFixed(2)}</span></div>` : ''}
                 <div class="detail-row"><span class="label">Total Paid:</span><span class="value">$${(totalPaid || 0).toFixed(2)}</span></div>
               `;
       const periodInlineHtml = (isRental && rentalMonths.length > 0)
@@ -552,11 +575,33 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
 
       <Grid container spacing={2} sx={{ mt: 1 }}>
         <Grid item xs={12} sm={6}>
-          <Typography variant="subtitle2" color="textSecondary">Rent Amount</Typography>
+          <Typography variant="subtitle2" color="textSecondary">Monthly Rent</Typography>
           <Typography variant="body1">
             ${rentAmount.toFixed(2)}
           </Typography>
         </Grid>
+        {levyAmount > 0 && (
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2" color="textSecondary">Monthly Levy</Typography>
+            <Typography variant="body1">
+              ${levyAmount.toFixed(2)}
+            </Typography>
+          </Grid>
+        )}
+        <Grid item xs={12} sm={6}>
+          <Typography variant="subtitle2" color="textSecondary">Rent Paid</Typography>
+          <Typography variant="body1">
+            ${rentPaid.toFixed(2)}
+          </Typography>
+        </Grid>
+        {levyAllocated > 0 && (
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2" color="textSecondary">Levy Allocated</Typography>
+            <Typography variant="body1">
+              ${levyAllocated.toFixed(2)}
+            </Typography>
+          </Grid>
+        )}
         {depositAmount > 0 && (
           <Grid item xs={12} sm={6}>
             <Typography variant="subtitle2" color="textSecondary">Deposit Amount</Typography>
@@ -567,9 +612,17 @@ const PaymentReceipt: React.FC<PaymentReceiptProps> = ({ receipt, onClose }) => 
         )}
         {rentalOutstanding != null && (
           <Grid item xs={12} sm={6}>
-            <Typography variant="subtitle2" color="textSecondary">Outstanding</Typography>
+            <Typography variant="subtitle2" color="textSecondary">Rent Outstanding</Typography>
             <Typography variant="body1">
               ${rentalOutstanding.toFixed(2)}
+            </Typography>
+          </Grid>
+        )}
+        {levyOutstanding != null && (
+          <Grid item xs={12} sm={6}>
+            <Typography variant="subtitle2" color="textSecondary">Levy Outstanding</Typography>
+            <Typography variant="body1">
+              ${levyOutstanding.toFixed(2)}
             </Typography>
           </Grid>
         )}

@@ -83,8 +83,7 @@ const PropertyLedgerPage: React.FC = () => {
     const [txRes, summaryRes] = await Promise.all([
       api.get(`/accountants/property-accounts/${propertyId}/transactions`, {
         params: {
-          includePayouts: 1,
-          ...(accountMeta?.ledgerType ? { ledger: accountMeta.ledgerType } : {})
+          includePayouts: 1
         }
       }).catch(async () => api.get(`/accountants/property-accounts/${propertyId}/deposits`)),
       api.get(`/accountants/property-accounts/${propertyId}/deposits/summary`).catch(() => null)
@@ -106,10 +105,7 @@ const PropertyLedgerPage: React.FC = () => {
   const refreshAccountMeta = async () => {
     if (!propertyId) return;
     try {
-      const account = await propertyAccountService.getPropertyAccount(
-        propertyId,
-        (accountMeta?.ledgerType as 'rental' | 'sale' | undefined)
-      );
+      const account = await propertyAccountService.getPropertyAccount(propertyId);
       setAccountMeta(account as any);
     } catch {
       setAccountMeta(null);
@@ -182,8 +178,7 @@ const PropertyLedgerPage: React.FC = () => {
           description: expenseData.description,
           category: expenseData.category,
           notes: expenseData.notes
-        },
-        (accountMeta?.ledgerType as 'rental' | 'sale' | undefined)
+        }
       );
       await Promise.all([refreshLedger(), refreshAccountMeta()]);
       setExpenseOpen(false);
@@ -217,8 +212,7 @@ const PropertyLedgerPage: React.FC = () => {
           recipientName: payoutData.recipientName || String(accountMeta?.ownerName || ''),
           autoComplete: true,
           notes: payoutData.notes
-        },
-        (accountMeta?.ledgerType as 'rental' | 'sale' | undefined)
+        }
       );
       await Promise.all([refreshLedger(), refreshAccountMeta()]);
       setPayoutOpen(false);

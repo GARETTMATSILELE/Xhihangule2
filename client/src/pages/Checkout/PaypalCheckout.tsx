@@ -18,13 +18,16 @@ const parseParams = (search: string) => {
   const cycleParam = (params.get('cycle') || 'monthly').toLowerCase();
   const plan = (['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(planParam) ? planParam : 'INDIVIDUAL') as Plan;
   const cycle = (['monthly', 'yearly'].includes(cycleParam) ? cycleParam : 'monthly') as Cycle;
-  return { plan, cycle };
+  const paymentSessionId = params.get('paymentSessionId') || undefined;
+  return { plan, cycle, paymentSessionId };
 };
+
+const pendingWorkspaceStatuses = ['PENDING_SETUP', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'FAILED_SETUP'] as const;
 
 const PaypalCheckout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { plan, cycle } = useMemo(() => parseParams(location.search), [location.search]);
+  const { plan, cycle, paymentSessionId } = useMemo(() => parseParams(location.search), [location.search]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [method, setMethod] = useState<'paynow' | 'cash'>('paynow');
@@ -33,6 +36,47 @@ const PaypalCheckout: React.FC = () => {
 
   const amount = PRICES[plan][cycle].toFixed(2);
 
+  const routeAfterActivation = async () => {
+    // Checkout routes are "public" in the router, so we can't rely on ProtectedRoute to steer correctly.
+    // After activation, fetch the user + company and choose the correct next step.
+    try {
+      const meResp = await api.get('/auth/me');
+      const user = meResp.data?.user;
+      if (!user) {
+        navigate('/login', { state: { message: 'Please sign in to continue setup.' } });
+        return;
+      }
+
+      let company: any = null;
+      try {
+        const cResp = await api.get('/companies/current');
+        company = cResp.data?.status === 'success' ? cResp.data?.data : cResp.data?.data ?? cResp.data;
+      } catch {
+        company = null;
+      }
+
+      // Admin without company at all -> company setup
+      if ((user.role === 'admin' || (Array.isArray(user.roles) && user.roles.includes('admin'))) && !user.companyId && !company?._id) {
+        navigate('/admin/company-setup', { replace: true });
+        return;
+      }
+
+      // If company exists but onboarding isn't completed -> workspace setup
+      if (company?._id && company?.onboardingCompleted === false) {
+        const status = String(company?.onboardingStatus || '');
+        if (pendingWorkspaceStatuses.includes(status as any)) {
+          navigate('/workspace-setup', { replace: true });
+          return;
+        }
+      }
+
+      // Default: go to dashboard (admin for now; other roles will be handled by normal login routing)
+      navigate('/admin-dashboard', { replace: true });
+    } catch {
+      navigate('/login', { state: { message: 'Please sign in to continue setup.' } });
+    }
+  };
+
   const handlePaynowCheckout = async () => {
     try {
       setLoading(true);
@@ -40,7 +84,8 @@ const PaypalCheckout: React.FC = () => {
       const reference = `SUBS-${plan}-${cycle}-${Date.now()}`;
       const resp = await api.post('/paynow/web/create', {
         amount: Number(amount),
-        reference
+        reference,
+        paymentSessionId
       });
       const redirectUrl = resp.data?.redirectUrl;
       if (!redirectUrl) {
@@ -129,7 +174,9 @@ const PaypalCheckout: React.FC = () => {
                   setMessage(null);
                   const resp = await api.post('/billing/vouchers/redeem', { code: cashCode.trim(), pin: cashPin.trim() });
                   setMessage({ type: 'success', text: 'Cash code accepted. Your subscription has been updated. Redirecting…' });
-                  setTimeout(() => navigate('/admin-dashboard'), 1200);
+                  setTimeout(() => {
+                    routeAfterActivation();
+                  }, 700);
                   return resp.data;
                 } catch (e: any) {
                   setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to redeem code.' });

@@ -37,6 +37,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyService } from '../../services/propertyService';
 import publicApi from '../../api/publicApi';
 import { useLocation } from 'react-router-dom';
+import { useCompany } from '../../contexts/CompanyContext';
+import { shouldUseAgentDataRoutes } from '../../utils/workspaceDataSources';
 
 interface Property {
   _id: string;
@@ -72,6 +74,7 @@ type FileType = typeof FILE_TYPES[number];
 
 export const Files: React.FC = () => {
   const { user } = useAuth();
+  const { company } = useCompany();
   const propertyService = usePropertyService();
   const location = useLocation();
   const [properties, setProperties] = useState<Property[]>([]);
@@ -94,7 +97,11 @@ export const Files: React.FC = () => {
         
         console.log('Files page: starting to load data');
         
-        const isAgentRoute = location.pathname.includes('/agent-dashboard');
+        const isAgentRoute = shouldUseAgentDataRoutes(location.pathname, {
+          workspaceType: company?.workspaceType,
+          plan: company?.plan,
+          role: user?.role
+        });
         const [propertiesResponse, filesResponse] = await Promise.all([
           isAgentRoute ? api.get('/agents/properties') : api.get('/properties'),
           isAgentRoute ? api.get('/agents/files') : api.get('/files')

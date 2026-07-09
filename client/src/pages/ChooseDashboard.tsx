@@ -12,7 +12,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const ChooseDashboard: React.FC = () => {
-  const { user, setActiveRole } = useAuth();
+  const { user, company, setActiveRole } = useAuth();
   const roles: string[] = React.useMemo(() => {
     if (!user) return [];
     const list = Array.isArray((user as any).roles) && (user as any).roles.length > 0 ? (user as any).roles : [user.role];
@@ -40,7 +40,7 @@ const ChooseDashboard: React.FC = () => {
               size="large"
               onClick={() => {
                 setActiveRole(r as any);
-                const path = getDashboardPath(r as any);
+                const path = getDashboardPath(r as any, company as any);
                 window.location.assign(path);
               }}
             >

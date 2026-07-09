@@ -15,6 +15,11 @@ interface SendMailParams {
   subject: string;
   html: string;
   text?: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer | string;
+    contentType?: string;
+  }>;
 }
 
 let transporter: any | null = null;
@@ -303,7 +308,8 @@ export async function sendMail(params: SendMailParams): Promise<void> {
       to: params.to,
       subject: params.subject,
       text: params.text,
-      html: params.html
+      html: params.html,
+      attachments: params.attachments
     });
   } catch (err: any) {
     // If SMTP fails, try API-based fallbacks

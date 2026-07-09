@@ -56,6 +56,12 @@ const userSchema = new mongoose_1.Schema({
         trim: true,
         lowercase: true
     },
+    normalizedEmail: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        index: true
+    },
     password: {
         type: String,
         required: true,
@@ -86,6 +92,11 @@ const userSchema = new mongoose_1.Schema({
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Company',
         required: false
+    },
+    sessionVersion: {
+        type: Number,
+        default: 1,
+        min: 1
     },
     isActive: {
         type: Boolean,
@@ -123,6 +134,24 @@ const userSchema = new mongoose_1.Schema({
     lastLogin: {
         type: Date
     },
+    lastLoginIp: {
+        type: String,
+        required: false
+    },
+    lastLogoutAt: {
+        type: Date,
+        required: false
+    },
+    createdBy: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false
+    },
+    updatedBy: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false
+    },
     resetPasswordToken: {
         type: String,
         required: false,
@@ -153,6 +182,10 @@ userSchema.add({
 // Hash password before saving
 userSchema.pre('save', function (next) {
     return __awaiter(this, void 0, void 0, function* () {
+        if (this.isModified('email') || !this.normalizedEmail) {
+            this.email = String(this.email || '').trim().toLowerCase();
+            this.normalizedEmail = this.email;
+        }
         if (!this.isModified('password'))
             return next();
         try {

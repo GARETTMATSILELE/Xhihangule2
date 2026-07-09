@@ -206,7 +206,7 @@ agentAccountSchema.index(
     unique: true,
     partialFilterExpression: {
       'transactions.type': 'commission',
-      'transactions.reference': { $exists: true, $type: 'string', $ne: '' }
+      'transactions.reference': { $exists: true, $type: 'string', $gt: '' }
     }
   }
 );

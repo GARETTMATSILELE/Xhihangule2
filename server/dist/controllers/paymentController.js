@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.finalizeProvisionalPayment = exports.getPaymentReceipt = exports.getPaymentReceiptDownload = exports.createPaymentPublic = exports.getPaymentByIdPublic = exports.getPaymentsPublic = exports.reversePayment = exports.updatePaymentStatus = exports.getPaymentDetails = exports.getCompanyPayments = exports.deletePayment = exports.updatePayment = exports.createSalesPaymentAccountant = exports.createPaymentAccountant = exports.createPayment = exports.getPayment = exports.getPayments = exports.getCompanySalesPayments = void 0;
+exports.getCombinedRemaining = exports.finalizeProvisionalPayment = exports.getPaymentReceipt = exports.getPaymentReceiptDownload = exports.createPaymentPublic = exports.getPaymentByIdPublic = exports.getPaymentsPublic = exports.reversePayment = exports.updatePaymentStatus = exports.getPaymentDetails = exports.getCompanyPayments = exports.deletePayment = exports.updatePayment = exports.createSalesPaymentAccountant = exports.createPaymentAccountant = exports.createPayment = exports.getPayment = exports.getPayments = exports.getCompanySalesPayments = void 0;
 const Payment_1 = require("../models/Payment");
 const Notification_1 = require("../models/Notification");
 const errorHandler_1 = require("../middleware/errorHandler");
@@ -62,9 +62,42 @@ const agentPaymentNotificationService_1 = require("../services/agentPaymentNotif
 const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
 const eventBus_1 = require("../events/eventBus");
 const trustEventRetryService_1 = __importDefault(require("../services/trustEventRetryService"));
+const chargeTypeService_1 = __importDefault(require("../services/chargeTypeService"));
+const combinedPaymentService_1 = require("../services/combinedPaymentService");
 const isConfirmedStatus = (status) => {
     const s = String(status || '').toLowerCase();
     return s === 'completed' || s === 'confirmed';
+};
+const normalizePaymentLines = (rawLines, companyId) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!Array.isArray(rawLines) || rawLines.length === 0)
+        return undefined;
+    const normalized = [];
+    for (const rawLine of rawLines) {
+        const code = String((rawLine === null || rawLine === void 0 ? void 0 : rawLine.chargeTypeCode) || (rawLine === null || rawLine === void 0 ? void 0 : rawLine.code) || '').trim().toUpperCase();
+        const amount = Number((rawLine === null || rawLine === void 0 ? void 0 : rawLine.amount) || 0);
+        if (!code || amount <= 0)
+            continue;
+        const chargeType = yield chargeTypeService_1.default.getChargeTypeByCode(code, companyId, { throwIfMissing: true });
+        normalized.push({
+            chargeTypeCode: chargeType.code,
+            chargeTypeId: chargeType._id,
+            amount: Number(amount.toFixed(2)),
+            description: (rawLine === null || rawLine === void 0 ? void 0 : rawLine.description) ? String(rawLine.description) : chargeType.name,
+            referenceId: (rawLine === null || rawLine === void 0 ? void 0 : rawLine.referenceId) ? String(rawLine.referenceId) : undefined,
+            metadata: (rawLine === null || rawLine === void 0 ? void 0 : rawLine.metadata) && typeof rawLine.metadata === 'object' ? rawLine.metadata : undefined,
+            chargeTypeCategory: chargeType.category,
+            ownerIncome: chargeType.ownerIncome
+        });
+    }
+    if (normalized.length === 0) {
+        throw new errorHandler_1.AppError('At least one valid payment line is required', 400);
+    }
+    return normalized;
+});
+const sumPaymentLines = (lines) => {
+    if (!Array.isArray(lines) || lines.length === 0)
+        return undefined;
+    return Number(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0).toFixed(2));
 };
 const emitPaymentConfirmedIfNeeded = (payment, sourceEvent) => __awaiter(void 0, void 0, void 0, function* () {
     if (!payment || !payment._id || !isConfirmedStatus(payment.status))
@@ -797,10 +830,21 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     catch (_) { }
     // Helper to perform the actual create logic, with optional transaction session
     const performCreate = (user, session) => __awaiter(void 0, void 0, void 0, function* () {
-        var _a, _b;
+        var _a, _b, _c;
         const { paymentType, propertyType, paymentDate, paymentMethod, amount, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, rentUsed, commissionDetails, manualPropertyAddress, manualTenantName, } = req.body;
         // Extract optional advance fields
         const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = req.body;
+        if (!user.companyId) {
+            return { error: { status: 400, message: 'Company ID is required' } };
+        }
+        const normalizedPaymentLines = yield normalizePaymentLines(req.body.paymentLines, String(user.companyId));
+        const lineTotal = sumPaymentLines(normalizedPaymentLines);
+        const effectiveAmount = lineTotal !== null && lineTotal !== void 0 ? lineTotal : Number(amount || 0);
+        const configuredNonOwnerTotal = Array.isArray(normalizedPaymentLines)
+            ? normalizedPaymentLines
+                .filter((line) => line.chargeTypeCategory !== 'PROPERTY_INCOME' || line.ownerIncome !== true)
+                .reduce((sum, line) => sum + Number(line.amount || 0), 0)
+            : 0;
         // Safely extract ids (string or nested {_id})
         const extractId = (v) => {
             if (!v)
@@ -822,7 +866,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (!paymentDate) {
             return { error: { status: 400, message: 'Missing required field: paymentDate' } };
         }
-        const numericAmount = Number(amount || 0);
+        const numericAmount = Number(effectiveAmount || 0);
         const numericDeposit = Number(depositAmount || 0);
         if (numericAmount <= 0 && numericDeposit <= 0) {
             return { error: { status: 400, message: 'Either amount or depositAmount must be greater than 0' } };
@@ -866,11 +910,68 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (rawOwnerId && !mongoose_1.default.Types.ObjectId.isValid(rawOwnerId)) {
             return { error: { status: 400, message: 'Invalid ownerId format' } };
         }
+        let resolvedPaymentType;
+        if (manualProperty) {
+            if (!paymentType) {
+                return { error: { status: 400, message: 'paymentType is required for manual property payments because Property.rentalType cannot be resolved' } };
+            }
+            resolvedPaymentType = paymentType;
+        }
+        else {
+            try {
+                const ledgerResolution = yield propertyAccountService_1.default.resolveLedgerTypeForProperty(rawPropertyId, 'createPaymentAccountant');
+                const suppliedPaymentType = paymentType ? String(paymentType).toLowerCase() : '';
+                if (suppliedPaymentType === 'sale' && ledgerResolution.ledgerType !== 'sale') {
+                    return {
+                        error: {
+                            status: 400,
+                            message: `Payment type sale does not match Property.rentalType (${ledgerResolution.businessType}) for property ${rawPropertyId}`
+                        }
+                    };
+                }
+                if (suppliedPaymentType && suppliedPaymentType !== 'sale' && ledgerResolution.ledgerType !== 'rental') {
+                    return {
+                        error: {
+                            status: 400,
+                            message: `Payment type ${suppliedPaymentType} does not match Property.rentalType (${ledgerResolution.businessType}) for property ${rawPropertyId}`
+                        }
+                    };
+                }
+                resolvedPaymentType = paymentType || (ledgerResolution.ledgerType === 'sale' ? 'sale' : 'rental');
+            }
+            catch (error) {
+                return { error: { status: Number((error === null || error === void 0 ? void 0 : error.statusCode) || 400), message: (error === null || error === void 0 ? void 0 : error.message) || 'Unable to resolve payment ledger type from property' } };
+            }
+        }
+        // Resolve rent/levy allocation for combined payments (levy-first split)
+        let combinedAllocation = null;
+        const isRentalPayment = resolvedPaymentType !== 'sale';
+        if (isRentalPayment && !normalizedPaymentLines && !manualProperty && !manualTenant && rawPropertyId && rawTenantId) {
+            const allocationResult = yield (0, combinedPaymentService_1.resolveCombinedRentalAllocation)({
+                companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
+                propertyId: new mongoose_1.default.Types.ObjectId(rawPropertyId),
+                tenantId: new mongoose_1.default.Types.ObjectId(rawTenantId),
+                amount: Number(effectiveAmount || 0),
+                depositAmount: Number(depositAmount || 0),
+                rentalPeriodMonth: Number(rentalPeriodMonth),
+                rentalPeriodYear: Number(rentalPeriodYear),
+                advanceMonthsPaid: Number(advanceMonthsPaid || 1),
+                rentUsed: typeof rentUsed === 'number' ? Number(rentUsed) : undefined,
+                levyUsed: typeof req.body.levyUsed === 'number' ? Number(req.body.levyUsed) : undefined,
+            });
+            if ('status' in allocationResult) {
+                return { error: { status: allocationResult.status, message: allocationResult.message } };
+            }
+            combinedAllocation = allocationResult;
+        }
+        const commissionBaseAmount = combinedAllocation
+            ? combinedAllocation.rentAllocated
+            : Number(amount || 0);
         // Calculate commission: apply "single-month" rule only for introduction; management uses full amount (including advance periods)
         let finalCommissionDetails = commissionDetails;
         let resolvedOwnerId = rawOwnerId;
         try {
-            const isRental = (paymentType || 'rental') === 'rental';
+            const isRental = resolvedPaymentType !== 'sale';
             const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose_1.default.Types.ObjectId(rawTenantId) : undefined);
             const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose_1.default.Types.ObjectId(rawPropertyId) : undefined);
             const amountNum = Number(amount || 0);
@@ -917,9 +1018,11 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                                 const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
                                 oneMonthRent = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
                             }
-                            catch (_c) { }
+                            catch (_d) { }
                         }
-                        const commissionable = oneMonthRent > 0 ? Math.min(Math.max(0, amountNum), oneMonthRent) : Math.max(0, amountNum);
+                        const commissionable = oneMonthRent > 0
+                            ? Math.min(Math.max(0, commissionBaseAmount), oneMonthRent)
+                            : Math.max(0, commissionBaseAmount);
                         if (commissionable > 0) {
                             const tmp = yield commissionService_1.CommissionService.calculate(commissionable, commissionPercentResolved, new mongoose_1.default.Types.ObjectId(user.companyId));
                             computed = {
@@ -927,19 +1030,29 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                                 preaFee: tmp.preaFee,
                                 agentShare: tmp.agentShare,
                                 agencyShare: tmp.agencyShare,
-                                ownerAmount: Math.max(0, amountNum - tmp.totalCommission)
+                                ownerAmount: Math.max(0, commissionBaseAmount - tmp.totalCommission)
                             };
                         }
                     }
                     // Not first or zero commissionable → zero commission
                     if (!computed) {
-                        computed = { totalCommission: 0, preaFee: 0, agentShare: 0, agencyShare: 0, ownerAmount: amountNum };
+                        computed = {
+                            totalCommission: 0,
+                            preaFee: 0,
+                            agentShare: 0,
+                            agencyShare: 0,
+                            ownerAmount: commissionBaseAmount
+                        };
                     }
                 }
                 else {
-                    // Management (or unknown): standard commission on the full rent amount (advance supported)
-                    const tmp = yield commissionService_1.CommissionService.calculate(Math.max(0, amountNum), commissionPercentResolved, new mongoose_1.default.Types.ObjectId(user.companyId));
+                    // Management (or unknown): standard commission on rent portion only (advance supported)
+                    const tmp = yield commissionService_1.CommissionService.calculate(Math.max(0, commissionBaseAmount), commissionPercentResolved, new mongoose_1.default.Types.ObjectId(user.companyId));
                     computed = tmp;
+                }
+                // Levy portion passes through to owner (not commissioned)
+                if ((combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.hasLevy) && computed) {
+                    computed.ownerAmount = Number(computed.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
                 }
             }
             else {
@@ -962,7 +1075,8 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             };
         }
         // Remaining-balance enforcement for rental payments (single month) and advance-payment handling
-        if ((paymentType || 'rental') === 'rental') {
+        // Skip when combined allocation already validated rent+levy together.
+        if (isRentalPayment && !(combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.hasLevy)) {
             const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose_1.default.Types.ObjectId(rawTenantId) : undefined);
             const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose_1.default.Types.ObjectId(rawPropertyId) : undefined);
             const isAdvanceRental = typeof advanceMonthsPaid === 'number' && advanceMonthsPaid > 1;
@@ -975,7 +1089,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                         const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
                         rentBaseline = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
                     }
-                    catch (_d) { }
+                    catch (_e) { }
                 }
                 if (rentBaseline > 0) {
                     const expectedCents = Math.round(rentBaseline * 100) * Number(advanceMonthsPaid);
@@ -1001,7 +1115,20 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                                 status: { $in: ['pending', 'completed'] }
                             }
                         },
-                        { $group: { _id: null, total: { $sum: '$amount' } } }
+                        {
+                            $group: {
+                                _id: null,
+                                total: {
+                                    $sum: {
+                                        $cond: [
+                                            { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
+                                            '$rentAllocated',
+                                            '$amount'
+                                        ]
+                                    }
+                                }
+                            }
+                        }
                     ]);
                     // Determine monthly rent baseline for single-month enforcement
                     let rentBaseline = typeof rentUsed === 'number' ? rentUsed : 0;
@@ -1010,13 +1137,13 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             const prop = yield Property_1.Property.findById(propertyObjectId).select('rent').lean();
                             rentBaseline = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
                         }
-                        catch (_e) { }
+                        catch (_f) { }
                     }
                     const rentCents = Math.round((rentBaseline || 0) * 100);
                     const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
                     const remainingCents = rentCents - alreadyPaidCents;
                     if (rentCents > 0) {
-                        const amountCents = Math.round((amount || 0) * 100);
+                        const amountCents = Math.round((effectiveAmount || 0) * 100);
                         const depositCents = Math.round((Number(depositAmount || 0)) * 100);
                         const isDepositOnly = amountCents === 0 && depositCents > 0;
                         if (!isDepositOnly) {
@@ -1042,7 +1169,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         const markProvisional = Boolean(manualProperty || manualTenant);
         // Create payment record
         const payment = new Payment_1.Payment({
-            paymentType: paymentType || 'rental',
+            paymentType: resolvedPaymentType,
             propertyType: propertyType || 'residential',
             propertyId: manualProperty ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(rawPropertyId), // Generate new ID for manual entries
             tenantId: manualTenant ? new mongoose_1.default.Types.ObjectId() : new mongoose_1.default.Types.ObjectId(rawTenantId), // Generate new ID for manual entries
@@ -1050,8 +1177,16 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
             paymentDate: new Date(paymentDate),
             paymentMethod,
-            amount,
+            amount: effectiveAmount,
             depositAmount: depositAmount || 0,
+            paymentLines: normalizedPaymentLines === null || normalizedPaymentLines === void 0 ? void 0 : normalizedPaymentLines.map((line) => ({
+                chargeTypeCode: line.chargeTypeCode,
+                chargeTypeId: line.chargeTypeId,
+                amount: line.amount,
+                description: line.description,
+                referenceId: line.referenceId,
+                metadata: line.metadata
+            })),
             rentalPeriodMonth,
             rentalPeriodYear,
             referenceNumber: referenceNumber || `RCPT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -1061,7 +1196,10 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             status: 'completed',
             currency: currency || 'USD',
             leaseId: rawLeaseId ? new mongoose_1.default.Types.ObjectId(rawLeaseId) : undefined,
-            rentUsed,
+            rentUsed: (_a = combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentUsed) !== null && _a !== void 0 ? _a : rentUsed,
+            levyUsed: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyUsed,
+            rentAllocated: combinedAllocation ? combinedAllocation.rentAllocated : undefined,
+            levyAllocated: combinedAllocation ? combinedAllocation.levyAllocated : undefined,
             advanceMonthsPaid: advanceMonthsPaid || 1,
             advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
             advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
@@ -1078,6 +1216,31 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         });
         // Save and related updates (with or without session)
         yield payment.save(session ? { session } : undefined);
+        // Create linked levy ledger entry when rent+levy combined
+        if ((combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated) && combinedAllocation.levyAllocated > 0) {
+            const levyId = yield (0, combinedPaymentService_1.createLinkedLevyPayment)({
+                _id: payment._id,
+                propertyId: payment.propertyId,
+                companyId: payment.companyId,
+                paymentDate: payment.paymentDate,
+                paymentMethod: payment.paymentMethod,
+                currency: payment.currency,
+                referenceNumber: payment.referenceNumber,
+                notes: payment.notes,
+                processedBy: payment.processedBy,
+                levyAllocated: combinedAllocation.levyAllocated,
+                levyUsed: combinedAllocation.levyUsed,
+                rentalPeriodMonth: payment.rentalPeriodMonth,
+                rentalPeriodYear: payment.rentalPeriodYear,
+                advanceMonthsPaid: payment.advanceMonthsPaid,
+                advancePeriodStart: payment.advancePeriodStart,
+                advancePeriodEnd: payment.advancePeriodEnd,
+            }, session);
+            if (levyId) {
+                payment.linkedLevyPaymentId = levyId;
+                yield payment.save(session ? { session } : undefined);
+            }
+        }
         yield logPaymentAudit({
             paymentId: String(payment._id),
             companyId: String(payment.companyId),
@@ -1112,7 +1275,8 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         if (!payment.isProvisional) {
             if ((paymentType === 'rental' || paymentType === 'introduction') && resolvedOwnerId) {
-                yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(resolvedOwnerId), { $inc: { balance: finalCommissionDetails.ownerAmount } }, session ? { session } : undefined);
+                const ownerBalanceIncrement = Math.max(0, Number(finalCommissionDetails.ownerAmount || 0) - Number((combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated) || configuredNonOwnerTotal || 0));
+                yield User_1.User.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(resolvedOwnerId), { $inc: { balance: ownerBalanceIncrement } }, session ? { session } : undefined);
             }
         }
         try {
@@ -1126,7 +1290,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
                 yield ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
             }
-            catch (_f) { }
+            catch (_g) { }
             console.error('Failed to record income in property account, enqueued for retry:', error);
         }
         // Notify the primary agent (and split participants) when a completed sale payment is created
@@ -1135,7 +1299,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const recipientIds = new Set();
                 if (payment.agentId)
                     recipientIds.add(String(payment.agentId));
-                const split = ((_a = (payment.commissionDetails || req.body.commissionDetails || {})) === null || _a === void 0 ? void 0 : _a.agentSplit) || {};
+                const split = ((_b = (payment.commissionDetails || req.body.commissionDetails || {})) === null || _b === void 0 ? void 0 : _b.agentSplit) || {};
                 if (split.ownerUserId)
                     recipientIds.add(String(split.ownerUserId));
                 if (split.collaboratorUserId)
@@ -1159,7 +1323,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             }
                         }
                     }
-                    catch (_g) { }
+                    catch (_h) { }
                 }
             }
         }
@@ -1172,7 +1336,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const recipientIds = new Set();
                 if (payment.agentId)
                     recipientIds.add(String(payment.agentId));
-                const split = ((_b = (payment.commissionDetails || req.body.commissionDetails || {})) === null || _b === void 0 ? void 0 : _b.agentSplit) || {};
+                const split = ((_c = (payment.commissionDetails || req.body.commissionDetails || {})) === null || _c === void 0 ? void 0 : _c.agentSplit) || {};
                 if (split.ownerUserId)
                     recipientIds.add(String(split.ownerUserId));
                 if (split.collaboratorUserId)
@@ -1196,7 +1360,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                             }
                         }
                     }
-                    catch (_h) { }
+                    catch (_j) { }
                 }
             }
         }
@@ -2219,6 +2383,14 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 paymentMethod: lockedOriginal.paymentMethod,
                 amount: -Math.abs(Number(lockedOriginal.amount || 0)),
                 depositAmount: -Math.abs(Number(lockedOriginal.depositAmount || 0)),
+                rentAllocated: lockedOriginal.rentAllocated != null
+                    ? -Math.abs(Number(lockedOriginal.rentAllocated || 0))
+                    : undefined,
+                levyAllocated: lockedOriginal.levyAllocated != null
+                    ? -Math.abs(Number(lockedOriginal.levyAllocated || 0))
+                    : undefined,
+                rentUsed: lockedOriginal.rentUsed,
+                levyUsed: lockedOriginal.levyUsed,
                 referenceNumber: `REV-${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
                 rentalPeriodMonth: lockedOriginal.rentalPeriodMonth,
                 rentalPeriodYear: lockedOriginal.rentalPeriodYear,
@@ -2251,6 +2423,7 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 saleId: lockedOriginal.saleId,
             });
             yield reversal.save(dbSession ? { session: dbSession } : undefined);
+            yield (0, combinedPaymentService_1.voidLinkedLevyPayment)(lockedOriginal.linkedLevyPaymentId, `Reversal of ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}: ${reason}`, dbSession);
             const correctedCommissionDetails = yield buildSaleCommissionDetails({
                 amount: Math.max(0, Number(lockedOriginal.amount || 0)),
                 companyId: String(lockedOriginal.companyId || ''),
@@ -2900,7 +3073,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
 exports.getPaymentReceiptDownload = getPaymentReceiptDownload;
 // Public endpoint for getting a payment receipt for printing
 const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const { id } = req.params;
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -2911,7 +3084,7 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
         try {
             query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        catch (_f) {
+        catch (_g) {
             query.companyId = String(companyId);
         }
         const payment = yield Payment_1.Payment.findOne(query)
@@ -2976,8 +3149,17 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             if (Number.isFinite(rentAmountForDisplay)) {
                 receipt.rentAmount = rentAmountForDisplay;
             }
+            if (typeof payment.rentAllocated === 'number') {
+                receipt.rentAllocated = Number(payment.rentAllocated);
+            }
+            if (typeof payment.levyAllocated === 'number') {
+                receipt.levyAllocated = Number(payment.levyAllocated);
+            }
+            if (typeof payment.levyUsed === 'number') {
+                receipt.levyAmount = Number(payment.levyUsed);
+            }
         }
-        catch (_g) {
+        catch (_h) {
             // ignore
         }
         // Include rental outstanding aggregated across the rental period (rent - paid-to-date; deposit excluded)
@@ -3002,14 +3184,39 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             };
             const agg = yield Payment_1.Payment.aggregate([
                 { $match: match },
-                { $group: { _id: null, total: { $sum: '$amount' } } }
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: {
+                                $cond: [
+                                    { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
+                                    '$rentAllocated',
+                                    '$amount'
+                                ]
+                            }
+                        }
+                    }
+                }
             ]);
             const paidToDate = Number(((_e = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _e === void 0 ? void 0 : _e.total) || 0);
             const rentalOutstanding = Math.max(0, rentAmountForDisplay - paidToDate);
             receipt.paidToDate = paidToDate;
             receipt.rentalOutstanding = rentalOutstanding;
+            const levyBaseline = typeof receipt.levyAmount === 'number' ? Number(receipt.levyAmount) : 0;
+            if (levyBaseline > 0) {
+                const { sumLevyPaidForPeriod } = yield Promise.resolve().then(() => __importStar(require('../services/combinedPaymentService')));
+                const levyPaidToDate = yield sumLevyPaidForPeriod({
+                    companyId: payment.companyId,
+                    propertyId: (((_f = payment.propertyId) === null || _f === void 0 ? void 0 : _f._id) || payment.propertyId),
+                    levyPeriodMonth: periodMonth,
+                    levyPeriodYear: periodYear,
+                });
+                receipt.levyPaidToDate = levyPaidToDate;
+                receipt.levyOutstanding = Math.max(0, levyBaseline - levyPaidToDate);
+            }
         }
-        catch (_h) {
+        catch (_j) {
             // ignore
         }
         // Generate a deterministic unique receipt code for sale payments
@@ -3242,3 +3449,59 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.finalizeProvisionalPayment = finalizeProvisionalPayment;
+/** Remaining rent + levy for a rental period (combined payment UI). */
+const getCombinedRemaining = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+        const { propertyId, tenantId, rentalPeriodMonth, rentalPeriodYear } = req.query;
+        if (!propertyId || !tenantId || !rentalPeriodMonth || !rentalPeriodYear) {
+            return res.status(400).json({ message: 'propertyId, tenantId, rentalPeriodMonth, rentalPeriodYear are required' });
+        }
+        const companyId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
+        const propId = new mongoose_1.default.Types.ObjectId(String(propertyId));
+        const tenId = new mongoose_1.default.Types.ObjectId(String(tenantId));
+        const month = Number(rentalPeriodMonth);
+        const year = Number(rentalPeriodYear);
+        const { loadPropertyCombinedBaselines, sumRentPaidForPeriod, sumLevyPaidForPeriod } = yield Promise.resolve().then(() => __importStar(require('../services/combinedPaymentService')));
+        const baselines = yield loadPropertyCombinedBaselines(propId);
+        const rentPaid = yield sumRentPaidForPeriod({
+            companyId,
+            propertyId: propId,
+            tenantId: tenId,
+            rentalPeriodMonth: month,
+            rentalPeriodYear: year,
+        });
+        const rentRemaining = Math.max(0, baselines.monthlyRent - rentPaid);
+        let levyPaid = 0;
+        let levyRemaining = 0;
+        if (baselines.hasLevy) {
+            levyPaid = yield sumLevyPaidForPeriod({
+                companyId,
+                propertyId: propId,
+                levyPeriodMonth: month,
+                levyPeriodYear: year,
+            });
+            levyRemaining = Math.max(0, baselines.monthlyLevy - levyPaid);
+        }
+        return res.json({
+            data: {
+                monthlyRent: baselines.monthlyRent,
+                monthlyLevy: baselines.monthlyLevy,
+                hasLevy: baselines.hasLevy,
+                rentPaid,
+                levyPaid,
+                rentRemaining,
+                levyRemaining,
+                combinedRemaining: rentRemaining + levyRemaining,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error fetching combined remaining:', error);
+        return res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to fetch remaining balance' });
+    }
+});
+exports.getCombinedRemaining = getCombinedRemaining;

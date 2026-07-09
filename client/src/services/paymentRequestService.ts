@@ -81,6 +81,7 @@ export interface CreatePaymentRequestData {
   requestDate?: Date;
   dueDate?: Date;
   notes?: string;
+  maintenanceRequestId?: string;
   payTo: {
     name: string;
     surname: string;

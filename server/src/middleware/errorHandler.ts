@@ -37,7 +37,8 @@ export const errorHandler = (
     code: err instanceof AppError ? err.code : 'INTERNAL_SERVER_ERROR',
     details: err instanceof AppError ? err.details : undefined,
     path: req.path,
-    method: req.method
+    method: req.method,
+    requestId: (req as any).requestId || req.get('x-request-id')
   });
 
   // Handle operational errors (AppError)
@@ -46,6 +47,7 @@ export const errorHandler = (
       status: err.status,
       message: err.message,
       code: err.code,
+      requestId: (req as any).requestId || req.get('x-request-id'),
       ...(process.env.NODE_ENV === 'development' && { 
         stack: err.stack,
         details: err.details
@@ -58,7 +60,8 @@ export const errorHandler = (
     return res.status(401).json({
       status: 'error',
       message: 'Invalid token',
-      code: 'INVALID_TOKEN'
+      code: 'INVALID_TOKEN',
+      requestId: (req as any).requestId || req.get('x-request-id')
     });
   }
 
@@ -66,7 +69,8 @@ export const errorHandler = (
     return res.status(401).json({
       status: 'error',
       message: 'Token expired',
-      code: 'TOKEN_EXPIRED'
+      code: 'TOKEN_EXPIRED',
+      requestId: (req as any).requestId || req.get('x-request-id')
     });
   }
 
@@ -75,7 +79,8 @@ export const errorHandler = (
     return res.status(400).json({
       status: 'error',
       message: 'Duplicate field value entered',
-      code: 'DUPLICATE_ENTRY'
+      code: 'DUPLICATE_ENTRY',
+      requestId: (req as any).requestId || req.get('x-request-id')
     });
   }
 
@@ -85,6 +90,7 @@ export const errorHandler = (
       status: 'error',
       message: 'Validation failed',
       code: 'VALIDATION_ERROR',
+      requestId: (req as any).requestId || req.get('x-request-id'),
       details: Object.values((err as any).errors).map((e: any) => e.message)
     });
   }
@@ -94,6 +100,7 @@ export const errorHandler = (
     status: 'error',
     message: 'Something went wrong',
     code: 'INTERNAL_SERVER_ERROR',
+    requestId: (req as any).requestId || req.get('x-request-id'),
     ...(process.env.NODE_ENV === 'development' && { 
       stack: err.stack,
       error: err.message

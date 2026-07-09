@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import api from '../../api/axios';
 import { apiService } from '../../api';
+import { statusLabel, normalizeStatus } from '../../types/maintenanceManagement';
 import {
   Box,
   Container,
@@ -136,6 +137,7 @@ export default function OwnerDashboard() {
   const [activeTab, setActiveTab] = useState(0);
   const [properties, setProperties] = useState<Property[]>([]);
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
+  const [maintenanceSummary, setMaintenanceSummary] = useState<any>(null);
   const [chartData, setChartData] = useState<ChartData>({});
   const [loading, setLoading] = useState<LoadingStates>({
     properties: true,
@@ -240,7 +242,7 @@ export default function OwnerDashboard() {
       const user = userStr ? JSON.parse(userStr) : null;
       await apiService.rejectOwnerMaintenanceRequest(requestId, reason, user?._id, user?.companyId);
       // Optimistically update status locally
-      setMaintenanceRequests((prev) => prev.map((r) => r._id === requestId ? { ...r, status: 'cancelled' } : r));
+      setMaintenanceRequests((prev) => prev.map((r) => r._id === requestId ? { ...r, status: 'rejected' as any } : r));
     } catch (e) {
       console.error('Reject maintenance failed', e);
     } finally {
@@ -376,15 +378,17 @@ export default function OwnerDashboard() {
           return;
         }
 
-        const [propertiesRes, maintenanceRes, financialDataRes] = await Promise.all([
+        const [propertiesRes, maintenanceRes, financialDataRes, maintenanceSummaryRes] = await Promise.all([
           api.get('/owners/properties'),
           apiService.getOwnerMaintenanceRequestsPublic(user._id as string, (user as any).companyId),
           apiService.getOwnerFinancialData(),
+          apiService.getOwnerMaintenanceSummary(user._id as string, (user as any).companyId).catch(() => ({ data: null })),
         ]);
 
         if (isMounted) {
           setProperties(propertiesRes.data);
           setMaintenanceRequests(maintenanceRes.data);
+          setMaintenanceSummary(maintenanceSummaryRes?.data || null);
 
           if (financialDataRes.data?.success) {
             setFinancialData(financialDataRes.data.data);
@@ -1009,6 +1013,34 @@ export default function OwnerDashboard() {
                     {activeTab === 2 && (
                       <Box sx={{ mt: 2 }}>
                         <Typography variant="h6" gutterBottom>
+                          Maintenance Overview
+                        </Typography>
+                        <Grid container spacing={2} sx={{ mb: 3 }}>
+                          {[
+                            { label: 'Open Requests', value: maintenanceSummary?.openRequests?.length ?? maintenanceRequests.filter((r) => !['closed', 'rejected', 'verified', 'completed'].includes(normalizeStatus(r.status))).length },
+                            { label: 'Approved', value: maintenanceSummary?.approvedRequests?.length ?? maintenanceRequests.filter((r) => ['approved', 'awaiting_payment', 'funded', 'assigned', 'in_progress', 'pending_completion'].includes(normalizeStatus(r.status))).length },
+                            { label: 'Maintenance Spend', value: `$${Number(maintenanceSummary?.maintenanceSpend || maintenanceRequests.reduce((s, r) => s + Number((r as any).paidAmount || r.estimatedCost || 0), 0)).toLocaleString()}` },
+                            { label: 'Completed Repairs', value: maintenanceSummary?.completedRepairs?.length ?? maintenanceRequests.filter((r) => ['completed', 'verified', 'closed'].includes(normalizeStatus(r.status))).length },
+                          ].map((item) => (
+                            <Grid item xs={6} md={3} key={item.label}>
+                              <Paper sx={{ ...emphasizedPaperSx }}>
+                                <Typography variant="body2" color="text.secondary">{item.label}</Typography>
+                                <Typography variant="h5" fontWeight={700}>{item.value}</Typography>
+                              </Paper>
+                            </Grid>
+                          ))}
+                        </Grid>
+                        {!!maintenanceSummary?.recentWorkOrders?.length && (
+                          <Paper sx={{ ...sectionPaperSx, mb: 3 }}>
+                            <Typography variant="subtitle1" fontWeight={600} gutterBottom>Recent Work Orders</Typography>
+                            {maintenanceSummary.recentWorkOrders.slice(0, 5).map((wo: any) => (
+                              <Typography key={wo._id} variant="body2" sx={{ mb: 0.5 }}>
+                                {wo.workOrderNumber} — {statusLabel(wo.status)}
+                              </Typography>
+                            ))}
+                          </Paper>
+                        )}
+                        <Typography variant="h6" gutterBottom>
                           Maintenance Requests
                         </Typography>
                         <Grid container spacing={3}>
@@ -1036,14 +1068,14 @@ export default function OwnerDashboard() {
                                       }
                                     />
                                     <Chip
-                                      label={request.status}
+                                      label={statusLabel(request.status)}
                                       size="small"
                                       color={
-                                        request.status === 'completed'
+                                        ['completed', 'verified', 'closed'].includes(normalizeStatus(request.status))
                                           ? 'success'
-                                          : request.status === 'in_progress' || request.status === 'approved' || request.status === 'pending_completion'
+                                          : ['in_progress', 'approved', 'funded', 'assigned', 'awaiting_payment', 'pending_completion'].includes(normalizeStatus(request.status))
                                           ? 'primary'
-                                          : request.status === 'pending_approval'
+                                          : ['awaiting_approval', 'pending_approval'].includes(normalizeStatus(request.status))
                                           ? 'warning'
                                           : 'default'
                                       }
@@ -1072,7 +1104,7 @@ export default function OwnerDashboard() {
                                       ))}
                                     </Box>
                                   )}
-                                  {(((request.status || '').toLowerCase().replace(/[^a-z]/g, '')) === 'pendingapproval') && (
+                                  {(['pendingapproval', 'awaitingapproval'].includes(((request.status || '').toLowerCase().replace(/[^a-z]/g, '')))) && (
                                     <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
                                       <Button
                                         variant="contained"

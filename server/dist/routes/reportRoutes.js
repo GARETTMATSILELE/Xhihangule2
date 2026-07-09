@@ -103,6 +103,49 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
             }
         }
         const owners = {};
+        const normalizePassThroughType = (value) => String(value || 'OTHER')
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9_]+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'OTHER';
+        const passThroughLabel = (type) => {
+            const labels = {
+                LEVY: 'Levies',
+                WATER: 'Water Recoveries',
+                ELECTRICITY: 'Electricity Recoveries',
+                RATES: 'Rates',
+                SECURITY: 'Security',
+                INSURANCE: 'Insurance Recoveries',
+                MUNICIPAL: 'Municipal Charges',
+                OTHER: 'Other Pass-Through Charges'
+            };
+            const normalized = normalizePassThroughType(type);
+            return labels[normalized] || normalized.toLowerCase().split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+        };
+        const inferLegacyPassThroughType = (transaction) => {
+            const text = `${(transaction === null || transaction === void 0 ? void 0 : transaction.category) || ''} ${(transaction === null || transaction === void 0 ? void 0 : transaction.description) || ''}`.toLowerCase();
+            if (/levy|levies|hoa/.test(text))
+                return 'LEVY';
+            if (/water/.test(text))
+                return 'WATER';
+            if (/electric/.test(text))
+                return 'ELECTRICITY';
+            if (/rates?/.test(text))
+                return 'RATES';
+            if (/security/.test(text))
+                return 'SECURITY';
+            if (/insurance/.test(text))
+                return 'INSURANCE';
+            if (/municipal/.test(text))
+                return 'MUNICIPAL';
+            return 'OTHER';
+        };
+        const isPassThroughTransaction = (transaction) => {
+            if ((transaction === null || transaction === void 0 ? void 0 : transaction.accountingTreatment) === 'PASS_THROUGH' || (transaction === null || transaction === void 0 ? void 0 : transaction.transactionCategory) === 'PASS_THROUGH')
+                return true;
+            const text = `${(transaction === null || transaction === void 0 ? void 0 : transaction.category) || ''} ${(transaction === null || transaction === void 0 ? void 0 : transaction.description) || ''}`.toLowerCase();
+            return /levy|levies|hoa|water|electric|rates?|municipal|security|insurance/.test(text);
+        };
         for (const acc of accounts) {
             const propertyIdStr = ((_e = (_d = acc.propertyId) === null || _d === void 0 ? void 0 : _d.toString) === null || _e === void 0 ? void 0 : _e.call(_d)) || '';
             const refOwner = propertyIdStr ? propertyIdToOwner[propertyIdStr] : undefined;
@@ -121,12 +164,48 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
                 }
             });
             const income = inPeriod
-                .filter((t) => t.type === 'income')
+                .filter((t) => t.type === 'income' && !isPassThroughTransaction(t))
                 .reduce((sum, t) => sum + Number(t.amount || 0), 0);
             const expenseTypes = new Set(['expense', 'repair', 'maintenance']);
             const expenses = inPeriod
-                .filter((t) => expenseTypes.has(t.type))
+                .filter((t) => expenseTypes.has(t.type) && !isPassThroughTransaction(t))
                 .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+            const passThroughByType = {};
+            const addPassThrough = (type, direction, amount) => {
+                const normalized = normalizePassThroughType(type);
+                passThroughByType[normalized] = passThroughByType[normalized] || {
+                    label: passThroughLabel(normalized),
+                    collected: 0,
+                    paid: 0,
+                    outstanding: 0
+                };
+                if (direction === 'collected')
+                    passThroughByType[normalized].collected += Number(amount || 0);
+                if (direction === 'paid')
+                    passThroughByType[normalized].paid += Number(amount || 0);
+                passThroughByType[normalized].outstanding = passThroughByType[normalized].collected - passThroughByType[normalized].paid;
+            };
+            for (const passThroughAccount of (acc.passThroughAccounts || [])) {
+                for (const entry of (passThroughAccount.transactions || [])) {
+                    try {
+                        const d = new Date(entry.date);
+                        if (d < startDate || d >= endDate || entry.status === 'cancelled' || entry.status === 'failed')
+                            continue;
+                        if (entry.type === 'collection')
+                            addPassThrough(passThroughAccount.type, 'collected', Number(entry.amount || 0));
+                        if (entry.type === 'payment')
+                            addPassThrough(passThroughAccount.type, 'paid', Number(entry.amount || 0));
+                    }
+                    catch (_f) { }
+                }
+            }
+            for (const transaction of inPeriod) {
+                if (!isPassThroughTransaction(transaction))
+                    continue;
+                addPassThrough(inferLegacyPassThroughType(transaction), transaction.type === 'income' ? 'collected' : 'paid', Number(transaction.amount || 0));
+            }
+            const passThroughCollected = Object.values(passThroughByType).reduce((sum, row) => sum + Number(row.collected || 0), 0);
+            const passThroughPaid = Object.values(passThroughByType).reduce((sum, row) => sum + Number(row.paid || 0), 0);
             const netIncome = income - expenses;
             const propertyItem = {
                 propertyId: propertyIdStr,
@@ -135,6 +214,12 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
                 rentCollected: income,
                 expenses,
                 netIncome,
+                passThroughCharges: {
+                    totalCollected: passThroughCollected,
+                    totalPaid: passThroughPaid,
+                    totalOutstanding: passThroughCollected - passThroughPaid,
+                    byType: passThroughByType
+                },
                 period
             };
             if (!owners[ownerId]) {
@@ -145,6 +230,12 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
                     totalRentCollected: 0,
                     totalExpenses: 0,
                     totalNetIncome: 0,
+                    passThroughCharges: {
+                        totalCollected: 0,
+                        totalPaid: 0,
+                        totalOutstanding: 0,
+                        byType: {}
+                    },
                     period
                 };
             }
@@ -152,6 +243,16 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
             owners[ownerId].totalRentCollected += income;
             owners[ownerId].totalExpenses += expenses;
             owners[ownerId].totalNetIncome += netIncome;
+            const ownerPassThrough = owners[ownerId].passThroughCharges;
+            ownerPassThrough.totalCollected += passThroughCollected;
+            ownerPassThrough.totalPaid += passThroughPaid;
+            ownerPassThrough.totalOutstanding = ownerPassThrough.totalCollected - ownerPassThrough.totalPaid;
+            for (const [type, row] of Object.entries(passThroughByType)) {
+                ownerPassThrough.byType[type] = ownerPassThrough.byType[type] || { label: row.label, collected: 0, paid: 0, outstanding: 0 };
+                ownerPassThrough.byType[type].collected += row.collected;
+                ownerPassThrough.byType[type].paid += row.paid;
+                ownerPassThrough.byType[type].outstanding = ownerPassThrough.byType[type].collected - ownerPassThrough.byType[type].paid;
+            }
             // Attach enriched owner details (non-breaking additional field)
             if (refOwner) {
                 owners[ownerId].ownerDetails = owners[ownerId].ownerDetails || {

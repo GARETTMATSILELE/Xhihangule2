@@ -44,6 +44,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
   const [properties, setProperties] = React.useState<Property[]>([]);
   const [loadingProperties, setLoadingProperties] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const effectiveCompanyId = company?._id || user?.companyId || initialData?.companyId || '';
 
   const getInitialFormData = React.useCallback((): TenantFormData => ({
     firstName: initialData?.firstName || '',
@@ -55,8 +56,8 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     propertyIds: initialData?.propertyIds || [],
     idNumber: initialData?.idNumber || '',
     emergencyContact: initialData?.emergencyContact || '',
-    companyId: company?._id || ''
-  }), [initialData, company?._id]);
+    companyId: effectiveCompanyId
+  }), [initialData, effectiveCompanyId]);
 
   const [formData, setFormData] = React.useState<TenantFormData>(getInitialFormData);
 
@@ -113,12 +114,12 @@ export const TenantForm: React.FC<TenantFormProps> = ({
 
   // Update companyId when company changes
   React.useEffect(() => {
-    const newCompanyId = company?._id || '';
+    const newCompanyId = effectiveCompanyId;
     setFormData(prev => {
       if (prev.companyId === newCompanyId) return prev;
       return { ...prev, companyId: newCompanyId };
     });
-  }, [company?._id]);
+  }, [effectiveCompanyId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,7 +140,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
       return;
     }
 
-    if (!company?._id) {
+    if (!effectiveCompanyId) {
       setError('No company ID found');
       return;
     }
@@ -168,8 +169,8 @@ export const TenantForm: React.FC<TenantFormProps> = ({
         companyId: user.companyId
       },
       company: {
-        _id: company._id,
-        name: company.name
+        _id: effectiveCompanyId,
+        name: company?.name || 'No company'
       },
       formData
     });
@@ -178,6 +179,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
     // Include the user's ID as ownerId for agents
     const tenantDataWithOwnerId = {
       ...formData,
+      companyId: effectiveCompanyId,
       ownerId: user._id // Add the logged-in user's ID as ownerId
     };
     onSubmit(tenantDataWithOwnerId);
@@ -221,7 +223,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
             <strong>User:</strong> {user?.firstName} {user?.lastName} ({user?.email}) - {user?.role}
           </Typography>
           <Typography variant="body2" color="textSecondary">
-            <strong>Company:</strong> {company?.name || 'No company'} (ID: {user?.companyId})
+            <strong>Company:</strong> {company?.name || 'No company'} (ID: {effectiveCompanyId || user?.companyId})
           </Typography>
         </Box>
 
@@ -388,7 +390,7 @@ export const TenantForm: React.FC<TenantFormProps> = ({
           onClick={handleSubmit}
           variant="contained"
           color="primary"
-          disabled={!company?._id || !user?._id || !['admin', 'owner', 'agent'].includes(user?.role || '')}
+          disabled={!effectiveCompanyId || !user?._id || !['admin', 'owner', 'agent'].includes(user?.role || '')}
         >
           {initialData ? 'Update Tenant' : 'Add Tenant'}
         </Button>

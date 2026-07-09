@@ -5,7 +5,7 @@ import { MaintenanceRequest } from '../models/MaintenanceRequest';
 import { User } from '../models/User';
 import { PropertyOwner } from '../models/PropertyOwner';
 import propertyAccountService from '../services/propertyAccountService';
-import { getOwnerProperties, getOwnerPropertyById, getOwnerMaintenanceRequests, getOwnerMaintenanceRequestById, updateOwnerMaintenanceRequest, addOwnerMaintenanceMessage, getOwnerNetIncome, approveOwnerMaintenanceRequest, rejectOwnerMaintenanceRequest } from '../controllers/ownerController';
+import { getOwnerProperties, getOwnerPropertyById, getOwnerMaintenanceRequests, getOwnerMaintenanceRequestById, updateOwnerMaintenanceRequest, addOwnerMaintenanceMessage, getOwnerNetIncome, approveOwnerMaintenanceRequest, rejectOwnerMaintenanceRequest, getOwnerMaintenanceSummaryReport } from '../controllers/ownerController';
 import mongoose from 'mongoose';
 import { Tenant } from '../models/Tenant';
 import { Lease } from '../models/Lease';
@@ -119,6 +119,8 @@ router.get('/maintenance-requests', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: GET /maintenance-requests route hit');
   next();
 }, getOwnerMaintenanceRequests);
+
+router.get('/maintenance-summary', propertyOwnerAuth, getOwnerMaintenanceSummaryReport);
 
 router.get('/maintenance-requests/:id', propertyOwnerAuth, (req, res, next) => {
   console.log('OwnerRoutes: GET /maintenance-requests/:id route hit');
@@ -305,7 +307,7 @@ router.get('/financial-data', propertyOwnerAuth, async (req, res) => {
         const propertyId = String(property._id);
         const { ledgerType, incomeType } = resolveOwnerIncomeType(property.rentalType);
         try {
-          const account = await propertyAccountService.getPropertyAccount(propertyId, ledgerType);
+          const account = await propertyAccountService.getPropertyAccount(propertyId);
           return {
             ...(typeof (account as any)?.toObject === 'function' ? (account as any).toObject() : account),
             propertyId: (account as any)?.propertyId || property._id,

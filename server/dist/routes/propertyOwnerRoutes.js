@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const propertyOwnerController_1 = require("../controllers/propertyOwnerController");
+const ownerManagementController_1 = require("../controllers/ownerManagementController");
 const router = express_1.default.Router();
 // Legacy public endpoints now require company authentication because property
 // owner records contain PII and account-management capabilities.
@@ -114,9 +115,28 @@ router.get('/by-property/:propertyId', auth_1.authWithCompany, (req, res) => __a
 router.post('/public', auth_1.authWithCompany, propertyOwnerController_1.createPropertyOwnerPublic);
 router.patch('/public/:id', auth_1.authWithCompany, propertyOwnerController_1.updatePropertyOwnerPublic);
 router.delete('/public/:id', auth_1.authWithCompany, propertyOwnerController_1.deletePropertyOwnerPublic);
+// ORM management routes (before /:id)
+router.get('/dashboard', auth_1.authWithCompany, ownerManagementController_1.ownersDashboard);
+router.post('/documents', auth_1.authWithCompany, ownerManagementController_1.ownerDocumentsUpload);
+router.post('/banking', auth_1.authWithCompany, ownerManagementController_1.ownerBankingUpsert);
+router.post('/preferences', auth_1.authWithCompany, ownerManagementController_1.ownerPreferencesUpsert);
+router.post('/ownership-history', auth_1.authWithCompany, ownerManagementController_1.ownershipHistoryCreate);
+router.get('/property-history/:propertyId', auth_1.authWithCompany, ownerManagementController_1.propertyOwnershipHistory);
 // CRUD routes for property owners (company-scoped)
 router.post('/', auth_1.authWithCompany, propertyOwnerController_1.createPropertyOwner);
 router.get('/', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwners);
+router.get('/:ownerId/portfolio', auth_1.authWithCompany, ownerManagementController_1.ownerPortfolio);
+router.get('/:ownerId/financials', auth_1.authWithCompany, ownerManagementController_1.ownerFinancials);
+router.get('/:ownerId/maintenance', auth_1.authWithCompany, ownerManagementController_1.ownerMaintenance);
+router.get('/:ownerId/documents', auth_1.authWithCompany, ownerManagementController_1.ownerDocumentsList);
+router.get('/:ownerId/history', auth_1.authWithCompany, ownerManagementController_1.ownerHistoryList);
+router.get('/:ownerId/profile-extras', auth_1.authWithCompany, ownerManagementController_1.ownerProfileExtras);
+router.get('/:ownerId/full-profile', auth_1.authWithCompany, ownerManagementController_1.ownerFullProfile);
+router.patch('/:ownerId/profile', auth_1.authWithCompany, ownerManagementController_1.ownerProfilePatch);
+router.post('/:ownerId/banking', auth_1.authWithCompany, ownerManagementController_1.ownerBankingUpsert);
+router.post('/:ownerId/preferences', auth_1.authWithCompany, ownerManagementController_1.ownerPreferencesUpsert);
+router.post('/:ownerId/documents', auth_1.authWithCompany, ownerManagementController_1.ownerDocumentsUpload);
+router.get('/:ownerId/documents/:docType', auth_1.authWithCompany, ownerManagementController_1.ownerDocumentPdf);
 router.get('/:id', auth_1.authWithCompany, propertyOwnerController_1.getPropertyOwnerById);
 router.patch('/:id', auth_1.authWithCompany, propertyOwnerController_1.updatePropertyOwner);
 // Accept PUT for clients that use PUT semantics for updates

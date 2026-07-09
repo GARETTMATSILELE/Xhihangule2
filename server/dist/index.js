@@ -74,6 +74,7 @@ const levyPaymentRoutes_1 = __importDefault(require("./routes/levyPaymentRoutes"
 const municipalPaymentRoutes_1 = __importDefault(require("./routes/municipalPaymentRoutes"));
 const paymentRequestRoutes_1 = __importDefault(require("./routes/paymentRequestRoutes"));
 const notificationRoutes_1 = __importDefault(require("./routes/notificationRoutes"));
+const agencyOperationsRoutes_1 = __importDefault(require("./routes/agencyOperationsRoutes"));
 const invoiceRoutes_1 = __importDefault(require("./routes/invoiceRoutes"));
 const syncRoutes_1 = __importDefault(require("./routes/syncRoutes"));
 const subscriptionRoutes_1 = __importDefault(require("./routes/subscriptionRoutes"));
@@ -90,6 +91,8 @@ const inspectionRoutes_1 = __importDefault(require("./routes/inspectionRoutes"))
 const salesFileRoutes_1 = __importDefault(require("./routes/salesFileRoutes"));
 const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
 const paynowRoutes_1 = __importDefault(require("./routes/paynowRoutes"));
+const onboardingRoutes_1 = __importDefault(require("./routes/onboardingRoutes"));
+const individualRoutes_1 = __importDefault(require("./routes/individualRoutes"));
 const diagnosticsRoutes_1 = __importDefault(require("./routes/diagnosticsRoutes"));
 const accountingRoutes_1 = __importDefault(require("./routes/accountingRoutes"));
 const trustAccountRoutes_1 = __importDefault(require("./routes/trustAccountRoutes"));
@@ -113,6 +116,7 @@ const User_1 = require("./models/User");
 const emailService_1 = require("./services/emailService");
 const requestSecurity_1 = require("./utils/requestSecurity");
 const runtimeRole_1 = require("./config/runtimeRole");
+const crypto_1 = __importDefault(require("crypto"));
 // Load environment variables (support .env.production if NODE_ENV=production or ENV_FILE override)
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
@@ -120,8 +124,31 @@ const ENV_PATH = path_1.default.resolve(__dirname, '..', ENV_FILE);
 dotenv_1.default.config({ path: ENV_PATH });
 const app = (0, express_1.default)();
 const runtimeFeatures = (0, runtimeRole_1.getRuntimeFeatures)();
+function isMongoWaitQueueTimeout(error) {
+    return ((error === null || error === void 0 ? void 0 : error.name) === 'MongoWaitQueueTimeoutError' ||
+        (error === null || error === void 0 ? void 0 : error.name) === 'WaitQueueTimeoutError' ||
+        /Timed out while checking out a connection from connection pool/i.test(String((error === null || error === void 0 ? void 0 : error.message) || '')));
+}
+process.on('uncaughtException', (error) => {
+    if (isMongoWaitQueueTimeout(error)) {
+        console.error('MongoDB connection pool timeout; keeping server alive while pool recovers:', (error === null || error === void 0 ? void 0 : error.message) || error);
+        return;
+    }
+    console.error('Uncaught exception:', error);
+    process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+    if (isMongoWaitQueueTimeout(reason)) {
+        console.error('Unhandled MongoDB connection pool timeout; keeping server alive while pool recovers:', (reason === null || reason === void 0 ? void 0 : reason.message) || reason);
+        return;
+    }
+    console.error('Unhandled promise rejection:', reason);
+});
 // Lightweight request latency instrumentation for endpoint profiling.
 app.use((req, res, next) => {
+    const requestId = req.get('x-request-id') || crypto_1.default.randomUUID();
+    req.requestId = requestId;
+    res.setHeader('X-Request-Id', requestId);
     const startNs = process.hrtime.bigint();
     const originalEnd = res.end.bind(res);
     res.end = ((chunk, encoding, cb) => {
@@ -402,10 +429,12 @@ app.use('/api/auth/forgot-password', forgotLimiter);
 app.use('/api/auth/reset-password', resetLimiter);
 app.use('/api/files/upload', fileLimiter);
 app.use('/api/auth', auth_1.default);
+app.use('/api/onboarding', onboardingRoutes_1.default);
 app.use('/api/companies', companyRoutes_1.default);
 app.use('/api/users', userRoutes_1.default);
 app.use('/api/agents', agentRoutes_1.default);
 app.use('/api/accountants', accountantRoutes_1.default);
+app.use('/api/individual', individualRoutes_1.default);
 app.use('/api/files', fileRoutes_1.default);
 app.use('/api/upload', uploadRoutes_1.default);
 app.use('/api/sales-files', salesFileRoutes_1.default);
@@ -426,6 +455,7 @@ app.use('/api/levy-payments', levyPaymentRoutes_1.default);
 app.use('/api/municipal-payments', municipalPaymentRoutes_1.default);
 app.use('/api/payment-requests', paymentRequestRoutes_1.default);
 app.use('/api/notifications', notificationRoutes_1.default);
+app.use('/api/agency-operations', agencyOperationsRoutes_1.default);
 app.use('/api/invoices', invoiceRoutes_1.default);
 app.use('/api/sync', syncRoutes_1.default);
 app.use('/api/billing', billingRoutes_1.default);
@@ -454,10 +484,12 @@ sessionRouter.use('/payments', paymentRoutes_1.default);
 sessionRouter.use('/webhooks', webhookRoutes_1.default);
 sessionRouter.use('/charts', chartRoutes_1.default);
 sessionRouter.use('/auth', auth_1.default);
+sessionRouter.use('/onboarding', onboardingRoutes_1.default);
 sessionRouter.use('/companies', companyRoutes_1.default);
 sessionRouter.use('/users', userRoutes_1.default);
 sessionRouter.use('/agents', agentRoutes_1.default);
 sessionRouter.use('/accountants', accountantRoutes_1.default);
+sessionRouter.use('/individual', individualRoutes_1.default);
 sessionRouter.use('/files', fileRoutes_1.default);
 sessionRouter.use('/upload', uploadRoutes_1.default);
 sessionRouter.use('/property-owners', propertyOwnerRoutes_1.default);

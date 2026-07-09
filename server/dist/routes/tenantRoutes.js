@@ -53,7 +53,7 @@ router.get('/public/:id', auth_1.authWithCompany, (req, res) => __awaiter(void 0
     }
 }));
 // Protected routes
-router.use(auth_1.authWithCompany);
+router.use(auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)());
 // Routes
 router.get('/', tenantController_1.getTenants);
 router.get('/:id', tenantController_1.getTenant);

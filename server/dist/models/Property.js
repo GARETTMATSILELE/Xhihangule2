@@ -56,6 +56,30 @@ const PropertySchema = new mongoose_1.Schema({
         },
         default: 'apartment'
     },
+    propertyCategory: {
+        type: String,
+        enum: ['Residential', 'Commercial', 'Land', 'Special Use'],
+        required: false
+    },
+    propertySubtype: {
+        type: String,
+        trim: true,
+        required: false
+    },
+    propertySpecifications: {
+        type: mongoose_1.Schema.Types.Mixed,
+        default: {}
+    },
+    propertyOperationalStatus: {
+        type: String,
+        enum: ['Vacant', 'Occupied', 'Under Maintenance', 'Reserved', 'Archived'],
+        default: 'Vacant'
+    },
+    propertyUse: {
+        type: String,
+        enum: ['Rental', 'Sale', 'Both', 'Internal'],
+        default: 'Rental'
+    },
     status: {
         type: String,
         enum: {

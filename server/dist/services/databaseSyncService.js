@@ -593,24 +593,8 @@ class DatabaseSyncService extends events_1.EventEmitter {
     syncPropertyToAccounting(property) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                // Always go through the service's idempotent entrypoint
-                const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(property._id.toString(), 'rental');
-                // Update metadata on the canonical rental ledger
-                const updates = {
-                    propertyName: property.name,
-                    propertyAddress: property.address,
-                    ownerId: property.ownerId,
-                    isActive: property.isActive !== false,
-                    lastUpdated: new Date()
-                };
-                if (property.ownerId) {
-                    const owner = yield User_1.User.findById(property.ownerId);
-                    if (owner) {
-                        updates.ownerName = `${owner.firstName} ${owner.lastName}`;
-                    }
-                }
                 yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                    yield (yield Promise.resolve().then(() => __importStar(require('../models/PropertyAccount')))).default.updateOne({ _id: account._id }, { $set: updates });
+                    yield propertyAccountService_1.default.syncPropertyMetadata(property);
                 }));
                 logger_1.logger.info(`Ensured/updated property account for property ${property._id}`);
                 this.recordSyncSuccess();
@@ -628,13 +612,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 // Update owner names in property accounts if this user is a property owner
-                const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
                 const ownerName = `${user.firstName} ${user.lastName}`;
-                const res = yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                    return yield PropertyAccount.updateMany({ ownerId: user._id }, { $set: { ownerName, lastUpdated: new Date() } }, { maxTimeMS: 5000 });
+                const modifiedCount = yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
+                    return yield propertyAccountService_1.default.updateOwnerNameForActiveAccounts(user._id, ownerName);
                 }));
-                if ((res === null || res === void 0 ? void 0 : res.modifiedCount) > 0) {
-                    logger_1.logger.info(`Updated owner name in ${res.modifiedCount} property accounts for user ${user._id}`);
+                if (modifiedCount > 0) {
+                    logger_1.logger.info(`Updated owner name in ${modifiedCount} property accounts for user ${user._id}`);
                 }
                 this.recordSyncSuccess();
             }
@@ -650,24 +633,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
     removePaymentFromAccounting(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                // Find property account with this payment
-                const propertyAccount = yield PropertyAccount.findOne({
-                    'transactions.paymentId': paymentId
-                });
-                if (propertyAccount) {
-                    const transaction = propertyAccount.transactions.find((t) => t.paymentId && t.paymentId.toString() === paymentId);
-                    if (transaction) {
-                        // Remove transaction and update totals
-                        propertyAccount.transactions = propertyAccount.transactions.filter((t) => t.paymentId && t.paymentId.toString() !== paymentId);
-                        propertyAccount.totalIncome -= transaction.amount;
-                        propertyAccount.runningBalance -= transaction.amount;
-                        propertyAccount.lastUpdated = new Date();
-                        yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                            yield propertyAccount.save();
-                        }));
-                        logger_1.logger.info(`Removed payment ${paymentId} from property account ${propertyAccount.propertyId}`);
-                    }
+                const cancelled = yield propertyAccountService_1.default.cancelPaymentReference(paymentId);
+                if (cancelled) {
+                    logger_1.logger.info(`Cancelled payment ${paymentId} on active property account`);
                 }
                 this.recordSyncSuccess();
             }
@@ -684,9 +652,8 @@ class DatabaseSyncService extends events_1.EventEmitter {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 // Do not delete immutable ledgers; archive/deactivate instead
-                const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
                 yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                    yield PropertyAccount.updateMany({ propertyId }, { $set: { isActive: false, isArchived: true, lastUpdated: new Date() } }, { maxTimeMS: 5000 });
+                    yield propertyAccountService_1.default.archiveLedgersForProperty(propertyId);
                 }));
                 logger_1.logger.info(`Archived/deactivated property account(s) for property ${propertyId}`);
                 this.recordSyncSuccess();
@@ -703,13 +670,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
     removeUserFromAccounting(userId) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
                 // Update property accounts to remove owner reference
                 yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                    yield PropertyAccount.updateMany({ ownerId: userId }, {
-                        $unset: { ownerId: 1, ownerName: 1 },
-                        $set: { lastUpdated: new Date() }
-                    }, { maxTimeMS: 5000 });
+                    yield propertyAccountService_1.default.removeOwnerReferenceFromActiveAccounts(userId);
                 }));
                 logger_1.logger.info(`Removed user ${userId} from property accounts`);
                 this.recordSyncSuccess();
@@ -1164,7 +1127,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         .lean();
                     yield runWithConcurrency(properties, (property) => __awaiter(this, void 0, void 0, function* () {
                         try {
-                            const account = yield PropertyAccount.findOne({ propertyId: property._id })
+                            const account = yield PropertyAccount.findOne({
+                                propertyId: property._id,
+                                isArchived: false,
+                                isActive: { $ne: false }
+                            })
                                 .select('_id')
                                 .lean();
                             if (!account) {
@@ -1233,7 +1200,11 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         }
                     }), resolvedConcurrency);
                     // Detect duplicate postings in recent ledgers (property)
-                    const recentAccounts = yield PropertyAccount.find({ lastUpdated: { $gte: since } })
+                    const recentAccounts = yield PropertyAccount.find({
+                        lastUpdated: { $gte: since },
+                        isArchived: false,
+                        isActive: { $ne: false }
+                    })
                         .select('_id propertyId ledgerType transactions')
                         .lean();
                     for (const acc of recentAccounts) {
@@ -1344,7 +1315,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         const occurrences = (acc.transactions || []).filter((t) => String((t === null || t === void 0 ? void 0 : t.paymentId) || '') === String(payment._id)).length;
                         if (occurrences > 1) {
                             try {
-                                yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acc.propertyId), acc.ledgerType);
+                                yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acc.propertyId));
                                 logger_1.logger.info(`verifyAndReconcile: deduped property ledger for property ${String(acc.propertyId)} (${acc.ledgerType})`);
                             }
                             catch (dedupeErr) {

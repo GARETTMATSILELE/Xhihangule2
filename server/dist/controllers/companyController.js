@@ -21,7 +21,15 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const chartController_1 = require("./chartController");
 const User_1 = require("../models/User");
 const subscriptionService_1 = require("../services/subscriptionService");
+const normalization_1 = require("../utils/normalization");
 const subscriptionService = subscriptionService_1.SubscriptionService.getInstance();
+function isSuperAdmin(req) {
+    var _a, _b;
+    const roles = Array.isArray((_a = req.user) === null || _a === void 0 ? void 0 : _a.roles)
+        ? req.user.roles
+        : (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) ? [req.user.role] : []);
+    return roles.includes('system_admin');
+}
 const getCompanies = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companies = yield Company_1.Company.find().select('-__v');
@@ -63,34 +71,67 @@ const getCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.getCompany = getCompany;
 const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
     try {
         const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber } = req.body;
+        const companyType = (0, normalization_1.normalizeCompanyType)((_a = req.body) === null || _a === void 0 ? void 0 : _a.companyType);
+        const normalizedEmail = (0, normalization_1.normalizeEmail)(email);
+        const normalizedRegistrationNumber = (0, normalization_1.normalizeLegalIdentifier)(registrationNumber);
+        const normalizedTinNumber = (0, normalization_1.normalizeLegalIdentifier)(tinNumber);
         console.log('Creating company with data:', { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber });
-        // Check if company with same name or email already exists
-        const existingCompany = yield Company_1.Company.findOne({
-            $or: [
-                { name: { $regex: new RegExp(`^${name}$`, 'i') } },
-                { email: { $regex: new RegExp(`^${email}$`, 'i') } }
-            ]
-        });
+        const currentUserId = req.user.userId;
+        if (!currentUserId) {
+            throw new errorHandler_1.AppError('User not authenticated', 401);
+        }
+        if (!isSuperAdmin(req)) {
+            const alreadyLinkedCompanyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
+            const ownedCompany = yield Company_1.Company.findOne({ ownerId: currentUserId }).select('_id').lean();
+            if (alreadyLinkedCompanyId || ownedCompany) {
+                throw new errorHandler_1.AppError('User is already associated with a company', 409, 'COMPANY_ALREADY_EXISTS');
+            }
+        }
+        if (companyType === 'REGISTERED_BUSINESS' && (!registrationNumber || !tinNumber)) {
+            throw new errorHandler_1.AppError('Registration number and TIN number are required for registered businesses', 400, 'VALIDATION_ERROR');
+        }
+        // Check if company with same normalized identifiers already exists. Regex
+        // fallback preserves legacy data compatibility while escaping user input.
+        const duplicateClauses = [];
+        if (name)
+            duplicateClauses.push({ name: { $regex: new RegExp(`^${(0, normalization_1.escapeRegex)(String(name).trim())}$`, 'i') } });
+        if (normalizedEmail) {
+            duplicateClauses.push({ normalizedEmail });
+            duplicateClauses.push({ email: { $regex: new RegExp(`^${(0, normalization_1.escapeRegex)(normalizedEmail)}$`, 'i') } });
+        }
+        if (normalizedRegistrationNumber)
+            duplicateClauses.push({ normalizedRegistrationNumber });
+        if (normalizedTinNumber)
+            duplicateClauses.push({ normalizedTinNumber });
+        const existingCompany = duplicateClauses.length > 0
+            ? yield Company_1.Company.findOne({ $or: duplicateClauses })
+            : null;
         if (existingCompany) {
             console.log('Company already exists:', existingCompany);
             throw new errorHandler_1.AppError('Company with this name or email already exists', 400);
         }
-        const plan = (((_a = req.body) === null || _a === void 0 ? void 0 : _a.plan) && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(req.body.plan)) ? req.body.plan : 'ENTERPRISE';
+        const plan = (((_c = req.body) === null || _c === void 0 ? void 0 : _c.plan) && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(req.body.plan)) ? req.body.plan : 'ENTERPRISE';
         const config = plan_1.PLAN_CONFIG[plan];
+        const workspaceType = (0, normalization_1.normalizeWorkspaceType)((_d = req.body) === null || _d === void 0 ? void 0 : _d.workspaceType, config.workspaceType);
         const company = new Company_1.Company({
             name,
             description,
-            email,
+            email: normalizedEmail,
+            normalizedEmail,
             address,
             phone,
             website,
             registrationNumber,
+            normalizedRegistrationNumber,
             tinNumber,
+            normalizedTinNumber,
             vatNumber,
-            ownerId: req.user.userId,
+            companyType,
+            workspaceType,
+            ownerId: currentUserId,
             plan,
             propertyLimit: config.propertyLimit,
             featureFlags: config.featureFlags
@@ -99,7 +140,6 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
         yield company.save();
         console.log('Company saved successfully:', company);
         // Link company to current user
-        const currentUserId = req.user.userId;
         if (currentUserId) {
             try {
                 yield User_1.User.findByIdAndUpdate(currentUserId, { companyId: company._id });
@@ -149,6 +189,25 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.createCompany = createCompany;
+function pickWorkspaceFields(body) {
+    const updateData = {};
+    if (body.workspacePreferences !== undefined)
+        updateData.workspacePreferences = body.workspacePreferences;
+    if (body.onboardingStatus !== undefined)
+        updateData.onboardingStatus = body.onboardingStatus;
+    if (body.onboardingCompleted !== undefined)
+        updateData.onboardingCompleted = Boolean(body.onboardingCompleted);
+    if (body.companyType !== undefined)
+        updateData.companyType = (0, normalization_1.normalizeCompanyType)(body.companyType);
+    if (body.workspaceType !== undefined)
+        updateData.workspaceType = (0, normalization_1.normalizeWorkspaceType)(body.workspaceType);
+    if (body.tenantStatus !== undefined && isSafeTenantStatus(body.tenantStatus))
+        updateData.tenantStatus = body.tenantStatus;
+    return updateData;
+}
+function isSafeTenantStatus(value) {
+    return ['active', 'suspended', 'pending', 'archived'].includes(String(value));
+}
 const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
@@ -179,6 +238,7 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             updateData.fiscalConfig = fiscalConfig;
         if (commissionConfig !== undefined)
             updateData.commissionConfig = commissionConfig;
+        Object.assign(updateData, pickWorkspaceFields(req.body));
         if (receivablesCutover !== undefined)
             updateData.receivablesCutover = receivablesCutover;
         if (rentReceivableOpeningBalance !== undefined)
@@ -190,6 +250,9 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             updateData.plan = plan;
             updateData.propertyLimit = cfg.propertyLimit;
             updateData.featureFlags = cfg.featureFlags;
+            if (req.body.workspaceType === undefined) {
+                updateData.workspaceType = cfg.workspaceType;
+            }
         }
         const company = yield Company_1.Company.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true, runValidators: true });
         if (!company) {
@@ -377,6 +440,7 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             updateData.fiscalConfig = fiscalConfig;
         if (commissionConfig !== undefined)
             updateData.commissionConfig = commissionConfig;
+        Object.assign(updateData, pickWorkspaceFields(req.body));
         if (receivablesCutover !== undefined)
             updateData.receivablesCutover = receivablesCutover;
         if (rentReceivableOpeningBalance !== undefined)
@@ -388,6 +452,9 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             updateData.plan = plan;
             updateData.propertyLimit = cfg.propertyLimit;
             updateData.featureFlags = cfg.featureFlags;
+            if (req.body.workspaceType === undefined) {
+                updateData.workspaceType = cfg.workspaceType;
+            }
         }
         const updatedCompany = yield Company_1.Company.findByIdAndUpdate(company._id, { $set: updateData }, { new: true, runValidators: true });
         if (!updatedCompany) {
@@ -449,6 +516,8 @@ const getCompanyById = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 isActive: company.isActive,
                 subscriptionStatus: company.subscriptionStatus,
                 subscriptionEndDate: company.subscriptionEndDate,
+                companyType: company.companyType,
+                workspaceType: company.workspaceType || 'agency',
                 bankAccounts: company.bankAccounts,
                 commissionConfig: company.commissionConfig,
                 plan: company.plan,

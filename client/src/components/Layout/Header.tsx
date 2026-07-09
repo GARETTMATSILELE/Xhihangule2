@@ -21,6 +21,7 @@ import {
 } from '@mui/icons-material';
 import { getDashboardPath } from '../../utils/registrationUtils';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import notificationService from '../../services/notificationService';
 import { io as socketClient, Socket } from 'socket.io-client';
@@ -54,6 +55,7 @@ export const useNotification = () => {
 };
 
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
@@ -71,6 +73,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }
 
   useEffect(() => {
+    if (loading) return;
+    if (!isAuthenticated) {
+      setNotifications([]);
+      return;
+    }
+
     (async () => {
       try {
         const list = await notificationService.list();
@@ -87,10 +95,16 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         // ignore fetch errors silently for header
       }
     })();
-  }, []);
+  }, [isAuthenticated, loading]);
 
   // Socket.IO subscription for real-time notifications
   useEffect(() => {
+    if (loading || !isAuthenticated) {
+      try { socket?.close(); } catch {}
+      setSocket(null);
+      return;
+    }
+
     const base = (api.defaults.baseURL || '').replace(/\/api\/?$/, '');
     const token = getAccessToken && getAccessToken();
     if (!base || !token) return;
@@ -130,11 +144,14 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       });
       setSocket(s);
-      return () => { try { s.close(); } catch {} };
+      return () => {
+        try { s.close(); } catch {}
+        setSocket(null);
+      };
     } catch {
       // ignore socket init errors
     }
-  }, [soundEnabled, desktopEnabled]);
+  }, [isAuthenticated, loading, soundEnabled, desktopEnabled]);
 
   const addNotification = (notification: Notification) => {
     setNotifications(prev => [notification, ...prev]);
@@ -158,6 +175,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ sidebarWidth = 280 }) => {
   const { user, logout, stopImpersonation, isImpersonating, setActiveRole } = useAuth() as any;
+  const { company } = useCompany();
   const navigate = useNavigate();
   const location = useLocation();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
@@ -323,7 +341,7 @@ export const Header: React.FC<HeaderProps> = ({ sidebarWidth = 280 }) => {
                   <>
                     <Divider />
                     {roles.map((r: string) => (
-                      <MenuItem key={r} onClick={() => { handleClose(); try { setActiveRole && setActiveRole(r as any); } catch {}; navigate(getDashboardPath(r as any)); }}>
+                      <MenuItem key={r} onClick={() => { handleClose(); try { setActiveRole && setActiveRole(r as any); } catch {}; navigate(getDashboardPath(r as any, company)); }}>
                         <ListItemIcon>
                           <SwapHorizIcon fontSize="small" />
                         </ListItemIcon>

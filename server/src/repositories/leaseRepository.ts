@@ -1,5 +1,5 @@
 import { BaseRepository } from './base.repository';
-import { Lease, ILease } from '../models/Lease';
+import { Lease, ILease, LeaseStatus } from '../models/Lease';
 import mongoose from 'mongoose';
 
 export class LeaseRepository extends BaseRepository<ILease> {
@@ -50,12 +50,16 @@ export class LeaseRepository extends BaseRepository<ILease> {
     });
   }
 
-  async updateLeaseStatus(id: string, status: 'active' | 'expired' | 'terminated'): Promise<ILease | null> {
-    return this.update(id, { status });
+  async updateLeaseStatus(id: string, status: LeaseStatus): Promise<ILease | null> {
+    return this.update(id, { status, lifecycleStatusChangedAt: new Date() });
   }
 
-  async extendLease(id: string, newEndDate: Date): Promise<ILease | null> {
-    return this.update(id, { endDate: newEndDate });
+  async linkSuccessor(previousLeaseId: string, successorLeaseId: mongoose.Types.ObjectId): Promise<ILease | null> {
+    return this.update(previousLeaseId, {
+      successorLeaseId,
+      status: 'renewed',
+      lifecycleStatusChangedAt: new Date()
+    });
   }
 
   async bulkUpdateStatus(ids: string[], status: string): Promise<boolean> {
@@ -94,7 +98,7 @@ export class LeaseRepository extends BaseRepository<ILease> {
       }),
       this.model.countDocuments({
         startDate: { $gt: now },
-        status: 'pending'
+        status: 'pending_approval'
       })
     ]);
 

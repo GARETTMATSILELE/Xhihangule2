@@ -406,10 +406,14 @@ export class ScheduledSyncService {
       }
 
       // 3) Dedupe any property accounts updated recently
-      const recentAccounts = await PropertyAccount.find({ lastUpdated: { $gte: since } }).select('_id propertyId ledgerType');
+      const recentAccounts = await PropertyAccount.find({
+        lastUpdated: { $gte: since },
+        isArchived: false,
+        isActive: { $ne: false }
+      }).select('_id propertyId ledgerType');
       for (const acct of recentAccounts) {
         try {
-          await reconcilePropertyLedgerDuplicates(String((acct as any).propertyId), (acct as any).ledgerType);
+          await reconcilePropertyLedgerDuplicates(String((acct as any).propertyId));
         } catch (e) {
           logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String((acct as any)._id), err: (e as any)?.message || e });
         }
@@ -585,13 +589,12 @@ export class ScheduledSyncService {
    */
   private async fixOrphanedPropertyAccounts(): Promise<number> {
     try {
-      const PropertyAccount = require('../models/PropertyAccount').default;
       const Property = require('../models/Property').default;
       const Development = require('../models/Development').default;
       const DevelopmentUnit = require('../models/DevelopmentUnit').default;
 
       // Only consider non-archived accounts for repair
-      const propertyAccounts = await PropertyAccount.find({ isArchived: { $ne: true } });
+      const propertyAccounts = await PropertyAccount.find({ isArchived: false });
       let archivedCount = 0;
 
       for (const account of propertyAccounts) {
@@ -604,11 +607,8 @@ export class ScheduledSyncService {
         ]);
         const exists = Boolean(propExists || devExists || unitExists);
         if (!exists) {
-          await PropertyAccount.updateOne(
-            { _id: account._id, isArchived: { $ne: true } },
-            { $set: { isArchived: true, isActive: false, lastUpdated: new Date() } }
-          );
-          archivedCount++;
+          const archived = await propertyAccountService.archiveLedgerById(account._id);
+          if (archived) archivedCount++;
         }
       }
 
@@ -660,11 +660,10 @@ export class ScheduledSyncService {
    */
   private async fixOrphanedOwnerReferences(): Promise<number> {
     try {
-      const PropertyAccount = require('../models/PropertyAccount').default;
       const User = require('../models/User').default;
       const PropertyOwner = require('../models/PropertyOwner').default;
       
-      const propertyAccounts = await PropertyAccount.find({ ownerId: { $exists: true } });
+      const propertyAccounts = await PropertyAccount.find({ ownerId: { $exists: true }, isArchived: false, isActive: { $ne: false } });
       let fixedCount = 0;
       
       for (const account of propertyAccounts) {
@@ -674,11 +673,8 @@ export class ScheduledSyncService {
             User.findById(account.ownerId).select('_id')
           ]);
           if (!po && !u) {
-            await PropertyAccount.findByIdAndUpdate(account._id, {
-              $unset: { ownerId: 1, ownerName: 1 },
-              $set: { lastUpdated: new Date() }
-            });
-            fixedCount++;
+            const cleaned = await propertyAccountService.clearOwnerReferenceForAccount(account._id);
+            if (cleaned) fixedCount++;
           }
         }
       }
@@ -706,22 +702,18 @@ export class ScheduledSyncService {
    */
   public async runOwnerReferenceCleanupForOwnerId(ownerId: string): Promise<{ cleaned: number }> {
     try {
-      const PropertyAccount = require('../models/PropertyAccount').default;
       const User = require('../models/User').default;
       const PropertyOwner = require('../models/PropertyOwner').default;
       let cleaned = 0;
-      const accounts = await PropertyAccount.find({ ownerId: ownerId });
+      const accounts = await PropertyAccount.find({ ownerId: ownerId, isArchived: false, isActive: { $ne: false } });
       for (const account of accounts) {
         const [po, u] = await Promise.all([
           PropertyOwner.findById(ownerId).select('_id').lean(),
           User.findById(ownerId).select('_id').lean()
         ]);
         if (!po && !u) {
-          await PropertyAccount.updateOne(
-            { _id: account._id },
-            { $unset: { ownerId: 1, ownerName: 1 }, $set: { lastUpdated: new Date() } }
-          );
-          cleaned++;
+          const wasCleaned = await propertyAccountService.clearOwnerReferenceForAccount(account._id);
+          if (wasCleaned) cleaned++;
         }
       }
       if (cleaned > 0) {

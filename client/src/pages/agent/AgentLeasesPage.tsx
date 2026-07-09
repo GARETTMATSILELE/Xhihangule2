@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Box, Typography, Button, CircularProgress, Alert, Grid, Card, CardContent, Container, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip, FormControl, InputLabel, Select, MenuItem, TextField, InputAdornment
+  Box, Typography, Button, CircularProgress, Alert, Grid, Card, CardContent, Container, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Chip, FormControl, InputLabel, Select, MenuItem, TextField, InputAdornment, Tooltip, Stack
 } from '@mui/material';
-import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, Search as SearchIcon } from '@mui/icons-material';
+import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, Search as SearchIcon, Autorenew as RenewIcon, Logout as MoveOutIcon, CheckCircle as CloseIcon } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLocation } from 'react-router-dom';
 import agentService from '../../services/agentService';
 import { useLeaseService } from '../../services/leaseService';
 import { Lease, LeaseStatus, LeaseFormData } from '../../types/lease';
@@ -11,6 +12,18 @@ import { Property } from '../../types/property';
 import { Tenant } from '../../types/tenant';
 import LeaseForm from '../leases/components/LeaseForm';
 import { useNotification } from '../../components/Layout/Header';
+import { OperationalEmptyState } from '../../components/rentalWorkflow';
+import {
+  buildLeaseLineage,
+  getLeaseLifecycleStatus,
+  isLeaseImmutable,
+  leaseStatusLabels,
+  leaseStatuses,
+} from '../../utils/leaseLifecycle';
+
+const notifyRentalWorkflowChanged = (entity: string) => {
+  window.dispatchEvent(new CustomEvent('rental-workflow:changed', { detail: { entity } }));
+};
 
 // Helper to extract string id from propertyId (handles { $oid: string } or string)
 function getId(id: any): string {
@@ -42,36 +55,27 @@ function resolveTenantFromLease(lease: any, tenants: Tenant[]): Tenant | undefin
   return tenants.find(t => getId(t._id) === tid);
 }
 
-// Compute derived lease status based on endDate proximity
-function addMonths(date: Date, months: number): Date {
-  const d = new Date(date);
-  d.setMonth(d.getMonth() + months);
-  return d;
-}
+function getPropertyLeaseDefaults(property?: Property): { rent: number; deposit: number } {
+  const specs = ((property as any)?.propertySpecifications || {}) as Record<string, any>;
+  const rent = Number((property as any)?.rent || (property as any)?.monthlyRent || 0);
+  const explicitDeposit = Number(
+    specs.depositAmount ??
+    specs.securityDeposit ??
+    specs.expectedDeposit ??
+    (property as any)?.depositAmount ??
+    (property as any)?.securityDeposit ??
+    0
+  );
 
-function startOfDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getDerivedLeaseStatus(lease: any): 'active' | 'expired' | 'expiring' | 'terminated' {
-  try {
-    const end = lease?.endDate ? new Date(lease.endDate) : null;
-    if (end) {
-      const today = startOfDay(new Date());
-      if (end < today) return 'expired';
-      const threshold = addMonths(today, 2);
-      if (end <= threshold) return 'expiring';
-    }
-    return (lease?.status as any) || 'active';
-  } catch {
-    return (lease?.status as any) || 'active';
-  }
+  return {
+    rent: Number.isFinite(rent) ? rent : 0,
+    deposit: Number.isFinite(explicitDeposit) ? explicitDeposit : 0,
+  };
 }
 
 const AgentLeasesPage: React.FC = () => {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const location = useLocation();
   // Use agent service to ensure data is scoped to the logged-in agent
   const { addNotification } = useNotification();
   const leaseService = useLeaseService();
@@ -83,7 +87,9 @@ const AgentLeasesPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedLease, setSelectedLease] = useState<Lease | null>(null);
+  const [formMode, setFormMode] = useState<'create' | 'amend' | 'renew'>('create');
   const [filters, setFilters] = useState({ status: 'all', property: 'all', search: '' });
+  const requestedPropertyId = new URLSearchParams(location.search).get('propertyId') || '';
 
   // Load data for agent's own properties/tenants/leases
   const loadData = useCallback(async () => {
@@ -193,25 +199,106 @@ const AgentLeasesPage: React.FC = () => {
         startDate: serverData.startDate ? new Date(serverData.startDate).toISOString() : '',
         endDate: serverData.endDate ? new Date(serverData.endDate).toISOString() : ''
       };
-      if (selectedLease) {
+      if (selectedLease && formMode === 'renew') {
+        await leaseService.renew(selectedLease._id, {
+          ...finalServerData,
+          previousLeaseId: selectedLease._id,
+          status: formData.status || 'pending_approval',
+        } as any);
+        const propertyId = getId(formData.propertyId || selectedLease.propertyId);
+        const property = properties.find(p => getId(p._id) === propertyId) || resolvePropertyFromLease(selectedLease, properties);
+        const defaults = getPropertyLeaseDefaults(property);
+        const nextRent = Number(formData.monthlyRent ?? formData.rentAmount ?? 0);
+        const nextDeposit = Number(formData.securityDeposit ?? formData.depositAmount ?? 0);
+        const rentChanged = Number.isFinite(nextRent) && nextRent !== defaults.rent;
+        const depositChanged = Number.isFinite(nextDeposit) && nextDeposit !== defaults.deposit;
+
+        if (property && (rentChanged || depositChanged)) {
+          const shouldUpdateProperty = window.confirm(
+            `Update this property's stored rent/deposit to match the renewal?\n\n` +
+            `Property rent: ${defaults.rent} -> ${nextRent}\n` +
+            `Property deposit: ${defaults.deposit} -> ${nextDeposit}`
+          );
+
+          if (shouldUpdateProperty) {
+            await agentService.updateProperty(propertyId, {
+              rent: nextRent,
+              propertySpecifications: {
+                ...(((property as any).propertySpecifications || {}) as Record<string, unknown>),
+                depositAmount: nextDeposit,
+                securityDeposit: nextDeposit,
+              },
+            } as any);
+          }
+        }
+      } else if (selectedLease && formMode === 'amend') {
         await leaseService.update(selectedLease._id, finalServerData);
       } else {
-        await leaseService.create(finalServerData);
+        await agentService.createLease(finalServerData);
       }
       setDialogOpen(false);
       setSelectedLease(null);
+      setFormMode('create');
       await loadData();
+      notifyRentalWorkflowChanged('lease');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to save lease. Please try again later.');
     }
   };
 
   const handleEditLease = (lease: Lease) => {
+    if (isLeaseImmutable(lease)) {
+      setError('This lease is active or historical and cannot be destructively edited. Use Renew, Move-out, or a controlled status update instead.');
+      return;
+    }
     setSelectedLease(lease);
+    setFormMode('amend');
     setDialogOpen(true);
   };
 
+  const handleRenewLease = (lease: Lease) => {
+    setSelectedLease(lease);
+    setFormMode('renew');
+    setDialogOpen(true);
+  };
+
+  const handleTerminateLease = async (lease: Lease) => {
+    const reason = window.prompt('Move-out reason or settlement note', lease.terminationReason || '');
+    if (reason === null) return;
+    try {
+      setError(null);
+      await leaseService.terminate(lease._id, {
+        reason,
+        moveOutDate: new Date().toISOString(),
+        settlementNotes: reason,
+      });
+      await loadData();
+      notifyRentalWorkflowChanged('lease');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to start move-out workflow.');
+    }
+  };
+
+  const handleCloseSettlement = async (lease: Lease) => {
+    if (!window.confirm('Close this lease settlement and return the property to vacant if there is no successor lease?')) {
+      return;
+    }
+    try {
+      setError(null);
+      await leaseService.closeSettlement(lease._id, 'Settlement closed from lease lifecycle dashboard.');
+      await loadData();
+      notifyRentalWorkflowChanged('lease');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to close settlement.');
+    }
+  };
+
   const handleDeleteLease = async (id: string) => {
+    const lease = leases.find(item => item._id === id);
+    if (lease && isLeaseImmutable(lease)) {
+      setError('Historical and active leases cannot be deleted. Close or terminate the lease to preserve the audit trail.');
+      return;
+    }
     if (!window.confirm('Are you sure you want to delete this lease?')) {
       return;
     }
@@ -219,6 +306,7 @@ const AgentLeasesPage: React.FC = () => {
       setError(null);
       await leaseService.delete(id);
       await loadData();
+      notifyRentalWorkflowChanged('lease');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to delete lease. Please try again later.');
     }
@@ -234,7 +322,7 @@ const AgentLeasesPage: React.FC = () => {
   const filteredLeases = leases.filter(lease => {
     const property = resolvePropertyFromLease(lease, properties);
     const tenant = resolveTenantFromLease(lease, tenants);
-    const derivedStatus = getDerivedLeaseStatus(lease);
+    const derivedStatus = getLeaseLifecycleStatus(lease);
     const matchesStatus = filters.status === 'all' || derivedStatus === filters.status;
     const leasePropertyId = getId(lease.propertyId);
     const matchesProperty = filters.property === 'all' || leasePropertyId === filters.property;
@@ -245,6 +333,17 @@ const AgentLeasesPage: React.FC = () => {
        tenant?.lastName?.toLowerCase().includes(search));
     return matchesStatus && matchesProperty && matchesSearch;
   });
+
+  const lifecycleCounts = leases.reduce((acc, lease) => {
+    const status = getLeaseLifecycleStatus(lease);
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {} as Record<LeaseStatus, number>);
+
+  const requestedProperty = requestedPropertyId
+    ? properties.find(property => getId(property._id) === requestedPropertyId)
+    : undefined;
+  const requestedPropertyDefaults = getPropertyLeaseDefaults(requestedProperty);
 
   if (authLoading) {
     return (
@@ -274,7 +373,10 @@ const AgentLeasesPage: React.FC = () => {
       <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box>
           <Typography variant="h4" gutterBottom>
-            My Leases
+            Lease Lifecycle
+          </Typography>
+          <Typography color="text.secondary">
+            Renewals create successor leases and active leases preserve historical occupancy.
           </Typography>
         </Box>
         <Button 
@@ -283,6 +385,7 @@ const AgentLeasesPage: React.FC = () => {
           startIcon={<AddIcon />}
           onClick={() => {
             setSelectedLease(null);
+            setFormMode('create');
             setDialogOpen(true);
           }}
         >
@@ -294,6 +397,40 @@ const AgentLeasesPage: React.FC = () => {
           {error}
         </Alert>
       )}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary">Expiring Soon</Typography>
+              <Typography variant="h5">{lifecycleCounts.expiring_soon || 0}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary">Pending Renewal</Typography>
+              <Typography variant="h5">{lifecycleCounts.pending_approval || 0}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary">Pending Settlement</Typography>
+              <Typography variant="h5">{lifecycleCounts.pending_settlement || 0}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="text.secondary">Closed History</Typography>
+              <Typography variant="h5">{lifecycleCounts.closed || 0}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={2} alignItems="center">
@@ -306,10 +443,9 @@ const AgentLeasesPage: React.FC = () => {
                   onChange={handleFilterChange('status')}
                 >
                   <MenuItem value="all">All Statuses</MenuItem>
-                  <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="expiring">Expiring</MenuItem>
-                  <MenuItem value="expired">Expired</MenuItem>
-                  <MenuItem value="terminated">Terminated</MenuItem>
+                  {leaseStatuses.map(status => (
+                    <MenuItem key={status} value={status}>{leaseStatusLabels[status]}</MenuItem>
+                  ))}
                 </Select>
               </FormControl>
             </Grid>
@@ -353,36 +489,80 @@ const AgentLeasesPage: React.FC = () => {
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" sx={{ mb: 2 }}>
-              {selectedLease ? 'Edit Lease' : 'Create Lease'}
+              {formMode === 'renew' ? 'Create Renewal Lease' : formMode === 'amend' ? 'Amend Draft Lease' : 'Create Lease'}
             </Typography>
+            {formMode === 'renew' && selectedLease && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                This creates a new successor lease linked to the current lease. The existing lease remains in history.
+              </Alert>
+            )}
             <LeaseForm
-              key={selectedLease?._id || 'new-lease'}
+              key={selectedLease?._id || requestedPropertyId || 'new-lease'}
               onCancel={() => {
                 setDialogOpen(false);
                 setSelectedLease(null);
+                setFormMode('create');
               }}
               onSubmit={handleFormSubmit}
               properties={properties}
               tenants={tenants}
-              initialData={selectedLease ? {
-                propertyId: selectedLease.propertyId,
-                tenantId: selectedLease.tenantId,
-                startDate: selectedLease.startDate,
-                endDate: selectedLease.endDate,
-                rentAmount: selectedLease.rentAmount,
-                depositAmount: selectedLease.depositAmount,
-                status: selectedLease.status,
-                monthlyRent: selectedLease.rentAmount,
-                securityDeposit: selectedLease.depositAmount,
-                petDeposit: 0,
-                isPetAllowed: false,
-                maxOccupants: 1,
-                isUtilitiesIncluded: false,
-                utilitiesDetails: '',
-                rentDueDay: 1,
-                lateFee: 0,
-                gracePeriod: 0
-              } : undefined}
+              initialData={(() => {
+                if (selectedLease) {
+                  const leaseProperty = resolvePropertyFromLease(selectedLease, properties);
+                  const defaults = getPropertyLeaseDefaults(leaseProperty);
+                  const renewalRent = formMode === 'renew' && defaults.rent > 0 ? defaults.rent : selectedLease.rentAmount;
+                  const renewalDeposit = formMode === 'renew' && defaults.deposit > 0 ? defaults.deposit : selectedLease.depositAmount;
+
+                  return {
+                    propertyId: selectedLease.propertyId,
+                    tenantId: selectedLease.tenantId,
+                    startDate: formMode === 'renew' && selectedLease.endDate
+                      ? new Date(new Date(selectedLease.endDate).getTime() + 24 * 60 * 60 * 1000).toISOString()
+                      : selectedLease.startDate,
+                    endDate: formMode === 'renew' && selectedLease.endDate
+                      ? new Date(new Date(selectedLease.endDate).getFullYear() + 1, new Date(selectedLease.endDate).getMonth(), new Date(selectedLease.endDate).getDate()).toISOString()
+                      : selectedLease.endDate,
+                    rentAmount: renewalRent,
+                    depositAmount: renewalDeposit,
+                    status: formMode === 'renew' ? 'pending_approval' : selectedLease.status,
+                    previousLeaseId: formMode === 'renew' ? selectedLease._id : selectedLease.previousLeaseId,
+                    monthlyRent: renewalRent,
+                    securityDeposit: renewalDeposit,
+                    petDeposit: 0,
+                    isPetAllowed: false,
+                    maxOccupants: 1,
+                    isUtilitiesIncluded: false,
+                    utilitiesDetails: '',
+                    rentDueDay: 1,
+                    lateFee: 0,
+                    gracePeriod: 0
+                  };
+                }
+
+                if (requestedPropertyId) {
+                  return {
+                    propertyId: requestedPropertyId,
+                    tenantId: '',
+                    startDate: '',
+                    endDate: '',
+                    rentAmount: requestedPropertyDefaults.rent,
+                    depositAmount: requestedPropertyDefaults.deposit,
+                    status: 'active',
+                    monthlyRent: requestedPropertyDefaults.rent,
+                    securityDeposit: requestedPropertyDefaults.deposit,
+                    petDeposit: 0,
+                    isPetAllowed: false,
+                    maxOccupants: 1,
+                    isUtilitiesIncluded: false,
+                    utilitiesDetails: '',
+                    rentDueDay: 1,
+                    lateFee: 0,
+                    gracePeriod: 0
+                  };
+                }
+
+                return undefined;
+              })()}
             />
           </CardContent>
         </Card>
@@ -399,22 +579,32 @@ const AgentLeasesPage: React.FC = () => {
                   <TableCell>End Date</TableCell>
                   <TableCell>Rent Amount</TableCell>
                   <TableCell>Status</TableCell>
+                    <TableCell>Lineage</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filteredLeases.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
-                      <Typography variant="body2" color="text.secondary">
-                        No leases found
-                      </Typography>
+                    <TableCell colSpan={8} align="center">
+                      <OperationalEmptyState
+                        title="Create the first lease"
+                        description="Leases connect properties, tenants, rent rules, deposits, and billing so rental operations can move from setup to active occupancy."
+                        actionLabel="Create Lease"
+                        onAction={() => {
+                          setSelectedLease(null);
+                          setDialogOpen(true);
+                        }}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredLeases.map((lease) => {
                     const property = resolvePropertyFromLease(lease, properties);
                     const tenant = resolveTenantFromLease(lease, tenants);
+                    const status = getLeaseLifecycleStatus(lease);
+                    const lineage = buildLeaseLineage(lease, leases);
+                    const statusColor = status === 'active' ? 'success' : status === 'expiring_soon' || status === 'pending_settlement' ? 'warning' : status === 'expired' || status === 'terminated' ? 'error' : 'default';
                     return (
                       <TableRow key={lease._id}>
                         <TableCell>
@@ -445,33 +635,83 @@ const AgentLeasesPage: React.FC = () => {
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          {(() => {
-                            const status = getDerivedLeaseStatus(lease);
-                            const color = status === 'active' ? 'success' : status === 'expiring' ? 'warning' : status === 'expired' ? 'error' : 'default';
-                            return (
-                              <Chip 
-                                label={status}
-                                color={color as any}
-                                size="small" 
-                              />
-                            );
-                          })()}
+                          <Chip 
+                            label={leaseStatusLabels[status]}
+                            color={statusColor as any}
+                            size="small" 
+                          />
                         </TableCell>
                         <TableCell>
-                          <IconButton 
-                            onClick={() => handleEditLease(lease)} 
-                            size="small"
-                            color="primary"
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton 
-                            onClick={() => handleDeleteLease(lease._id)} 
-                            size="small"
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption">
+                              {lineage.map((item, index) => `${index + 1}. ${new Date(item.startDate).getFullYear()}`).join(' -> ') || 'Single lease'}
+                            </Typography>
+                            {lease.previousLeaseId && (
+                              <Typography variant="caption" color="text.secondary">Has predecessor</Typography>
+                            )}
+                            {lease.successorLeaseId && (
+                              <Typography variant="caption" color="text.secondary">Has successor</Typography>
+                            )}
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={0.5}>
+                            <Tooltip title={isLeaseImmutable(lease) ? 'Immutable after activation' : 'Amend draft'}>
+                              <span>
+                                <IconButton 
+                                  onClick={() => handleEditLease(lease)} 
+                                  size="small"
+                                  color="primary"
+                                  disabled={isLeaseImmutable(lease)}
+                                >
+                                  <EditIcon />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Create renewal successor">
+                              <IconButton
+                                onClick={() => handleRenewLease(lease)}
+                                size="small"
+                                color="primary"
+                                disabled={status === 'closed' || status === 'pending_settlement'}
+                              >
+                                <RenewIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Start move-out settlement">
+                              <IconButton
+                                onClick={() => handleTerminateLease(lease)}
+                                size="small"
+                                color="warning"
+                                disabled={status === 'closed' || status === 'pending_settlement'}
+                              >
+                                <MoveOutIcon />
+                              </IconButton>
+                            </Tooltip>
+                            {status === 'pending_settlement' && (
+                              <Tooltip title="Close settlement">
+                                <IconButton
+                                  onClick={() => handleCloseSettlement(lease)}
+                                  size="small"
+                                  color="success"
+                                >
+                                  <CloseIcon />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            <Tooltip title={isLeaseImmutable(lease) ? 'Cannot delete historical leases' : 'Delete draft'}>
+                              <span>
+                                <IconButton 
+                                  onClick={() => handleDeleteLease(lease._id)} 
+                                  size="small"
+                                  color="error"
+                                  disabled={isLeaseImmutable(lease)}
+                                >
+                                  <DeleteIcon />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
                         </TableCell>
                       </TableRow>
                     );

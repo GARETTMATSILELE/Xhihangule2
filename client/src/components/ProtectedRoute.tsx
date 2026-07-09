@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 import { Box, CircularProgress, Typography, Alert, Button } from '@mui/material';
 import { getDashboardPath } from '../utils/registrationUtils';
 import { Helmet } from 'react-helmet-async';
@@ -13,6 +14,7 @@ interface ProtectedRouteProps {
 const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
   const location = useLocation();
   const { user, loading, isAuthenticated, error } = useAuth();
+  const { company } = useCompany();
 
   if (process.env.NODE_ENV === 'development') {
     console.log('ProtectedRoute check:', {
@@ -75,8 +77,30 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
 
   // If admin is authenticated but has no companyId, route to company setup (except if already there)
   const roles = Array.isArray((user as any).roles) && (user as any).roles.length > 0 ? (user as any).roles : [user.role];
-  if (roles.includes('admin') && isAuthenticated && !user.companyId && !location.pathname.startsWith('/admin/company-setup')) {
+  // Note: during onboarding V2, the backend may create a company but the user object may not yet include companyId.
+  // If we already have a company object, don't force the "create company" flow.
+  if (
+    roles.includes('admin') &&
+    isAuthenticated &&
+    !user.companyId &&
+    !company?._id &&
+    !location.pathname.startsWith('/admin/company-setup')
+  ) {
     return <Navigate to="/admin/company-setup" replace />;
+  }
+
+  const pendingWorkspaceStatuses = ['PENDING_SETUP', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'FAILED_SETUP'];
+  if (
+    roles.includes('admin') &&
+    isAuthenticated &&
+    company?.onboardingCompleted === false &&
+    company?.onboardingStatus &&
+    pendingWorkspaceStatuses.includes(company.onboardingStatus) &&
+    !location.pathname.startsWith('/workspace-setup') &&
+    !location.pathname.startsWith('/billing') &&
+    !location.pathname.startsWith('/checkout')
+  ) {
+    return <Navigate to="/workspace-setup" replace />;
   }
 
   if (process.env.NODE_ENV === 'development') {

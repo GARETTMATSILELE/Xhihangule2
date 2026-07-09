@@ -21,8 +21,20 @@ export interface Company {
   description?: string;
   logo?: string;
   isActive: boolean;
-  subscriptionStatus: 'active' | 'inactive' | 'trial';
+  subscriptionStatus: 'active' | 'inactive' | 'trial' | 'past_due' | 'suspended' | 'cancelled' | 'expired' | 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED' | 'EXPIRED';
   subscriptionEndDate?: Date;
+  companyType?: 'INDIVIDUAL_LANDLORD' | 'REGISTERED_BUSINESS';
+  workspaceType?: 'agency' | 'individual';
+  tenantStatus?: 'active' | 'suspended' | 'pending' | 'archived';
+  onboardingStatus?: 'PENDING_SETUP' | 'PENDING_PAYMENT' | 'PAYMENT_RECEIVED' | 'INITIALIZING_WORKSPACE' | 'ACTIVE' | 'FAILED_SETUP' | 'SUSPENDED';
+  onboardingCompleted?: boolean;
+  workspacePreferences?: {
+    currency?: 'USD' | 'ZiG';
+    timezone?: string;
+    measurementUnits?: 'metric' | 'imperial';
+    invoicePrefix?: string;
+    invoiceNotes?: string;
+  };
   bankAccounts: BankAccount[];
   commissionConfig?: {
     preaPercentOfTotal: number;
@@ -36,6 +48,12 @@ export interface Company {
     commissionEnabled: boolean;
     agentAccounts: boolean;
     propertyAccounts: boolean;
+    propertyOwners?: boolean;
+    commissions?: boolean;
+    trustAccounting?: boolean;
+    maintenanceApprovals?: boolean;
+    accounting?: boolean;
+    agents?: boolean;
   };
   fiscalConfig?: {
     enabled?: boolean;
@@ -68,4 +86,5 @@ export interface CreateCompany {
   vatNumber?: string;
   description?: string;
   bankAccounts?: BankAccount[];
+  workspaceType?: 'agency' | 'individual';
 } 

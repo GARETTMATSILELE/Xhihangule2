@@ -195,6 +195,85 @@ export const listCompanySubscriptions = async (req: Request, res: Response) => {
   res.json({ data });
 };
 
+export const listTenants = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const companies = await Company.find({})
+    .select('_id name email plan tenantStatus onboardingStatus subscriptionStatus subscriptionEndDate isActive createdAt updatedAt')
+    .sort({ createdAt: -1 })
+    .lean();
+  const subs = await Subscription.find({})
+    .select('companyId plan cycle status currentPeriodEnd trialEndDate gracePeriodEnd nextPaymentAt')
+    .lean();
+  const subMap = new Map<string, any>();
+  for (const sub of subs) subMap.set(String(sub.companyId), sub);
+  res.json({
+    data: companies.map((company: any) => ({
+      ...company,
+      subscription: subMap.get(String(company._id)) || null
+    }))
+  });
+};
+
+export const suspendTenant = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const { id } = req.params;
+  const { reason } = req.body || {};
+  const audit = await startAudit(req, 'tenant:suspend', { companyId: id, reason });
+  try {
+    const company = await Company.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          tenantStatus: 'suspended',
+          onboardingStatus: 'SUSPENDED',
+          subscriptionStatus: 'suspended',
+          isActive: false
+        }
+      },
+      { new: true }
+    );
+    if (!company) throw new AppError('Company not found', 404);
+    await Subscription.updateMany({ companyId: company._id }, {
+      $set: { status: 'suspended', suspendedAt: new Date(), suspensionReason: reason || 'Suspended by system admin' }
+    });
+    await finishAudit(audit, true, { companyId: id });
+    res.json({ message: 'Tenant suspended', data: company });
+  } catch (e: any) {
+    await finishAudit(audit, false, undefined, e?.message || String(e));
+    throw e;
+  }
+};
+
+export const reactivateTenant = async (req: Request, res: Response) => {
+  requireSystemAdmin(req);
+  const { id } = req.params;
+  const audit = await startAudit(req, 'tenant:reactivate', { companyId: id });
+  try {
+    const company = await Company.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          tenantStatus: 'active',
+          onboardingStatus: 'ACTIVE',
+          subscriptionStatus: 'active',
+          isActive: true
+        }
+      },
+      { new: true }
+    );
+    if (!company) throw new AppError('Company not found', 404);
+    await Subscription.updateMany({ companyId: company._id }, {
+      $set: { status: 'active' },
+      $unset: { suspendedAt: '', suspensionReason: '' }
+    });
+    await finishAudit(audit, true, { companyId: id });
+    res.json({ message: 'Tenant reactivated', data: company });
+  } catch (e: any) {
+    await finishAudit(audit, false, undefined, e?.message || String(e));
+    throw e;
+  }
+};
+
 export const manualRenewSubscription = async (req: Request, res: Response) => {
   requireSystemAdmin(req);
   const { companyId, cycle } = req.body || {};
@@ -282,6 +361,15 @@ export const createCashVoucher = async (req: Request, res: Response) => {
     validFrom: now,
     validUntil: validUntil ? new Date(validUntil) : undefined,
     maxRedemptions: 1,
+    status: 'Unused',
+    auditHistory: [{
+      action: 'Created',
+      userId: (req.user as any)?.userId ? new mongoose.Types.ObjectId(String((req.user as any).userId)) : undefined,
+      companyId: new mongoose.Types.ObjectId(companyId),
+      plan,
+      details: { cycle, amount: computedAmount },
+      createdAt: now
+    }],
     metadata: { intendedCompanyId: companyId, pin }
   });
 

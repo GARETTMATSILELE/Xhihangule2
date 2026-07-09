@@ -16,6 +16,9 @@ export const listViewings = async (req: Request, res: Response) => {
     if (req.query.propertyId) {
       query.propertyId = new mongoose.Types.ObjectId(String(req.query.propertyId));
     }
+    if (req.query.leadId) {
+      query.leadId = new mongoose.Types.ObjectId(String(req.query.leadId));
+    }
     const viewings = await Viewing.find(query).sort({ when: 1 });
     res.json({ status: 'success', data: viewings });
   } catch (error) {
@@ -29,7 +32,7 @@ export const createViewing = async (req: Request, res: Response) => {
     if (!req.user?.userId) throw new AppError('Authentication required', 401);
     if (!req.user.companyId) throw new AppError('Company ID not found', 400);
 
-    const { propertyId, buyerId, leadId, when, status, notes } = req.body;
+    const { propertyId, buyerId, leadId, when, status, outcome, completedAt, notes } = req.body;
     if (!propertyId || !when) throw new AppError('propertyId and when are required', 400);
 
     const viewing = await Viewing.create({
@@ -38,6 +41,8 @@ export const createViewing = async (req: Request, res: Response) => {
       leadId: leadId || undefined,
       when: new Date(when),
       status: status || 'Scheduled',
+      outcome: outcome || undefined,
+      completedAt: completedAt ? new Date(completedAt) : undefined,
       notes: notes || '',
       companyId: req.user.companyId,
       ownerId: req.user.userId

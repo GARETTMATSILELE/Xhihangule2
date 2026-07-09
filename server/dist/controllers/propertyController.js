@@ -155,6 +155,11 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
             projection = {
                 name: 1,
                 address: 1,
+                type: 1,
+                propertyCategory: 1,
+                propertySubtype: 1,
+                propertyOperationalStatus: 1,
+                propertyUse: 1,
                 price: 1,
                 commission: 1,
                 commissionPreaPercent: 1,
@@ -488,7 +493,7 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, images, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining, sourceValuationId } = req.body || {};
+        const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, images, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining, sourceValuationId, propertyCategory, propertySubtype, propertySpecifications, propertyOperationalStatus, propertyUse } = req.body || {};
         if (!name || !address) {
             throw new errorHandler_1.AppError('Missing required fields: name and address', 400);
         }
@@ -521,7 +526,8 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         const isLand = typeNormalized === 'land';
         const computedPrice = isLand ? (Number(landArea || 0) * Number(pricePerSqm || 0)) : Number(price || 0);
         const property = new Property_1.Property(Object.assign(Object.assign({ name,
-            address, type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house'), status: normalizedStatus, price: computedPrice, pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0, bedrooms: isLand ? 0 : Number(bedrooms || 0), bathrooms: isLand ? 0 : Number(bathrooms || 0), builtArea: Number(builtArea || 0), landArea: Number(landArea || 0), description: description || '', images: Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim() !== '') : [], ownerId: req.user.userId, companyId: req.user.companyId, agentId: agentId || req.user.userId, propertyOwnerId: propertyOwnerId || undefined }, (sourceValuationObjectId ? { sourceValuationId: sourceValuationObjectId } : {})), { rentalType: 'sale', saleType: (saleType === 'installment' ? 'installment' : 'cash'), commission: typeof commission === 'number' ? commission : Number(commission || 0), commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0), commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0), commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0) }));
+            address, type: (allowedTypes.includes(typeNormalized) ? typeNormalized : 'house'), propertyCategory,
+            propertySubtype, propertySpecifications: propertySpecifications && typeof propertySpecifications === 'object' ? propertySpecifications : {}, propertyOperationalStatus, propertyUse: propertyUse || 'Sale', status: normalizedStatus, price: computedPrice, pricePerSqm: isLand ? Number(pricePerSqm || 0) : 0, bedrooms: isLand ? 0 : Number(bedrooms || 0), bathrooms: isLand ? 0 : Number(bathrooms || 0), builtArea: Number(builtArea || 0), landArea: Number(landArea || 0), description: description || '', images: Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim() !== '') : [], ownerId: req.user.userId, companyId: req.user.companyId, agentId: agentId || req.user.userId, propertyOwnerId: propertyOwnerId || undefined }, (sourceValuationObjectId ? { sourceValuationId: sourceValuationObjectId } : {})), { rentalType: 'sale', saleType: (saleType === 'installment' ? 'installment' : 'cash'), commission: typeof commission === 'number' ? commission : Number(commission || 0), commissionPreaPercent: typeof commissionPreaPercent === 'number' ? commissionPreaPercent : Number(commissionPreaPercent || 0), commissionAgencyPercentRemaining: typeof commissionAgencyPercentRemaining === 'number' ? commissionAgencyPercentRemaining : Number(commissionAgencyPercentRemaining || 0), commissionAgentPercentRemaining: typeof commissionAgentPercentRemaining === 'number' ? commissionAgentPercentRemaining : Number(commissionAgentPercentRemaining || 0) }));
         const saved = yield property.save();
         // Non-breaking extension: open trust account shell for every sales property listing.
         try {

@@ -19,6 +19,7 @@ const roles_1 = require("../middleware/roles");
 const accountantController_1 = require("../controllers/accountantController");
 const paymentController_1 = require("../controllers/paymentController");
 const propertyAccountController_1 = require("../controllers/propertyAccountController");
+const chargeTypeController_1 = require("../controllers/chargeTypeController");
 const companyAccountController_1 = require("../controllers/companyAccountController");
 const salesContractController_1 = require("../controllers/salesContractController");
 const Payment_1 = require("../models/Payment");
@@ -155,6 +156,11 @@ router.post('/payments/finalize-bulk', roles_1.canManagePayments, (req, res) => 
     }
 }));
 // Property Account routes - allow admin and accountant
+router.get('/charge-types', roles_1.canViewCommissions, chargeTypeController_1.listChargeTypes);
+router.post('/charge-types', roles_1.isAccountant, chargeTypeController_1.createChargeType);
+router.put('/charge-types/:id', roles_1.isAccountant, chargeTypeController_1.updateChargeType);
+router.post('/charge-types/:id/deactivate', roles_1.isAccountant, chargeTypeController_1.deactivateChargeType);
+router.delete('/charge-types/:id', roles_1.isAccountant, chargeTypeController_1.deleteChargeType);
 router.get('/property-accounts', roles_1.canViewCommissions, propertyAccountController_1.getCompanyPropertyAccounts);
 router.post('/property-accounts/migrate-legacy-ledgers', roles_1.canViewCommissions, propertyAccountController_1.migrateLegacyLedgerTypes);
 router.get('/property-accounts/:propertyId', roles_1.canViewCommissions, propertyAccountController_1.getPropertyAccount);

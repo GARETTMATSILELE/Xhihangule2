@@ -110,6 +110,7 @@ router.get('/maintenance-requests', auth_1.propertyOwnerAuth, (req, res, next) =
     console.log('OwnerRoutes: GET /maintenance-requests route hit');
     next();
 }, ownerController_1.getOwnerMaintenanceRequests);
+router.get('/maintenance-summary', auth_1.propertyOwnerAuth, ownerController_1.getOwnerMaintenanceSummaryReport);
 router.get('/maintenance-requests/:id', auth_1.propertyOwnerAuth, (req, res, next) => {
     console.log('OwnerRoutes: GET /maintenance-requests/:id route hit');
     next();
@@ -276,7 +277,7 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
             const propertyId = String(property._id);
             const { ledgerType, incomeType } = resolveOwnerIncomeType(property.rentalType);
             try {
-                const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledgerType);
+                const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
                 return Object.assign(Object.assign({}, (typeof (account === null || account === void 0 ? void 0 : account.toObject) === 'function' ? account.toObject() : account)), { propertyId: (account === null || account === void 0 ? void 0 : account.propertyId) || property._id, propertyName: (account === null || account === void 0 ? void 0 : account.propertyName) || property.name || 'Unknown Property', propertyAddress: (account === null || account === void 0 ? void 0 : account.propertyAddress) || property.address || 'No Address', ledgerType,
                     incomeType });
             }

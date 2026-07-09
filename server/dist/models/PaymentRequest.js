@@ -130,7 +130,8 @@ const PaymentRequestSchema = new mongoose_1.Schema({
         approvedAt: { type: Date },
         notes: { type: String }
     },
-    readyForAccounting: { type: Boolean, default: false }
+    readyForAccounting: { type: Boolean, default: false },
+    maintenanceRequestId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'MaintenanceRequest', index: true }
 }, {
     timestamps: true
 });

@@ -1,6 +1,52 @@
 import { Request, Response } from 'express';
 import { LeaseRepository } from '../repositories/leaseRepository';
 import mongoose from 'mongoose';
+import { Lease, LeaseStatus } from '../models/Lease';
+import { Payment } from '../models/Payment';
+import { Property } from '../models/Property';
+import { LeaseBillingEngine } from '../services/leaseBillingEngine';
+import { ensureLeaseInspectionSchedule, ensureMoveOutInspection } from '../services/inspectionAutomationService';
+
+const LEASE_STATUSES: LeaseStatus[] = [
+  'draft',
+  'pending_approval',
+  'active',
+  'expiring_soon',
+  'expired',
+  'renewed',
+  'terminated',
+  'pending_settlement',
+  'closed',
+];
+
+const IMMUTABLE_LEASE_STATUSES: LeaseStatus[] = [
+  'active',
+  'expiring_soon',
+  'expired',
+  'renewed',
+  'terminated',
+  'pending_settlement',
+  'closed',
+];
+
+const IMMUTABLE_LEASE_FIELDS = [
+  'propertyId',
+  'tenantId',
+  'startDate',
+  'endDate',
+  'rentAmount',
+  'depositAmount',
+  'monthlyRent',
+  'securityDeposit',
+  'previousLeaseId',
+  'successorLeaseId',
+  'billingRules',
+];
+
+const asObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefined => {
+  if (!value || !mongoose.Types.ObjectId.isValid(String(value))) return undefined;
+  return new mongoose.Types.ObjectId(String(value));
+};
 
 export class LeaseController {
   private static instance: LeaseController;
@@ -118,10 +164,33 @@ export class LeaseController {
         endDate: new Date(endDate),
         rentAmount: Number(finalRentAmount),
         depositAmount: Number(finalDepositAmount),
-        status: req.body.status || 'active',
+        status: LEASE_STATUSES.includes(req.body.status) ? req.body.status : 'active',
         companyId: req.user?.companyId ? new mongoose.Types.ObjectId(req.user.companyId) : (req.body.companyId ? new mongoose.Types.ObjectId(req.body.companyId) : undefined),
         // Always stamp ownerId from the authenticated user context (required by schema)
         ownerId: req.user?.userId ? new mongoose.Types.ObjectId(req.user.userId) : undefined,
+        previousLeaseId: asObjectIdOrUndefined(req.body.previousLeaseId) || null,
+        renewalReminderDate: req.body.renewalReminderDate ? new Date(req.body.renewalReminderDate) : undefined,
+        billingStatus: req.body.billingStatus || 'current',
+        billingRules: {
+          frequency: 'monthly' as const,
+          rentDueDay: Number(req.body.rentDueDay || 1),
+          escalationPercent: Number(req.body.escalationPercent || req.body.billingRules?.escalationPercent || 0),
+          escalationFrequencyMonths: Number(req.body.escalationFrequencyMonths || req.body.billingRules?.escalationFrequencyMonths || 12),
+          nextEscalationDate: req.body.nextEscalationDate || req.body.billingRules?.nextEscalationDate
+            ? new Date(req.body.nextEscalationDate || req.body.billingRules.nextEscalationDate)
+            : undefined,
+          recurringLevies: Number(req.body.recurringLevies || req.body.billingRules?.recurringLevies || 0),
+          recurringServiceCharges: Number(req.body.recurringServiceCharges || req.body.billingRules?.recurringServiceCharges || 0),
+          prorateMoveIn: req.body.prorateMoveIn ?? req.body.billingRules?.prorateMoveIn ?? true,
+        },
+        financialSummary: {
+          totalBilled: 0,
+          totalPaid: 0,
+          outstandingBalance: 0,
+          depositHeld: Number(finalDepositAmount),
+          penalties: 0,
+          moveOutSettlement: 0,
+        },
         // Additional fields with defaults
         monthlyRent: Number(req.body.monthlyRent || finalRentAmount),
         securityDeposit: Number(req.body.securityDeposit || finalDepositAmount),
@@ -150,6 +219,14 @@ export class LeaseController {
       console.log('Processed lease data:', leaseData);
 
       const lease = await this.leaseRepository.create(leaseData);
+      if (leaseData.previousLeaseId) {
+        await this.leaseRepository.linkSuccessor(String(leaseData.previousLeaseId), lease._id as mongoose.Types.ObjectId);
+      }
+      if (lease.status === 'active' || lease.status === 'pending_approval') {
+        ensureLeaseInspectionSchedule(lease).catch((error) => {
+          console.error('Failed to create lease inspection schedule:', error);
+        });
+      }
       console.log('Lease created successfully:', lease._id);
       
       res.status(201).json(lease);
@@ -184,6 +261,27 @@ export class LeaseController {
       
       const { id } = req.params;
       const updateData = { ...req.body };
+      const existingLease = await this.leaseRepository.findById(id);
+      if (!existingLease) {
+        res.status(404).json({ error: 'Lease not found' });
+        return;
+      }
+
+      if (IMMUTABLE_LEASE_STATUSES.includes(existingLease.status)) {
+        const destructiveFields = IMMUTABLE_LEASE_FIELDS.filter((field) => field in updateData);
+        if (destructiveFields.length > 0) {
+          res.status(409).json({
+            error: 'Active and historical leases are immutable. Create a renewal lease or controlled amendment instead.',
+            blockedFields: destructiveFields,
+          });
+          return;
+        }
+      }
+
+      if (updateData.status && !LEASE_STATUSES.includes(updateData.status)) {
+        res.status(400).json({ error: 'Invalid lease status' });
+        return;
+      }
 
       // Transform numeric fields
       if (updateData.rentAmount !== undefined) updateData.rentAmount = Number(updateData.rentAmount);
@@ -221,6 +319,10 @@ export class LeaseController {
       }
 
       console.log('Processed update data:', updateData);
+
+      if (updateData.status && updateData.status !== existingLease.status) {
+        updateData.lifecycleStatusChangedAt = new Date();
+      }
 
       const lease = await this.leaseRepository.update(id, updateData);
       if (!lease) {
@@ -295,10 +397,19 @@ export class LeaseController {
   async updateLeaseStatus(req: Request, res: Response): Promise<void> {
     try {
       const { status } = req.body;
+      if (!LEASE_STATUSES.includes(status)) {
+        res.status(400).json({ error: 'Invalid lease status' });
+        return;
+      }
       const lease = await this.leaseRepository.updateLeaseStatus(req.params.id, status);
       if (!lease) {
         res.status(404).json({ error: 'Lease not found' });
         return;
+      }
+      if (status === 'active') {
+        ensureLeaseInspectionSchedule(lease).catch((error) => {
+          console.error('Failed to create active lease inspection schedule:', error);
+        });
       }
       res.json(lease);
     } catch (error) {
@@ -310,16 +421,184 @@ export class LeaseController {
   async extendLease(req: Request, res: Response): Promise<void> {
     try {
       const { newEndDate } = req.body;
-      const lease = await this.leaseRepository.extendLease(req.params.id, new Date(newEndDate));
+      const lease = await this.leaseRepository.findById(req.params.id);
       if (!lease) {
         res.status(404).json({ error: 'Lease not found' });
         return;
       }
-      res.json(lease);
+      const successor = await this.createSuccessorLease(lease, {
+        ...req.body,
+        startDate: new Date(lease.endDate.getTime() + 24 * 60 * 60 * 1000),
+        endDate: new Date(newEndDate),
+      });
+      res.status(201).json(successor);
     } catch (error) {
       console.error('Error extending lease:', error);
-      res.status(500).json({ error: 'Failed to extend lease' });
+      res.status(500).json({ error: 'Failed to renew lease' });
     }
+  }
+
+  async renewLease(req: Request, res: Response): Promise<void> {
+    try {
+      const lease = await this.leaseRepository.findById(req.params.id);
+      if (!lease) {
+        res.status(404).json({ error: 'Lease not found' });
+        return;
+      }
+
+      const successor = await this.createSuccessorLease(lease, req.body);
+      res.status(201).json(successor);
+    } catch (error: any) {
+      console.error('Error renewing lease:', error);
+      res.status(500).json({ error: error.message || 'Failed to renew lease' });
+    }
+  }
+
+  async terminateLease(req: Request, res: Response): Promise<void> {
+    try {
+      const lease = await Lease.findById(req.params.id);
+      if (!lease) {
+        res.status(404).json({ error: 'Lease not found' });
+        return;
+      }
+
+      const payments = await Payment.find({
+        leaseId: lease._id,
+        status: { $in: ['pending', 'completed'] }
+      });
+      const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      const generatedPeriods = LeaseBillingEngine.generateMonthlyPeriods(lease, lease.startDate, req.body.moveOutDate ? new Date(req.body.moveOutDate) : new Date());
+      const totalBilled = generatedPeriods.reduce((sum, period) => sum + period.totalAmount, 0);
+      const outstandingBalance = Math.max(0, totalBilled - totalPaid);
+      const depositHeld = Number(lease.depositAmount || lease.securityDeposit || 0);
+      const deductions = Number(req.body.deductions || req.body.damages || 0);
+      const refundDue = Math.max(0, depositHeld - deductions - outstandingBalance);
+
+      lease.status = 'pending_settlement';
+      lease.terminationDate = req.body.terminationDate ? new Date(req.body.terminationDate) : new Date();
+      lease.terminationReason = req.body.reason || req.body.terminationReason || 'Move-out initiated';
+      lease.moveOutDate = req.body.moveOutDate ? new Date(req.body.moveOutDate) : lease.terminationDate;
+      lease.lifecycleStatusChangedAt = new Date();
+      lease.financialSummary = {
+        totalBilled,
+        totalPaid,
+        outstandingBalance,
+        depositHeld,
+        penalties: Number(req.body.penalties || 0),
+        moveOutSettlement: refundDue,
+      };
+      lease.depositSettlement = {
+        depositHeld,
+        deductions,
+        refundDue,
+        notes: req.body.settlementNotes || '',
+      };
+      await lease.save();
+      ensureMoveOutInspection(lease, lease.moveOutDate || lease.terminationDate || new Date()).catch((error) => {
+        console.error('Failed to create move-out inspection:', error);
+      });
+
+      res.json(lease);
+    } catch (error) {
+      console.error('Error terminating lease:', error);
+      res.status(500).json({ error: 'Failed to terminate lease' });
+    }
+  }
+
+  async closeSettlement(req: Request, res: Response): Promise<void> {
+    try {
+      const lease = await Lease.findById(req.params.id);
+      if (!lease) {
+        res.status(404).json({ error: 'Lease not found' });
+        return;
+      }
+
+      lease.status = 'closed';
+      lease.settlementClosedAt = new Date();
+      lease.lifecycleStatusChangedAt = new Date();
+      if (lease.depositSettlement) {
+        lease.depositSettlement.settledAt = new Date();
+        lease.depositSettlement.notes = req.body.notes || lease.depositSettlement.notes;
+      }
+      await lease.save();
+
+      const activeSuccessor = await Lease.findOne({
+        propertyId: lease.propertyId,
+        status: { $in: ['active', 'expiring_soon', 'pending_approval'] },
+        _id: { $ne: lease._id }
+      });
+      if (!activeSuccessor) {
+        await Property.findByIdAndUpdate(lease.propertyId, { status: 'vacant' });
+      }
+
+      res.json(lease);
+    } catch (error) {
+      console.error('Error closing settlement:', error);
+      res.status(500).json({ error: 'Failed to close lease settlement' });
+    }
+  }
+
+  private async createSuccessorLease(previousLease: any, body: any): Promise<any> {
+    const startDate = body.startDate ? new Date(body.startDate) : new Date(previousLease.endDate.getTime() + 24 * 60 * 60 * 1000);
+    const endDate = body.endDate ? new Date(body.endDate) : new Date(startDate.getFullYear() + 1, startDate.getMonth(), startDate.getDate() - 1);
+    if (startDate >= endDate) {
+      throw new Error('Renewal end date must be after start date');
+    }
+
+    const successor = await Lease.create({
+      propertyId: body.propertyId || previousLease.propertyId,
+      tenantId: body.tenantId || previousLease.tenantId,
+      startDate,
+      endDate,
+      rentAmount: Number(body.rentAmount ?? body.monthlyRent ?? previousLease.rentAmount),
+      depositAmount: Number(body.depositAmount ?? body.securityDeposit ?? previousLease.depositAmount),
+      status: body.status || 'pending_approval',
+      companyId: previousLease.companyId,
+      ownerId: previousLease.ownerId,
+      previousLeaseId: previousLease._id,
+      monthlyRent: Number(body.monthlyRent ?? body.rentAmount ?? previousLease.monthlyRent ?? previousLease.rentAmount),
+      securityDeposit: Number(body.securityDeposit ?? body.depositAmount ?? previousLease.securityDeposit ?? previousLease.depositAmount),
+      petDeposit: Number(body.petDeposit ?? previousLease.petDeposit ?? 0),
+      isPetAllowed: body.isPetAllowed ?? previousLease.isPetAllowed ?? false,
+      maxOccupants: Number(body.maxOccupants ?? previousLease.maxOccupants ?? 1),
+      isUtilitiesIncluded: body.isUtilitiesIncluded ?? previousLease.isUtilitiesIncluded ?? false,
+      utilitiesDetails: body.utilitiesDetails ?? previousLease.utilitiesDetails ?? '',
+      rentDueDay: Number(body.rentDueDay ?? previousLease.rentDueDay ?? 1),
+      lateFee: Number(body.lateFee ?? previousLease.lateFee ?? 0),
+      gracePeriod: Number(body.gracePeriod ?? previousLease.gracePeriod ?? 0),
+      billingStatus: 'current',
+      billingRules: {
+        frequency: 'monthly' as const,
+        rentDueDay: Number(body.rentDueDay ?? previousLease.billingRules?.rentDueDay ?? previousLease.rentDueDay ?? 1),
+        escalationPercent: Number(body.escalationPercent ?? previousLease.billingRules?.escalationPercent ?? 0),
+        escalationFrequencyMonths: Number(body.escalationFrequencyMonths ?? previousLease.billingRules?.escalationFrequencyMonths ?? 12),
+        nextEscalationDate: body.nextEscalationDate ? new Date(body.nextEscalationDate) : previousLease.billingRules?.nextEscalationDate,
+        recurringLevies: Number(body.recurringLevies ?? previousLease.billingRules?.recurringLevies ?? 0),
+        recurringServiceCharges: Number(body.recurringServiceCharges ?? previousLease.billingRules?.recurringServiceCharges ?? 0),
+        prorateMoveIn: body.prorateMoveIn ?? previousLease.billingRules?.prorateMoveIn ?? true,
+      },
+      financialSummary: {
+        totalBilled: 0,
+        totalPaid: 0,
+        outstandingBalance: 0,
+        depositHeld: Number(body.depositAmount ?? body.securityDeposit ?? previousLease.depositAmount ?? 0),
+        penalties: 0,
+        moveOutSettlement: 0,
+      },
+    });
+
+    previousLease.successorLeaseId = successor._id;
+    previousLease.status = 'renewed';
+    previousLease.lifecycleStatusChangedAt = new Date();
+    await previousLease.save();
+
+    if (successor.status === 'active' || successor.status === 'pending_approval') {
+      ensureLeaseInspectionSchedule(successor).catch((error) => {
+        console.error('Failed to create renewal inspection schedule:', error);
+      });
+    }
+
+    return successor;
   }
 
   // Legacy public endpoint for admin dashboard; now authenticated and company-scoped.

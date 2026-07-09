@@ -159,7 +159,7 @@ const PropertyAccountDetailPage: React.FC = () => {
 
         // Fetch account and deposit summary in parallel
         const [accountData, depositSum] = await Promise.all([
-          propertyAccountService.getPropertyAccount(propertyId, inferredLedger as any),
+          propertyAccountService.getPropertyAccount(propertyId),
           paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
         ]);
         setAccount(accountData);
@@ -282,8 +282,7 @@ const PropertyAccountDetailPage: React.FC = () => {
     try {
       const updatedAccount = await propertyAccountService.addExpense(
         propertyId,
-        expenseData,
-        (account?.ledgerType as 'rental' | 'sale' | undefined)
+        expenseData
       );
       setAccount(updatedAccount);
       setExpenseDialogOpen(false);
@@ -312,8 +311,7 @@ const PropertyAccountDetailPage: React.FC = () => {
     try {
       const updatedAccount = await propertyAccountService.addOpeningBalanceAdjustment(
         propertyId,
-        openingBalanceData,
-        (account?.ledgerType as 'rental' | 'sale' | undefined)
+        openingBalanceData
       );
       setAccount(updatedAccount);
       setOpeningBalanceDialogOpen(false);
@@ -342,8 +340,7 @@ const PropertyAccountDetailPage: React.FC = () => {
     try {
       const result = await propertyAccountService.createOwnerPayout(
         propertyId,
-        payoutData,
-        (account?.ledgerType as 'rental' | 'sale' | undefined)
+        payoutData
       );
       setAccount(result.account);
       setPayoutDialogOpen(false);
@@ -537,13 +534,91 @@ const PropertyAccountDetailPage: React.FC = () => {
         });
       }
 
+      const normalizePassThroughType = (value?: string) => String(value || 'OTHER')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'OTHER';
+      const passThroughLabel = (type: string) => {
+        const labels: Record<string, string> = {
+          LEVY: 'Levies',
+          WATER: 'Water Recoveries',
+          ELECTRICITY: 'Electricity Recoveries',
+          RATES: 'Rates',
+          SECURITY: 'Security',
+          INSURANCE: 'Insurance Recoveries',
+          MUNICIPAL: 'Municipal Charges',
+          OTHER: 'Other Pass-Through Charges'
+        };
+        const normalized = normalizePassThroughType(type);
+        return labels[normalized] || normalized.toLowerCase().split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+      };
+      const inferPassThroughType = (entry: any): string => {
+        const explicit = entry?.passThroughType || entry?.type;
+        const text = `${entry?.category || ''} ${entry?.description || ''} ${entry?.referenceNumber || ''}`.toLowerCase();
+        if (String(explicit || '').toUpperCase() !== 'COLLECTION' && String(explicit || '').toUpperCase() !== 'PAYMENT') {
+          const normalized = normalizePassThroughType(explicit);
+          if (normalized !== 'OTHER') return normalized;
+        }
+        if (/levy|levies|hoa/.test(text)) return 'LEVY';
+        if (/water/.test(text)) return 'WATER';
+        if (/electric/.test(text)) return 'ELECTRICITY';
+        if (/rates?/.test(text)) return 'RATES';
+        if (/security/.test(text)) return 'SECURITY';
+        if (/insurance/.test(text)) return 'INSURANCE';
+        if (/municipal/.test(text)) return 'MUNICIPAL';
+        return 'OTHER';
+      };
+      const isPassThroughTransaction = (transaction: any) => {
+        if (transaction?.accountingTreatment === 'PASS_THROUGH' || transaction?.transactionCategory === 'PASS_THROUGH') return true;
+        const text = `${transaction?.category || ''} ${transaction?.description || ''}`.toLowerCase();
+        return /levy|levies|hoa|water|electric|rates?|municipal|security|insurance/.test(text);
+      };
+      const addPassThroughRow = (
+        rows: Record<string, { label: string; collected: number; paid: number }>,
+        type: string,
+        direction: 'collection' | 'payment',
+        amount: number
+      ) => {
+        const normalized = normalizePassThroughType(type);
+        rows[normalized] = rows[normalized] || { label: passThroughLabel(normalized), collected: 0, paid: 0 };
+        if (direction === 'collection') rows[normalized].collected += Number(amount || 0);
+        if (direction === 'payment') rows[normalized].paid += Number(amount || 0);
+      };
+      const passThroughRows: Record<string, { label: string; collected: number; paid: number }> = {};
+      for (const passThroughAccount of (account?.passThroughAccounts || [])) {
+        for (const entry of (passThroughAccount.transactions || [])) {
+          const entryDate = new Date(entry.date);
+          if (!statementData.includeAllTransactions && (entryDate < statementData.startDate || entryDate > statementData.endDate)) continue;
+          if (entry.status === 'cancelled' || entry.status === 'failed') continue;
+          if (entry.type === 'collection' || entry.type === 'payment') {
+            addPassThroughRow(passThroughRows, passThroughAccount.type, entry.type, Number(entry.amount || 0));
+          }
+        }
+      }
+      for (const transaction of filteredTransactions) {
+        if (!isPassThroughTransaction(transaction)) continue;
+        const direction = transaction.type === 'income' ? 'collection' : 'payment';
+        addPassThroughRow(passThroughRows, inferPassThroughType(transaction), direction, Number(transaction.amount || 0));
+      }
+      const passThroughSummaryRows = Object.entries(passThroughRows).map(([type, row]) => ({
+        type,
+        label: row.label,
+        collected: Number(row.collected.toFixed(2)),
+        paid: Number(row.paid.toFixed(2)),
+        outstanding: Number((row.collected - row.paid).toFixed(2))
+      }));
+      const passThroughCollected = passThroughSummaryRows.reduce((sum, row) => sum + row.collected, 0);
+      const passThroughPaid = passThroughSummaryRows.reduce((sum, row) => sum + row.paid, 0);
+      const passThroughOutstanding = passThroughCollected - passThroughPaid;
+
       // Calculate summary for the period
       const periodIncome = filteredTransactions
-        .filter(t => t.type === 'income' && t.status === 'completed')
+        .filter(t => t.type === 'income' && t.status === 'completed' && !isPassThroughTransaction(t))
         .reduce((sum, t) => sum + t.amount, 0);
       
       const periodExpenses = filteredTransactions
-        .filter(t => t.type === 'expense' && t.status === 'completed')
+        .filter(t => t.type === 'expense' && t.status === 'completed' && !isPassThroughTransaction(t))
         .reduce((sum, t) => sum + t.amount, 0);
       
       // Get payouts from the account's ownerPayouts array and filter by date range
@@ -624,6 +699,7 @@ const PropertyAccountDetailPage: React.FC = () => {
             .income { color: #4caf50; }
             .expense { color: #f44336; }
             .payout { color: #2196f3; }
+            .pass-through { color: #7b1fa2; }
             .transactions-table { margin: 30px 0; }
             .transactions-table table { width: 100%; border-collapse: collapse; }
             .transactions-table th, .transactions-table td { 
@@ -635,6 +711,7 @@ const PropertyAccountDetailPage: React.FC = () => {
             .income-row { background: #f1f8e9; }
             .expense-row { background: #ffebee; }
             .payout-row { background: #e3f2fd; }
+            .pass-through-row { background: #f3e5f5; }
             .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #666; }
             @media print {
               body { margin: 20px; }
@@ -695,9 +772,51 @@ const PropertyAccountDetailPage: React.FC = () => {
               </div>
               <div class="summary-card" style="background: #f5f5f5;">
                 <div>Available for Payouts</div>
-                <div class="summary-amount payout">${propertyAccountService.formatCurrency(account?.runningBalance || 0)}</div>
+                <div class="summary-amount payout">${propertyAccountService.formatCurrency(account?.netOwnerBalance ?? account?.runningBalance ?? 0)}</div>
               </div>
             </div>
+          </div>
+          
+          <div class="summary-section">
+            <h3>Pass-Through Charges</h3>
+            <div class="summary-grid">
+              <div class="summary-card">
+                <div>Collected</div>
+                <div class="summary-amount pass-through">${propertyAccountService.formatCurrency(passThroughCollected)}</div>
+              </div>
+              <div class="summary-card">
+                <div>Paid</div>
+                <div class="summary-amount pass-through">${propertyAccountService.formatCurrency(passThroughPaid)}</div>
+              </div>
+              <div class="summary-card">
+                <div>Outstanding</div>
+                <div class="summary-amount pass-through">${propertyAccountService.formatCurrency(passThroughOutstanding)}</div>
+              </div>
+            </div>
+            ${passThroughSummaryRows.length > 0 ? `
+            <div class="transactions-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Charge Type</th>
+                    <th>Collected</th>
+                    <th>Paid</th>
+                    <th>Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${passThroughSummaryRows.map(row => `
+                    <tr class="pass-through-row">
+                      <td>${row.label}</td>
+                      <td>${propertyAccountService.formatCurrency(row.collected)}</td>
+                      <td>${propertyAccountService.formatCurrency(row.paid)}</td>
+                      <td>${propertyAccountService.formatCurrency(row.outstanding)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            ` : '<p>No pass-through charges recorded for this period.</p>'}
           </div>
           
           <div class="transactions-table">
@@ -718,7 +837,7 @@ const PropertyAccountDetailPage: React.FC = () => {
               </thead>
               <tbody>
                 ${filteredTransactions
-                  .filter(transaction => transaction.type !== 'owner_payout')
+                  .filter(transaction => transaction.type !== 'owner_payout' && !isPassThroughTransaction(transaction))
                   .map(transaction => {
                     const isIncome = transaction.type === 'income';
                     const isOpeningCredit = transaction.type === 'opening_balance' && transaction.direction !== 'debit';
@@ -936,6 +1055,10 @@ const PropertyAccountDetailPage: React.FC = () => {
           {submitError}
         </Alert>
       )}
+
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Balances and income below are calculated from this property&apos;s trust ledger (same source as the agent owner portfolio financials).
+      </Alert>
 
       {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1422,10 +1545,7 @@ const PropertyAccountDetailPage: React.FC = () => {
                       try {
                         const result = await propertyAccountService.mergeDuplicatesForProperty(propertyId);
                         // Refresh account after merge
-                        const refreshed = await propertyAccountService.getPropertyAccount(
-                          propertyId,
-                          (account?.ledgerType as 'rental' | 'sale' | undefined)
-                        );
+                        const refreshed = await propertyAccountService.getPropertyAccount(propertyId);
                         setAccount(refreshed);
                         setSuccess(result?.merged ? 'Ledgers merged successfully.' : 'No merge needed; already unified.');
                       } catch (err: any) {

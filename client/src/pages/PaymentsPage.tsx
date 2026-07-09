@@ -88,6 +88,14 @@ const PaymentsPage: React.FC = () => {
     });
   }, [navigate, location.pathname]);
 
+  const sortPayments = useCallback((list: Payment[]) => {
+    const toTime = (p: any) => {
+      const d = p?.paymentDate || p?.createdAt || p?.updatedAt;
+      return d ? new Date(d).getTime() : 0;
+    };
+    return [...list].sort((a, b) => toTime(b) - toTime(a));
+  }, []);
+
 
   // Determine which sidebar to use based on user role
   const SidebarComponent = useMemo(() => {
@@ -264,82 +272,87 @@ const PaymentsPage: React.FC = () => {
   }, [filters]);
 
   // Load payments when filters change
-  useEffect(() => {
-    const loadPayments = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Prepare filter parameters
-        const filterParams: any = {};
-        if (debouncedFilters.startDate) {
-          filterParams.startDate = debouncedFilters.startDate.toISOString();
-        }
-        if (debouncedFilters.endDate) {
-          filterParams.endDate = debouncedFilters.endDate.toISOString();
-        }
-        if (debouncedFilters.status) {
-          filterParams.status = debouncedFilters.status;
-        }
-        if (debouncedFilters.paymentMethod) {
-          filterParams.paymentMethod = debouncedFilters.paymentMethod;
-        }
-        if (debouncedFilters.propertyId) {
-          filterParams.propertyId = debouncedFilters.propertyId;
-        }
-        
-        // Use agent-scoped endpoint if agent, otherwise company payments
-        const basePayments: any[] = user?.role === 'agent'
-          ? await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data)
-          : await paymentService.getPayments({ ...filterParams, ...(user?.role === 'admin' ? { includeProvisional: 'true' } : {}) });
+  const fetchPayments = useCallback(async () => {
+    if (!user?.companyId) return;
+    try {
+      setLoading(true);
+      setError(null);
 
-        // Fetch levy payments and apply same filters client-side
-        let levy: any[] = [];
-        try {
-          levy = user?.role === 'agent'
-            ? await api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
-            : await paymentService.getLevyPayments(user?.companyId);
-        } catch {
-          levy = [];
-        }
-
-        const applyClientFilters = (list: any[]): any[] => {
-          return list.filter((p: any) => {
-            const date = p.paymentDate ? new Date(p.paymentDate) : null;
-            if (debouncedFilters.startDate && date && date < debouncedFilters.startDate) return false;
-            if (debouncedFilters.endDate && date && date > debouncedFilters.endDate) return false;
-            if (debouncedFilters.status && p.status !== debouncedFilters.status) return false;
-            if (debouncedFilters.paymentMethod && p.paymentMethod !== debouncedFilters.paymentMethod) return false;
-            if (debouncedFilters.propertyId) {
-              const propId = typeof p.propertyId === 'object' && p.propertyId?._id ? p.propertyId._id : p.propertyId;
-              if (String(propId || '') !== String(debouncedFilters.propertyId)) return false;
-            }
-            return true;
-          });
-        };
-
-        const filteredLevy = applyClientFilters(levy);
-        // Normalize levy entries to carry explicit type so UI doesn't show them as rental
-        const normalizeType = (p: any) => ({ ...p, paymentType: p.paymentType || p.type || (p.isLevy ? 'levy' : undefined) });
-        const combined = [
-          ...((basePayments || []).map(normalizeType)),
-          ...((filteredLevy || []).map((p) => ({ ...p, paymentType: 'levy', type: 'levy' })))
-        ];
-        setPayments(combined);
-      } catch (err: any) {
-        console.error('Error loading payments:', err);
-        if (err.response?.status === 401) {
-          redirectToLogin('Session expired. Please log in.');
-        } else {
-          setError(err instanceof Error ? err.message : 'Failed to load payments');
-        }
-      } finally {
-        setLoading(false);
+      const filterParams: any = {};
+      if (debouncedFilters.startDate) {
+        filterParams.startDate = debouncedFilters.startDate.toISOString();
       }
-    };
+      if (debouncedFilters.endDate) {
+        filterParams.endDate = debouncedFilters.endDate.toISOString();
+      }
+      if (debouncedFilters.status) {
+        filterParams.status = debouncedFilters.status;
+      }
+      if (debouncedFilters.paymentMethod) {
+        filterParams.paymentMethod = debouncedFilters.paymentMethod;
+      }
+      if (debouncedFilters.propertyId) {
+        filterParams.propertyId = debouncedFilters.propertyId;
+      }
 
-    loadPayments();
-  }, [debouncedFilters, user?.companyId, user?.role]);
+      const basePayments: any[] = user?.role === 'agent'
+        ? await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data)
+        : await paymentService.getPayments({ ...filterParams, ...(user?.role === 'admin' ? { includeProvisional: 'true' } : {}) });
+
+      let levy: any[] = [];
+      try {
+        levy = user?.role === 'agent'
+          ? await api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
+          : await paymentService.getLevyPayments(user?.companyId);
+      } catch {
+        levy = [];
+      }
+
+      const applyClientFilters = (list: any[]): any[] => {
+        return list.filter((p: any) => {
+          const date = p.paymentDate ? new Date(p.paymentDate) : null;
+          if (debouncedFilters.startDate && date && date < debouncedFilters.startDate) return false;
+          if (debouncedFilters.endDate && date && date > debouncedFilters.endDate) return false;
+          if (debouncedFilters.status && p.status !== debouncedFilters.status) return false;
+          if (debouncedFilters.paymentMethod && p.paymentMethod !== debouncedFilters.paymentMethod) return false;
+          if (debouncedFilters.propertyId) {
+            const propId = typeof p.propertyId === 'object' && p.propertyId?._id ? p.propertyId._id : p.propertyId;
+            if (String(propId || '') !== String(debouncedFilters.propertyId)) return false;
+          }
+          return true;
+        });
+      };
+
+      const filteredLevy = applyClientFilters(levy);
+      const normalizeType = (p: any) => ({ ...p, paymentType: p.paymentType || p.type || (p.isLevy ? 'levy' : undefined) });
+      const combined = sortPayments([
+        ...((basePayments || []).map(normalizeType)),
+        ...((filteredLevy || []).map((p) => ({ ...p, paymentType: 'levy', type: 'levy' })))
+      ]);
+      setPayments(combined);
+    } catch (err: any) {
+      console.error('Error loading payments:', err);
+      if (err.response?.status === 401) {
+        redirectToLogin('Session expired. Please log in.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load payments');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [debouncedFilters, redirectToLogin, sortPayments, user?.companyId, user?.role]);
+
+  useEffect(() => {
+    fetchPayments();
+  }, [fetchPayments]);
+
+  useEffect(() => {
+    const onPaymentsChanged = () => {
+      fetchPayments();
+    };
+    window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
+    return () => window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
+  }, [fetchPayments]);
 
   // Handle payment creation
   const handleCreatePayment = async (data: PaymentFormData) => {
@@ -450,48 +463,27 @@ const PaymentsPage: React.FC = () => {
         paymentData.ownerId = property.ownerId;
       }
       if (selectedPayment) {
-        // Use agent service if user is an agent, otherwise use regular payment service
         if (user.role === 'agent') {
-          const response = await agentService.updatePayment(selectedPayment._id, paymentData, properties, user?._id);
-          setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response.data : p));
-          try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'updated', payment: response.data } })); } catch {}
+          await agentService.updatePayment(selectedPayment._id, paymentData, properties, user?._id);
         } else {
-          const response = await paymentService.updatePayment(selectedPayment._id, paymentData);
-          setPayments(prev => prev.map(p => p._id === selectedPayment._id ? response : p));
-          try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'updated', payment: response } })); } catch {}
+          await paymentService.updatePayment(selectedPayment._id, paymentData);
         }
       } else {
         if (paymentData.paymentType === 'levy') {
-          const response = await paymentService.createLevyPayment(paymentData);
-          const created = (response && (response.data ?? response)) as any;
-          if (created) {
-            setPayments(prev => [...prev, created]);
-            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
-          }
+          await paymentService.createLevyPayment(paymentData);
         } else if (paymentData.paymentType === 'municipal') {
-          const response = await paymentService.createMunicipalPayment(paymentData);
-          const created = (response && (response.data ?? response)) as any;
-          if (created) {
-            setPayments(prev => [...prev, created]);
-            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
-          }
+          await paymentService.createMunicipalPayment(paymentData);
         } else if (user.role === 'agent') {
-          const response = await agentService.createPayment(paymentData, properties, user?._id);
-          const created = (response && (response.data ?? response)) as any;
-          if (created) {
-            setPayments(prev => [...prev, created]);
-            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
-          }
+          await agentService.createPayment(paymentData, properties, user?._id);
         } else {
-          // Use accountant endpoint for admin dashboard payments
-          const response = await paymentService.createPaymentAccountant(paymentData);
-          const created = (response && (response.data ?? response)) as any;
-          if (created) {
-            setPayments(prev => [...prev, created]);
-            try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
-          }
+          await paymentService.createPaymentAccountant(paymentData);
         }
       }
+      try {
+        window.dispatchEvent(new CustomEvent('payments:changed', {
+          detail: { type: selectedPayment ? 'updated' : 'created' },
+        }));
+      } catch {}
       setShowForm(false);
       setSelectedPayment(undefined);
       setSuccessMessage(selectedPayment ? 'Payment updated successfully' : 'Payment created successfully');

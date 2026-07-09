@@ -13,7 +13,14 @@ const upload = (0, multer_1.default)({
         fileSize: 5 * 1024 * 1024 // 5MB per file
     },
     fileFilter: (_req, file, cb) => {
-        const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+        const allowed = [
+            'application/pdf',
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/msword',
+        ];
         if (allowed.includes(file.mimetype)) {
             cb(null, true);
             return;

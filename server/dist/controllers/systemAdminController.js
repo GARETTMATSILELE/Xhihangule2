@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSubscriptionPaymentReceipt = exports.listSubscriptionBillingPayments = exports.listCashVouchers = exports.createCashVoucher = exports.manualRenewSubscription = exports.listCompanySubscriptions = exports.fullSync = exports.ledgerMaintenance = exports.reconcile = exports.getBackups = exports.runBackup = exports.removeSystemAdmin = exports.addSystemAdmin = exports.listSystemAdmins = exports.getStatus = void 0;
+exports.getSubscriptionPaymentReceipt = exports.listSubscriptionBillingPayments = exports.listCashVouchers = exports.createCashVoucher = exports.manualRenewSubscription = exports.reactivateTenant = exports.suspendTenant = exports.listTenants = exports.listCompanySubscriptions = exports.fullSync = exports.ledgerMaintenance = exports.reconcile = exports.getBackups = exports.runBackup = exports.removeSystemAdmin = exports.addSystemAdmin = exports.listSystemAdmins = exports.getStatus = void 0;
 const errorHandler_1 = require("../middleware/errorHandler");
 const User_1 = require("../models/User");
 const backupService_1 = require("../services/backupService");
@@ -222,6 +222,79 @@ const listCompanySubscriptions = (req, res) => __awaiter(void 0, void 0, void 0,
     res.json({ data });
 });
 exports.listCompanySubscriptions = listCompanySubscriptions;
+const listTenants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const companies = yield Company_1.Company.find({})
+        .select('_id name email plan tenantStatus onboardingStatus subscriptionStatus subscriptionEndDate isActive createdAt updatedAt')
+        .sort({ createdAt: -1 })
+        .lean();
+    const subs = yield Subscription_1.Subscription.find({})
+        .select('companyId plan cycle status currentPeriodEnd trialEndDate gracePeriodEnd nextPaymentAt')
+        .lean();
+    const subMap = new Map();
+    for (const sub of subs)
+        subMap.set(String(sub.companyId), sub);
+    res.json({
+        data: companies.map((company) => (Object.assign(Object.assign({}, company), { subscription: subMap.get(String(company._id)) || null })))
+    });
+});
+exports.listTenants = listTenants;
+const suspendTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const audit = yield startAudit(req, 'tenant:suspend', { companyId: id, reason });
+    try {
+        const company = yield Company_1.Company.findByIdAndUpdate(id, {
+            $set: {
+                tenantStatus: 'suspended',
+                onboardingStatus: 'SUSPENDED',
+                subscriptionStatus: 'suspended',
+                isActive: false
+            }
+        }, { new: true });
+        if (!company)
+            throw new errorHandler_1.AppError('Company not found', 404);
+        yield Subscription_1.Subscription.updateMany({ companyId: company._id }, {
+            $set: { status: 'suspended', suspendedAt: new Date(), suspensionReason: reason || 'Suspended by system admin' }
+        });
+        yield finishAudit(audit, true, { companyId: id });
+        res.json({ message: 'Tenant suspended', data: company });
+    }
+    catch (e) {
+        yield finishAudit(audit, false, undefined, (e === null || e === void 0 ? void 0 : e.message) || String(e));
+        throw e;
+    }
+});
+exports.suspendTenant = suspendTenant;
+const reactivateTenant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    requireSystemAdmin(req);
+    const { id } = req.params;
+    const audit = yield startAudit(req, 'tenant:reactivate', { companyId: id });
+    try {
+        const company = yield Company_1.Company.findByIdAndUpdate(id, {
+            $set: {
+                tenantStatus: 'active',
+                onboardingStatus: 'ACTIVE',
+                subscriptionStatus: 'active',
+                isActive: true
+            }
+        }, { new: true });
+        if (!company)
+            throw new errorHandler_1.AppError('Company not found', 404);
+        yield Subscription_1.Subscription.updateMany({ companyId: company._id }, {
+            $set: { status: 'active' },
+            $unset: { suspendedAt: '', suspensionReason: '' }
+        });
+        yield finishAudit(audit, true, { companyId: id });
+        res.json({ message: 'Tenant reactivated', data: company });
+    }
+    catch (e) {
+        yield finishAudit(audit, false, undefined, (e === null || e === void 0 ? void 0 : e.message) || String(e));
+        throw e;
+    }
+});
+exports.reactivateTenant = reactivateTenant;
 const manualRenewSubscription = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     requireSystemAdmin(req);
     const { companyId, cycle } = req.body || {};
@@ -270,6 +343,7 @@ exports.manualRenewSubscription = manualRenewSubscription;
  * Records a BillingPayment (provider=cash, method=voucher, status=paid) and returns the code and PIN.
  */
 const createCashVoucher = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     requireSystemAdmin(req);
     const { companyId, plan, cycle, amount, validUntil } = req.body || {};
     if (!companyId)
@@ -301,6 +375,15 @@ const createCashVoucher = (req, res) => __awaiter(void 0, void 0, void 0, functi
         validFrom: now,
         validUntil: validUntil ? new Date(validUntil) : undefined,
         maxRedemptions: 1,
+        status: 'Unused',
+        auditHistory: [{
+                action: 'Created',
+                userId: ((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) ? new mongoose_1.default.Types.ObjectId(String(req.user.userId)) : undefined,
+                companyId: new mongoose_1.default.Types.ObjectId(companyId),
+                plan,
+                details: { cycle, amount: computedAmount },
+                createdAt: now
+            }],
         metadata: { intendedCompanyId: companyId, pin }
     });
     const payment = yield BillingPayment_1.BillingPayment.create({

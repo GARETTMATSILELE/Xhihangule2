@@ -54,6 +54,7 @@ export interface JwtPayload {
   role: UserRole;
   roles?: UserRole[];
   companyId?: string;
+  sessionVersion?: number;
 }
 
 export interface AuthRequest extends Request {

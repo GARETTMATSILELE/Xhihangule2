@@ -23,6 +23,7 @@ const BankTransaction_1 = require("../models/BankTransaction");
 const AccountingEventLog_1 = require("../models/AccountingEventLog");
 const Payment_1 = require("../models/Payment");
 const dashboardKpiService_1 = __importDefault(require("./dashboardKpiService"));
+const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const DEFAULT_ACCOUNTS = [
     { code: '1001', name: 'Main Bank Account', type: 'asset' },
     { code: '1002', name: 'Cash On Hand', type: 'asset' },
@@ -354,7 +355,7 @@ class AccountingService {
                 var _a, _b, _c, _d, _e, _f;
                 const companyObjectId = toObjectId(companyId);
                 yield this.ensureCompanyBalance(companyId);
-                const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis] = yield Promise.all([
+                const [balance, cash, unreconciledBank, pendingVat, pendingExpense, unpaidCommissions, completedPaymentRevenue, dashboardKpis, passThroughSummary] = yield Promise.all([
                     CompanyBalance_1.CompanyBalance.findOne({ companyId: companyObjectId }).maxTimeMS(10000).lean(),
                     BankAccount_1.BankAccount.aggregate([{ $match: { companyId: companyObjectId } }, { $group: { _id: null, total: { $sum: '$currentBalance' } } }]).option({ maxTimeMS: 10000 }),
                     BankTransaction_1.BankTransaction.countDocuments({ companyId: companyObjectId, matched: false }).maxTimeMS(10000),
@@ -383,7 +384,13 @@ class AccountingService {
                             }
                         }
                     ]).option({ maxTimeMS: 10000 }),
-                    dashboardKpiService_1.default.getCompanySnapshot(companyId)
+                    dashboardKpiService_1.default.getCompanySnapshot(companyId),
+                    propertyAccountService_1.default.getCompanyPassThroughSummary(companyId).catch(() => ({
+                        totalCollected: 0,
+                        totalPaid: 0,
+                        totalOutstanding: 0,
+                        byType: {}
+                    }))
                 ]);
                 const cashBalance = toMoney(((_a = cash[0]) === null || _a === void 0 ? void 0 : _a.total) || 0);
                 const vatDueAmount = toMoney((balance === null || balance === void 0 ? void 0 : balance.vatPayable) || 0);
@@ -421,6 +428,10 @@ class AccountingService {
                     invoices: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.invoices) || 0)),
                     outstandingRentals: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.outstandingRentals) || 0)),
                     outstandingLevies: toMoney(Number((dashboardKpis === null || dashboardKpis === void 0 ? void 0 : dashboardKpis.outstandingLevies) || 0)),
+                    passThroughCollected: toMoney(Number((passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.totalCollected) || 0)),
+                    passThroughPaid: toMoney(Number((passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.totalPaid) || 0)),
+                    passThroughOutstanding: toMoney(Number((passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.totalOutstanding) || 0)),
+                    passThroughByType: (passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.byType) || {},
                     lastUpdated: ((_f = balance === null || balance === void 0 ? void 0 : balance.lastUpdated) === null || _f === void 0 ? void 0 : _f.toISOString()) || new Date().toISOString()
                 };
                 this.dashboardSummaryCache.set(companyId, {
@@ -449,7 +460,16 @@ class AccountingService {
     }
     getDashboardOutstanding(companyId) {
         return __awaiter(this, void 0, void 0, function* () {
-            return dashboardKpiService_1.default.getCompanyOutstandingBreakdown(companyId);
+            const [breakdown, passThroughSummary] = yield Promise.all([
+                dashboardKpiService_1.default.getCompanyOutstandingBreakdown(companyId),
+                propertyAccountService_1.default.getCompanyPassThroughSummary(companyId).catch(() => ({
+                    totalCollected: 0,
+                    totalPaid: 0,
+                    totalOutstanding: 0,
+                    byType: {}
+                }))
+            ]);
+            return Object.assign(Object.assign({}, breakdown), { passThroughCollected: toMoney(Number((passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.totalCollected) || 0)), passThroughPaid: toMoney(Number((passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.totalPaid) || 0)), passThroughOutstanding: toMoney(Number((passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.totalOutstanding) || 0)), passThroughByType: (passThroughSummary === null || passThroughSummary === void 0 ? void 0 : passThroughSummary.byType) || {} });
         });
     }
     getTrend(companyId_1, accountType_1) {

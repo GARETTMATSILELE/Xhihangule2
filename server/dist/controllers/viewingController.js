@@ -31,6 +31,9 @@ const listViewings = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (req.query.propertyId) {
             query.propertyId = new mongoose_1.default.Types.ObjectId(String(req.query.propertyId));
         }
+        if (req.query.leadId) {
+            query.leadId = new mongoose_1.default.Types.ObjectId(String(req.query.leadId));
+        }
         const viewings = yield Viewing_1.Viewing.find(query).sort({ when: 1 });
         res.json({ status: 'success', data: viewings });
     }
@@ -48,7 +51,7 @@ const createViewing = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { propertyId, buyerId, leadId, when, status, notes } = req.body;
+        const { propertyId, buyerId, leadId, when, status, outcome, completedAt, notes } = req.body;
         if (!propertyId || !when)
             throw new errorHandler_1.AppError('propertyId and when are required', 400);
         const viewing = yield Viewing_1.Viewing.create({
@@ -57,6 +60,8 @@ const createViewing = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             leadId: leadId || undefined,
             when: new Date(when),
             status: status || 'Scheduled',
+            outcome: outcome || undefined,
+            completedAt: completedAt ? new Date(completedAt) : undefined,
             notes: notes || '',
             companyId: req.user.companyId,
             ownerId: req.user.userId

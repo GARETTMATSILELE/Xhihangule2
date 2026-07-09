@@ -54,6 +54,8 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const authService_1 = require("../services/authService");
 const emailService_1 = require("../services/emailService");
 const subscriptionService_1 = require("../services/subscriptionService");
+const auditService_1 = require("../services/auditService");
+const normalization_1 = require("../utils/normalization");
 const authService = authService_1.AuthService.getInstance();
 const subscriptionService = subscriptionService_1.SubscriptionService.getInstance();
 // Compute cookie domain for production based on env. Prefer explicit COOKIE_DOMAIN.
@@ -74,14 +76,33 @@ function getCookieDomain() {
         return undefined;
     }
 }
+function clearAuthCookies(res) {
+    const prod = process.env.NODE_ENV === 'production';
+    const domain = getCookieDomain();
+    const base = Object.assign({ path: '/', sameSite: prod ? 'strict' : 'lax', secure: prod }, (prod && domain ? { domain } : {}));
+    try {
+        res.clearCookie('refreshToken', Object.assign(Object.assign({}, base), { httpOnly: true }));
+    }
+    catch (_a) { }
+    try {
+        res.clearCookie('accessToken', Object.assign(Object.assign({}, base), { httpOnly: true }));
+    }
+    catch (_b) { }
+    try {
+        res.clearCookie('refreshCsrf', Object.assign(Object.assign({}, base), { httpOnly: false }));
+    }
+    catch (_c) { }
+}
 // Signup with company details
 const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
     try {
         const allowPublicSignup = String(process.env.ALLOW_PUBLIC_SIGNUP || '').toLowerCase() === 'true';
         if (process.env.NODE_ENV === 'production' && !allowPublicSignup) {
             throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
         }
-        const { email, password, name, company, plan: inputPlan } = req.body;
+        const { email: rawEmail, password, name, company, plan: inputPlan } = req.body;
+        const email = (0, normalization_1.normalizeEmail)(rawEmail);
         if (!email || !password || !name) {
             throw new errorHandler_1.AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
         }
@@ -100,6 +121,7 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
         let companyId = undefined;
         try {
             yield session.withTransaction(() => __awaiter(void 0, void 0, void 0, function* () {
+                var _a, _b;
                 // Create user
                 console.log('Creating new user...');
                 const [firstNameRaw, ...lastParts] = String(name).trim().split(/\s+/);
@@ -141,7 +163,9 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                     const { PLAN_CONFIG } = yield Promise.resolve().then(() => __importStar(require('../types/plan')));
                     const plan = (inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
                     const cfg = PLAN_CONFIG[plan];
-                    const companyDoc = new Company_1.Company(Object.assign(Object.assign({}, autoCompany), { ownerId: createdUser._id, plan, propertyLimit: cfg.propertyLimit, featureFlags: cfg.featureFlags }));
+                    const workspaceType = (0, normalization_1.normalizeWorkspaceType)((_a = company === null || company === void 0 ? void 0 : company.workspaceType) !== null && _a !== void 0 ? _a : (_b = req.body) === null || _b === void 0 ? void 0 : _b.workspaceType, cfg.workspaceType);
+                    const companyDoc = new Company_1.Company(Object.assign(Object.assign({}, autoCompany), { ownerId: createdUser._id, workspaceType,
+                        plan, propertyLimit: cfg.propertyLimit, featureFlags: cfg.featureFlags }));
                     const newCompany = yield companyDoc.save({ session });
                     companyId = newCompany._id;
                     companyData = newCompany;
@@ -186,6 +210,7 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                             const { PLAN_CONFIG } = yield Promise.resolve().then(() => __importStar(require('../types/plan')));
                             const plan = (inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
                             const cfg = PLAN_CONFIG[plan];
+                            const workspaceType = (0, normalization_1.normalizeWorkspaceType)((_a = company === null || company === void 0 ? void 0 : company.workspaceType) !== null && _a !== void 0 ? _a : (_b = req.body) === null || _b === void 0 ? void 0 : _b.workspaceType, cfg.workspaceType);
                             const [firstNameRaw, ...lastParts2] = String(name).trim().split(/\s+/);
                             const firstName2 = firstNameRaw || 'User';
                             const lastName2 = lastParts2.join(' ') || firstNameRaw || 'Admin';
@@ -202,7 +227,8 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
                                 tinNumber: `TIN-${nowSuffix2}`,
                                 vatNumber: undefined
                             };
-                            const newCompany = yield Company_1.Company.create(Object.assign(Object.assign({}, autoCompany2), { ownerId: createdUser._id, plan, propertyLimit: cfg.propertyLimit, featureFlags: cfg.featureFlags }));
+                            const newCompany = yield Company_1.Company.create(Object.assign(Object.assign({}, autoCompany2), { ownerId: createdUser._id, workspaceType,
+                                plan, propertyLimit: cfg.propertyLimit, featureFlags: cfg.featureFlags }));
                             companyId = newCompany._id;
                             companyData = newCompany;
                             console.log('Company created successfully (fallback):', { id: newCompany._id, name: newCompany.name });
@@ -287,6 +313,15 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
             company: companyData,
             token
         });
+        yield (0, auditService_1.recordAuditEvent)({
+            req,
+            userId: savedUser._id.toString(),
+            companyId: (_d = (_c = savedUser.companyId) === null || _c === void 0 ? void 0 : _c.toString) === null || _d === void 0 ? void 0 : _d.call(_c),
+            action: 'auth.signup',
+            entityType: 'User',
+            entityId: savedUser._id.toString(),
+            metadata: { plan: inputPlan || null, hasCompany: Boolean(companyData) }
+        });
     }
     catch (error) {
         console.error('Signup error:', {
@@ -316,11 +351,12 @@ const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* (
 exports.signup = signup;
 // Role-based login
 const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
     try {
         const { email, password } = req.body;
+        const normalizedEmail = (0, normalization_1.normalizeEmail)(email);
         // Use auth service for login
-        const { user: userData, token, refreshToken } = yield authService.login(email, password);
+        const { user: userData, token, refreshToken } = yield authService.login(normalizedEmail, password);
         // Get company details if user has a company
         let company = null;
         if (userData.companyId) {
@@ -365,6 +401,8 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
                 isActive: company.isActive,
                 subscriptionStatus: company.subscriptionStatus,
                 subscriptionEndDate: company.subscriptionEndDate,
+                companyType: company.companyType,
+                workspaceType: company.workspaceType,
                 bankAccounts: company.bankAccounts,
                 commissionConfig: company.commissionConfig,
                 plan: company.plan,
@@ -375,8 +413,23 @@ const login = (req, res, next) => __awaiter(void 0, void 0, void 0, function* ()
             } : null,
             token
         });
+        yield (0, auditService_1.recordAuditEvent)({
+            req,
+            userId: userData.userId,
+            companyId: (_c = (_b = userData.companyId) === null || _b === void 0 ? void 0 : _b.toString) === null || _c === void 0 ? void 0 : _c.call(_b),
+            action: 'auth.login',
+            entityType: 'User',
+            entityId: userData.userId
+        });
     }
     catch (error) {
+        yield (0, auditService_1.recordAuditEvent)({
+            req,
+            action: 'auth.login_failed',
+            entityType: 'User',
+            status: 'failure',
+            metadata: { email: (_d = req.body) === null || _d === void 0 ? void 0 : _d.email }
+        });
         console.error('Login error:', error);
         // Normalize known auth errors to 401 with message
         const message = (error === null || error === void 0 ? void 0 : error.message) || 'Authentication failed';
@@ -462,25 +515,17 @@ const resetPassword = (req, res, next) => __awaiter(void 0, void 0, void 0, func
 });
 exports.resetPassword = resetPassword;
 // Logout
-const logout = (req, res) => {
-    // Clear refresh token + CSRF cookies with correct options
-    const prod = process.env.NODE_ENV === 'production';
-    const d = getCookieDomain();
-    const base = Object.assign({ path: '/', sameSite: prod ? 'strict' : 'lax', secure: prod }, (prod && d ? { domain: d } : {}));
-    try {
-        res.clearCookie('refreshToken', Object.assign(Object.assign({}, base), { httpOnly: true }));
-    }
-    catch (_a) { }
-    try {
-        res.clearCookie('accessToken', Object.assign(Object.assign({}, base), { httpOnly: true }));
-    }
-    catch (_b) { }
-    try {
-        res.clearCookie('refreshCsrf', Object.assign(Object.assign({}, base), { httpOnly: false }));
-    }
-    catch (_c) { }
+const logout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    clearAuthCookies(res);
+    yield (0, auditService_1.recordAuditEvent)({
+        req,
+        action: 'auth.logout',
+        entityType: 'Session',
+        metadata: { hasAccessToken: Boolean((_a = req.cookies) === null || _a === void 0 ? void 0 : _a.accessToken) }
+    });
     res.json({ message: 'Logged out successfully' });
-};
+});
 exports.logout = logout;
 // Get current user
 const getCurrentUser = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
@@ -538,6 +583,9 @@ const refreshToken = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
         });
     }
     catch (error) {
+        if (error instanceof errorHandler_1.AppError && (error.statusCode === 401 || error.statusCode === 403)) {
+            clearAuthCookies(res);
+        }
         console.error('Refresh token error:', error);
         next(error);
     }

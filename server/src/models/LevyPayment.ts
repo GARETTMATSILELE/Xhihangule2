@@ -24,6 +24,8 @@ export interface ILevyPayment extends Document {
   advanceMonthsPaid?: number;
   advancePeriodStart?: { month: number; year: number };
   advancePeriodEnd?: { month: number; year: number };
+  /** When levy was collected as part of a combined rental payment. */
+  parentPaymentId?: mongoose.Types.ObjectId;
   // payout fields
   payout?: {
     paidOut: boolean;
@@ -139,6 +141,12 @@ const LevyPaymentSchema: Schema = new Schema({
   advancePeriodEnd: {
     month: { type: Number, min: 1, max: 12 },
     year: { type: Number }
+  },
+  parentPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Payment',
+    required: false,
+    index: true,
   },
   payout: {
     paidOut: { type: Boolean, default: false },

@@ -28,6 +28,7 @@ type AccessTokenClaims = {
   role: UserRole;
   roles?: UserRole[];
   companyId?: string;
+  sessionVersion?: number;
   type?: string;
   iat?: number;
   exp?: number;
@@ -96,7 +97,8 @@ export class AuthService {
       userId: decoded.userId,
       role: decoded.role,
       roles: decoded.roles,
-      companyId: decoded.companyId
+      companyId: decoded.companyId,
+      sessionVersion: decoded.sessionVersion
     };
   }
 
@@ -127,7 +129,7 @@ export class AuthService {
     }
 
     const user = await User.findById(userId)
-      .select('_id email firstName lastName role roles companyId isActive lastLogin createdAt updatedAt avatar avatarMimeType')
+      .select('_id email firstName lastName role roles companyId isActive sessionVersion lastLogin createdAt updatedAt avatar avatarMimeType')
       .maxTimeMS(AUTH_QUERY_MAX_TIME_MS)
       .lean();
     if (!user) return null;
@@ -161,7 +163,7 @@ export class AuthService {
     // Check only the User collection
     const normalizedEmail = String(email || '').trim().toLowerCase();
     let user = await User.findOne({ email: normalizedEmail })
-      .select('_id email password firstName lastName role roles companyId isActive lastLogin createdAt updatedAt')
+      .select('_id email password firstName lastName role roles companyId isActive sessionVersion lastLogin createdAt updatedAt')
       .maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
     if (!user) {
       throw new AppError('Invalid credentials', 401, 'AUTH_ERROR');
@@ -209,12 +211,42 @@ export class AuthService {
     };
   }
 
+  public async createSessionForUserId(userId: string): Promise<{ user: JwtUser; token: string; refreshToken: string }> {
+    await this.initialize();
+    const user = await User.findById(userId)
+      .select('_id email firstName lastName role roles companyId isActive sessionVersion lastLogin createdAt updatedAt')
+      .maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
+    if (!user) {
+      throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+    if (!user.isActive) {
+      throw new AppError('Account is inactive', 403, 'ACCOUNT_INACTIVE');
+    }
+
+    const token = this.generateAccessToken(user, 'user');
+    const refreshToken = this.generateRefreshToken(user, 'user');
+    const resultUser: JwtUser = {
+      userId: user._id.toString(),
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role as UserRole,
+      roles: Array.isArray((user as any).roles) && (user as any).roles!.length > 0 ? (user as any).roles : undefined,
+      companyId: user.companyId ? user.companyId.toString() : undefined,
+      isActive: user.isActive,
+      lastLogin: user.lastLogin,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
+    return { user: resultUser, token, refreshToken };
+  }
+
   public async refreshToken(refreshToken: string): Promise<{ token: string; refreshToken: string }> {
     try {
       const decoded = jwt.verify(refreshToken, JWT_CONFIG.REFRESH_SECRET, {
         issuer: JWT_CONFIG.ISSUER,
         audience: JWT_CONFIG.AUDIENCE
-      }) as { userId: string; type?: string; iat?: number };
+      }) as { userId: string; type?: string; iat?: number; sessionVersion?: number };
 
       if (!decoded?.userId) {
         throw new Error('Invalid refresh token payload');
@@ -237,6 +269,12 @@ export class AuthService {
         throw new Error('Account is inactive');
       }
 
+      const tokenSessionVersion = typeof decoded.sessionVersion === 'number' ? decoded.sessionVersion : undefined;
+      const currentSessionVersion = Number((user as any).sessionVersion || 1);
+      if (tokenSessionVersion !== undefined && tokenSessionVersion < currentSessionVersion) {
+        throw new Error('Refresh token invalid due to session version');
+      }
+
       // Invalidate refresh token if password changed after token was issued
       try {
         const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
@@ -256,12 +294,28 @@ export class AuthService {
         refreshToken: newRefreshToken
       };
     } catch (error) {
-      if (error instanceof jwt.TokenExpiredError) {
-        throw new Error('Refresh token expired');
-      } else if (error instanceof jwt.JsonWebTokenError) {
-        throw new Error('Invalid refresh token');
+      if (error instanceof AppError) {
+        throw error;
       }
-      throw new Error('Token refresh failed');
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new AppError('Refresh token expired', 401, 'REFRESH_TOKEN_EXPIRED');
+      } else if (error instanceof jwt.JsonWebTokenError) {
+        throw new AppError('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
+      }
+      const message = error instanceof Error ? error.message : '';
+      if (message === 'User not found') {
+        throw new AppError('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
+      }
+      if (message === 'Account is inactive') {
+        throw new AppError('Account is inactive', 403, 'ACCOUNT_INACTIVE');
+      }
+      if (message === 'Refresh token invalid due to password change') {
+        throw new AppError('Refresh token invalid due to password change', 401, 'REFRESH_TOKEN_REVOKED');
+      }
+      if (message === 'Refresh token invalid due to session version') {
+        throw new AppError('Refresh token invalid due to session version', 401, 'REFRESH_TOKEN_REVOKED');
+      }
+      throw new AppError('Token refresh failed', 401, 'TOKEN_REFRESH_FAILED');
     }
   }
 
@@ -329,6 +383,9 @@ export class AuthService {
       userId: user._id.toString(),
       role: userType === 'user' ? user.role : 'owner',
       roles: userType === 'user' ? ((Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined) : undefined,
+      sessionVersion: userType === 'user' ? Number((user as any).sessionVersion || 1) : 1,
+      // Legacy compatibility: keep companyId in tokens until all consumers use
+      // DB-backed company context. New middleware does not require this claim.
       companyId: (user as any).companyId ? (user as any).companyId.toString() : undefined,
       type: 'access'
     };
@@ -343,6 +400,7 @@ export class AuthService {
   private generateRefreshToken(user: any, userType: 'user' | 'propertyOwner'): string {
     const payload = {
       userId: user._id.toString(),
+      sessionVersion: userType === 'user' ? Number((user as any).sessionVersion || 1) : 1,
       type: 'refresh'
     };
     const options: SignOptions = {

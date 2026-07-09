@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import { PaymentSession } from '../models/PaymentSession';
+import { WebhookEventReceipt } from '../models/WebhookEventReceipt';
+import { activateSubscriptionFromPayment } from '../services/billingActivationService';
 
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -91,6 +94,7 @@ export async function createWebPayment(req: Request, res: Response) {
 			email?: string;
 			items?: Array<{ title?: string; name?: string; description?: string; amount: number }>;
 			amount?: number;
+			paymentSessionId?: string;
 		};
 		const ref = reference && String(reference).trim().length > 0
 			? String(reference).trim()
@@ -117,6 +121,17 @@ export async function createWebPayment(req: Request, res: Response) {
 
 		const response = await paynow.send(payment);
 		if (response && response.success) {
+			if ((req.body || {}).paymentSessionId) {
+				await PaymentSession.findByIdAndUpdate((req.body || {}).paymentSessionId, {
+					$set: {
+						provider: 'paynow',
+						providerRef: ref,
+						pollUrl: response.pollUrl,
+						status: 'provider_created',
+						rawProviderResponse: response
+					}
+				});
+			}
 			return res.json({
 				status: 'ok',
 				reference: ref,
@@ -200,10 +215,53 @@ export async function pollTransaction(req: Request, res: Response) {
 // Paynow server-to-server notification (Instant Payment Notification)
 export async function handleResult(req: Request, res: Response) {
 	try {
-		// In a full implementation, verify signature and update your DB records by reference
-		// For now, acknowledge receipt so Paynow considers the callback successful
+		const payload = { ...(req.query || {}), ...(req.body || {}) } as any;
+		const reference = String(payload.reference || payload.Reference || payload.m_payment_id || payload.id || '').trim();
+		const status = String(payload.status || payload.Status || payload.payment_status || '').toLowerCase();
+		const eventId = String(payload.pollurl || payload.pollUrl || payload.hash || reference || Date.now());
+
+		if (!reference) {
+			return res.status(200).json({ status: 'received', message: 'No reference supplied' });
+		}
+
+		const receipt = await WebhookEventReceipt.findOneAndUpdate(
+			{ provider: 'paynow', eventId },
+			{ $setOnInsert: { provider: 'paynow', eventId, status: 'processing' } },
+			{ upsert: true, new: true }
+		);
+		if (receipt.status === 'processed') {
+			return res.status(200).json({ status: 'duplicate' });
+		}
+
+		if (['paid', 'awaiting delivery', 'delivered', 'success'].includes(status)) {
+			const result = await activateSubscriptionFromPayment({
+				provider: 'paynow',
+				providerRef: reference,
+				rawProviderResponse: payload,
+				paidAt: new Date()
+			});
+			receipt.companyId = result.paymentSession.companyId as any;
+			receipt.paymentId = result.paymentSession.billingPaymentId as any;
+			receipt.status = 'processed';
+			receipt.processedAt = new Date();
+			await receipt.save();
+		} else {
+			receipt.status = 'processed';
+			receipt.processedAt = new Date();
+			await receipt.save();
+		}
+
 		return res.status(200).json({ status: 'received' });
 	} catch (e: any) {
+		try {
+			const payload = { ...(req.query || {}), ...(req.body || {}) } as any;
+			const eventId = String(payload.pollurl || payload.pollUrl || payload.hash || payload.reference || Date.now());
+			await WebhookEventReceipt.updateOne(
+				{ provider: 'paynow', eventId },
+				{ $set: { status: 'failed', lastError: e?.message || String(e) } },
+				{ upsert: true }
+			);
+		} catch {}
 		return res.status(500).json({ status: 'error', message: e?.message || 'Failed to process Paynow result' });
 	}
 }

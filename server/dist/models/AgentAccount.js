@@ -191,7 +191,7 @@ agentAccountSchema.index({ agentId: 1, 'transactions.type': 1, 'transactions.ref
     unique: true,
     partialFilterExpression: {
         'transactions.type': 'commission',
-        'transactions.reference': { $exists: true, $type: 'string', $ne: '' }
+        'transactions.reference': { $exists: true, $type: 'string', $gt: '' }
     }
 });
 // Prevent duplicate paymentId-backed entries per agent (commission lane)

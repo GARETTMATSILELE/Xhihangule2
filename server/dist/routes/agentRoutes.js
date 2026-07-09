@@ -9,6 +9,7 @@ const limits_1 = require("../middleware/limits");
 const roles_1 = require("../middleware/roles");
 const multer_1 = __importDefault(require("multer"));
 const agentController_1 = require("../controllers/agentController");
+const ownerManagementController_1 = require("../controllers/ownerManagementController");
 const router = express_1.default.Router();
 // Configure multer for memory storage (similar to fileRoutes)
 const upload = (0, multer_1.default)({
@@ -59,6 +60,23 @@ router.put('/payments/:id', agentController_1.updateAgentPayment);
 router.get('/payments', agentController_1.getAgentPayments);
 router.get('/levy-payments', agentController_1.getAgentLevyPayments);
 router.get('/commission', agentController_1.getAgentCommission);
+// Property owner ORM routes (before /:id)
+router.get('/property-owners/dashboard', ownerManagementController_1.ownersDashboard);
+router.get('/property-owners/properties/:propertyId/ledger', ownerManagementController_1.propertyLedgerSnapshot);
+router.post('/property-owners/documents', ownerManagementController_1.ownerDocumentsUpload);
+router.post('/property-owners/ownership-history', ownerManagementController_1.ownershipHistoryCreate);
+router.get('/property-owners/:ownerId/portfolio', ownerManagementController_1.ownerPortfolio);
+router.get('/property-owners/:ownerId/financials', ownerManagementController_1.ownerFinancials);
+router.get('/property-owners/:ownerId/maintenance', ownerManagementController_1.ownerMaintenance);
+router.get('/property-owners/:ownerId/documents', ownerManagementController_1.ownerDocumentsList);
+router.get('/property-owners/:ownerId/history', ownerManagementController_1.ownerHistoryList);
+router.get('/property-owners/:ownerId/profile-extras', ownerManagementController_1.ownerProfileExtras);
+router.get('/property-owners/:ownerId/full-profile', ownerManagementController_1.ownerFullProfile);
+router.patch('/property-owners/:ownerId/profile', ownerManagementController_1.ownerProfilePatch);
+router.post('/property-owners/:ownerId/banking', ownerManagementController_1.ownerBankingUpsert);
+router.post('/property-owners/:ownerId/preferences', ownerManagementController_1.ownerPreferencesUpsert);
+router.post('/property-owners/:ownerId/documents', ownerManagementController_1.ownerDocumentsUpload);
+router.get('/property-owners/:ownerId/documents/:docType', ownerManagementController_1.ownerDocumentPdf);
 // Property owner routes
 router.get('/property-owners', agentController_1.getAgentPropertyOwners);
 router.get('/property-owners/:id', agentController_1.getAgentPropertyOwnerById);

@@ -7,6 +7,7 @@ const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const companyController_1 = require("../controllers/companyController");
 const auth_1 = require("../middleware/auth");
+const auth_2 = require("../middleware/auth");
 const router = express_1.default.Router();
 const asyncRoute = (handler) => (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
@@ -33,9 +34,10 @@ router.get('/current', auth_1.auth, asyncRoute(companyController_1.getCurrentCom
 router.put('/current', auth_1.authWithCompany, asyncRoute(companyController_1.updateCurrentCompany));
 // Admin: change plan directly by company id (can be restricted later)
 router.put('/:id/plan', auth_1.authWithCompany, asyncRoute(companyController_1.updateCompany));
-// Public routes
-router.get('/', asyncRoute(companyController_1.getCompanies));
-router.get('/:id', asyncRoute(companyController_1.getCompany));
+// Company metadata is tenant-sensitive. Keep /current for normal users and
+// restrict global/list-by-id access to platform admins.
+router.get('/', auth_1.auth, (0, auth_2.authorize)(['system_admin']), asyncRoute(companyController_1.getCompanies));
+router.get('/:id', auth_1.auth, (0, auth_2.authorize)(['system_admin']), asyncRoute(companyController_1.getCompany));
 // Protected routes
 // Allow creating a company even if user has no company yet
 router.post('/', auth_1.auth, asyncRoute(companyController_1.createCompany));

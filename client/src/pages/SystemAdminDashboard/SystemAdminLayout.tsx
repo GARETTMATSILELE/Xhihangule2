@@ -115,7 +115,8 @@ const SystemAdminLayout: React.FC = () => {
               bgcolor: '#235347',
               color: '#DAF1DE',
               top: { xs: 56, sm: 64 },
-              height: { xs: 'calc(100% - 56px)', sm: 'calc(100% - 64px)' }
+              height: { xs: 'calc(100% - 56px)', sm: 'calc(100% - 64px)' },
+              overflowY: 'auto'
             }
           }}
           open
@@ -126,11 +127,19 @@ const SystemAdminLayout: React.FC = () => {
             </Typography>
             <Stack spacing={0.5}>
               <NavButton to="/system-admin" label="Dashboard" />
+              <NavButton to="/system-admin/companies" label="Companies" />
               <NavButton to="/system-admin/status" label="Status" />
               <NavButton to="/system-admin/backups-maintenance" label="Backups & Maintenance" />
               <NavButton to="/system-admin/users" label="User Management" />
               <NavButton to="/system-admin/subscriptions" label="Subscription management" />
               <NavButton to="/system-admin/cash-subscriptions" label="Cash subscriptions" />
+              <NavButton to="/system-admin/cash-payments" label="Cash Payments" />
+              <NavButton to="/system-admin/invoices" label="Invoices" />
+              <NavButton to="/system-admin/vouchers" label="Vouchers" />
+              <NavButton to="/system-admin/plans" label="Plans" />
+              <NavButton to="/system-admin/audit-logs" label="Audit Logs" />
+              <NavButton to="/system-admin/support-tickets" label="Support Desk" />
+              <NavButton to="/system-admin/revenue" label="Revenue Analytics" />
             </Stack>
           </Box>
         </Drawer>

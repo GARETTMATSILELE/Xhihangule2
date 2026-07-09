@@ -80,7 +80,8 @@ class AuthService {
             userId: decoded.userId,
             role: decoded.role,
             roles: decoded.roles,
-            companyId: decoded.companyId
+            companyId: decoded.companyId,
+            sessionVersion: decoded.sessionVersion
         };
     }
     getUserById(userId) {
@@ -108,7 +109,7 @@ class AuthService {
                 return cached.user;
             }
             const user = yield User_1.User.findById(userId)
-                .select('_id email firstName lastName role roles companyId isActive lastLogin createdAt updatedAt avatar avatarMimeType')
+                .select('_id email firstName lastName role roles companyId isActive sessionVersion lastLogin createdAt updatedAt avatar avatarMimeType')
                 .maxTimeMS(AUTH_QUERY_MAX_TIME_MS)
                 .lean();
             if (!user)
@@ -142,7 +143,7 @@ class AuthService {
             // Check only the User collection
             const normalizedEmail = String(email || '').trim().toLowerCase();
             let user = yield User_1.User.findOne({ email: normalizedEmail })
-                .select('_id email password firstName lastName role roles companyId isActive lastLogin createdAt updatedAt')
+                .select('_id email password firstName lastName role roles companyId isActive sessionVersion lastLogin createdAt updatedAt')
                 .maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
             if (!user) {
                 throw new errorHandler_1.AppError('Invalid credentials', 401, 'AUTH_ERROR');
@@ -185,6 +186,36 @@ class AuthService {
             };
         });
     }
+    createSessionForUserId(userId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield this.initialize();
+            const user = yield User_1.User.findById(userId)
+                .select('_id email firstName lastName role roles companyId isActive sessionVersion lastLogin createdAt updatedAt')
+                .maxTimeMS(AUTH_QUERY_MAX_TIME_MS);
+            if (!user) {
+                throw new errorHandler_1.AppError('User not found', 404, 'USER_NOT_FOUND');
+            }
+            if (!user.isActive) {
+                throw new errorHandler_1.AppError('Account is inactive', 403, 'ACCOUNT_INACTIVE');
+            }
+            const token = this.generateAccessToken(user, 'user');
+            const refreshToken = this.generateRefreshToken(user, 'user');
+            const resultUser = {
+                userId: user._id.toString(),
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                role: user.role,
+                roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : undefined,
+                companyId: user.companyId ? user.companyId.toString() : undefined,
+                isActive: user.isActive,
+                lastLogin: user.lastLogin,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
+            };
+            return { user: resultUser, token, refreshToken };
+        });
+    }
     refreshToken(refreshToken) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
@@ -208,6 +239,11 @@ class AuthService {
                 if (type === 'user' && !user.isActive) {
                     throw new Error('Account is inactive');
                 }
+                const tokenSessionVersion = typeof decoded.sessionVersion === 'number' ? decoded.sessionVersion : undefined;
+                const currentSessionVersion = Number(user.sessionVersion || 1);
+                if (tokenSessionVersion !== undefined && tokenSessionVersion < currentSessionVersion) {
+                    throw new Error('Refresh token invalid due to session version');
+                }
                 // Invalidate refresh token if password changed after token was issued
                 try {
                     const iatSec = typeof decoded.iat === 'number' ? decoded.iat : undefined;
@@ -227,13 +263,29 @@ class AuthService {
                 };
             }
             catch (error) {
+                if (error instanceof errorHandler_1.AppError) {
+                    throw error;
+                }
                 if (error instanceof jsonwebtoken_1.default.TokenExpiredError) {
-                    throw new Error('Refresh token expired');
+                    throw new errorHandler_1.AppError('Refresh token expired', 401, 'REFRESH_TOKEN_EXPIRED');
                 }
                 else if (error instanceof jsonwebtoken_1.default.JsonWebTokenError) {
-                    throw new Error('Invalid refresh token');
+                    throw new errorHandler_1.AppError('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
                 }
-                throw new Error('Token refresh failed');
+                const message = error instanceof Error ? error.message : '';
+                if (message === 'User not found') {
+                    throw new errorHandler_1.AppError('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
+                }
+                if (message === 'Account is inactive') {
+                    throw new errorHandler_1.AppError('Account is inactive', 403, 'ACCOUNT_INACTIVE');
+                }
+                if (message === 'Refresh token invalid due to password change') {
+                    throw new errorHandler_1.AppError('Refresh token invalid due to password change', 401, 'REFRESH_TOKEN_REVOKED');
+                }
+                if (message === 'Refresh token invalid due to session version') {
+                    throw new errorHandler_1.AppError('Refresh token invalid due to session version', 401, 'REFRESH_TOKEN_REVOKED');
+                }
+                throw new errorHandler_1.AppError('Token refresh failed', 401, 'TOKEN_REFRESH_FAILED');
             }
         });
     }
@@ -298,6 +350,9 @@ class AuthService {
             userId: user._id.toString(),
             role: userType === 'user' ? user.role : 'owner',
             roles: userType === 'user' ? ((Array.isArray(user.roles) && user.roles.length > 0) ? user.roles : undefined) : undefined,
+            sessionVersion: userType === 'user' ? Number(user.sessionVersion || 1) : 1,
+            // Legacy compatibility: keep companyId in tokens until all consumers use
+            // DB-backed company context. New middleware does not require this claim.
             companyId: user.companyId ? user.companyId.toString() : undefined,
             type: 'access'
         };
@@ -311,6 +366,7 @@ class AuthService {
     generateRefreshToken(user, userType) {
         const payload = {
             userId: user._id.toString(),
+            sessionVersion: userType === 'user' ? Number(user.sessionVersion || 1) : 1,
             type: 'refresh'
         };
         const options = {

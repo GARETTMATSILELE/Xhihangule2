@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { MAINTENANCE_STATUSES } from '../utils/maintenanceStatus';
 
 export interface IMaintenanceAttachment {
   name: string;
@@ -15,8 +16,19 @@ export interface IMaintenanceRequest extends Document {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'pending_approval' | 'approved' | 'pending_completion' | 'in_progress' | 'completed' | 'cancelled';
+  status: typeof MAINTENANCE_STATUSES[number];
+  category?: string;
+  inspectionId?: mongoose.Types.ObjectId;
   estimatedCost?: number;
+  requestedAmount?: number;
+  paidAmount?: number;
+  paymentStatus?: 'awaiting_payment' | 'partially_paid' | 'paid';
+  paymentDate?: Date;
+  paymentReference?: string;
+  paymentRequestId?: mongoose.Types.ObjectId;
+  contractorId?: mongoose.Types.ObjectId;
+  lastActivityAt?: Date;
+  followUpInspectionId?: mongoose.Types.ObjectId;
   attachments?: IMaintenanceAttachment[];
   messages: {
     sender: mongoose.Types.ObjectId;
@@ -78,13 +90,35 @@ const MaintenanceRequestSchema: Schema = new Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'pending_approval', 'approved', 'pending_completion', 'in_progress', 'completed', 'cancelled'],
-    default: 'pending'
+    enum: MAINTENANCE_STATUSES,
+    default: 'draft'
+  },
+  category: {
+    type: String,
+    default: 'GENERAL'
+  },
+  inspectionId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Inspection',
+    index: true
   },
   estimatedCost: {
     type: Number,
     min: 0
   },
+  requestedAmount: { type: Number, min: 0 },
+  paidAmount: { type: Number, min: 0, default: 0 },
+  paymentStatus: {
+    type: String,
+    enum: ['awaiting_payment', 'partially_paid', 'paid'],
+    default: 'awaiting_payment'
+  },
+  paymentDate: { type: Date },
+  paymentReference: { type: String },
+  paymentRequestId: { type: Schema.Types.ObjectId, ref: 'PaymentRequest' },
+  contractorId: { type: Schema.Types.ObjectId, ref: 'MaintenanceContractor', index: true },
+  lastActivityAt: { type: Date, index: true },
+  followUpInspectionId: { type: Schema.Types.ObjectId, ref: 'Inspection' },
   attachments: [MaintenanceAttachmentSchema],
   messages: [{
     sender: {

@@ -23,6 +23,24 @@ const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const norm = (s) => String(s || '').trim().toLowerCase();
 const asNum = (v) => (v == null || v === '' || isNaN(Number(v)) ? undefined : Number(v));
+const PIPELINE_STAGES = ['NEW', 'CONTACTED', 'VIEWING_SCHEDULED', 'VIEWED', 'APPLICATION_RECEIVED', 'APPROVED', 'LEASE_PENDING', 'CONVERTED', 'LOST'];
+const addDays = (days) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d;
+};
+const timelineLabelForStage = (stage) => {
+    switch (stage) {
+        case 'CONTACTED': return 'Lead Contacted';
+        case 'VIEWING_SCHEDULED': return 'Viewing Scheduled';
+        case 'VIEWED': return 'Viewing Completed';
+        case 'APPLICATION_RECEIVED': return 'Application Submitted';
+        case 'LEASE_PENDING': return 'Lease Pending';
+        case 'CONVERTED': return 'Lease Signed';
+        case 'LOST': return 'Lead Lost';
+        default: return 'Lead Updated';
+    }
+};
 function scorePropertyForLead(lead, p) {
     var _a;
     const reasons = [];
@@ -93,8 +111,26 @@ const listLeads = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
             query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
         }
-        const leads = yield Lead_1.Lead.find(query).sort({ createdAt: -1 });
-        res.json({ status: 'success', data: leads });
+        if (req.query.stage && PIPELINE_STAGES.includes(String(req.query.stage))) {
+            query.pipelineStage = String(req.query.stage);
+        }
+        if (req.query.search) {
+            const search = String(req.query.search).trim();
+            query.$or = [
+                { name: new RegExp(search, 'i') },
+                { email: new RegExp(search, 'i') },
+                { phone: new RegExp(search, 'i') },
+                { source: new RegExp(search, 'i') },
+                { interest: new RegExp(search, 'i') }
+            ];
+        }
+        const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 250);
+        const page = Math.max(Number(req.query.page || 1), 1);
+        const [leads, total] = yield Promise.all([
+            Lead_1.Lead.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+            Lead_1.Lead.countDocuments(query)
+        ]);
+        res.json({ status: 'success', data: leads, pagination: { total, page, limit, pages: Math.ceil(total / limit) } });
     }
     catch (error) {
         if (error instanceof errorHandler_1.AppError)
@@ -110,9 +146,48 @@ const createLead = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             throw new errorHandler_1.AppError('Authentication required', 401);
         if (!req.user.companyId)
             throw new errorHandler_1.AppError('Company ID not found', 400);
-        const { name, source, interest, email, phone, status, notes, budgetMin, budgetMax, preferredSuburbs, propertyType, minBedrooms, features } = req.body;
+        const { name, source, interest, email, phone, status, notes, pipelineStage, leadScore, nextFollowUpDate, lastContactDate, followUpStatus, assignedAgent, interestedPropertyIds, budgetMin, budgetMax, preferredSuburbs, propertyType, minBedrooms, features } = req.body;
         if (!name)
             throw new errorHandler_1.AppError('Name is required', 400);
+        const safePipelineStage = PIPELINE_STAGES.includes(String(pipelineStage)) ? String(pipelineStage) : 'NEW';
+        const initialFollowUpDate = nextFollowUpDate ? new Date(nextFollowUpDate) : addDays(1);
+        const initialTasks = [
+            {
+                type: 'follow_up_lead',
+                title: 'Follow-Up Lead',
+                dueDate: initialFollowUpDate,
+                status: 'pending',
+                notes: 'Automatic reminder created when lead was captured.'
+            },
+            {
+                type: 'call_lead',
+                title: 'Call Lead',
+                dueDate: addDays(3),
+                status: 'pending',
+                notes: 'Automatic reminder if no activity is recorded.'
+            },
+            {
+                type: 'schedule_viewing',
+                title: 'Schedule Viewing',
+                dueDate: addDays(7),
+                status: 'pending',
+                notes: 'Automatic reminder if no viewing has been scheduled.'
+            },
+            {
+                type: 'send_property_options',
+                title: 'Send Property Options',
+                dueDate: addDays(2),
+                status: 'pending',
+                notes: 'Automatic reminder to send matching properties.'
+            },
+            {
+                type: 'application_reminder',
+                title: 'Application Reminder',
+                dueDate: addDays(5),
+                status: 'pending',
+                notes: 'Automatic reminder to request or chase an application.'
+            }
+        ];
         const lead = yield Lead_1.Lead.create({
             name,
             source: source || '',
@@ -121,6 +196,23 @@ const createLead = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             email,
             phone,
             status: status || 'New',
+            pipelineStage: safePipelineStage,
+            leadScore: leadScore != null && !isNaN(Number(leadScore)) ? Math.max(0, Math.min(100, Number(leadScore))) : undefined,
+            nextFollowUpDate: initialFollowUpDate,
+            lastContactDate: lastContactDate ? new Date(lastContactDate) : undefined,
+            followUpStatus: followUpStatus || 'pending',
+            assignedAgent: assignedAgent && mongoose_1.default.Types.ObjectId.isValid(String(assignedAgent)) ? assignedAgent : req.user.userId,
+            interestedPropertyIds: Array.isArray(interestedPropertyIds)
+                ? interestedPropertyIds.filter((id) => mongoose_1.default.Types.ObjectId.isValid(String(id)))
+                : undefined,
+            activityTimeline: [{
+                    type: 'lead_created',
+                    label: 'Lead Created',
+                    notes: source ? `Source: ${source}` : undefined,
+                    createdAt: new Date(),
+                    createdBy: req.user.userId
+                }],
+            followUpTasks: initialTasks,
             budgetMin: budgetMin != null && !isNaN(Number(budgetMin)) ? Number(budgetMin) : undefined,
             budgetMax: budgetMax != null && !isNaN(Number(budgetMax)) ? Number(budgetMax) : undefined,
             preferredSuburbs: Array.isArray(preferredSuburbs)
@@ -152,6 +244,29 @@ const updateLead = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             throw new errorHandler_1.AppError('Company ID not found', 400);
         const { id } = req.params;
         const updates = req.body || {};
+        if ('pipelineStage' in updates) {
+            if (!PIPELINE_STAGES.includes(String(updates.pipelineStage))) {
+                delete updates.pipelineStage;
+            }
+        }
+        if ('leadScore' in updates) {
+            updates.leadScore = updates.leadScore != null && !isNaN(Number(updates.leadScore))
+                ? Math.max(0, Math.min(100, Number(updates.leadScore)))
+                : undefined;
+        }
+        if ('nextFollowUpDate' in updates && updates.nextFollowUpDate) {
+            updates.nextFollowUpDate = new Date(updates.nextFollowUpDate);
+        }
+        if ('lastContactDate' in updates && updates.lastContactDate) {
+            updates.lastContactDate = new Date(updates.lastContactDate);
+        }
+        if ('interestedPropertyIds' in updates) {
+            updates.interestedPropertyIds = Array.isArray(updates.interestedPropertyIds)
+                ? updates.interestedPropertyIds.filter((id) => mongoose_1.default.Types.ObjectId.isValid(String(id)))
+                : undefined;
+        }
+        const timelineNote = typeof updates.activityNote === 'string' ? updates.activityNote.trim() : '';
+        delete updates.activityNote;
         // Normalize optional requirement fields if present
         if ('budgetMin' in updates) {
             updates.budgetMin = updates.budgetMin != null && !isNaN(Number(updates.budgetMin)) ? Number(updates.budgetMin) : undefined;
@@ -175,7 +290,22 @@ const updateLead = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 : undefined;
         }
         const prev = yield Lead_1.Lead.findOne({ _id: id, companyId: req.user.companyId });
-        const lead = yield Lead_1.Lead.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, updates, { new: true });
+        const updateDoc = { $set: updates };
+        if (prev && updates.pipelineStage && updates.pipelineStage !== prev.pipelineStage) {
+            updateDoc.$push = {
+                activityTimeline: {
+                    type: String(updates.pipelineStage).toLowerCase(),
+                    label: timelineLabelForStage(String(updates.pipelineStage)),
+                    notes: timelineNote || undefined,
+                    createdAt: new Date(),
+                    createdBy: req.user.userId
+                }
+            };
+            if (updates.pipelineStage === 'CONTACTED' && !updates.lastContactDate) {
+                updateDoc.$set.lastContactDate = new Date();
+            }
+        }
+        const lead = yield Lead_1.Lead.findOneAndUpdate({ _id: id, companyId: req.user.companyId }, updateDoc, { new: true });
         if (!lead)
             throw new errorHandler_1.AppError('Lead not found', 404);
         // If lead transitioned to Won, create a Buyer record tied to a property

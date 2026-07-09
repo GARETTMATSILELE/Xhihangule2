@@ -279,39 +279,52 @@ const AccountantPaymentsPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [filters]);
 
-  useEffect(() => {
-    const loadPayments = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const filterParams: any = { page, limit, paginate: true };
-        if (debouncedFilters.startDate) filterParams.startDate = debouncedFilters.startDate.toISOString();
-        if (debouncedFilters.endDate) filterParams.endDate = debouncedFilters.endDate.toISOString();
-        if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
-        if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
-        if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
-        // Guard against accidental "undefined" propagation into query params
-        const rawSearch = (debouncedFilters as any).search;
-        const search =
-          typeof rawSearch === 'string'
-            ? rawSearch.trim()
-            : '';
-        if (search && search.toLowerCase() !== 'undefined') {
-          filterParams.search = search;
-        }
-        // Include provisional payments on accountant view
-        const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true', paymentType: 'rental' as any } as any);
-        setPayments(sortPayments(items as any[]));
-        setTotalCount(total);
-        persistCache({ items: items as any[], total, page, limit, filters });
-      } catch (err: any) {
-        setError(err instanceof Error ? err.message : 'Failed to load payments');
-      } finally {
-        setLoading(false);
+  const fetchPayments = useCallback(async (opts?: { pageOverride?: number }) => {
+    const activePage = opts?.pageOverride ?? page;
+    try {
+      setLoading(true);
+      setError(null);
+      const filterParams: any = { page: activePage, limit, paginate: true };
+      if (debouncedFilters.startDate) filterParams.startDate = debouncedFilters.startDate.toISOString();
+      if (debouncedFilters.endDate) filterParams.endDate = debouncedFilters.endDate.toISOString();
+      if (debouncedFilters.status) filterParams.status = debouncedFilters.status;
+      if (debouncedFilters.paymentMethod) filterParams.paymentMethod = debouncedFilters.paymentMethod;
+      if (debouncedFilters.propertyId) filterParams.propertyId = debouncedFilters.propertyId;
+      const rawSearch = (debouncedFilters as any).search;
+      const search =
+        typeof rawSearch === 'string'
+          ? rawSearch.trim()
+          : '';
+      if (search && search.toLowerCase() !== 'undefined') {
+        filterParams.search = search;
       }
+      const { items, total } = await paymentService.getPaymentsPage({ ...filterParams, includeProvisional: 'true', paymentType: 'rental' as any } as any);
+      setPayments(sortPayments(items as any[]));
+      setTotalCount(total);
+      persistCache({ items: items as any[], total, page: activePage, limit, filters });
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to load payments');
+    } finally {
+      setLoading(false);
+    }
+  }, [debouncedFilters, page, limit, sortPayments, persistCache, filters]);
+
+  useEffect(() => {
+    fetchPayments();
+  }, [fetchPayments]);
+
+  useEffect(() => {
+    const onPaymentsChanged = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.type === 'created' && page !== 1) {
+        setPage(1);
+        return;
+      }
+      fetchPayments(detail?.type === 'created' ? { pageOverride: 1 } : undefined);
     };
-    loadPayments();
-  }, [debouncedFilters, user?.companyId, page, limit, sortPayments, persistCache, filters]);
+    window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
+    return () => window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
+  }, [fetchPayments, page]);
 
   const handleCreatePayment = async (data: PaymentFormData) => {
     try {
@@ -321,21 +334,19 @@ const AccountantPaymentsPage: React.FC = () => {
       if (data.paymentType === 'levy') {
         response = await paymentService.createLevyPayment(data);
         setSuccessMessage('Levy payment created successfully');
-        try { window.dispatchEvent(new Event('payments:changed')); } catch {}
       } else if (data.paymentType === 'municipal') {
         response = await paymentService.createMunicipalPayment(data);
         setSuccessMessage('Municipal payment created successfully');
-        try { window.dispatchEvent(new Event('payments:changed')); } catch {}
       } else {
-        // Use accountant endpoint that accepts PaymentFormData
-        const resp = await paymentService.createPaymentAccountant(data);
-        const created = (resp as any)?.data || resp;
-        if (created) {
-          setPayments(prev => sortPayments([created as Payment, ...(prev || [])]));
-        }
+        response = await paymentService.createPaymentAccountant(data);
         setSuccessMessage('Payment created successfully');
-        try { window.dispatchEvent(new Event('payments:changed')); } catch {}
       }
+      const created = (response as any)?.data ?? response;
+      try {
+        window.dispatchEvent(new CustomEvent('payments:changed', {
+          detail: { type: 'created', payment: created },
+        }));
+      } catch {}
       setShowForm(false);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to create payment');
@@ -358,7 +369,11 @@ const AccountantPaymentsPage: React.FC = () => {
       setShowForm(false);
       setSelectedPayment(undefined);
       setSuccessMessage('Payment updated and completed successfully');
-      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+      try {
+        window.dispatchEvent(new CustomEvent('payments:changed', {
+          detail: { type: 'updated', payment: response },
+        }));
+      } catch {}
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to update payment');
     } finally {
@@ -387,7 +402,9 @@ const AccountantPaymentsPage: React.FC = () => {
         return sortPayments(next);
       });
       setSuccessMessage((resp as any)?.message || 'Payment reversed and correction draft created');
-      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+      try {
+        window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'reversed' } }));
+      } catch {}
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to reverse payment');
     } finally {
@@ -569,6 +586,9 @@ const AccountantPaymentsPage: React.FC = () => {
                   setPayments((prev) => prev.map((p) => (p._id === updated._id ? (updated as any) : p)));
                 }
                 setSuccessMessage('Payment finalized successfully');
+                try {
+                  window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'finalized', payment: updated } }));
+                } catch {}
                 setFinalizeOpen(false);
                 setFinalizePayment(null);
                 setFinalizePropertyId('');

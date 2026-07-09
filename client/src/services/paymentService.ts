@@ -129,8 +129,11 @@ class PaymentService {
         const body = { ...paymentData, idempotencyKey: (paymentData as any)?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'rental') };
         const response = await api.post('/payments', body);
         return response.data;
-      });
+      }, { maxRetries: 0 });
     } catch (error: any) {
+      if (error?.response?.status && error.response.status !== 401) {
+        throw new Error(error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to create payment');
+      }
       return this.handleAuthError(error);
     }
   }
@@ -142,8 +145,11 @@ class PaymentService {
         const body = { ...paymentData, idempotencyKey: (paymentData as any)?.idempotencyKey || this.generateIdempotencyKey(paymentData, 'acct') };
         const response = await api.post('/accountants/payments', body);
         return response.data;
-      });
+      }, { maxRetries: 0 });
     } catch (error: any) {
+      if (error?.response?.status && error.response.status !== 401) {
+        throw new Error(error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to create payment');
+      }
       return this.handleAuthError(error);
     }
   }
@@ -560,21 +566,41 @@ class PaymentService {
   async getRemainingForPeriod(params: { tenantId: string; propertyId: string; rentalPeriodMonth: number; rentalPeriodYear: number; rent: number }): Promise<{ remaining: number; totalPaid: number }> {
     const { tenantId, propertyId, rentalPeriodMonth, rentalPeriodYear, rent } = params;
     try {
-      // Query paginated payments filtered by property, and then sum client-side (fast, cached on server)
       const page1 = await this.getPaymentsPage({ paginate: true, page: 1, limit: 200, propertyId });
       const relevant = page1.items.filter(p => String(p.tenantId) === String(tenantId)
         && p.paymentType === 'rental'
         && p.rentalPeriodMonth === rentalPeriodMonth
         && p.rentalPeriodYear === rentalPeriodYear
         && (p.status === 'completed' || p.status === 'pending'));
-      const totalPaid = relevant.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const totalPaid = relevant.reduce((sum, p) => {
+        const rentPart = typeof (p as any).rentAllocated === 'number' && (p as any).rentAllocated > 0
+          ? (p as any).rentAllocated
+          : (p.amount || 0);
+        return sum + rentPart;
+      }, 0);
       const remaining = Math.max(0, (rent || 0) - totalPaid);
       return { remaining, totalPaid };
     } catch (error: any) {
       console.warn('Failed to fetch remaining for period:', error);
-      // If error, fall back to zero paid to avoid blocking UI
       return { remaining: Math.max(0, rent || 0), totalPaid: 0 };
     }
+  }
+
+  async getCombinedRemaining(params: {
+    tenantId: string;
+    propertyId: string;
+    rentalPeriodMonth: number;
+    rentalPeriodYear: number;
+  }): Promise<{
+    monthlyRent: number;
+    monthlyLevy: number;
+    hasLevy: boolean;
+    rentRemaining: number;
+    levyRemaining: number;
+    combinedRemaining: number;
+  }> {
+    const response = await api.get('/payments/combined-remaining', { params });
+    return response.data?.data ?? response.data;
   }
 }
 

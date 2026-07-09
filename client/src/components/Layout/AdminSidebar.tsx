@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Drawer,
   List,
@@ -12,6 +12,8 @@ import {
   CircularProgress,
   Divider,
   Badge,
+  ListSubheader,
+  Collapse,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -25,16 +27,36 @@ import {
   Group as GroupIcon,
   Assessment as AssessmentIcon,
   AccountBalance as AccountBalanceIcon,
-  Folder as FolderIcon,
   Receipt as ReceiptIcon,
   Sync as SyncIcon,
   Notifications as NotificationsIcon,
+  Engineering as EngineeringIcon,
+  Visibility as VisibilityIcon,
+  CalendarMonth as CalendarIcon,
+  HomeWork as HomeWorkIcon,
+  Campaign as CampaignIcon,
+  Apartment as ApartmentIcon,
+  ExpandLess,
+  ExpandMore,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import paymentRequestService from '../../services/paymentRequestService';
 
 const drawerWidth = 280;
+
+interface NavItem {
+  text: string;
+  icon: React.ReactNode;
+  path: string;
+  badge?: number;
+}
+
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
 
 interface AdminSidebarProps {
   activeTab: number;
@@ -43,121 +65,133 @@ interface AdminSidebarProps {
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChange }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const { company } = useCompany();
-  const [pendingApprovalsCount, setPendingApprovalsCount] = React.useState<number>(0);
+  const [pendingApprovalsCount, setPendingApprovalsCount] = React.useState(0);
+  const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
+    Portfolio: true,
+    Occupancy: true,
+    Operations: true,
+    'Financial Oversight': true,
+    CRM: true,
+    People: true,
+    Administration: true,
+  });
 
-  const baseItems = [
-    { 
-      text: 'Dashboard', 
-      icon: <DashboardIcon />, 
-      path: '/admin-dashboard' 
-    },
-    { 
-      text: 'Properties', 
-      icon: <BusinessIcon />, 
-      path: '/admin-dashboard/properties' 
-    },
-    { 
-      text: 'Property Owners', 
-      icon: <AccountBalanceIcon />, 
-      path: '/admin-dashboard/property-owners' 
-    },
-    { 
-      text: 'Tenants', 
-      icon: <PeopleIcon />, 
-      path: '/admin-dashboard/tenants' 
-    },
-    { 
-      text: 'Leases', 
-      icon: <DescriptionIcon />, 
-      path: '/admin-dashboard/leases' 
-    },
-    { 
-      text: 'Payments', 
-      icon: <PaymentIcon />, 
-      path: '/admin-dashboard/payments' 
-    },
-    {
-      text: 'Levies',
-      icon: <ReceiptIcon />,
-      path: '/admin-dashboard/levies'
-    },
-    { 
-      text: 'Files', 
-      icon: <FolderIcon />, 
-      path: '/admin-dashboard/files' 
-    },
-    { 
-      text: 'Maintenance', 
-      icon: <BuildIcon />, 
-      path: '/admin-dashboard/maintenance' 
-    },
-    { 
-      text: 'Communications', 
-      icon: <MessageIcon />, 
-      path: '/admin-dashboard/communications' 
-    },
-    { 
-      text: 'User Management', 
-      icon: <GroupIcon />, 
-      path: '/admin-dashboard/users' 
-    },
-    { 
-      text: 'Reports', 
-      icon: <AssessmentIcon />, 
-      path: '/admin-dashboard/reports' 
-    },
-    { 
-      text: 'Database Sync', 
-      icon: <SyncIcon />, 
-      path: '/admin-dashboard/sync' 
-    },
-    { 
-      text: 'Settings', 
-      icon: <SettingsIcon />, 
-      path: '/admin-dashboard/settings' 
-    },
-  ];
+  const roles: string[] =
+    Array.isArray((user as any)?.roles) && (user as any).roles.length > 0
+      ? (user as any).roles
+      : [user?.role].filter(Boolean) as string[];
+  const isPrincipalOrPrea = roles.some((r) => ['principal', 'prea'].includes(r));
 
-  const menuItems = React.useMemo(() => {
-    const items = [...baseItems];
-    // Add Property Accounts menu only for INDIVIDUAL plan
+  const sections: NavSection[] = React.useMemo(() => {
+    const base: NavSection[] = [
+      {
+        title: 'Portfolio',
+        items: [
+          { text: 'Properties', icon: <BusinessIcon />, path: '/admin-dashboard/properties' },
+          { text: 'Developments', icon: <ApartmentIcon />, path: '/admin-dashboard/developments' },
+          { text: 'Property Owners', icon: <AccountBalanceIcon />, path: '/admin-dashboard/property-owners' },
+        ],
+      },
+      {
+        title: 'Occupancy',
+        items: [
+          { text: 'Tenants', icon: <PeopleIcon />, path: '/admin-dashboard/tenants' },
+          { text: 'Leases', icon: <DescriptionIcon />, path: '/admin-dashboard/leases' },
+        ],
+      },
+      {
+        title: 'Operations',
+        items: [
+          { text: 'Maintenance', icon: <BuildIcon />, path: '/admin-dashboard/maintenance' },
+          { text: 'Inspections', icon: <HomeWorkIcon />, path: '/admin-dashboard/inspections' },
+          { text: 'Viewings', icon: <VisibilityIcon />, path: '/admin-dashboard/viewings' },
+          { text: 'Duty Rosters', icon: <CalendarIcon />, path: '/admin-dashboard/duty-rosters' },
+          { text: 'Vacancies', icon: <CampaignIcon />, path: '/admin-dashboard/vacancies' },
+        ],
+      },
+      {
+        title: 'Financial Oversight',
+        items: [
+          { text: 'Rent Collection', icon: <PaymentIcon />, path: '/admin-dashboard/payments' },
+          { text: 'Levies', icon: <ReceiptIcon />, path: '/admin-dashboard/levies' },
+          { text: 'Municipal Bills', icon: <ReceiptIcon />, path: '/admin-dashboard/municipal-bills' },
+        ],
+      },
+      {
+        title: 'CRM',
+        items: [
+          { text: 'Leads', icon: <CampaignIcon />, path: '/admin-dashboard/leads' },
+          { text: 'Communications', icon: <MessageIcon />, path: '/admin-dashboard/communications' },
+        ],
+      },
+      {
+        title: 'People',
+        items: [
+          { text: 'Agents', icon: <GroupIcon />, path: '/admin-dashboard/agents' },
+          { text: 'Contractors', icon: <EngineeringIcon />, path: '/admin-dashboard/contractors' },
+          { text: 'User Management', icon: <GroupIcon />, path: '/admin-dashboard/users' },
+        ],
+      },
+      {
+        title: 'Administration',
+        items: [
+          { text: 'Files', icon: <FolderIcon />, path: '/admin-dashboard/files' },
+          {
+            text: 'Notifications',
+            icon: <NotificationsIcon />,
+            path: '/admin-dashboard/notifications',
+            badge: pendingApprovalsCount,
+          },
+          { text: 'Database Sync', icon: <SyncIcon />, path: '/admin-dashboard/sync' },
+          { text: 'Charge Types', icon: <ReceiptIcon />, path: '/admin-dashboard/charge-types' },
+          { text: 'Settings', icon: <SettingsIcon />, path: '/admin-dashboard/settings' },
+        ],
+      },
+    ];
+
     if (company?.plan === 'INDIVIDUAL') {
-      items.splice(6, 0, {
+      const fin = base.find((s) => s.title === 'Financial Oversight');
+      fin?.items.splice(1, 0, {
         text: 'Property Accounts',
         icon: <AccountBalanceIcon />,
-        path: '/admin-dashboard/property-accounts'
+        path: '/admin-dashboard/property-accounts',
       });
     }
-    // Add Notifications/Approvals for Principal/PREA
-    const roles: string[] = (Array.isArray((user as any)?.roles) && (user as any).roles.length > 0) ? (user as any).roles : [user?.role].filter(Boolean) as string[];
-    if (roles.some(r => ['principal', 'prea'].includes(r))) {
-      items.splice(items.length - 2, 0, {
-        text: 'Notifications',
-        icon: <NotificationsIcon />,
-        path: '/admin-dashboard/approvals'
-      });
+
+    if (isPrincipalOrPrea) {
+      const admin = base.find((s) => s.title === 'Administration');
+      const notif = admin?.items.find((i) => i.text === 'Notifications');
+      if (notif) notif.path = '/admin-dashboard/approvals';
+    }
+
+    return base;
+  }, [company?.plan, isPrincipalOrPrea, pendingApprovalsCount]);
+
+  const flatItems = React.useMemo(() => {
+    const items: NavItem[] = [{ text: 'Dashboard', icon: <DashboardIcon />, path: '/admin-dashboard' }];
+    sections.forEach((s) => items.push(...s.items));
+    items.push({ text: 'Reports', icon: <AssessmentIcon />, path: '/admin-dashboard/reports' });
+    if (company?.plan === 'INDIVIDUAL') {
+      // property accounts already in section
     }
     return items;
-  }, [company?.plan, user?.role, (user as any)?.roles]);
+  }, [sections, company?.plan]);
 
-  // Load pending approvals count for Notifications item
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const resp = await paymentRequestService.getPaymentRequests({ page: 1, limit: 200 } as any);
         const list = Array.isArray(resp?.data) ? resp.data : [];
-        // Count requests needing approval (approval.status === 'pending')
-        // Match ApprovalsPage heuristic (sales/disbursement related) to stay consistent
         const pending = list.filter((r: any) => (r?.approval?.status || 'pending') === 'pending');
         const salesOnly = pending.filter((r: any) => {
           const reason = String(r?.reason || '');
           return Boolean((r as any).reportHtml) || /disbursement|sale|commission/i.test(reason);
         });
-        const count = salesOnly.length;
-        if (!cancelled) setPendingApprovalsCount(count);
+        if (!cancelled) setPendingApprovalsCount(salesOnly.length);
       } catch {
         if (!cancelled) setPendingApprovalsCount(0);
       }
@@ -165,32 +199,39 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
     return () => { cancelled = true; };
   }, []);
 
+  const getActiveIndex = () => {
+    const path = location.pathname;
+    const idx = flatItems.findIndex((item) => {
+      if (item.path === '/admin-dashboard') return path === '/admin-dashboard' || path === '/admin-dashboard/';
+      return path.startsWith(item.path);
+    });
+    return idx >= 0 ? idx : 0;
+  };
+
+  React.useEffect(() => {
+    onTabChange(getActiveIndex());
+  }, [location.pathname]);
+
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);
     navigate(path);
   };
 
+  const toggleSection = (title: string) => {
+    setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }));
+  };
+
   if (authLoading) {
     return (
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          '& .MuiDrawer-paper': {
-            width: drawerWidth,
-            boxSizing: 'border-box',
-            position: 'fixed',
-            height: '100vh',
-          },
-        }}
-      >
+      <Drawer variant="permanent" sx={{ width: drawerWidth, flexShrink: 0, '& .MuiDrawer-paper': { width: drawerWidth, position: 'fixed', height: '100vh' } }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
           <CircularProgress />
         </Box>
       </Drawer>
     );
   }
+
+  let itemIndex = 0;
 
   return (
     <Drawer
@@ -206,85 +247,120 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
           borderRight: 'none',
           position: 'fixed',
           height: '100vh',
+          overflowY: 'auto',
         },
       }}
     >
-      <Box sx={{ overflow: 'auto', px: 2 }}>
+      <Box sx={{ px: 2, pb: 2 }}>
         {company && user && (
           <>
-            <Box sx={{ px: 2, mb: 2, mt: 2 }}>
-              {/* Company Logo */}
+            <Box sx={{ px: 1, mb: 2, mt: 2 }}>
               {company.logo && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
                   <Avatar
                     src={`data:image/png;base64,${company.logo}`}
-                    sx={{ 
-                      width: 200, 
-                      height: 100,
-                      border: '0.1px solid rgba(255, 255, 255, 0.2)'
-                    }}
-                    imgProps={{ decoding: 'async', loading: 'lazy' }}
+                    sx={{ width: 180, height: 90, border: '0.1px solid rgba(255, 255, 255, 0.2)' }}
                     variant="rounded"
                   />
                 </Box>
               )}
-              
-              <Typography variant="subtitle2" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                Company
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                {company.name}
-              </Typography>
+              <Typography variant="subtitle2" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>Company</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 500 }}>{company.name}</Typography>
             </Box>
             <Divider sx={{ mb: 2, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
           </>
         )}
 
-        {/* User block removed as per request; name will be shown in top header */}
+        <List disablePadding>
+          <ListItem
+            button
+            onClick={() => handleNavigation('/admin-dashboard', 0)}
+            selected={activeTab === 0}
+            sx={{
+              borderRadius: 2,
+              mb: 1,
+              '&.Mui-selected': { backgroundColor: 'rgba(94, 114, 228, 0.15)' },
+              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+            }}
+          >
+            <ListItemIcon sx={{ color: activeTab === 0 ? 'primary.main' : 'inherit', minWidth: 40 }}>
+              <DashboardIcon />
+            </ListItemIcon>
+            <ListItemText primary="Dashboard" primaryTypographyProps={{ fontWeight: activeTab === 0 ? 600 : 400 }} />
+          </ListItem>
 
-        <List>
-          {menuItems.map((item, index) => (
-            <ListItem
-              button
-              key={item.text}
-              onClick={() => handleNavigation(item.path, index)}
-              selected={activeTab === index}
-              sx={{
-                borderRadius: 2,
-                mb: 0.5,
-                '&.Mui-selected': {
-                  backgroundColor: 'rgba(94, 114, 228, 0.1)',
-                  '&:hover': {
-                    backgroundColor: 'rgba(94, 114, 228, 0.2)',
-                  },
-                },
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                },
-              }}
-            >
-              <ListItemIcon sx={{ color: activeTab === index ? 'primary.main' : 'inherit' }}>
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText 
-                primary={
-                  item.text === 'Notifications' && pendingApprovalsCount > 0 ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box component="span" sx={{ mr: 1 }}>
-                        {item.text}
-                      </Box>
-                      <Badge color="error" badgeContent={pendingApprovalsCount} />
-                    </Box>
-                  ) : item.text
-                } 
-                primaryTypographyProps={{
-                  fontWeight: activeTab === index ? 600 : 400,
-                }}
-              />
-            </ListItem>
-          ))}
+          {sections.map((section) => {
+            const sectionOpen = openSections[section.title] !== false;
+            return (
+              <React.Fragment key={section.title}>
+                <ListItem button onClick={() => toggleSection(section.title)} sx={{ py: 0.5, mt: 0.5 }}>
+                  <ListItemText
+                    primary={section.title}
+                    primaryTypographyProps={{ variant: 'caption', sx: { color: 'rgba(255,255,255,0.45)', fontWeight: 700, letterSpacing: 1 } }}
+                  />
+                  {sectionOpen ? <ExpandLess sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 18 }} /> : <ExpandMore sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 18 }} />}
+                </ListItem>
+                <Collapse in={sectionOpen}>
+                  {section.items.map((item) => {
+                    itemIndex += 1;
+                    const idx = itemIndex;
+                    const selected = activeTab === idx;
+                    return (
+                      <ListItem
+                        button
+                        key={item.path}
+                        onClick={() => handleNavigation(item.path, idx)}
+                        selected={selected}
+                        sx={{
+                          borderRadius: 2,
+                          mb: 0.25,
+                          pl: 2,
+                          '&.Mui-selected': { backgroundColor: 'rgba(94, 114, 228, 0.12)' },
+                          '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.06)' },
+                        }}
+                      >
+                        <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: 36 }}>
+                          {item.icon}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            item.badge && item.badge > 0 ? (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                {item.text}
+                                <Badge color="error" badgeContent={item.badge} />
+                              </Box>
+                            ) : item.text
+                          }
+                          primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: selected ? 600 : 400 }}
+                        />
+                      </ListItem>
+                    );
+                  })}
+                </Collapse>
+              </React.Fragment>
+            );
+          })}
+
+          {(() => {
+            itemIndex += 1;
+            const idx = itemIndex;
+            const selected = activeTab === idx;
+            return (
+              <ListItem
+                button
+                onClick={() => handleNavigation('/admin-dashboard/reports', idx)}
+                selected={selected}
+                sx={{ borderRadius: 2, mt: 1, '&.Mui-selected': { backgroundColor: 'rgba(94, 114, 228, 0.12)' } }}
+              >
+                <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: 40 }}>
+                  <AssessmentIcon />
+                </ListItemIcon>
+                <ListItemText primary="Reports" primaryTypographyProps={{ fontWeight: selected ? 600 : 400 }} />
+              </ListItem>
+            );
+          })()}
         </List>
       </Box>
     </Drawer>
   );
-}; 
+};

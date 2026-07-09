@@ -413,10 +413,14 @@ class ScheduledSyncService {
                     logger_1.logger.warn('Reconciliation: ensuring company commissions skipped:', (ensureErr === null || ensureErr === void 0 ? void 0 : ensureErr.message) || ensureErr);
                 }
                 // 3) Dedupe any property accounts updated recently
-                const recentAccounts = yield PropertyAccount_1.default.find({ lastUpdated: { $gte: since } }).select('_id propertyId ledgerType');
+                const recentAccounts = yield PropertyAccount_1.default.find({
+                    lastUpdated: { $gte: since },
+                    isArchived: false,
+                    isActive: { $ne: false }
+                }).select('_id propertyId ledgerType');
                 for (const acct of recentAccounts) {
                     try {
-                        yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acct.propertyId), acct.ledgerType);
+                        yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acct.propertyId));
                     }
                     catch (e) {
                         logger_1.logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String(acct._id), err: (e === null || e === void 0 ? void 0 : e.message) || e });
@@ -594,12 +598,11 @@ class ScheduledSyncService {
     fixOrphanedPropertyAccounts() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const PropertyAccount = require('../models/PropertyAccount').default;
                 const Property = require('../models/Property').default;
                 const Development = require('../models/Development').default;
                 const DevelopmentUnit = require('../models/DevelopmentUnit').default;
                 // Only consider non-archived accounts for repair
-                const propertyAccounts = yield PropertyAccount.find({ isArchived: { $ne: true } });
+                const propertyAccounts = yield PropertyAccount_1.default.find({ isArchived: false });
                 let archivedCount = 0;
                 for (const account of propertyAccounts) {
                     const pid = account.propertyId;
@@ -611,8 +614,9 @@ class ScheduledSyncService {
                     ]);
                     const exists = Boolean(propExists || devExists || unitExists);
                     if (!exists) {
-                        yield PropertyAccount.updateOne({ _id: account._id, isArchived: { $ne: true } }, { $set: { isArchived: true, isActive: false, lastUpdated: new Date() } });
-                        archivedCount++;
+                        const archived = yield propertyAccountService_1.default.archiveLedgerById(account._id);
+                        if (archived)
+                            archivedCount++;
                     }
                 }
                 if (archivedCount > 0) {
@@ -664,10 +668,9 @@ class ScheduledSyncService {
     fixOrphanedOwnerReferences() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const PropertyAccount = require('../models/PropertyAccount').default;
                 const User = require('../models/User').default;
                 const PropertyOwner = require('../models/PropertyOwner').default;
-                const propertyAccounts = yield PropertyAccount.find({ ownerId: { $exists: true } });
+                const propertyAccounts = yield PropertyAccount_1.default.find({ ownerId: { $exists: true }, isArchived: false, isActive: { $ne: false } });
                 let fixedCount = 0;
                 for (const account of propertyAccounts) {
                     if (account.ownerId) {
@@ -676,11 +679,9 @@ class ScheduledSyncService {
                             User.findById(account.ownerId).select('_id')
                         ]);
                         if (!po && !u) {
-                            yield PropertyAccount.findByIdAndUpdate(account._id, {
-                                $unset: { ownerId: 1, ownerName: 1 },
-                                $set: { lastUpdated: new Date() }
-                            });
-                            fixedCount++;
+                            const cleaned = yield propertyAccountService_1.default.clearOwnerReferenceForAccount(account._id);
+                            if (cleaned)
+                                fixedCount++;
                         }
                     }
                 }
@@ -710,19 +711,19 @@ class ScheduledSyncService {
     runOwnerReferenceCleanupForOwnerId(ownerId) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const PropertyAccount = require('../models/PropertyAccount').default;
                 const User = require('../models/User').default;
                 const PropertyOwner = require('../models/PropertyOwner').default;
                 let cleaned = 0;
-                const accounts = yield PropertyAccount.find({ ownerId: ownerId });
+                const accounts = yield PropertyAccount_1.default.find({ ownerId: ownerId, isArchived: false, isActive: { $ne: false } });
                 for (const account of accounts) {
                     const [po, u] = yield Promise.all([
                         PropertyOwner.findById(ownerId).select('_id').lean(),
                         User.findById(ownerId).select('_id').lean()
                     ]);
                     if (!po && !u) {
-                        yield PropertyAccount.updateOne({ _id: account._id }, { $unset: { ownerId: 1, ownerName: 1 }, $set: { lastUpdated: new Date() } });
-                        cleaned++;
+                        const wasCleaned = yield propertyAccountService_1.default.clearOwnerReferenceForAccount(account._id);
+                        if (wasCleaned)
+                            cleaned++;
                     }
                 }
                 if (cleaned > 0) {

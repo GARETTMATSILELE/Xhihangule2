@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import PropertyAccount, { IPropertyAccount, Transaction, OwnerPayout } from '../models/PropertyAccount';
+import PropertyAccount, { IPropertyAccount, Transaction, OwnerPayout, PassThroughChargeType } from '../models/PropertyAccount';
 import { Payment } from '../models/Payment';
 import { Property } from '../models/Property';
 import { PropertyOwner } from '../models/PropertyOwner';
@@ -12,9 +12,21 @@ import { DevelopmentUnit } from '../models/DevelopmentUnit';
 import SystemSetting from '../models/SystemSetting';
 import { v4 as uuidv4 } from 'uuid';
 import { mainConnection, accountingConnection } from '../config/database';
+import chargeTypeService from './chargeTypeService';
 
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise: Promise<void> | null = null;
+
+const PASS_THROUGH_TYPE_LABELS: Record<string, string> = {
+  LEVY: 'Levies',
+  WATER: 'Water Recoveries',
+  ELECTRICITY: 'Electricity Recoveries',
+  RATES: 'Rates',
+  SECURITY: 'Security',
+  INSURANCE: 'Insurance Recoveries',
+  MUNICIPAL: 'Municipal Charges',
+  OTHER: 'Other Pass-Through Charges'
+};
 
 export class PropertyAccountService {
   private static instance: PropertyAccountService;
@@ -149,19 +161,39 @@ export class PropertyAccountService {
   }
 
   private async normalizeActiveLedgerTypes(): Promise<number> {
-    const result = await PropertyAccount.updateMany(
-      {
-        isArchived: false,
-        $or: [
-          { ledgerType: { $exists: false } },
-          { ledgerType: null as any },
-          { ledgerType: '' as any },
-          { ledgerType: { $nin: ['rental', 'sale'] } as any }
-        ]
-      } as any,
-      { $set: { ledgerType: 'rental', lastUpdated: new Date() } } as any
-    );
-    return Number((result as any)?.modifiedCount || 0);
+    const accounts = await PropertyAccount.find({
+      isArchived: false,
+      $or: [
+        { ledgerType: { $exists: false } },
+        { ledgerType: null as any },
+        { ledgerType: '' as any },
+        { ledgerType: { $nin: ['rental', 'sale'] } as any }
+      ]
+    } as any).select('_id propertyId ledgerType');
+
+    let modified = 0;
+    for (const account of accounts as any[]) {
+      try {
+        const resolution = await this.resolveLedgerTypeForProperty(
+          String(account.propertyId),
+          'normalizeActiveLedgerTypes',
+          String(account._id)
+        );
+        const result = await PropertyAccount.updateOne(
+          { _id: account._id, isArchived: false },
+          { $set: { ledgerType: resolution.ledgerType, lastUpdated: new Date() } }
+        );
+        modified += Number((result as any)?.modifiedCount || 0);
+      } catch (error: any) {
+        logger.warn('Skipping PropertyAccount ledgerType normalization because Property business type could not be resolved', {
+          propertyId: String(account.propertyId || ''),
+          propertyAccountId: String(account._id || ''),
+          currentLedgerType: String(account.ledgerType || ''),
+          error: error?.message || String(error)
+        });
+      }
+    }
+    return modified;
   }
 
   // Keep one active ledger per (propertyId, normalized ledgerType), archive the rest.
@@ -201,100 +233,480 @@ export class PropertyAccountService {
     return Number((result as any)?.modifiedCount || 0);
   }
 
-  /**
-   * Infer ledger type strictly from the entity itself.
-   * - Property.rentalType:
-   *   - 'introduction' | 'management' → 'rental'
-   *   - 'sale' → 'sale'
-   * - Development or DevelopmentUnit id → 'sale'
-   * Throws if the type cannot be determined. No defaults.
-   */
-  private async inferLedgerTypeForProperty(propertyId: string): Promise<'rental' | 'sale'> {
-    // Try as Property first
+  async resolveLedgerTypeForProperty(
+    propertyId: string,
+    callingService = 'unknown',
+    propertyAccountId?: string
+  ): Promise<{ ledgerType: 'rental' | 'sale'; businessType: string }> {
     const property = await Property.findById(propertyId).lean();
     if (property) {
       const rt = String((property as any)?.rentalType || '').toLowerCase();
-      if (rt === 'introduction' || rt === 'management') return 'rental';
-      if (rt === 'sale') return 'sale';
-      throw new AppError('Unable to determine ledger type: property.rentalType must be introduction, management, or sale', 400);
+      let ledgerType: 'rental' | 'sale' | null = null;
+      if (rt === 'introduction' || rt === 'management') ledgerType = 'rental';
+      if (rt === 'sale') ledgerType = 'sale';
+      if (!ledgerType) {
+        throw new AppError('Unable to determine ledger type: Property.rentalType must be sale, management, or introduction', 400);
+      }
+      logger.info('Resolved PropertyAccount ledger type from Property.rentalType', {
+        propertyId,
+        propertyBusinessType: rt,
+        resolvedLedgerType: ledgerType,
+        callingService,
+        propertyAccountId
+      });
+      return { ledgerType, businessType: rt };
     }
-    // If not a Property, allow Development/DevelopmentUnit ids as sales ledgers
+
+    // Backward compatibility for existing development/unit sale ledgers. This is
+    // still resolved centrally here; callers must not assume the ledger type.
     const dev = await Development.findById(propertyId).select('_id').lean();
-    if (dev) return 'sale';
+    if (dev) {
+      logger.warn('Resolved ledger type for Development through compatibility resolver', {
+        propertyId,
+        propertyBusinessType: 'development',
+        resolvedLedgerType: 'sale',
+        callingService,
+        propertyAccountId
+      });
+      return { ledgerType: 'sale', businessType: 'development' };
+    }
     const unit = await DevelopmentUnit.findById(propertyId).select('_id').lean();
-    if (unit) return 'sale';
+    if (unit) {
+      logger.warn('Resolved ledger type for DevelopmentUnit through compatibility resolver', {
+        propertyId,
+        propertyBusinessType: 'development_unit',
+        resolvedLedgerType: 'sale',
+        callingService,
+        propertyAccountId
+      });
+      return { ledgerType: 'sale', businessType: 'development_unit' };
+    }
     throw new AppError('Unable to determine ledger type: entity not found', 404);
+  }
+
+  private activeAccountCandidatesQuery(propertyId: mongoose.Types.ObjectId, ledgerType: 'rental' | 'sale'): Record<string, any> {
+    return {
+      propertyId,
+      ledgerType,
+      isArchived: false,
+      isActive: { $ne: false }
+    };
+  }
+
+  private activeAccountQuery(propertyId: mongoose.Types.ObjectId, ledgerType: 'rental' | 'sale'): Record<string, any> {
+    return {
+      propertyId,
+      ledgerType,
+      isArchived: false,
+      isActive: { $ne: false }
+    };
+  }
+
+  private validateWritableAccount(account: IPropertyAccount | null | undefined, propertyId: string, callingFunction: string): IPropertyAccount {
+    if (!account) {
+      throw new AppError(`PropertyAccount not found for writable operation (${callingFunction})`, 404);
+    }
+    if ((account as any).isArchived === true) {
+      throw new AppError(`Refusing to write to archived PropertyAccount ${String((account as any)._id)} in ${callingFunction}`, 409);
+    }
+    if ((account as any).isActive === false) {
+      throw new AppError(`Refusing to write to inactive PropertyAccount ${String((account as any)._id)} in ${callingFunction}`, 409);
+    }
+    if (String((account as any).propertyId) !== String(propertyId)) {
+      throw new AppError(`PropertyAccount ${String((account as any)._id)} does not belong to requested property ${propertyId}`, 409);
+    }
+    this.logWritableAccountSelection(account, callingFunction);
+    return account;
+  }
+
+  private logWritableAccountSelection(account: IPropertyAccount, callingFunction: string): void {
+    logger.info('Selected PropertyAccount for write', {
+      propertyId: String((account as any).propertyId),
+      propertyAccountId: String((account as any)._id),
+      isArchived: Boolean((account as any).isArchived),
+      ledgerType: String((account as any).ledgerType || 'legacy'),
+      callingFunction
+    } as any);
+  }
+
+  private normalizePassThroughType(type?: string): string {
+    const normalized = String(type || 'OTHER')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return normalized || 'OTHER';
+  }
+
+  private getPassThroughLabel(type: string): string {
+    const normalized = this.normalizePassThroughType(type);
+    return PASS_THROUGH_TYPE_LABELS[normalized] || normalized
+      .toLowerCase()
+      .split('_')
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  private recalculatePassThroughAccounts(accounts: any[] = []): {
+    accounts: any[];
+    collected: number;
+    paid: number;
+    outstanding: number;
+  } {
+    let collected = 0;
+    let paid = 0;
+    const normalizedAccounts = accounts.map((account: any) => {
+      const plain = account?.toObject ? account.toObject() : account;
+      const type = this.normalizePassThroughType(plain?.type);
+      const transactions = Array.isArray(plain?.transactions) ? plain.transactions : [];
+      const totalCollected = transactions
+        .filter((tx: any) => tx?.type === 'collection' && tx?.status === 'completed')
+        .reduce((sum: number, tx: any) => sum + Number(tx?.amount || 0), 0);
+      const totalPaid = transactions
+        .filter((tx: any) => tx?.type === 'payment' && tx?.status === 'completed')
+        .reduce((sum: number, tx: any) => sum + Number(tx?.amount || 0), 0);
+      collected += totalCollected;
+      paid += totalPaid;
+      return {
+        ...plain,
+        type,
+        label: plain?.label || this.getPassThroughLabel(type),
+        totalCollected: Number(totalCollected.toFixed(2)),
+        totalPaid: Number(totalPaid.toFixed(2)),
+        runningBalance: Number((totalCollected - totalPaid).toFixed(2)),
+        transactions,
+        lastUpdated: new Date()
+      };
+    });
+
+    return {
+      accounts: normalizedAccounts,
+      collected: Number(collected.toFixed(2)),
+      paid: Number(paid.toFixed(2)),
+      outstanding: Number((collected - paid).toFixed(2))
+    };
+  }
+
+  private upsertPassThroughTransaction(
+    accounts: any[],
+    chargeType: string,
+    transaction: any,
+    duplicatePredicate: (tx: any) => boolean
+  ): { accounts: any[]; inserted: boolean } {
+    const type = this.normalizePassThroughType(chargeType);
+    const nextAccounts = (Array.isArray(accounts) ? accounts : []).map((account: any) => {
+      const plain = account?.toObject ? account.toObject() : account;
+      return {
+        ...plain,
+        type: this.normalizePassThroughType(plain?.type),
+        transactions: Array.isArray(plain?.transactions) ? [...plain.transactions] : []
+      };
+    });
+    let target = nextAccounts.find((account: any) => this.normalizePassThroughType(account?.type) === type);
+    if (!target) {
+      target = {
+        type,
+        label: this.getPassThroughLabel(type),
+        runningBalance: 0,
+        totalCollected: 0,
+        totalPaid: 0,
+        transactions: [],
+        lastUpdated: new Date()
+      };
+      nextAccounts.push(target);
+    }
+
+    const exists = (target.transactions || []).some(duplicatePredicate);
+    if (exists) {
+      return { accounts: nextAccounts, inserted: false };
+    }
+
+    target.transactions.push(transaction);
+    return { accounts: nextAccounts, inserted: true };
+  }
+
+  calculatePassThroughSummary(account: IPropertyAccount | any): {
+    accounts: any[];
+    collected: number;
+    paid: number;
+    outstanding: number;
+    byType: Record<string, { label: string; collected: number; paid: number; outstanding: number }>;
+  } {
+    const summary = this.recalculatePassThroughAccounts((account as any)?.passThroughAccounts || []);
+    const byType: Record<string, { label: string; collected: number; paid: number; outstanding: number }> = {};
+    for (const passThroughAccount of summary.accounts) {
+      const type = this.normalizePassThroughType(passThroughAccount.type);
+      byType[type] = {
+        label: passThroughAccount.label || this.getPassThroughLabel(type),
+        collected: Number(passThroughAccount.totalCollected || 0),
+        paid: Number(passThroughAccount.totalPaid || 0),
+        outstanding: Number(passThroughAccount.runningBalance || 0)
+      };
+    }
+    return { ...summary, byType };
+  }
+
+  async recordPassThroughCollection(input: {
+    propertyId: string;
+    chargeType: PassThroughChargeType;
+    companyId?: string;
+    amount: number;
+    date?: Date;
+    paymentId?: string;
+    levyPaymentId?: string;
+    referenceNumber?: string;
+    description?: string;
+    processedBy?: string;
+    notes?: string;
+    idempotencyKey?: string;
+  }): Promise<IPropertyAccount> {
+    const amount = Number(input.amount || 0);
+    if (amount <= 0) {
+      throw new AppError('Pass-through collection amount must be greater than 0', 400);
+    }
+    const chargeType = this.normalizePassThroughType(input.chargeType);
+    const chargeTypeConfig = await chargeTypeService.getChargeTypeByCode(chargeType, input.companyId, { throwIfMissing: true });
+    if (chargeTypeConfig?.category !== 'PASS_THROUGH') {
+      throw new AppError(`Charge type ${chargeType} is not configured as pass-through`, 400);
+    }
+    const idKey = input.idempotencyKey || `pass-through:${chargeType}:collection:${input.paymentId || uuidv4()}`;
+    const account = this.validateWritableAccount(
+      await this.getOrCreatePropertyAccount(input.propertyId),
+      input.propertyId,
+      'recordPassThroughCollection'
+    );
+
+    const transaction = {
+      type: 'collection',
+      amount,
+      date: input.date || new Date(),
+      paymentId: input.paymentId ? new mongoose.Types.ObjectId(input.paymentId) : undefined,
+      levyPaymentId: input.levyPaymentId ? new mongoose.Types.ObjectId(input.levyPaymentId) : undefined,
+      chargeTypeCode: chargeTypeConfig?.code,
+      chargeTypeId: chargeTypeConfig?._id,
+      idempotencyKey: idKey,
+      description: input.description || `${chargeTypeConfig?.name || this.getPassThroughLabel(chargeType)} collected`,
+      referenceNumber: input.referenceNumber,
+      status: 'completed',
+      processedBy: input.processedBy ? new mongoose.Types.ObjectId(input.processedBy) : undefined,
+      notes: input.notes,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const { accounts, inserted } = this.upsertPassThroughTransaction(
+      (account as any).passThroughAccounts || [],
+      chargeType,
+      transaction,
+      (tx: any) =>
+        String(tx?.idempotencyKey || '') === idKey ||
+        Boolean(input.paymentId && tx?.type === 'collection' && String(tx?.paymentId || '') === String(input.paymentId))
+    );
+    if (!inserted) {
+      return (await this.getPropertyAccount(input.propertyId)) as any;
+    }
+
+    const summary = this.recalculatePassThroughAccounts(accounts);
+    await PropertyAccount.updateOne(
+      { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
+      {
+        $set: {
+          passThroughAccounts: summary.accounts,
+          passThroughCollected: summary.collected,
+          passThroughPaid: summary.paid,
+          passThroughOutstanding: summary.outstanding,
+          netOwnerBalance: (account as any).runningBalance || 0,
+          lastUpdated: new Date()
+        }
+      }
+    );
+
+    return (await this.getPropertyAccount(input.propertyId)) as any;
+  }
+
+  async recordPassThroughPayment(input: {
+    propertyId: string;
+    chargeType: PassThroughChargeType;
+    companyId?: string;
+    amount: number;
+    date?: Date;
+    paymentId?: string;
+    levyPaymentId?: string;
+    referenceNumber?: string;
+    description?: string;
+    processedBy?: string;
+    notes?: string;
+    idempotencyKey?: string;
+  }): Promise<IPropertyAccount> {
+    const amount = Number(input.amount || 0);
+    if (amount <= 0) {
+      throw new AppError('Pass-through payment amount must be greater than 0', 400);
+    }
+    const chargeType = this.normalizePassThroughType(input.chargeType);
+    const chargeTypeConfig = await chargeTypeService.getChargeTypeByCode(chargeType, input.companyId, { throwIfMissing: true });
+    if (chargeTypeConfig?.category !== 'PASS_THROUGH') {
+      throw new AppError(`Charge type ${chargeType} is not configured as pass-through`, 400);
+    }
+    const idKey = input.idempotencyKey || `pass-through:${chargeType}:payment:${input.levyPaymentId || input.paymentId || uuidv4()}`;
+    const account = this.validateWritableAccount(
+      await this.getOrCreatePropertyAccount(input.propertyId),
+      input.propertyId,
+      'recordPassThroughPayment'
+    );
+
+    const transaction = {
+      type: 'payment',
+      amount,
+      date: input.date || new Date(),
+      paymentId: input.paymentId ? new mongoose.Types.ObjectId(input.paymentId) : undefined,
+      levyPaymentId: input.levyPaymentId ? new mongoose.Types.ObjectId(input.levyPaymentId) : undefined,
+      chargeTypeCode: chargeTypeConfig?.code,
+      chargeTypeId: chargeTypeConfig?._id,
+      idempotencyKey: idKey,
+      description: input.description || `${chargeTypeConfig?.name || this.getPassThroughLabel(chargeType)} paid`,
+      referenceNumber: input.referenceNumber,
+      status: 'completed',
+      processedBy: input.processedBy ? new mongoose.Types.ObjectId(input.processedBy) : undefined,
+      notes: input.notes,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const { accounts, inserted } = this.upsertPassThroughTransaction(
+      (account as any).passThroughAccounts || [],
+      chargeType,
+      transaction,
+      (tx: any) =>
+        String(tx?.idempotencyKey || '') === idKey ||
+        Boolean(input.levyPaymentId && tx?.type === 'payment' && String(tx?.levyPaymentId || '') === String(input.levyPaymentId))
+    );
+    if (!inserted) {
+      return (await this.getPropertyAccount(input.propertyId)) as any;
+    }
+
+    const summary = this.recalculatePassThroughAccounts(accounts);
+    await PropertyAccount.updateOne(
+      { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
+      {
+        $set: {
+          passThroughAccounts: summary.accounts,
+          passThroughCollected: summary.collected,
+          passThroughPaid: summary.paid,
+          passThroughOutstanding: summary.outstanding,
+          netOwnerBalance: (account as any).runningBalance || 0,
+          lastUpdated: new Date()
+        }
+      }
+    );
+
+    return (await this.getPropertyAccount(input.propertyId)) as any;
+  }
+
+  async getCompanyPassThroughSummary(companyId: string): Promise<{
+    totalCollected: number;
+    totalPaid: number;
+    totalOutstanding: number;
+    byType: Record<string, { label: string; collected: number; paid: number; outstanding: number }>;
+  }> {
+    const [properties, developments] = await Promise.all([
+      Property.find({ companyId }).select('_id').lean(),
+      Development.find({ companyId }).select('_id').lean()
+    ]);
+    const propertyIds = properties.map((property: any) => property._id);
+    const developmentIds = developments.map((development: any) => development._id);
+    let unitIds: any[] = [];
+    if (developmentIds.length > 0) {
+      try {
+        const units = await DevelopmentUnit.find({ developmentId: { $in: developmentIds } }).select('_id').lean();
+        unitIds = units.map((unit: any) => unit._id);
+      } catch {}
+    }
+
+    const allIds = [...propertyIds, ...developmentIds, ...unitIds];
+    if (allIds.length === 0) {
+      return { totalCollected: 0, totalPaid: 0, totalOutstanding: 0, byType: {} };
+    }
+
+    const accounts = await PropertyAccount.find({
+      propertyId: { $in: allIds },
+      isArchived: false,
+      isActive: { $ne: false }
+    })
+      .select('passThroughAccounts passThroughCollected passThroughPaid passThroughOutstanding')
+      .lean();
+
+    const byType: Record<string, { label: string; collected: number; paid: number; outstanding: number }> = {};
+    let totalCollected = 0;
+    let totalPaid = 0;
+    for (const account of accounts as any[]) {
+      const summary = this.calculatePassThroughSummary(account);
+      totalCollected += summary.collected;
+      totalPaid += summary.paid;
+      for (const [type, row] of Object.entries(summary.byType)) {
+        byType[type] = byType[type] || { label: row.label, collected: 0, paid: 0, outstanding: 0 };
+        byType[type].collected = Number((byType[type].collected + row.collected).toFixed(2));
+        byType[type].paid = Number((byType[type].paid + row.paid).toFixed(2));
+        byType[type].outstanding = Number((byType[type].outstanding + row.outstanding).toFixed(2));
+      }
+    }
+
+    return {
+      totalCollected: Number(totalCollected.toFixed(2)),
+      totalPaid: Number(totalPaid.toFixed(2)),
+      totalOutstanding: Number((totalCollected - totalPaid).toFixed(2)),
+      byType
+    };
   }
 
   /**
    * Get or create property account
    */
-  async getOrCreatePropertyAccount(propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<IPropertyAccount> {
+  async getOrCreatePropertyAccount(propertyId: string): Promise<IPropertyAccount> {
     try {
       // Ensure indexes support multi-ledger before any creates
       await this.ensureLedgerIndexes();
       console.log('getOrCreatePropertyAccount called with propertyId:', propertyId);
       console.log('Converting to ObjectId:', new mongoose.Types.ObjectId(propertyId));
 
-      // If caller passed no explicit ledgerType, infer it
-      const effectiveLedger: 'rental' | 'sale' = ledgerType ?? await this.inferLedgerTypeForProperty(propertyId);
+      const resolution = await this.resolveLedgerTypeForProperty(propertyId, 'getOrCreatePropertyAccount');
+      const effectiveLedger = resolution.ledgerType;
+      const propertyObjectId = new mongoose.Types.ObjectId(propertyId);
 
-      let account = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
-      console.log('Database query result:', account ? 'Found account' : 'No account found');
-      // If a legacy ledger (without ledgerType) also exists for this property, prefer it when it appears more complete.
-      // This ensures older, accurate ledgers remain visible in the UI when a newer, partial ledger was created.
-      if (account) {
-        try {
-          const legacy = await PropertyAccount.findOne({
-            propertyId: new mongoose.Types.ObjectId(propertyId),
-            $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }]
-          });
-          if (legacy) {
-            const legacyIncome = Number((legacy as any)?.totalIncome || 0);
-            const currentIncome = Number((account as any)?.totalIncome || 0);
-            const legacyTxCount = Array.isArray((legacy as any)?.transactions) ? (legacy as any).transactions.length : 0;
-            const currentTxCount = Array.isArray((account as any)?.transactions) ? (account as any).transactions.length : 0;
-            // Prefer legacy if it has equal/greater totalIncome or more transactions (heuristic for completeness)
-            if (legacyIncome >= currentIncome || legacyTxCount > currentTxCount) {
-              account = legacy as any;
-            }
-          }
-        } catch {}
+      await PropertyAccount.updateMany(
+        {
+          propertyId: propertyObjectId,
+          isArchived: false,
+          isActive: { $ne: false },
+          $or: [
+            { ledgerType: { $exists: false } },
+            { ledgerType: null as any },
+            { ledgerType: '' as any },
+            { ledgerType: { $nin: ['rental', 'sale'] } as any }
+          ]
+        } as any,
+        { $set: { ledgerType: effectiveLedger, lastUpdated: new Date() } } as any
+      );
+
+      const activeAccounts = await PropertyAccount.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
+      if (activeAccounts.length > 1) {
+        throw new AppError(
+          `Multiple active PropertyAccounts found for property ${propertyId} (${effectiveLedger}); refusing to choose a writable ledger`,
+          409
+        );
       }
-      // If no account of the requested ledgerType exists, but a legacy ledger exists,
-      // adopt the legacy ledger by assigning the appropriate ledgerType instead of creating a new doc.
-      if (!account) {
-        try {
-          const legacy = await PropertyAccount.findOne({
-            propertyId: new mongoose.Types.ObjectId(propertyId),
-            $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }]
-          });
-          if (legacy) {
-            (legacy as any).ledgerType = effectiveLedger;
-            try {
-              await (legacy as any).save();
-              await this.recalculateBalance(legacy as any);
-              account = legacy as any;
-            } catch (adoptErr: any) {
-              // If a concurrent create slipped in and caused a duplicate-key on (propertyId, ledgerType),
-              // fall back to loading the newly created account.
-              const isDup = (adoptErr?.code === 11000) || /E11000 duplicate key error/.test(String(adoptErr?.message || ''));
-              if (isDup) {
-                const reloaded = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
-                if (reloaded) {
-                  account = reloaded as any;
-                } else {
-                  throw adoptErr;
-                }
-              } else {
-                throw adoptErr;
-              }
-            }
-          }
-        } catch {}
+
+      let account = activeAccounts[0] as IPropertyAccount | undefined;
+      console.log('Database query result:', account ? 'Found active account' : 'No active account found');
+      if (account) {
+        if (!(account as any).ledgerType) {
+          (account as any).ledgerType = effectiveLedger;
+          await (account as any).save();
+        }
+        await this.recalculateBalance(account);
+        return this.validateWritableAccount(account, propertyId, 'getOrCreatePropertyAccount');
       }
       
-    if (!account) {
+      if (!account) {
         // Try resolve as a Property; if not found, try as a Development; then as a Development Unit
         const property = await Property.findById(propertyId);
         const development = property ? null : await Development.findById(propertyId);
@@ -366,7 +778,7 @@ export class PropertyAccountService {
 
         // Create new account
         account = new PropertyAccount({
-          propertyId: new mongoose.Types.ObjectId(propertyId),
+          propertyId: propertyObjectId,
           ledgerType: effectiveLedger,
           propertyName: displayName,
           propertyAddress: displayAddress,
@@ -378,17 +790,23 @@ export class PropertyAccountService {
           totalIncome: 0,
           totalExpenses: 0,
           totalOwnerPayouts: 0,
-          isActive: true
+          isActive: true,
+          isArchived: false
         });
 
         try {
           await account.save();
         } catch (saveErr: any) {
-          const isDup = (saveErr?.code === 11000) || /E11000 duplicate key error/.test(String(saveErr?.message || ''));
+          const isDup = this.isDuplicateKeyError(saveErr);
           if (isDup) {
-            const reloaded = await PropertyAccount.findOne({ propertyId: new mongoose.Types.ObjectId(propertyId), ledgerType: effectiveLedger });
-            if (reloaded) {
-              account = reloaded as any;
+            const reloaded = await PropertyAccount.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
+            if (reloaded.length === 1) {
+              account = reloaded[0] as any;
+            } else if (reloaded.length > 1) {
+              throw new AppError(
+                `Multiple active PropertyAccounts found for property ${propertyId} after concurrent create; refusing to choose a writable ledger`,
+                409
+              );
             } else {
               throw saveErr;
             }
@@ -402,7 +820,7 @@ export class PropertyAccountService {
         await this.recalculateBalance(account);
       }
 
-      return account as IPropertyAccount;
+      return this.validateWritableAccount(account, propertyId, 'getOrCreatePropertyAccount');
     } catch (error) {
       logger.error('Error in getOrCreatePropertyAccount:', error);
       throw error;
@@ -624,13 +1042,14 @@ export class PropertyAccountService {
    * Recalculate balance for an existing account
    */
   async recalculateBalance(account: IPropertyAccount): Promise<void> {
+    this.validateWritableAccount(account, String((account as any).propertyId), 'recalculateBalance');
     // Calculate totals from transactions
     const totalIncome = account.transactions
-      .filter(t => t.type === 'income' && t.status === 'completed')
+      .filter(t => t.type === 'income' && t.status === 'completed' && (t as any).accountingTreatment !== 'PASS_THROUGH')
       .reduce((sum, t) => sum + t.amount, 0);
     
     const totalExpenses = account.transactions
-      .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed')
+      .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed' && (t as any).accountingTreatment !== 'PASS_THROUGH')
       .reduce((sum, t) => sum + t.amount, 0);
     
     const totalOwnerPayouts = account.ownerPayouts
@@ -643,24 +1062,41 @@ export class PropertyAccountService {
     
     // Calculate running balance
     const newRunningBalance = totalIncome - totalExpenses - totalOwnerPayouts + openingBalance;
+    const passThroughSummary = this.recalculatePassThroughAccounts((account as any).passThroughAccounts || []);
     
     // Update the account if balance has changed
-    if (account.runningBalance !== newRunningBalance) {
+    if (
+      account.runningBalance !== newRunningBalance ||
+      Number((account as any).passThroughCollected || 0) !== passThroughSummary.collected ||
+      Number((account as any).passThroughPaid || 0) !== passThroughSummary.paid ||
+      Number((account as any).passThroughOutstanding || 0) !== passThroughSummary.outstanding ||
+      Number((account as any).netOwnerBalance || 0) !== newRunningBalance
+    ) {
       account.runningBalance = newRunningBalance;
       account.totalIncome = totalIncome;
       account.totalExpenses = totalExpenses;
       account.totalOwnerPayouts = totalOwnerPayouts;
+      (account as any).passThroughAccounts = passThroughSummary.accounts;
+      (account as any).passThroughCollected = passThroughSummary.collected;
+      (account as any).passThroughPaid = passThroughSummary.paid;
+      (account as any).passThroughOutstanding = passThroughSummary.outstanding;
+      (account as any).netOwnerBalance = newRunningBalance;
       account.lastUpdated = new Date();
       
       // Use updateOne instead of save() to avoid triggering pre-save middleware
       await PropertyAccount.updateOne(
-        { _id: account._id },
+        { _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } },
         {
           $set: {
             runningBalance: newRunningBalance,
             totalIncome: totalIncome,
             totalExpenses: totalExpenses,
             totalOwnerPayouts: totalOwnerPayouts,
+            passThroughAccounts: passThroughSummary.accounts,
+            passThroughCollected: passThroughSummary.collected,
+            passThroughPaid: passThroughSummary.paid,
+            passThroughOutstanding: passThroughSummary.outstanding,
+            netOwnerBalance: newRunningBalance,
             lastUpdated: new Date()
           }
         }
@@ -671,6 +1107,7 @@ export class PropertyAccountService {
 
   private async reconcileReversedPaymentArtifacts(account: IPropertyAccount): Promise<void> {
     try {
+      this.validateWritableAccount(account, String((account as any).propertyId), 'reconcileReversedPaymentArtifacts');
       const paymentIds = Array.from(
         new Set(
           (account.transactions || [])
@@ -695,7 +1132,7 @@ export class PropertyAccountService {
           .filter(Boolean)
       );
 
-      let changed = false;
+      const transactionIdsToCancel: any[] = [];
       for (const tx of (account.transactions || []) as any[]) {
         const txPid = String(tx?.paymentId || '');
         if (!txPid) continue;
@@ -703,28 +1140,30 @@ export class PropertyAccountService {
         if (!isReversedChain) continue;
 
         if (tx.type === 'income' && String(tx.status || '') === 'completed') {
-          tx.status = 'cancelled';
-          tx.updatedAt = new Date();
-          tx.notes = tx.notes || 'Auto-cancelled due to payment reversal';
-          changed = true;
+          transactionIdsToCancel.push(tx._id);
         }
         if (
           tx.type === 'expense' &&
           String(tx.category || '') === 'payment_reversal' &&
           String(tx.status || '') === 'completed'
         ) {
-          tx.status = 'cancelled';
-          tx.updatedAt = new Date();
-          tx.notes = tx.notes || 'Auto-cancelled after reversal-chain cleanup';
-          changed = true;
+          transactionIdsToCancel.push(tx._id);
         }
       }
 
-      if (changed) {
-        // Bypass immutable ledger middleware for reconciliation maintenance writes.
-        await (PropertyAccount as any).collection.updateOne(
-          { _id: (account as any)._id },
-          { $set: { transactions: (account as any).transactions, lastUpdated: new Date() } }
+      if (transactionIdsToCancel.length > 0) {
+        await PropertyAccount.updateOne(
+          { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
+          {
+            $set: {
+              'transactions.$[t].status': 'cancelled',
+              'transactions.$[t].updatedAt': new Date(),
+              lastUpdated: new Date()
+            }
+          },
+          {
+            arrayFilters: [{ 't._id': { $in: transactionIdsToCancel.filter(Boolean) } }] as any
+          } as any
         );
       }
     } catch (e) {
@@ -757,30 +1196,44 @@ export class PropertyAccountService {
         logger.info(`Skipping income for deposit-only payment ${paymentId} (amount: ${payment.amount}, deposit: ${deposit})`);
         return;
       }
-      // Get or create property account (rental vs sale)
-      const chosenLedger: 'rental' | 'sale' = payment.paymentType === 'sale' ? 'sale' : 'rental';
-      const isSale = payment.paymentType === 'sale';
+      const baseResolution = await this.resolveLedgerTypeForProperty(String(payment.propertyId), 'recordIncomeFromPayment');
+      const isSale = baseResolution.ledgerType === 'sale';
+      if (payment.paymentType && ((payment.paymentType === 'sale') !== isSale)) {
+        throw new AppError(
+          `Payment type ${payment.paymentType} does not match Property.rentalType (${baseResolution.businessType}) for property ${String(payment.propertyId)}`,
+          400
+        );
+      }
 
       let devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
       const unitId = (payment as any)?.developmentUnitId as mongoose.Types.ObjectId | undefined;
       const targets: Array<{ id: string; ledger: 'rental' | 'sale' }> = [];
       if (isSale) {
-        if (unitId) targets.push({ id: unitId.toString(), ledger: 'sale' });
+        if (unitId) targets.push({ id: unitId.toString(), ledger: baseResolution.ledgerType });
         if (!devId && unitId) {
           try { const unitDoc = await DevelopmentUnit.findById(unitId).select('developmentId'); devId = unitDoc?.developmentId as any; } catch {}
         }
-        if (devId) targets.push({ id: devId.toString(), ledger: 'sale' });
-        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: 'sale' });
+        if (devId) targets.push({ id: devId.toString(), ledger: baseResolution.ledgerType });
+        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
       } else {
-        targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
+        targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
       }
 
       let postedToAtLeastOneTarget = false;
       let notFoundCount = 0;
+      const chargeLines = isSale
+        ? []
+        : await chargeTypeService.getCompatibilityChargeLines(payment, payment.companyId);
+      const passThroughLines = chargeLines.filter(line => line.chargeType.category === 'PASS_THROUGH');
+      const passThroughTotal = passThroughLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      const propertyExpenseLines = chargeLines.filter(line => line.chargeType.category === 'PROPERTY_EXPENSE');
+      const propertyExpenseTotal = propertyExpenseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      const propertyIncomeLines = chargeLines.filter(line => line.chargeType.ownerIncome && line.chargeType.category === 'PROPERTY_INCOME');
+      const primaryIncomeChargeType = propertyIncomeLines[0]?.chargeType;
       for (const target of targets) {
         let account: IPropertyAccount | null = null as any;
         try {
-          account = await this.getOrCreatePropertyAccount(target.id, target.ledger);
+          account = await this.getOrCreatePropertyAccount(target.id);
         } catch (e: any) {
           const message = String(e?.message || '');
           const status = Number((e as any)?.statusCode || (e as any)?.status || 0);
@@ -795,6 +1248,82 @@ export class PropertyAccountService {
           }
           throw e;
         }
+        account = this.validateWritableAccount(account, target.id, 'recordIncomeFromPayment');
+
+        const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
+        const totalPaid = payment.amount || 0;
+        const depositPortion = payment.depositAmount || 0;
+        const totalCommission = payment.commissionDetails?.totalCommission || 0;
+        // Align owner income with commission-calculated owner amount while removing non-owner charge lines.
+        // Deposit-only payments are already excluded above.
+        const incomeAmount = isSale
+          ? Math.max(0, ownerAmount)
+          : Math.max(0, Number(ownerAmount || 0) - passThroughTotal);
+
+        const recordPassThroughIfNeeded = async () => {
+          const grouped = new Map<string, { amount: number; line: any }>();
+          for (const line of passThroughLines) {
+            const existing = grouped.get(line.chargeType.code) || { amount: 0, line };
+            existing.amount += Number(line.amount || 0);
+            grouped.set(line.chargeType.code, existing);
+          }
+          for (const [code, row] of grouped) {
+            if (row.amount <= 0) continue;
+            await this.recordPassThroughCollection({
+              propertyId: target.id,
+              companyId: payment.companyId ? String(payment.companyId) : undefined,
+              chargeType: code,
+              amount: row.amount,
+              date: payment.paymentDate || payment.createdAt,
+              paymentId,
+              levyPaymentId: code === 'LEVY' && (payment as any).linkedLevyPaymentId ? String((payment as any).linkedLevyPaymentId) : undefined,
+              referenceNumber: payment.referenceNumber,
+              description: `${row.line.chargeType.name} collected - ${payment.referenceNumber}`,
+              processedBy: payment.processedBy ? String(payment.processedBy) : undefined,
+              notes: payment.notes,
+              idempotencyKey: `payment:${paymentId}:pass-through:${code}`
+            });
+          }
+        };
+
+        const recordConfiguredExpensesIfNeeded = async () => {
+          if (propertyExpenseTotal <= 0) return;
+          const idKey = `payment:${paymentId}:configured-expense`;
+          const existingExpense = account!.transactions.find(
+            t => String((t as any).idempotencyKey || '') === idKey
+          );
+          if (existingExpense) return;
+          const expenseTransaction: any = {
+            type: 'expense',
+            amount: propertyExpenseTotal,
+            date: payment.paymentDate || payment.createdAt,
+            paymentId: new mongoose.Types.ObjectId(paymentId),
+            idempotencyKey: idKey,
+            description: `Configured property expense - ${payment.referenceNumber}`,
+            category: 'configured_expense',
+            transactionCategory: 'OTHER',
+            accountingTreatment: 'PROPERTY_EXPENSE',
+            chargeTypeCode: propertyExpenseLines[0]?.chargeType.code,
+            chargeTypeId: propertyExpenseLines[0]?.chargeType._id,
+            status: 'completed',
+            processedBy: payment.processedBy,
+            referenceNumber: payment.referenceNumber,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          await PropertyAccount.updateOne(
+            {
+              _id: (account as any)._id,
+              propertyId: (account as any).propertyId,
+              isArchived: false,
+              isActive: { $ne: false },
+              'transactions.idempotencyKey': { $ne: idKey }
+            },
+            { $push: { transactions: expenseTransaction }, $set: { lastUpdated: new Date() } }
+          );
+          const freshAfterExpense = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
+          if (freshAfterExpense) await this.recalculateBalance(freshAfterExpense as any);
+        };
 
         // Check if income already recorded for this payment
         const existingTransaction = account.transactions.find(
@@ -802,22 +1331,17 @@ export class PropertyAccountService {
         );
         if (existingTransaction) {
           logger.info(`Income already recorded for payment: ${paymentId} on account ${String((account as any)._id)}`);
+          await recordPassThroughIfNeeded();
+          await recordConfiguredExpensesIfNeeded();
           postedToAtLeastOneTarget = true;
           continue;
         }
 
-        const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
-        const totalPaid = payment.amount || 0;
-        const depositPortion = payment.depositAmount || 0;
-        const totalCommission = payment.commissionDetails?.totalCommission || 0;
-        // Align rental income with commission-calculated owner amount (legacy behavior).
-        // Deposit-only payments are already excluded above.
-        const incomeAmount = isSale
-          ? Math.max(0, ownerAmount)
-          : Math.max(0, ownerAmount);
-
         if (incomeAmount <= 0) {
           logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
+          await recordPassThroughIfNeeded();
+          await recordConfiguredExpensesIfNeeded();
+          if (passThroughTotal > 0 || propertyExpenseTotal > 0) postedToAtLeastOneTarget = true;
           continue;
         }
 
@@ -834,6 +1358,10 @@ export class PropertyAccountService {
           idempotencyKey: `payment:${paymentId}`,
           description: incomeDescription,
           category: incomeCategory,
+          transactionCategory: isSale ? 'OTHER' : (primaryIncomeChargeType?.code === 'RENT' ? 'RENT' : 'OTHER'),
+          accountingTreatment: 'PROPERTY_INCOME',
+          chargeTypeCode: primaryIncomeChargeType?.code,
+          chargeTypeId: primaryIncomeChargeType?._id,
           status: 'completed',
           processedBy: payment.processedBy,
           referenceNumber: payment.referenceNumber,
@@ -842,16 +1370,24 @@ export class PropertyAccountService {
         };
 
         await PropertyAccount.updateOne(
-          { _id: (account as any)._id, 'transactions.paymentId': { $ne: new mongoose.Types.ObjectId(paymentId) } },
+          {
+            _id: (account as any)._id,
+            propertyId: (account as any).propertyId,
+            isArchived: false,
+            isActive: { $ne: false },
+            'transactions.paymentId': { $ne: new mongoose.Types.ObjectId(paymentId) }
+          },
           {
             $push: { transactions: incomeTransaction },
             $set: { lastUpdated: new Date() }
           }
         );
-        const fresh = await PropertyAccount.findById((account as any)._id) as any;
+        const fresh = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
         if (fresh) {
           await this.recalculateBalance(fresh as any);
         }
+        await recordPassThroughIfNeeded();
+        await recordConfiguredExpensesIfNeeded();
         logger.info(`Recorded income of ${incomeAmount} to account ${String((account as any)._id)} (target ${target.id}, ledger ${target.ledger}) from payment ${paymentId}`);
         postedToAtLeastOneTarget = true;
       }
@@ -881,23 +1417,62 @@ export class PropertyAccountService {
         throw new AppError('Payment not found', 404);
       }
 
+      const baseResolution = await this.resolveLedgerTypeForProperty(String(payment.propertyId), 'reverseIncomeFromPayment');
       const targets: Array<{ id: string; ledger: 'rental' | 'sale' }> = [];
-      const isSale = payment.paymentType === 'sale';
+      const isSale = baseResolution.ledgerType === 'sale';
+      if (payment.paymentType && ((payment.paymentType === 'sale') !== isSale)) {
+        throw new AppError(
+          `Payment type ${payment.paymentType} does not match Property.rentalType (${baseResolution.businessType}) for property ${String(payment.propertyId)}`,
+          400
+        );
+      }
       let devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
       const unitId = (payment as any)?.developmentUnitId as mongoose.Types.ObjectId | undefined;
       if (isSale) {
-        if (unitId) targets.push({ id: unitId.toString(), ledger: 'sale' });
+        if (unitId) targets.push({ id: unitId.toString(), ledger: baseResolution.ledgerType });
         if (!devId && unitId) {
           try { const unitDoc = await DevelopmentUnit.findById(unitId).select('developmentId'); devId = unitDoc?.developmentId as any; } catch {}
         }
-        if (devId) targets.push({ id: devId.toString(), ledger: 'sale' });
-        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: 'sale' });
+        if (devId) targets.push({ id: devId.toString(), ledger: baseResolution.ledgerType });
+        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
       } else {
-        targets.push({ id: payment.propertyId.toString(), ledger: 'rental' });
+        targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
       }
 
+      const chargeLines = isSale
+        ? []
+        : await chargeTypeService.getCompatibilityChargeLines(payment, payment.companyId);
+      const passThroughLines = chargeLines.filter(line => line.chargeType.category === 'PASS_THROUGH');
+
       for (const target of targets) {
-        const account = await this.getOrCreatePropertyAccount(target.id, target.ledger);
+        const account = this.validateWritableAccount(
+          await this.getOrCreatePropertyAccount(target.id),
+          target.id,
+          'reverseIncomeFromPayment'
+        );
+        const groupedPassThrough = new Map<string, { amount: number; line: any }>();
+        for (const line of passThroughLines) {
+          const existing = groupedPassThrough.get(line.chargeType.code) || { amount: 0, line };
+          existing.amount += Number(line.amount || 0);
+          groupedPassThrough.set(line.chargeType.code, existing);
+        }
+        for (const [code, row] of groupedPassThrough) {
+          if (row.amount <= 0) continue;
+          await this.recordPassThroughPayment({
+            propertyId: target.id,
+            companyId: payment.companyId ? String(payment.companyId) : undefined,
+            chargeType: code,
+            amount: row.amount,
+            date: new Date(),
+            paymentId,
+            levyPaymentId: code === 'LEVY' && (payment as any).linkedLevyPaymentId ? String((payment as any).linkedLevyPaymentId) : undefined,
+            referenceNumber: (payment as any).referenceNumber,
+            description: `${row.line.chargeType.name} reversal - ${(payment as any).referenceNumber || paymentId}`,
+            processedBy: opts?.processedBy,
+            notes: opts?.reason || 'Payment reversal',
+            idempotencyKey: `payment:${paymentId}:pass-through:${code}:reversal`
+          });
+        }
         const originalIncomeIds = (account.transactions || [])
           .filter(
             (t: any) =>
@@ -924,12 +1499,11 @@ export class PropertyAccountService {
         const idsToCancel = [...originalIncomeIds, ...reversalIncomeIds];
         if (idsToCancel.length > 0) {
           await PropertyAccount.updateOne(
-            { _id: (account as any)._id },
+            { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
             {
               $set: {
                 'transactions.$[t].status': 'cancelled',
                 'transactions.$[t].updatedAt': new Date(),
-                'transactions.$[t].notes': opts?.reason || 'Payment reversed',
                 lastUpdated: new Date()
               }
             },
@@ -941,7 +1515,7 @@ export class PropertyAccountService {
 
         // Retire old expense-based reversal rows for this payment to avoid duplicate noise.
         await PropertyAccount.updateOne(
-          { _id: (account as any)._id },
+          { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
           {
             $set: {
               'transactions.$[t].status': 'cancelled',
@@ -959,7 +1533,7 @@ export class PropertyAccountService {
           } as any
         );
 
-        const fresh = await PropertyAccount.findById((account as any)._id) as any;
+        const fresh = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
         if (fresh) {
           await this.recalculateBalance(fresh as any);
         }
@@ -1005,12 +1579,11 @@ export class PropertyAccountService {
     let backfillInvocations = 0;
     for (const dev of developments) {
       // Ensure a 'sale' ledger exists for the development (guarded by unique index)
-      const existing = await PropertyAccount.findOne({
-        propertyId: new mongoose.Types.ObjectId(dev._id),
-        ledgerType: 'sale'
-      });
+      const existing = await PropertyAccount.findOne(
+        this.activeAccountQuery(new mongoose.Types.ObjectId(dev._id), 'sale')
+      );
       if (!existing) {
-        await this.getOrCreatePropertyAccount(dev._id.toString(), 'sale');
+        await this.getOrCreatePropertyAccount(dev._id.toString());
         ledgersCreated++;
       }
       // Find payments tied to this development directly or via its units
@@ -1076,7 +1649,11 @@ export class PropertyAccountService {
         ? expenseData.idempotencyKey.trim()
         : `expense:${uuidv4()}`;
 
-      const account = await this.getOrCreatePropertyAccount(propertyId, ledgerType);
+      const account = this.validateWritableAccount(
+        await this.getOrCreatePropertyAccount(propertyId),
+        propertyId,
+        'addExpense'
+      );
 
       if (account.runningBalance < expenseData.amount) {
         throw new AppError('Insufficient balance for this expense', 400);
@@ -1088,6 +1665,8 @@ export class PropertyAccountService {
         date: expenseData.date,
         description: expenseData.description,
         category: expenseData.category || 'general',
+        transactionCategory: String(expenseData.category || '').toLowerCase().includes('maintenance') ? 'MAINTENANCE' : 'OTHER',
+        accountingTreatment: 'PROPERTY_EXPENSE',
         recipientId: expenseData.recipientId,
         recipientType: expenseData.recipientType,
         status: 'completed',
@@ -1104,6 +1683,9 @@ export class PropertyAccountService {
       let res = await PropertyAccount.updateOne(
         { 
           _id: (account as any)._id,
+          propertyId: (account as any).propertyId,
+          isArchived: false,
+          isActive: { $ne: false },
           runningBalance: { $gte: expenseData.amount },
           'transactions.idempotencyKey': { $ne: idKey },
           ...(previousLastUpdated ? { lastUpdated: previousLastUpdated } : {})
@@ -1115,12 +1697,15 @@ export class PropertyAccountService {
       );
       if ((res as any)?.modifiedCount === 0) {
         // Retry once with refreshed state
-        const fresh = await PropertyAccount.findById((account as any)._id) as any;
+        const fresh = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
         if (fresh) {
           await this.recalculateBalance(fresh as any);
           res = await PropertyAccount.updateOne(
             { 
               _id: (fresh as any)._id,
+              propertyId: (fresh as any).propertyId,
+              isArchived: false,
+              isActive: { $ne: false },
               runningBalance: { $gte: expenseData.amount },
               'transactions.idempotencyKey': { $ne: idKey }
             },
@@ -1131,7 +1716,7 @@ export class PropertyAccountService {
           );
         }
       }
-      const reloaded = await PropertyAccount.findById((account as any)._id) as any;
+      const reloaded = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
       if (reloaded) await this.recalculateBalance(reloaded as any);
       logger.info(`Added expense (idempotent, guarded) of ${expenseData.amount} to property ${propertyId}`);
       return (await this.getPropertyAccount(propertyId)) as any;
@@ -1181,7 +1766,11 @@ export class PropertyAccountService {
         ? openingBalanceData.idempotencyKey.trim()
         : `opening-balance:${uuidv4()}`;
 
-      const account = await this.getOrCreatePropertyAccount(propertyId, ledgerType);
+      const account = this.validateWritableAccount(
+        await this.getOrCreatePropertyAccount(propertyId),
+        propertyId,
+        'addOpeningBalanceAdjustment'
+      );
       const referenceNumber = `OB-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const directionLabel = openingBalanceData.direction === 'credit' ? 'Credit' : 'Debit';
       const openingBalanceTransaction: any = {
@@ -1191,6 +1780,8 @@ export class PropertyAccountService {
         date: effectiveDate,
         description: openingBalanceData.description?.trim() || `Opening balance ${directionLabel.toLowerCase()}`,
         category: 'opening_balance',
+        transactionCategory: 'OPENING_BALANCE',
+        accountingTreatment: 'SYSTEM',
         status: 'completed',
         processedBy: new mongoose.Types.ObjectId(openingBalanceData.processedBy),
         notes: openingBalanceData.notes,
@@ -1203,6 +1794,9 @@ export class PropertyAccountService {
       await PropertyAccount.updateOne(
         {
           _id: (account as any)._id,
+          propertyId: (account as any).propertyId,
+          isArchived: false,
+          isActive: { $ne: false },
           'transactions.idempotencyKey': { $ne: idKey }
         },
         {
@@ -1211,10 +1805,10 @@ export class PropertyAccountService {
         }
       );
 
-      const reloaded = await PropertyAccount.findById((account as any)._id) as any;
+      const reloaded = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
       if (reloaded) await this.recalculateBalance(reloaded as any);
       logger.info(`Added opening balance ${openingBalanceData.direction} of ${amount} to property ${propertyId}`);
-      return (await this.getPropertyAccount(propertyId, ledgerType)) as any;
+      return (await this.getPropertyAccount(propertyId)) as any;
     } catch (error) {
       logger.error('Error adding opening balance adjustment:', error);
       throw error;
@@ -1253,7 +1847,11 @@ export class PropertyAccountService {
         ? payoutData.idempotencyKey.trim()
         : `payout:${uuidv4()}`;
 
-      const account = await this.getPropertyAccount(propertyId, ledgerType);
+      const account = this.validateWritableAccount(
+        await this.getOrCreatePropertyAccount(propertyId),
+        propertyId,
+        'createOwnerPayout'
+      );
 
       if (account.runningBalance < payoutData.amount) {
         throw new AppError('Insufficient balance for this payout', 400);
@@ -1279,10 +1877,10 @@ export class PropertyAccountService {
       };
 
       await PropertyAccount.updateOne(
-        { _id: (account as any)._id, 'ownerPayouts.idempotencyKey': { $ne: idKey } },
+        { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false }, 'ownerPayouts.idempotencyKey': { $ne: idKey } },
         { $push: { ownerPayouts: payout }, $set: { lastUpdated: new Date() } }
       );
-      const fresh = await PropertyAccount.findById((account as any)._id) as any;
+      const fresh = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
       if (fresh) await this.recalculateBalance(fresh as any);
       logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
       return { account: (await this.getPropertyAccount(propertyId)) as any, payout };
@@ -1304,7 +1902,7 @@ export class PropertyAccountService {
     try {
       const pid = new mongoose.Types.ObjectId(propertyId);
       // Fetch all ledgers for this property (rental/sale) and locate the payout
-      const accounts = await PropertyAccount.find({ propertyId: pid });
+      const accounts = await PropertyAccount.find({ propertyId: pid, isArchived: false, isActive: { $ne: false } });
       if (!accounts || accounts.length === 0) {
         throw new AppError('Property account not found', 404);
       }
@@ -1323,6 +1921,7 @@ export class PropertyAccountService {
       if (!targetAccount || !targetPayout) {
         throw new AppError('Payout not found', 404);
       }
+      targetAccount = this.validateWritableAccount(targetAccount, propertyId, 'updatePayoutStatus');
 
       // Atomic status transition
       const now = new Date();
@@ -1333,6 +1932,9 @@ export class PropertyAccountService {
         const res = await PropertyAccount.updateOne(
           { 
             _id: (targetAccount as any)._id,
+            propertyId: (targetAccount as any).propertyId,
+            isArchived: false,
+            isActive: { $ne: false },
             runningBalance: { $gte: targetPayout.amount },
             ownerPayouts: { $elemMatch: { _id: new mongoose.Types.ObjectId(payoutId), status: 'pending' } }
           },
@@ -1347,6 +1949,9 @@ export class PropertyAccountService {
         const res = await PropertyAccount.updateOne(
           { 
             _id: (targetAccount as any)._id,
+            propertyId: (targetAccount as any).propertyId,
+            isArchived: false,
+            isActive: { $ne: false },
             ownerPayouts: { $elemMatch: { _id: new mongoose.Types.ObjectId(payoutId) } }
           },
           { 
@@ -1357,7 +1962,7 @@ export class PropertyAccountService {
           throw new AppError('Payout status update conflict', 409);
         }
       }
-      const fresh = await PropertyAccount.findById((targetAccount as any)._id) as any;
+      const fresh = await PropertyAccount.findOne({ _id: (targetAccount as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
       if (fresh) await this.recalculateBalance(fresh as any);
 
       logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId} on ledger ${String((targetAccount as any).ledgerType || 'unknown')}`);
@@ -1372,48 +1977,37 @@ export class PropertyAccountService {
   /**
    * Get property account with summary
    */
-  async getPropertyAccount(propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<IPropertyAccount> {
+  async getPropertyAccount(propertyId: string, legacyLedgerHint?: 'rental' | 'sale'): Promise<IPropertyAccount> {
     try {
       // Ensure indexes are healthy and up-to-date (partial unique with archive support)
       await this.ensureLedgerIndexes();
       const pid = new mongoose.Types.ObjectId(propertyId);
-      // Prefer exact ledgerType; consider legacy records without ledgerType as candidates as well.
-      const effectiveLedger: 'rental' | 'sale' = ledgerType || await this.inferLedgerTypeForProperty(propertyId);
+      const resolution = await this.resolveLedgerTypeForProperty(propertyId, 'getPropertyAccount');
+      const effectiveLedger = resolution.ledgerType;
+      if (legacyLedgerHint && legacyLedgerHint !== effectiveLedger) {
+        throw new AppError(
+          `Requested ledger ${legacyLedgerHint} does not match Property.rentalType (${resolution.businessType}) for property ${propertyId}; expected ${effectiveLedger}`,
+          400
+        );
+      }
       const candidates = await PropertyAccount.find({
         propertyId: pid,
         isArchived: { $ne: true },
-        $or: [{ ledgerType: effectiveLedger }, { ledgerType: { $exists: false } }, { ledgerType: null as any }]
+        isActive: { $ne: false },
+        ledgerType: effectiveLedger
       }) as any as IPropertyAccount[];
 
       let account: IPropertyAccount | null = null;
       if (!candidates || candidates.length === 0) {
         // Create if missing
-        account = (await this.getOrCreatePropertyAccount(propertyId, effectiveLedger)) as IPropertyAccount;
+        account = (await this.getOrCreatePropertyAccount(propertyId)) as IPropertyAccount;
       } else if (candidates.length === 1) {
         account = candidates[0];
       } else {
-        // Multiple ledgers found (duplicates/legacy). Pick the most complete deterministically.
-        const score = (acc: IPropertyAccount) => {
-          const txCount = Array.isArray(acc.transactions) ? acc.transactions.length : 0;
-          const payoutCount = Array.isArray(acc.ownerPayouts) ? acc.ownerPayouts.length : 0;
-          const income = Number((acc as any).totalIncome || 0);
-          const updated = acc.lastUpdated ? new Date(acc.lastUpdated).getTime() : 0;
-          return { txCount, payoutCount, income, updated };
-        };
-        // Prefer legacy (missing/null ledgerType) as authoritative if present
-        const prefer = candidates.filter(c => (c as any).ledgerType == null);
-        const pool = prefer.length > 0 ? prefer : candidates;
-        let best = pool[0];
-        for (const c of pool.slice(1)) {
-          const a = score(best);
-          const b = score(c);
-          const aScore = a.txCount + a.payoutCount;
-          const bScore = b.txCount + b.payoutCount;
-          if (bScore > aScore || (bScore === aScore && (b.income > a.income || (b.income === a.income && b.updated > a.updated)))) {
-            best = c;
-          }
-        }
-        account = best;
+        throw new AppError(
+          `Multiple active PropertyAccounts found for property ${propertyId} (${effectiveLedger}); refusing to choose a ledger`,
+          409
+        );
       }
       if (!account) throw new AppError('Property account not found', 404);
       
@@ -1443,6 +2037,7 @@ export class PropertyAccountService {
           }
           
           if (ownerId) {
+            this.validateWritableAccount(account as IPropertyAccount, propertyId, 'getPropertyAccount:updateOwner');
             (account as IPropertyAccount).ownerId = ownerId;
             (account as IPropertyAccount).ownerName = ownerName;
             await (account as IPropertyAccount).save();
@@ -1456,6 +2051,7 @@ export class PropertyAccountService {
             const companyName = development.owner?.companyName || '';
             const combined = `${first} ${last}`.trim();
             const ownerName = combined || companyName || 'Unknown Owner';
+            this.validateWritableAccount(account as IPropertyAccount, propertyId, 'getPropertyAccount:updateDevelopmentOwner');
             (account as IPropertyAccount).ownerName = ownerName;
             await (account as IPropertyAccount).save();
           } else {
@@ -1469,6 +2065,7 @@ export class PropertyAccountService {
                 const companyName = dev?.owner?.companyName || '';
                 const combined = `${first} ${last}`.trim();
                 const ownerName = combined || companyName || 'Unknown Owner';
+                this.validateWritableAccount(account as IPropertyAccount, propertyId, 'getPropertyAccount:updateUnitOwner');
                 (account as IPropertyAccount).ownerName = ownerName;
                 await (account as IPropertyAccount).save();
               } catch {}
@@ -1519,7 +2116,7 @@ export class PropertyAccountService {
           }
 
           if (missing.length > 0) {
-            account = (await this.getOrCreatePropertyAccount(propertyId, 'sale')) as IPropertyAccount;
+            account = (await this.getOrCreatePropertyAccount(propertyId)) as IPropertyAccount;
           }
         } catch (defErr) {
           console.warn('Sales ledger defensive backfill error (non-fatal):', defErr);
@@ -1570,6 +2167,121 @@ export class PropertyAccountService {
     }
   }
 
+  async syncPropertyMetadata(property: any): Promise<void> {
+    const account = this.validateWritableAccount(
+      await this.getOrCreatePropertyAccount(property._id.toString()),
+      property._id.toString(),
+      'syncPropertyMetadata'
+    );
+    const updates: any = {
+      propertyName: property.name,
+      propertyAddress: property.address,
+      ownerId: property.ownerId,
+      isActive: property.isActive !== false,
+      lastUpdated: new Date()
+    };
+    if (property.ownerId) {
+      const owner = await User.findById(property.ownerId);
+      if (owner) {
+        updates.ownerName = `${owner.firstName} ${owner.lastName}`;
+      }
+    }
+    await PropertyAccount.updateOne(
+      { _id: (account as any)._id, isArchived: false, isActive: { $ne: false } },
+      { $set: updates }
+    );
+  }
+
+  async updateOwnerNameForActiveAccounts(ownerId: string | mongoose.Types.ObjectId, ownerName: string): Promise<number> {
+    const result = await PropertyAccount.updateMany(
+      { ownerId, isArchived: false, isActive: { $ne: false } },
+      { $set: { ownerName, lastUpdated: new Date() } },
+      { maxTimeMS: 5000 } as any
+    );
+    return Number((result as any)?.modifiedCount || 0);
+  }
+
+  async removeOwnerReferenceFromActiveAccounts(ownerId: string | mongoose.Types.ObjectId): Promise<number> {
+    const result = await PropertyAccount.updateMany(
+      { ownerId, isArchived: false, isActive: { $ne: false } },
+      {
+        $unset: { ownerId: 1, ownerName: 1 },
+        $set: { lastUpdated: new Date() }
+      },
+      { maxTimeMS: 5000 } as any
+    );
+    return Number((result as any)?.modifiedCount || 0);
+  }
+
+  async clearOwnerReferenceForAccount(accountId: string | mongoose.Types.ObjectId): Promise<boolean> {
+    const result = await PropertyAccount.updateOne(
+      { _id: accountId, isArchived: false, isActive: { $ne: false } },
+      { $unset: { ownerId: 1, ownerName: 1 }, $set: { lastUpdated: new Date() } }
+    );
+    return Number((result as any)?.modifiedCount || 0) > 0;
+  }
+
+  async archiveLedgersForProperty(propertyId: string | mongoose.Types.ObjectId): Promise<number> {
+    const result = await PropertyAccount.updateMany(
+      { propertyId },
+      { $set: { isActive: false, isArchived: true, lastUpdated: new Date() } },
+      { maxTimeMS: 5000 } as any
+    );
+    return Number((result as any)?.modifiedCount || 0);
+  }
+
+  async archiveLedgerById(accountId: string | mongoose.Types.ObjectId): Promise<boolean> {
+    const result = await PropertyAccount.updateOne(
+      { _id: accountId, isArchived: { $ne: true } },
+      { $set: { isArchived: true, isActive: false, lastUpdated: new Date() } }
+    );
+    return Number((result as any)?.modifiedCount || 0) > 0;
+  }
+
+  async cancelPaymentReference(paymentId: string): Promise<boolean> {
+    const propertyAccount = await PropertyAccount.findOne({
+      'transactions.paymentId': paymentId,
+      isArchived: false,
+      isActive: { $ne: false }
+    });
+    if (!propertyAccount) return false;
+
+    const transaction = propertyAccount.transactions.find(
+      (t: any) => t.paymentId && t.paymentId.toString() === paymentId
+    );
+    if (!transaction) return false;
+
+    this.validateWritableAccount(propertyAccount as any, String((propertyAccount as any).propertyId), 'cancelPaymentReference');
+    const updateResult = await PropertyAccount.updateOne(
+      {
+        _id: propertyAccount._id,
+        propertyId: propertyAccount.propertyId,
+        isArchived: false,
+        isActive: { $ne: false },
+        transactions: { $elemMatch: { _id: (transaction as any)._id, status: { $ne: 'cancelled' } } }
+      },
+      {
+        $set: {
+          'transactions.$.status': 'cancelled',
+          'transactions.$.updatedAt': new Date(),
+          lastUpdated: new Date()
+        }
+      }
+    );
+    if (Number((updateResult as any)?.modifiedCount || 0) > 0) {
+      const fresh = await PropertyAccount.findOne({
+        _id: propertyAccount._id,
+        isArchived: false,
+        isActive: { $ne: false }
+      });
+      if (fresh) {
+        await this.recalculateBalance(fresh as any);
+      }
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Sync all property accounts with payment data
    */
@@ -1611,10 +2323,10 @@ export class PropertyAccountService {
       category?: string;
       status?: string;
     },
-    ledgerType: 'rental' | 'sale' = 'rental'
+    legacyLedgerHint?: 'rental' | 'sale'
   ): Promise<Transaction[]> {
     try {
-      const account = await this.getPropertyAccount(propertyId, ledgerType);
+      const account = await this.getPropertyAccount(propertyId, legacyLedgerHint);
       
       let transactions = account.transactions;
 
@@ -1669,6 +2381,8 @@ export class PropertyAccountService {
    */
   private async mergeDuplicateAccounts(accounts: IPropertyAccount[]): Promise<boolean> {
     if (!Array.isArray(accounts) || accounts.length === 0) return false;
+    accounts = accounts.filter(acc => (acc as any).isArchived !== true && (acc as any).isActive !== false);
+    if (accounts.length === 0) return false;
     // Group by (propertyId, ledgerTypeNormalized)
     type Group = { key: string; items: IPropertyAccount[] };
     const groupsMap: Record<string, IPropertyAccount[]> = Object.create(null);
@@ -1765,6 +2479,7 @@ export class PropertyAccountService {
 
       // Persist keeper and recalculate balance
       try {
+        this.validateWritableAccount(keeper, String((keeper as any).propertyId), 'mergeDuplicateAccounts');
         await keeper.save();
         await this.recalculateBalance(keeper);
       } catch (e) {
@@ -1776,7 +2491,7 @@ export class PropertyAccountService {
         const ids = toMergeAndDelete.map(d => d._id);
         if (ids.length > 0) {
           await PropertyAccount.updateMany(
-            { _id: { $in: ids } },
+            { _id: { $in: ids }, isArchived: false },
             { $set: { isArchived: true, lastUpdated: new Date() } }
           );
         }
@@ -1800,11 +2515,12 @@ export class PropertyAccountService {
     if (Array.isArray(companyPropertyIds) && companyPropertyIds.length > 0) {
       filter.propertyId = { $in: companyPropertyIds.map(id => new mongoose.Types.ObjectId(id)) };
     }
-    const rentalAccounts = await PropertyAccount.find({ ...filter, ledgerType: { $in: [null as any, 'rental'] } });
+    const rentalAccounts = await PropertyAccount.find({ ...filter, isArchived: false, isActive: { $ne: false }, ledgerType: { $in: [null as any, 'rental'] } });
     for (const rental of rentalAccounts) {
+      this.validateWritableAccount(rental as any, String((rental as any).propertyId), 'migrateSalesLedgerForCompany');
       const saleTx = (rental.transactions || []).filter(t => t.type === 'income' && t.category === 'sale_income');
       if (saleTx.length === 0) continue;
-      const saleAccount = await this.getOrCreatePropertyAccount(rental.propertyId.toString(), 'sale');
+      const saleAccount = await this.getOrCreatePropertyAccount(rental.propertyId.toString());
       // Move each tx if not already present in sale ledger (by paymentId)
       let movedHere = 0;
       for (const tx of saleTx) {
@@ -1819,8 +2535,13 @@ export class PropertyAccountService {
         moved++;
       }
       if (movedHere > 0) {
-        // Remove from rental ledger
-        rental.transactions = rental.transactions.filter(t => !(t.type === 'income' && t.category === 'sale_income'));
+        for (const tx of rental.transactions || []) {
+          if (tx.type === 'income' && tx.category === 'sale_income') {
+            tx.status = 'cancelled';
+            tx.updatedAt = new Date();
+          }
+        }
+        this.validateWritableAccount(saleAccount, String((saleAccount as any).propertyId), 'migrateSalesLedgerForCompany');
         await saleAccount.save();
         await rental.save();
         await this.recalculateBalance(saleAccount);
@@ -1841,6 +2562,8 @@ export class PropertyAccountService {
   ): Promise<{ mergedTransactions: number; mergedPayouts: number }> {
     let mergedTransactions = 0;
     let mergedPayouts = 0;
+    this.validateWritableAccount(source, String((source as any).propertyId), 'mergeAccountsCrossLedger:source');
+    this.validateWritableAccount(target, String((target as any).propertyId), 'mergeAccountsCrossLedger:target');
 
     // Build uniqueness sets from target
     const txKeys = new Set<string>();
@@ -1897,8 +2620,10 @@ export class PropertyAccountService {
     await (target as any).save();
     await this.recalculateBalance(target);
 
-    // Bypass Mongoose middleware to delete the source document permanently
-    await (PropertyAccount as any).collection.deleteOne({ _id: source._id });
+    await PropertyAccount.updateOne(
+      { _id: source._id, isArchived: false },
+      { $set: { isArchived: true, isActive: false, lastUpdated: new Date() } }
+    );
 
     return { mergedTransactions, mergedPayouts };
   }
@@ -1962,6 +2687,8 @@ export class PropertyAccountService {
       // Query candidate legacy accounts: missing ledgerType or 'rental'
       const candidates = await PropertyAccount.find({
         propertyId: { $in: Array.from(allIdsSet).map(id => new mongoose.Types.ObjectId(id)) },
+        isArchived: false,
+        isActive: { $ne: false },
         $or: [{ ledgerType: { $exists: false } }, { ledgerType: null }, { ledgerType: 'rental' }]
       });
 
@@ -1983,7 +2710,7 @@ export class PropertyAccountService {
 
         try {
           // If a sale ledger already exists for this property, merge into it; else update this one to sale
-          const existingSale = await PropertyAccount.findOne({ propertyId: acc.propertyId, ledgerType: 'sale' });
+          const existingSale = await PropertyAccount.findOne({ propertyId: acc.propertyId, ledgerType: 'sale', isArchived: false, isActive: { $ne: false } });
           if (existingSale && String(existingSale._id) !== String(acc._id)) {
             if (dryRun) {
               merged++;
@@ -2001,6 +2728,7 @@ export class PropertyAccountService {
             updated++;
             details.push({ propertyId: pid, action: 'updated', reason: 'Would set ledgerType to sale (dry-run)' });
           } else {
+            this.validateWritableAccount(acc as any, String((acc as any).propertyId), 'migrateLegacyLedgerTypesForCompany');
             (acc as any).ledgerType = 'sale';
             await (acc as any).save();
             await this.recalculateBalance(acc as any);
@@ -2033,11 +2761,11 @@ export async function migrateSalesLedgerForCompany(
 
 // One-off maintenance: remove duplicate income transactions per (type,paymentId) for a given property ledger
 export async function reconcilePropertyLedgerDuplicates(
-  propertyId: string,
-  ledgerType?: 'rental' | 'sale'
+  propertyId: string
 ): Promise<{ removed: number; kept: number; accountId?: string }> {
   const service = PropertyAccountService.getInstance();
-  const account = await service.getPropertyAccount(propertyId, ledgerType);
+  const account = await service.getPropertyAccount(propertyId);
+  (service as any).validateWritableAccount(account, propertyId, 'reconcilePropertyLedgerDuplicates');
   const tx = Array.isArray(account.transactions) ? account.transactions : [];
   const byKey: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
   for (const t of tx) {
@@ -2058,12 +2786,18 @@ export async function reconcilePropertyLedgerDuplicates(
     toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
   }
   if (toRemove.length > 0) {
-    // Use native collection update to bypass immutability middleware intentionally for repair
-    await (PropertyAccount as any).collection.updateOne(
-      { _id: account._id },
-      { $pull: { transactions: { _id: { $in: toRemove } } } }
+    await PropertyAccount.updateOne(
+      { _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } },
+      {
+        $set: {
+          'transactions.$[t].status': 'cancelled',
+          'transactions.$[t].updatedAt': new Date(),
+          lastUpdated: new Date()
+        }
+      },
+      { arrayFilters: [{ 't._id': { $in: toRemove } }] as any } as any
     );
-    const fresh = await PropertyAccount.findById(account._id);
+    const fresh = await PropertyAccount.findOne({ _id: account._id, isArchived: false, isActive: { $ne: false } });
     if (fresh) {
       await service.recalculateBalance(fresh as any);
     }

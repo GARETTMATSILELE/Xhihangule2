@@ -1,11 +1,25 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../api/axios';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { User } from '../types/auth';
 import { AxiosError } from 'axios';
 import { getDashboardPath } from '../utils/registrationUtils';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
+
+function isAuthOptionalPublicPath(pathname: string): boolean {
+  return (
+    pathname === '/' ||
+    pathname === '/login' ||
+    pathname === '/signup' ||
+    pathname === '/forgot-password' ||
+    pathname === '/reset-password' ||
+    pathname === '/admin-signup' ||
+    pathname.startsWith('/billing/') ||
+    pathname.startsWith('/checkout') ||
+    pathname.startsWith('/payments')
+  );
+}
 
 function getSafeNextPathFromUrlSearch(search: string): string | null {
   try {
@@ -49,6 +63,8 @@ interface Company {
   name: string;
   ownerId: string;
   logo?: string;
+  plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
+  workspaceType?: 'agency' | 'individual';
 }
 
 interface CreateCompany {
@@ -126,6 +142,7 @@ const clearAllTokens = () => {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,15 +156,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Initialize authentication on mount
   useEffect(() => {
-    // Only initialize once
-    if (hasInitialized) {
+    // Avoid repeating validation unless the user moves from a public page into protected app space.
+    if (hasInitialized && (isAuthenticated || isAuthOptionalPublicPath(location.pathname))) {
       return;
     }
 
     const initializeAuth = async () => {
       try {
-        // If we're on the login page, do not attempt automatic sign-in or token refresh
-        if (window.location.pathname === '/login') {
+        // Public routes should render without probing auth or forcing a login redirect.
+        if (isAuthOptionalPublicPath(window.location.pathname)) {
           setLoading(false);
           setHasInitialized(true);
           return;
@@ -248,9 +265,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setCompany(null);
               setIsAuthenticated(false);
               
-              // Don't redirect on payments page - allow it to work without authentication
-              if (window.location.pathname.includes('/payments')) {
-                if (isDevelopment) console.log('Auth initialization failed on payments page - not redirecting');
+              // Public pages should remain usable without authentication.
+              if (isAuthOptionalPublicPath(window.location.pathname)) {
+                if (isDevelopment) console.log('Auth initialization failed on public page - not redirecting');
                 return;
               }
               
@@ -272,9 +289,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCompany(null);
         setIsAuthenticated(false);
         
-        // Don't redirect on payments page - allow it to work without authentication
-        if (window.location.pathname.includes('/payments')) {
-          if (isDevelopment) console.log('Auth initialization failed on payments page - not redirecting');
+        // Public pages should remain usable without authentication.
+        if (isAuthOptionalPublicPath(window.location.pathname)) {
+          if (isDevelopment) console.log('Auth initialization failed on public page - not redirecting');
           return;
         }
         
@@ -302,7 +319,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       setLoading(false);
-      navigate('/login');
+      if (!isAuthOptionalPublicPath(window.location.pathname)) {
+        navigate('/login');
+      }
     };
 
     window.addEventListener('authError', handleAuthError as EventListener);
@@ -310,7 +329,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       window.removeEventListener('authError', handleAuthError as EventListener);
     };
-  }, [navigate, hasInitialized]);
+  }, [navigate, hasInitialized, isAuthenticated, location.pathname]);
 
   // Cross-tab auth sync (login/logout) via storage events
   useEffect(() => {
@@ -399,7 +418,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           navigate(nextPath);
           return userData;
         } else {
-          const dashboardPath = getDashboardPath(roles[0] as any);
+          const dashboardPath = getDashboardPath(roles[0] as any, companyData);
           if (isDevelopment) console.log('Navigating to dashboard:', dashboardPath);
           navigate(dashboardPath);
         }
@@ -450,7 +469,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return userData as any;
               }
             } catch {}
-            const dashboardPath = getDashboardPath(userData.role);
+            const dashboardPath = getDashboardPath(userData.role, companyData);
             navigate(dashboardPath);
             return userData as any; // early return on successful retry
           } catch (retryErr: any) {
@@ -549,7 +568,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (isAdmin && !userData.companyId) {
           navigate('/admin/company-setup');
         } else {
-          const path = getDashboardPath(userData.role);
+          const path = getDashboardPath(userData.role, companyData);
           navigate(path);
         }
       }
@@ -644,7 +663,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveRole: (role) => {
         setActiveRoleState(role);
         try { localStorage.setItem('activeRole', role as any); } catch {}
-        const path = getDashboardPath(role as any);
+        const path = getDashboardPath(role as any, company);
         if (window.location.pathname !== path) {
           try { (window as any).history.pushState({}, '', path); } catch {}
         }

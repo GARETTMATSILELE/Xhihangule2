@@ -11,6 +11,7 @@ export const COLLECTIONS = {
   SALES_OWNERS: 'salesowners',
   LEVY_PAYMENTS: 'levypayments',
   MUNICIPAL_PAYMENTS: 'municipalpayments',
+  CHARGE_TYPES: 'ChargeTypes',
   PROPERTY_ACCOUNTS: 'propertyaccounts',
   AGENT_ACCOUNTS: 'agentaccounts',
   VALUATIONS: 'valuations',

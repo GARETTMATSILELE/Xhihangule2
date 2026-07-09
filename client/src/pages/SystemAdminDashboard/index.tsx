@@ -8,6 +8,15 @@ import BackupsMaintenancePage from './BackupsMaintenancePage';
 import UsersPage from './UsersPage';
 import SubscriptionManagementPage from './SubscriptionManagementPage';
 import CashSubscriptionsPage from './CashSubscriptionsPage';
+import CompaniesPage from './CompaniesPage';
+import CompanyProfilePage from './CompanyProfilePage';
+import CashPaymentsPage from './CashPaymentsPage';
+import InvoicesPage from './InvoicesPage';
+import VouchersPage from './VouchersPage';
+import PlansPage from './PlansPage';
+import AuditLogsPage from './AuditLogsPage';
+import SupportTicketsPage from './SupportTicketsPage';
+import RevenueAnalyticsPage from './RevenueAnalyticsPage';
 
 const SystemAdminDashboard: React.FC = () => {
   return (
@@ -20,6 +29,15 @@ const SystemAdminDashboard: React.FC = () => {
           <Route path="users" element={<UsersPage />} />
           <Route path="subscriptions" element={<SubscriptionManagementPage />} />
           <Route path="cash-subscriptions" element={<CashSubscriptionsPage />} />
+          <Route path="companies" element={<CompaniesPage />} />
+          <Route path="companies/:id" element={<CompanyProfilePage />} />
+          <Route path="cash-payments" element={<CashPaymentsPage />} />
+          <Route path="invoices" element={<InvoicesPage />} />
+          <Route path="vouchers" element={<VouchersPage />} />
+          <Route path="plans" element={<PlansPage />} />
+          <Route path="audit-logs" element={<AuditLogsPage />} />
+          <Route path="support-tickets" element={<SupportTicketsPage />} />
+          <Route path="revenue" element={<RevenueAnalyticsPage />} />
           <Route path="*" element={<Navigate to="/system-admin" replace />} />
         </Route>
       </Routes>

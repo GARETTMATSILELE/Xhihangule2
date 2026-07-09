@@ -24,6 +24,7 @@ import { useNotification } from '../../components/Layout/Header';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
+import { inspectionService } from '../../services/inspectionService';
 
 const locales = {
   'en-US': require('date-fns/locale/en-US'),
@@ -38,7 +39,11 @@ const localizer = dateFnsLocalizer({
 
 // Task types
 const TASK_TYPES = [
+  { value: 'follow_up', label: 'Follow-Up Lead' },
+  { value: 'call', label: 'Call Lead' },
   { value: 'viewing', label: 'Viewing' },
+  { value: 'property_options', label: 'Send Property Options' },
+  { value: 'application_reminder', label: 'Application Reminder' },
   { value: 'maintenance', label: 'Maintenance' },
   { value: 'meeting', label: 'Meeting' },
   { value: 'other', label: 'Other' },
@@ -57,6 +62,8 @@ interface Task {
   notes?: string;
   notified?: boolean;
 }
+
+const taskTypeLabel = (type: string) => TASK_TYPES.find(option => option.value === type)?.label || type || 'Type';
 
 const minimalistCardStyle = {
   borderRadius: 3,
@@ -77,7 +84,22 @@ const SchedulePage: React.FC = () => {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [form, setForm] = useState<Partial<Task>>({ type: 'viewing' });
   const [notificationTasks, setNotificationTasks] = useState<Task[]>([]);
+  const [inspectionEvents, setInspectionEvents] = useState<any[]>([]);
   const { addNotification } = useNotification();
+
+  useEffect(() => {
+    let mounted = true;
+    inspectionService.getInspections()
+      .then((items) => {
+        if (mounted) setInspectionEvents(items);
+      })
+      .catch(() => {
+        if (mounted) setInspectionEvents([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Save tasks to localStorage
   useEffect(() => {
@@ -206,7 +228,7 @@ const SchedulePage: React.FC = () => {
                     </div>
                     {/* Four evenly spaced blue info boxes */}
                     <div className="flex gap-2 mb-2 px-3">
-                      <div className="flex-1 bg-blue-100 text-blue-900 rounded-lg px-2 py-2 text-xs font-semibold text-center">{task.type || 'Type'}</div>
+                      <div className="flex-1 bg-blue-100 text-blue-900 rounded-lg px-2 py-2 text-xs font-semibold text-center">{taskTypeLabel(task.type)}</div>
                       <div className="flex-1 bg-blue-100 text-blue-900 rounded-lg px-2 py-2 text-xs font-semibold text-center">{task.date}</div>
                       <div className="flex-1 bg-blue-100 text-blue-900 rounded-lg px-2 py-2 text-xs font-semibold text-center">{task.time}</div>
                       <div className="flex-1 bg-blue-100 text-blue-900 rounded-lg px-2 py-2 text-xs font-semibold text-center">{task.clientName || 'N/A'}</div>
@@ -224,18 +246,45 @@ const SchedulePage: React.FC = () => {
         <div className="bg-white rounded-2xl p-6 shadow-md flex-grow w-full h-[60vh] min-h-[400px]">
           <Calendar
             localizer={localizer}
-            events={tasks.map(task => ({
-              id: task.id,
-              title: task.title,
-              start: new Date(`${task.date}T${task.time}`),
-              end: new Date(`${task.date}T${task.time}`),
-              allDay: false,
-            }))}
+            events={[
+              ...tasks.map(task => ({
+                id: task.id,
+                title: task.title,
+                start: new Date(`${task.date}T${task.time}`),
+                end: new Date(`${task.date}T${task.time}`),
+                allDay: false,
+                resource: { type: task.type }
+              })),
+              ...inspectionEvents.map((inspection) => {
+                const scheduled = new Date(inspection.scheduledDate);
+                return {
+                  id: `inspection-${inspection._id}`,
+                  title: `${String(inspection.type || 'routine').replace('_', ' ')} inspection`,
+                  start: scheduled,
+                  end: scheduled,
+                  allDay: false,
+                  resource: { type: 'inspection', status: inspection.effectiveStatus || inspection.status }
+                };
+              })
+            ]}
             startAccessor="start"
             endAccessor="end"
             style={{ height: '100%', width: '100%', background: 'transparent', color: 'black', borderRadius: '1.5rem', fontFamily: 'Poppins, ui-sans-serif, system-ui' }}
             className="text-black"
-            eventPropGetter={() => ({ style: { backgroundColor: '#3b82f6', color: '#fff', borderRadius: '0.75rem', border: 'none', padding: '2px 8px', fontWeight: 600 } })}
+            eventPropGetter={(event: any) => ({
+              style: {
+                backgroundColor: event.resource?.type === 'inspection'
+                  ? event.resource?.status === 'overdue'
+                    ? '#dc2626'
+                    : '#7c3aed'
+                  : '#3b82f6',
+                color: '#fff',
+                borderRadius: '0.75rem',
+                border: 'none',
+                padding: '2px 8px',
+                fontWeight: 600
+              }
+            })}
             dayPropGetter={() => ({ style: { backgroundColor: 'transparent' } })}
             toolbar={true}
             views={['month', 'week', 'day']}

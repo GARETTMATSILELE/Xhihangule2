@@ -12,6 +12,7 @@ import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
+import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationService';
 
 // Get properties managed by the agent
 export const getAgentProperties = async (req: Request, res: Response) => {
@@ -39,19 +40,6 @@ export const getAgentProperties = async (req: Request, res: Response) => {
     
     console.log('Agent properties query:', query);
     
-    // First, let's see all properties in the company to understand the data
-    const allCompanyProperties = await Property.find({ companyId: req.user.companyId });
-    console.log('All company properties:', {
-      total: allCompanyProperties.length,
-      properties: allCompanyProperties.map(p => ({
-        id: p._id,
-        name: p.name,
-        ownerId: p.ownerId?.toString(),
-        agentUserId: req.user!.userId,
-        isOwnedByAgent: p.ownerId?.toString() === req.user!.userId
-      }))
-    });
-    
     const properties = await Property.find(query)
     .populate('ownerId', 'firstName lastName email')
     .populate('propertyOwnerId', 'firstName lastName email phone')
@@ -60,17 +48,7 @@ export const getAgentProperties = async (req: Request, res: Response) => {
     console.log('Found properties for agent:', {
       count: properties.length,
       agentId: req.user.userId,
-      query: query,
-      properties: properties.map(p => ({
-        id: p._id,
-        name: p.name,
-        address: p.address,
-        type: p.type,
-        ownerId: p.ownerId?._id || p.ownerId, // Show the actual ID, not the populated object
-        ownerIdType: typeof p.ownerId,
-        companyId: p.companyId,
-        status: p.status
-      }))
+      query
     });
 
     res.json(properties);
@@ -175,6 +153,8 @@ export const getAgentLeases = async (req: Request, res: Response) => {
     })
     .populate('propertyId', 'name address')
     .populate('tenantId', 'firstName lastName email')
+    .populate('previousLeaseId', 'startDate endDate status')
+    .populate('successorLeaseId', 'startDate endDate status')
     .sort({ createdAt: -1 });
 
     res.json(leases);
@@ -496,7 +476,7 @@ export const createAgentLease = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Only agents can create leases via this endpoint.' });
     }
 
-    const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit, status, monthlyRent: rent, securityDeposit: deposit, petDeposit, isPetAllowed, maxOccupants, isUtilitiesIncluded, utilitiesDetails, rentDueDay, lateFee, gracePeriod } = req.body;
+    const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit, status, monthlyRent: rent, securityDeposit: deposit, petDeposit, isPetAllowed, maxOccupants, isUtilitiesIncluded, utilitiesDetails, rentDueDay, lateFee, gracePeriod, previousLeaseId } = req.body;
 
     // Use monthlyRent/securityDeposit if rentAmount/depositAmount are not provided
     const finalRentAmount = rentAmount !== undefined ? rentAmount : monthlyRent;
@@ -552,6 +532,28 @@ export const createAgentLease = async (req: Request, res: Response) => {
       status: status || 'active',
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       ownerId: new mongoose.Types.ObjectId(req.user.userId), // Set the agent as the owner
+      previousLeaseId: previousLeaseId && mongoose.Types.ObjectId.isValid(previousLeaseId) ? new mongoose.Types.ObjectId(previousLeaseId) : null,
+      billingStatus: 'current',
+      billingRules: {
+        frequency: 'monthly' as const,
+        rentDueDay: Number(rentDueDay || 1),
+        escalationPercent: Number(req.body.escalationPercent || req.body.billingRules?.escalationPercent || 0),
+        escalationFrequencyMonths: Number(req.body.escalationFrequencyMonths || req.body.billingRules?.escalationFrequencyMonths || 12),
+        nextEscalationDate: req.body.nextEscalationDate || req.body.billingRules?.nextEscalationDate
+          ? new Date(req.body.nextEscalationDate || req.body.billingRules.nextEscalationDate)
+          : undefined,
+        recurringLevies: Number(req.body.recurringLevies || req.body.billingRules?.recurringLevies || 0),
+        recurringServiceCharges: Number(req.body.recurringServiceCharges || req.body.billingRules?.recurringServiceCharges || 0),
+        prorateMoveIn: req.body.prorateMoveIn ?? req.body.billingRules?.prorateMoveIn ?? true,
+      },
+      financialSummary: {
+        totalBilled: 0,
+        totalPaid: 0,
+        outstandingBalance: 0,
+        depositHeld: Number(finalDepositAmount),
+        penalties: 0,
+        moveOutSettlement: 0,
+      },
       
       // Additional fields with defaults
       monthlyRent: Number(monthlyRent || finalRentAmount),
@@ -568,6 +570,18 @@ export const createAgentLease = async (req: Request, res: Response) => {
 
     const lease = new Lease(leaseData);
     await lease.save();
+    if (leaseData.previousLeaseId) {
+      await Lease.findByIdAndUpdate(leaseData.previousLeaseId, {
+        successorLeaseId: lease._id,
+        status: 'renewed',
+        lifecycleStatusChangedAt: new Date()
+      });
+    }
+    if (lease.status === 'active' || lease.status === 'pending_approval') {
+      ensureLeaseInspectionSchedule(lease as any, property.name || property.address || 'Property').catch((error) => {
+        console.error('Failed to create agent lease inspection schedule:', error);
+      });
+    }
 
     // Mark property as rented
     await Property.findByIdAndUpdate(new mongoose.Types.ObjectId(propertyId), { status: 'rented' });
@@ -610,6 +624,11 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
       'name',
       'address',
       'type',
+      'propertyCategory',
+      'propertySubtype',
+      'propertySpecifications',
+      'propertyOperationalStatus',
+      'propertyUse',
       'status',
       'description',
       'rent',
@@ -776,12 +795,19 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     // Accept idempotency key from header or body
     const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
 
-    // Validate required fields
-    const amountMissing = amount === undefined || amount === null || Number.isNaN(Number(amount));
-    if (!propertyId || !tenantId || amountMissing || !paymentDate || !paymentMethod) {
+    // Validate required fields (allow deposit-only: amount=0 with depositAmount>0)
+    const numericAmount = Number(amount || 0);
+    const numericDeposit = Number(depositAmount || 0);
+    if (!propertyId || !tenantId || !paymentDate || !paymentMethod) {
       return res.status(400).json({
         status: 'error',
-        message: 'Missing required fields: propertyId, tenantId, amount, paymentDate, paymentMethod',
+        message: 'Missing required fields: propertyId, tenantId, paymentDate, paymentMethod',
+      });
+    }
+    if (numericAmount <= 0 && numericDeposit <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Either amount or depositAmount must be greater than 0',
       });
     }
 
@@ -796,6 +822,23 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     if (!tenant) {
       return res.status(404).json({ message: 'Tenant not found or does not belong to your company.' });
     }
+
+    const propertyAccountService = (await import('../services/propertyAccountService')).default;
+    const ledgerResolution = await propertyAccountService.resolveLedgerTypeForProperty(propertyId, 'agentController.createPayment');
+    const suppliedPaymentType = paymentType ? String(paymentType).toLowerCase() : '';
+    if (suppliedPaymentType === 'sale' && ledgerResolution.ledgerType !== 'sale') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Payment type sale does not match Property.rentalType (${ledgerResolution.businessType}) for property ${propertyId}`
+      });
+    }
+    if (suppliedPaymentType && suppliedPaymentType !== 'sale' && ledgerResolution.ledgerType !== 'rental') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Payment type ${suppliedPaymentType} does not match Property.rentalType (${ledgerResolution.businessType}) for property ${propertyId}`
+      });
+    }
+    const resolvedPaymentType = (paymentType as any) || (ledgerResolution.ledgerType === 'sale' ? 'sale' : 'rental');
 
     // Short-circuit for duplicate submissions using idempotency key
     if (idempotencyKey) {
@@ -813,7 +856,29 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     }
 
     // Prevent double-paying the same rental month; allow partials up to remaining
-    if ((paymentType || 'rental') === 'rental' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
+    let combinedAllocation: import('../services/combinedPaymentService').CombinedAllocationResult | null = null;
+    if (resolvedPaymentType !== 'sale' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
+      const allocationResult = await (await import('../services/combinedPaymentService')).resolveCombinedRentalAllocation({
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        propertyId: new mongoose.Types.ObjectId(propertyId),
+        tenantId: new mongoose.Types.ObjectId(tenantId),
+        amount: numericAmount,
+        depositAmount: numericDeposit,
+        rentalPeriodMonth,
+        rentalPeriodYear,
+        advanceMonthsPaid: Number(advanceMonthsPaid || 1),
+        rentUsed: typeof (req.body as any).rentUsed === 'number' ? Number((req.body as any).rentUsed) : Number((property as any)?.rent || 0),
+        levyUsed: typeof (req.body as any).levyUsed === 'number' ? Number((req.body as any).levyUsed) : undefined,
+      });
+      if ('status' in allocationResult) {
+        return res.status(allocationResult.status).json({
+          status: 'error',
+          message: allocationResult.message,
+        });
+      }
+      combinedAllocation = allocationResult;
+
+      if (!combinedAllocation.hasLevy) {
       const rent = (property as any)?.rent || 0;
       if (advanceMonthsPaid && advanceMonthsPaid > 1) {
         if (rent > 0) {
@@ -837,32 +902,55 @@ export const createAgentPayment = async (req: Request, res: Response) => {
         };
         const [agg] = await Payment.aggregate([
           { $match: periodFilter },
-          { $group: { _id: null, total: { $sum: '$amount' } } }
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $cond: [
+                    { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
+                    '$rentAllocated',
+                    '$amount'
+                  ]
+                }
+              }
+            }
+          }
         ]);
         const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
         const rentCents = Math.round((rent || 0) * 100);
         const remainingCents = rentCents - alreadyPaidCents;
-        if (remainingCents <= 0) {
-          return res.status(409).json({ status: 'error', message: 'This month is fully paid.' });
-        }
         const amountCents = Math.round((Number(amount) || 0) * 100);
-        if (amountCents > remainingCents) {
-          return res.status(400).json({ status: 'error', message: `Only ${(remainingCents/100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+        const depositCents = Math.round(numericDeposit * 100);
+        const isDepositOnly = amountCents === 0 && depositCents > 0;
+        if (!isDepositOnly) {
+          if (remainingCents <= 0) {
+            return res.status(409).json({ status: 'error', message: 'This month is fully paid.' });
+          }
+          if (amountCents > remainingCents) {
+            return res.status(400).json({ status: 'error', message: `Only ${(remainingCents/100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
+          }
         }
       }
+      }
     }
+
+    const commissionBaseAmount = combinedAllocation ? combinedAllocation.rentAllocated : numericAmount;
 
     // Calculate commission based on property's commission percentage and company-specific splits
     const commissionPercentage = Number(property.commission || 0);
     const commissionDetails = await (await import('../services/commissionService')).CommissionService.calculate(
-      amount,
+      commissionBaseAmount,
       commissionPercentage,
       new mongoose.Types.ObjectId(req.user.companyId)
     );
+    if (combinedAllocation?.hasLevy) {
+      commissionDetails.ownerAmount = Number(commissionDetails.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
+    }
 
     // Create payment record
     const payment = new Payment({
-      paymentType: paymentType || 'rental',
+      paymentType: resolvedPaymentType,
       propertyType: propertyType || 'residential',
       propertyId: new mongoose.Types.ObjectId(propertyId),
       tenantId: new mongoose.Types.ObjectId(tenantId),
@@ -883,12 +971,42 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       advanceMonthsPaid: advanceMonthsPaid || 1,
       advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
       advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
+      rentUsed: combinedAllocation?.rentUsed ?? (req.body as any).rentUsed,
+      levyUsed: combinedAllocation?.levyUsed,
+      rentAllocated: combinedAllocation?.rentAllocated,
+      levyAllocated: combinedAllocation?.levyAllocated,
       idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined
     });
 
     await payment.save();
     payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
     await payment.save();
+
+    if (combinedAllocation?.levyAllocated && combinedAllocation.levyAllocated > 0) {
+      const { createLinkedLevyPayment } = await import('../services/combinedPaymentService');
+      const levyId = await createLinkedLevyPayment({
+        _id: payment._id as mongoose.Types.ObjectId,
+        propertyId: payment.propertyId,
+        companyId: payment.companyId,
+        paymentDate: payment.paymentDate,
+        paymentMethod: payment.paymentMethod,
+        currency: payment.currency,
+        referenceNumber: payment.referenceNumber,
+        notes: payment.notes,
+        processedBy: payment.processedBy,
+        levyAllocated: combinedAllocation.levyAllocated,
+        levyUsed: combinedAllocation.levyUsed,
+        rentalPeriodMonth: payment.rentalPeriodMonth,
+        rentalPeriodYear: payment.rentalPeriodYear,
+        advanceMonthsPaid: payment.advanceMonthsPaid,
+        advancePeriodStart: payment.advancePeriodStart,
+        advancePeriodEnd: payment.advancePeriodEnd,
+      });
+      if (levyId) {
+        payment.linkedLevyPaymentId = levyId;
+        await payment.save();
+      }
+    }
 
     // If depositAmount > 0, record in rentaldeposits (ledger)
     if (payment.depositAmount && payment.depositAmount > 0) {
@@ -929,7 +1047,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     await agentAccountService.syncCommissionForPayment(payment._id.toString());
 
     // If it's a rental payment, update property owner's balance
-    if ((paymentType || 'rental') === 'rental' && property.ownerId) {
+    if (resolvedPaymentType !== 'sale' && property.ownerId) {
       await mongoose.model('User').findByIdAndUpdate(
         property.ownerId,
         {
@@ -942,7 +1060,6 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     // Ensure owner income is recorded in property ledger (enqueue retry on failure)
     try {
-      const propertyAccountService = (await import('../services/propertyAccountService')).default;
       await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
     } catch (e) {
       try {

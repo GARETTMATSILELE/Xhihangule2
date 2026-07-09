@@ -12,7 +12,12 @@ export interface PropertyOwner {
 
 export interface CreatePropertyOwnerData extends Omit<PropertyOwner, '_id'> {
   password: string;
+  propertyIds?: string[];
 }
+
+export type UpdatePropertyOwnerData = Partial<PropertyOwner> & {
+  propertyIds?: string[];
+};
 
 export const useAgentPropertyOwnerService = () => {
   const getAll = async () => {
@@ -45,7 +50,7 @@ export const useAgentPropertyOwnerService = () => {
     }
   };
 
-  const update = async (id: string, ownerData: Partial<PropertyOwner>) => {
+  const update = async (id: string, ownerData: UpdatePropertyOwnerData) => {
     try {
       const response = await api.put(`/agents/property-owners/${id}`, ownerData);
       return response.data;

@@ -11,7 +11,7 @@ import {
   getAdminDashboardProperties,
   getPublicProperties
 } from '../controllers/propertyController';
-import { authWithCompany } from '../middleware/auth';
+import { authWithCompany, requireActiveSubscription } from '../middleware/auth';
 import { isAdmin, isAgent, canCreateProperty } from '../middleware/roles';
 import { enforcePropertyLimit } from '../middleware/limits';
 import { logger } from '../utils/logger';
@@ -59,7 +59,7 @@ router.get('/debug/all', async (req, res) => {
 router.get('/public', async (req, res) => {
   try {
     const properties = await Property.find({ status: 'available' })
-      .select('name address type status')
+      .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status')
       .limit(10);
     res.json(properties);
   } catch (error) {
@@ -81,7 +81,7 @@ router.get('/public/all', async (req, res) => {
   }
   try {
     const properties = await Property.find({})
-      .select('name address type status rentAmount bedrooms bathrooms amenities')
+      .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status rentAmount bedrooms bathrooms amenities propertySpecifications')
       .limit(50);
     res.json(properties);
   } catch (error) {
@@ -93,7 +93,7 @@ router.get('/public/all', async (req, res) => {
 router.get('/public/:id', async (req, res) => {
   try {
     const property = await Property.findById(req.params.id)
-      .select('name address type status rentAmount bedrooms bathrooms amenities description');
+      .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status rentAmount bedrooms bathrooms amenities description propertySpecifications');
     if (!property) {
       return res.status(404).json({ message: 'Property not found' });
     }
@@ -113,16 +113,16 @@ router.get('/admin-dashboard', (req, res, next) => {
 });
 
 // Protected routes (auth required)
-router.get('/', authWithCompany, getProperties);
-router.get('/vacant', authWithCompany, getVacantProperties);
-router.get('/:id', authWithCompany, getProperty);
-router.post('/', authWithCompany, canCreateProperty, enforcePropertyLimit, createProperty);
+router.get('/', authWithCompany, requireActiveSubscription(), getProperties);
+router.get('/vacant', authWithCompany, requireActiveSubscription(), getVacantProperties);
+router.get('/:id', authWithCompany, requireActiveSubscription(), getProperty);
+router.post('/', authWithCompany, requireActiveSubscription(), canCreateProperty, enforcePropertyLimit, createProperty);
 // Sales route for creating property with sales fields
-router.post('/sales', authWithCompany, createSalesProperty);
+router.post('/sales', authWithCompany, requireActiveSubscription(), createSalesProperty);
 // Allow sales/agents to update their own sales properties (controller enforces ownership)
-router.put('/sales/:id', authWithCompany, updateProperty);
-router.put('/:id', authWithCompany, isAdmin, updateProperty);
-router.delete('/:id', authWithCompany, isAdmin, deleteProperty);
-router.put('/:id/restore', authWithCompany, isAdmin, restoreProperty);
+router.put('/sales/:id', authWithCompany, requireActiveSubscription(), updateProperty);
+router.put('/:id', authWithCompany, requireActiveSubscription(), isAdmin, updateProperty);
+router.delete('/:id', authWithCompany, requireActiveSubscription(), isAdmin, deleteProperty);
+router.put('/:id/restore', authWithCompany, requireActiveSubscription(), isAdmin, restoreProperty);
 
 export default router; 

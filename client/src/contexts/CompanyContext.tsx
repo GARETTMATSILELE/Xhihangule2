@@ -25,8 +25,20 @@ interface Company {
   description?: string;
   logo?: string;
   isActive: boolean;
-  subscriptionStatus: 'active' | 'inactive' | 'trial';
+  subscriptionStatus: 'active' | 'inactive' | 'trial' | 'past_due' | 'suspended' | 'cancelled' | 'expired' | 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED' | 'EXPIRED';
   subscriptionEndDate?: Date;
+  companyType?: 'INDIVIDUAL_LANDLORD' | 'REGISTERED_BUSINESS';
+  workspaceType?: 'agency' | 'individual';
+  tenantStatus?: 'active' | 'suspended' | 'pending' | 'archived';
+  onboardingStatus?: 'PENDING_SETUP' | 'PENDING_PAYMENT' | 'PAYMENT_RECEIVED' | 'INITIALIZING_WORKSPACE' | 'ACTIVE' | 'FAILED_SETUP' | 'SUSPENDED';
+  onboardingCompleted?: boolean;
+  workspacePreferences?: {
+    currency?: 'USD' | 'ZiG';
+    timezone?: string;
+    measurementUnits?: 'metric' | 'imperial';
+    invoicePrefix?: string;
+    invoiceNotes?: string;
+  };
   bankAccounts: BankAccount[];
   commissionConfig?: {
     preaPercentOfTotal: number;
@@ -40,6 +52,12 @@ interface Company {
     commissionEnabled: boolean;
     agentAccounts: boolean;
     propertyAccounts: boolean;
+    propertyOwners?: boolean;
+    commissions?: boolean;
+    trustAccounting?: boolean;
+    maintenanceApprovals?: boolean;
+    accounting?: boolean;
+    agents?: boolean;
   };
   fiscalConfig?: {
     enabled?: boolean;
@@ -81,22 +99,31 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
   const lastFetchAtRef = React.useRef<number>(0);
 
   const validateCompanyData = (data: any): Company => {
-    if (!data._id || !data.name || !data.email || 
-        !data.registrationNumber || !data.tinNumber || 
-        !data.address || !data.phone) {
+    if (!data || !data._id || !data.name) {
       console.error('Invalid company data:', data);
       throw new Error('Invalid company data received');
+    }
+
+    // Some fields are legitimately absent during onboarding (especially for individual landlords).
+    // Only enforce business-only identifiers when the workspace is a registered business.
+    const companyType = data.companyType as Company['companyType'] | undefined;
+    const isRegisteredBusiness = companyType === 'REGISTERED_BUSINESS';
+    if (isRegisteredBusiness) {
+      if (!data.registrationNumber || !data.tinNumber) {
+        console.error('Missing required business identifiers:', data);
+        throw new Error('Company registration details are incomplete');
+      }
     }
 
     return {
       _id: data._id,
       name: data.name,
-      address: data.address,
-      phone: data.phone,
-      email: data.email,
+      address: data.address || '',
+      phone: data.phone || '',
+      email: data.email || '',
       website: data.website,
-      registrationNumber: data.registrationNumber,
-      tinNumber: data.tinNumber,
+      registrationNumber: data.registrationNumber || '',
+      tinNumber: data.tinNumber || '',
       vatNumber: data.vatNumber,
       ownerId: data.ownerId,
       description: data.description,
@@ -104,11 +131,20 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
       isActive: data.isActive ?? true,
       subscriptionStatus: data.subscriptionStatus ?? 'trial',
       subscriptionEndDate: data.subscriptionEndDate,
+      companyType,
+      workspaceType: data.workspaceType === 'individual' ? 'individual' : 'agency',
+      tenantStatus: data.tenantStatus,
+      onboardingStatus: data.onboardingStatus,
+      onboardingCompleted: data.onboardingCompleted,
+      workspacePreferences: data.workspacePreferences,
       bankAccounts: data.bankAccounts || [],
       plan: data.plan,
       propertyLimit: data.propertyLimit,
       featureFlags: data.featureFlags,
       fiscalConfig: data.fiscalConfig,
+      receivablesCutover: data.receivablesCutover,
+      rentReceivableOpeningBalance: data.rentReceivableOpeningBalance,
+      levyReceivableOpeningBalance: data.levyReceivableOpeningBalance,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
       __v: data.__v || 0
@@ -183,44 +219,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
         throw new Error('No company data received');
       }
 
-      // Validate required fields
-      if (!companyData._id || !companyData.name || !companyData.email || 
-          !companyData.registrationNumber || !companyData.tinNumber || 
-          !companyData.address || !companyData.phone) {
-        console.error('Invalid company data:', companyData);
-        throw new Error('Invalid company data received');
-      }
-      
-      // Ensure all required fields are present
-      const validatedCompany: Company = {
-        _id: companyData._id,
-        name: companyData.name,
-        address: companyData.address,
-        phone: companyData.phone,
-        email: companyData.email,
-        website: companyData.website,
-        registrationNumber: companyData.registrationNumber,
-        tinNumber: companyData.tinNumber,
-        vatNumber: companyData.vatNumber,
-        ownerId: companyData.ownerId,
-        description: companyData.description,
-        logo: companyData.logo,
-        isActive: companyData.isActive ?? true,
-        subscriptionStatus: companyData.subscriptionStatus ?? 'trial',
-        subscriptionEndDate: companyData.subscriptionEndDate,
-        bankAccounts: companyData.bankAccounts || [],
-        commissionConfig: companyData.commissionConfig,
-        plan: companyData.plan,
-        propertyLimit: companyData.propertyLimit,
-        featureFlags: companyData.featureFlags,
-        fiscalConfig: companyData.fiscalConfig,
-        receivablesCutover: companyData.receivablesCutover,
-        rentReceivableOpeningBalance: companyData.rentReceivableOpeningBalance,
-        levyReceivableOpeningBalance: companyData.levyReceivableOpeningBalance,
-        createdAt: companyData.createdAt,
-        updatedAt: companyData.updatedAt,
-        __v: companyData.__v || 0
-      };
+      const validatedCompany = validateCompanyData(companyData);
 
       if (process.env.NODE_ENV === 'development') {
         console.log('Validated company data:', validatedCompany);
@@ -267,14 +266,16 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Initial fetch when authenticated
   useEffect(() => {
-    if (isAuthenticated && user?.companyId) {
+    // Always attempt to fetch the "current" company when authenticated.
+    // New signups/onboarding can have a company without user.companyId being populated yet.
+    if (isAuthenticated && user) {
       fetchCompany();
     } else {
       setLoading(false);
       setCompany(null);
       setHasCompany(false);
     }
-  }, [isAuthenticated, user?.companyId]);
+  }, [isAuthenticated, user?._id, user?.companyId]);
 
   // Set up periodic refresh of company data
   useEffect(() => {

@@ -53,6 +53,7 @@ const Lease_1 = require("../models/Lease");
 const Tenant_1 = require("../models/Tenant");
 const Company_1 = require("../models/Company");
 const Property_1 = require("../models/Property");
+const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
 const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -182,6 +183,24 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         const levyPayment = new LevyPayment_1.LevyPayment(levyPaymentData);
         yield levyPayment.save();
+        try {
+            yield propertyAccountService_1.default.recordPassThroughCollection({
+                propertyId: String(levyPayment.propertyId),
+                companyId: String(levyPayment.companyId),
+                chargeType: 'LEVY',
+                amount: Number(levyPayment.amount || 0),
+                date: levyPayment.paymentDate,
+                levyPaymentId: String(levyPayment._id),
+                referenceNumber: levyPayment.referenceNumber,
+                description: `Levies collected - ${levyPayment.referenceNumber || levyPayment._id}`,
+                processedBy: String(levyPayment.processedBy),
+                notes: levyPayment.notes,
+                idempotencyKey: `levy-payment:${String(levyPayment._id)}:collection`
+            });
+        }
+        catch (ledgerErr) {
+            console.error('Failed to record levy pass-through collection:', ledgerErr);
+        }
         // Populate the created levy payment for response
         const populatedLevyPayment = yield LevyPayment_1.LevyPayment.findById(levyPayment._id)
             .populate('propertyId', 'name address')
@@ -316,6 +335,24 @@ const initiateLevyPayout = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // Update top-level status to paid_out for easier filtering
         levy.set('status', 'paid_out');
         yield levy.save();
+        try {
+            yield propertyAccountService_1.default.recordPassThroughPayment({
+                propertyId: String(levy.propertyId),
+                companyId: String(levy.companyId),
+                chargeType: 'LEVY',
+                amount: Number(levy.amount || 0),
+                date: payoutDate ? new Date(payoutDate) : new Date(),
+                levyPaymentId: String(levy._id),
+                referenceNumber: payoutReference || levy.referenceNumber,
+                description: `Levies paid - ${payoutReference || levy.referenceNumber || levy._id}`,
+                processedBy: String(req.user.userId),
+                notes,
+                idempotencyKey: `levy-payment:${String(levy._id)}:payout`
+            });
+        }
+        catch (ledgerErr) {
+            console.error('Failed to record levy pass-through payout:', ledgerErr);
+        }
         const populated = yield LevyPayment_1.LevyPayment.findById(levy._id)
             .populate('propertyId', 'name address')
             .populate('processedBy', 'firstName lastName email');

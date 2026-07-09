@@ -9,6 +9,19 @@ export interface LeadDTO {
   email?: string;
   phone?: string;
   status: 'New' | 'Contacted' | 'Qualified' | 'Viewing' | 'Offer' | 'Won' | 'Lost';
+  pipelineStage?: LeadPipelineStage;
+  leadScore?: number;
+  nextFollowUpDate?: string;
+  lastContactDate?: string;
+  followUpStatus?: 'pending' | 'due' | 'overdue' | 'completed' | 'snoozed';
+  assignedAgent?: string | { _id?: string; firstName?: string; lastName?: string; email?: string };
+  interestedPropertyIds?: string[];
+  convertedTenantId?: string;
+  convertedLeaseId?: string;
+  convertedAt?: string;
+  archivedAt?: string;
+  activityTimeline?: LeadActivity[];
+  followUpTasks?: LeadFollowUpTask[];
   // Optional requirements (for suggestions only)
   budgetMin?: number;
   budgetMax?: number;
@@ -17,6 +30,35 @@ export interface LeadDTO {
   minBedrooms?: number;
   features?: string[];
   createdAt: string;
+  updatedAt?: string;
+}
+
+export type LeadPipelineStage =
+  | 'NEW'
+  | 'CONTACTED'
+  | 'VIEWING_SCHEDULED'
+  | 'VIEWED'
+  | 'APPLICATION_RECEIVED'
+  | 'APPROVED'
+  | 'LEASE_PENDING'
+  | 'CONVERTED'
+  | 'LOST';
+
+export interface LeadActivity {
+  type: string;
+  label: string;
+  notes?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
+export interface LeadFollowUpTask {
+  type: string;
+  title: string;
+  dueDate?: string;
+  status?: 'pending' | 'completed' | 'cancelled';
+  notes?: string;
+  createdAt?: string;
 }
 
 export interface CreateLeadInput {
@@ -27,6 +69,13 @@ export interface CreateLeadInput {
   email?: string;
   phone?: string;
   status?: LeadDTO['status'];
+  pipelineStage?: LeadPipelineStage;
+  leadScore?: number;
+  nextFollowUpDate?: string;
+  lastContactDate?: string;
+  followUpStatus?: LeadDTO['followUpStatus'];
+  interestedPropertyIds?: string[];
+  followUpTasks?: LeadFollowUpTask[];
   budgetMin?: number;
   budgetMax?: number;
   preferredSuburbs?: string[] | string;
@@ -44,7 +93,7 @@ export const leadService = {
     const res = await api.post('/leads', input);
     return res.data.data || res.data;
   },
-  async update(id: string, updates: Partial<CreateLeadInput & { propertyId?: string }>) {
+  async update(id: string, updates: Partial<CreateLeadInput & { propertyId?: string; activityNote?: string }>) {
     const res = await api.put(`/leads/${id}`, updates as any);
     return res.data.data || res.data;
   },

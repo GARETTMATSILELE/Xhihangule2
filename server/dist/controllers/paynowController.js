@@ -20,6 +20,9 @@ exports.handleResult = handleResult;
 exports.handleReturn = handleReturn;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const PaymentSession_1 = require("../models/PaymentSession");
+const WebhookEventReceipt_1 = require("../models/WebhookEventReceipt");
+const billingActivationService_1 = require("../services/billingActivationService");
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Paynow } = require('paynow');
@@ -117,6 +120,17 @@ function createWebPayment(req, res) {
             }
             const response = yield paynow.send(payment);
             if (response && response.success) {
+                if ((req.body || {}).paymentSessionId) {
+                    yield PaymentSession_1.PaymentSession.findByIdAndUpdate((req.body || {}).paymentSessionId, {
+                        $set: {
+                            provider: 'paynow',
+                            providerRef: ref,
+                            pollUrl: response.pollUrl,
+                            status: 'provider_created',
+                            rawProviderResponse: response
+                        }
+                    });
+                }
                 return res.json({
                     status: 'ok',
                     reference: ref,
@@ -198,11 +212,44 @@ function pollTransaction(req, res) {
 function handleResult(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            // In a full implementation, verify signature and update your DB records by reference
-            // For now, acknowledge receipt so Paynow considers the callback successful
+            const payload = Object.assign(Object.assign({}, (req.query || {})), (req.body || {}));
+            const reference = String(payload.reference || payload.Reference || payload.m_payment_id || payload.id || '').trim();
+            const status = String(payload.status || payload.Status || payload.payment_status || '').toLowerCase();
+            const eventId = String(payload.pollurl || payload.pollUrl || payload.hash || reference || Date.now());
+            if (!reference) {
+                return res.status(200).json({ status: 'received', message: 'No reference supplied' });
+            }
+            const receipt = yield WebhookEventReceipt_1.WebhookEventReceipt.findOneAndUpdate({ provider: 'paynow', eventId }, { $setOnInsert: { provider: 'paynow', eventId, status: 'processing' } }, { upsert: true, new: true });
+            if (receipt.status === 'processed') {
+                return res.status(200).json({ status: 'duplicate' });
+            }
+            if (['paid', 'awaiting delivery', 'delivered', 'success'].includes(status)) {
+                const result = yield (0, billingActivationService_1.activateSubscriptionFromPayment)({
+                    provider: 'paynow',
+                    providerRef: reference,
+                    rawProviderResponse: payload,
+                    paidAt: new Date()
+                });
+                receipt.companyId = result.paymentSession.companyId;
+                receipt.paymentId = result.paymentSession.billingPaymentId;
+                receipt.status = 'processed';
+                receipt.processedAt = new Date();
+                yield receipt.save();
+            }
+            else {
+                receipt.status = 'processed';
+                receipt.processedAt = new Date();
+                yield receipt.save();
+            }
             return res.status(200).json({ status: 'received' });
         }
         catch (e) {
+            try {
+                const payload = Object.assign(Object.assign({}, (req.query || {})), (req.body || {}));
+                const eventId = String(payload.pollurl || payload.pollUrl || payload.hash || payload.reference || Date.now());
+                yield WebhookEventReceipt_1.WebhookEventReceipt.updateOne({ provider: 'paynow', eventId }, { $set: { status: 'failed', lastError: (e === null || e === void 0 ? void 0 : e.message) || String(e) } }, { upsert: true });
+            }
+            catch (_a) { }
             return res.status(500).json({ status: 'error', message: (e === null || e === void 0 ? void 0 : e.message) || 'Failed to process Paynow result' });
         }
     });

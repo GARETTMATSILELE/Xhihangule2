@@ -11,17 +11,24 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import { useProperties } from '../../contexts/PropertyContext';
 import { useAdminDashboardService } from '../../services/adminDashboardService';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import agentService from '../../services/agentService';
 import { Tenant } from '../../types/tenant';
 import { developmentService } from '../../services/developmentService';
 import api from '../../api/axios';
 import { developmentUnitService } from '../../services/developmentUnitService';
+import { PropertyCreationSuccess } from '../../components/rentalWorkflow';
+import { buildPropertyWorkflowState, getWorkflowId, PropertyWorkflowState } from '../../utils/rentalWorkflow';
+
+const notifyRentalWorkflowChanged = (entity: string) => {
+  window.dispatchEvent(new CustomEvent('rental-workflow:changed', { detail: { entity } }));
+};
 
 export const Properties: React.FC = () => {
   const { user, company } = useAuth();
   const { company: companyDetails } = useCompany();
   const location = useLocation();
+  const navigate = useNavigate();
   const { properties: contextProperties, loading: contextLoading, error: contextError, addProperty: contextAddProperty, updateProperty: contextUpdateProperty, deleteProperty: contextDeleteProperty } = useProperties();
   const { getAdminDashboardProperties, addProperty: adminAddProperty, updateProperty: adminUpdateProperty, deleteProperty: adminDeleteProperty, restoreProperty: adminRestoreProperty } = useAdminDashboardService();
   
@@ -53,6 +60,9 @@ export const Properties: React.FC = () => {
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentTenants, setAgentTenants] = useState<Tenant[]>([]);
+  const [agentLeases, setAgentLeases] = useState<any[]>([]);
+  const [agentPayments, setAgentPayments] = useState<any[]>([]);
+  const [lastCreatedProperty, setLastCreatedProperty] = useState<Property | null>(null);
   const [showDeletedProperties, setShowDeletedProperties] = useState(false);
   // Admin: users (for agent mapping via ownerId) and developments
   const [users, setUsers] = useState<any[]>([]);
@@ -151,30 +161,42 @@ export const Properties: React.FC = () => {
       userRole: user?.role
     });
     
-    if (isAgentRoute) {
-      const fetchAgentProperties = async () => {
-        try {
-          setAgentLoading(true);
-          setAgentError(null);
-          console.log('Properties component - Fetching agent properties...');
-          const [fetchedProperties, fetchedTenants] = await Promise.all([
-            agentService.getProperties({ deleted: showDeletedProperties }),
-            agentService.getTenants()
-          ]);
-          console.log('Properties component - Agent properties fetched:', fetchedProperties);
-          setAgentProperties(fetchedProperties);
-          setAgentTenants(Array.isArray(fetchedTenants) ? fetchedTenants : []);
-        } catch (err) {
-          console.error('Error fetching agent properties:', err);
-          setAgentError(err instanceof Error ? err.message : 'Failed to fetch properties');
-        } finally {
-          setAgentLoading(false);
-        }
-      };
-      
-      fetchAgentProperties();
-    }
-  }, [isAgentRoute, showDeletedProperties]);
+    if (!isAgentRoute) return;
+
+    let mounted = true;
+    const fetchAgentProperties = async () => {
+      try {
+        setAgentLoading(true);
+        setAgentError(null);
+        console.log('Properties component - Fetching agent properties...');
+        const [fetchedProperties, fetchedTenants] = await Promise.all([
+          agentService.getProperties({ deleted: showDeletedProperties }),
+          agentService.getTenants(),
+        ]);
+        if (!mounted) return;
+        console.log('Properties component - Agent properties fetched:', fetchedProperties.length);
+        setAgentProperties(fetchedProperties);
+        setAgentTenants(Array.isArray(fetchedTenants) ? fetchedTenants : []);
+        setAgentLoading(false);
+
+        const [fetchedLeases, fetchedPayments] = await Promise.all([
+          agentService.getLeases().catch(() => []),
+          api.get('/agents/payments').then((r) => r.data).catch(() => []),
+        ]);
+        if (!mounted) return;
+        setAgentLeases(Array.isArray(fetchedLeases) ? fetchedLeases : []);
+        setAgentPayments(Array.isArray(fetchedPayments) ? fetchedPayments : []);
+      } catch (err) {
+        if (!mounted) return;
+        console.error('Error fetching agent properties:', err);
+        setAgentError(err instanceof Error ? err.message : 'Failed to fetch properties');
+        setAgentLoading(false);
+      }
+    };
+    
+    fetchAgentProperties();
+    return () => { mounted = false; };
+  }, [isAgentRoute, showDeletedProperties, user?.role]);
 
   function getId(id: any): string {
     if (!id) return '';
@@ -257,6 +279,8 @@ export const Properties: React.FC = () => {
         
         // Update local state
         setAgentProperties(prev => [...prev, newProperty]);
+        setLastCreatedProperty(newProperty);
+        notifyRentalWorkflowChanged('property');
       } else {
         // Use context for non-admin/agent routes
         const propertyToCreate = {
@@ -317,6 +341,7 @@ export const Properties: React.FC = () => {
         // Agent route: call agent endpoint to update own property
         const updated = await agentService.updateProperty(_id, updateData);
         setAgentProperties(prev => prev.map(p => p._id === _id ? (updated as any) : p));
+        notifyRentalWorkflowChanged('property');
       } else {
         // Use context for non-admin/agent routes
         await contextUpdateProperty(_id, {
@@ -360,6 +385,7 @@ export const Properties: React.FC = () => {
           await agentService.deleteProperty(propertyId);
         }
         setAgentProperties(prev => prev.filter(p => p._id !== propertyId));
+        notifyRentalWorkflowChanged('property');
       } else {
         // Use context for non-admin routes
         await contextDeleteProperty(propertyId);
@@ -390,6 +416,20 @@ export const Properties: React.FC = () => {
 
   // Map properties to include display status for the list rendering
   const propertiesForList = filteredProperties.map(p => ({ ...p, status: getPropertyDisplayStatus(p), __ownerIdStr: getId((p as any).ownerId) }));
+  const workflowStatesByProperty = React.useMemo<Record<string, PropertyWorkflowState>>(() => {
+    if (!isAgentRoute) return {};
+    return propertiesForList.reduce<Record<string, PropertyWorkflowState>>((acc, property) => {
+      const propertyId = getWorkflowId(property._id);
+      if (propertyId) {
+        acc[propertyId] = buildPropertyWorkflowState(property, {
+          tenants: agentTenants,
+          leases: agentLeases,
+          payments: agentPayments,
+        });
+      }
+      return acc;
+    }, {});
+  }, [isAgentRoute, propertiesForList, agentTenants, agentLeases, agentPayments]);
   const agentNamesById = (users || []).reduce<Record<string, string>>((acc, a: any) => {
     const key = String(a._id || a.id || '');
     if (!key) return acc;
@@ -540,6 +580,14 @@ export const Properties: React.FC = () => {
           />
         )}
 
+        {isAgentRoute && lastCreatedProperty && (
+          <PropertyCreationSuccess
+            propertyName={lastCreatedProperty.name}
+            onAction={(path) => navigate(path)}
+            onDismiss={() => setLastCreatedProperty(null)}
+          />
+        )}
+
         <PropertyList
           properties={propertiesForList}
           onPropertyClick={handleUpdateProperty}
@@ -548,6 +596,7 @@ export const Properties: React.FC = () => {
           isAdminRoute={isAdminRoute}
           agentNamesById={agentNamesById}
           isDeletedView={showDeletedProperties}
+          workflowStatesByProperty={workflowStatesByProperty}
         />
 
         {isAdminRoute && (

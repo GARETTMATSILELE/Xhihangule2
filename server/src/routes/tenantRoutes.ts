@@ -1,5 +1,5 @@
 import express from 'express';
-import { auth, authWithCompany } from '../middleware/auth';
+import { authWithCompany, requireActiveSubscription } from '../middleware/auth';
 import {
   getTenants,
   getTenant,
@@ -48,7 +48,7 @@ router.get('/public/:id', authWithCompany, async (req, res) => {
 });
 
 // Protected routes
-router.use(authWithCompany);
+router.use(authWithCompany, requireActiveSubscription());
 
 // Routes
 router.get('/', getTenants);

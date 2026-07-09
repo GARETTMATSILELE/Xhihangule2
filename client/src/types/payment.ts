@@ -76,6 +76,12 @@ export interface PaymentFormData {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   rentUsed?: number;
+  levyUsed?: number;
+  rentAllocated?: number;
+  levyAllocated?: number;
+  linkedLevyPaymentId?: string;
+  chargeTypeCode?: string;
+  paymentLines?: PaymentLine[];
   // Advance payment fields
   advanceMonthsPaid?: number;
   advancePeriodStart?: { month: number; year: number };
@@ -143,6 +149,12 @@ export interface Payment {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   rentUsed?: number;
+  levyUsed?: number;
+  rentAllocated?: number;
+  levyAllocated?: number;
+  linkedLevyPaymentId?: string;
+  chargeTypeCode?: string;
+  paymentLines?: PaymentLine[];
   // Advance rental payment fields (optional)
   advanceMonthsPaid?: number;
   advancePeriodStart?: { month: number; year: number };
@@ -172,6 +184,15 @@ export interface Payment {
   reversedAt?: Date;
   reversalReason?: string;
   isCorrectionEntry?: boolean;
+}
+
+export interface PaymentLine {
+  chargeTypeCode: string;
+  chargeTypeId?: string;
+  amount: number;
+  description?: string;
+  referenceId?: string;
+  metadata?: Record<string, any>;
 }
 
 // Extended Payment interface for populated data from backend

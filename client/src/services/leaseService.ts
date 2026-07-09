@@ -73,6 +73,41 @@ export const useLeaseService = () => {
     return response.data;
   };
 
+  const updateStatus = async (id: string, status: Lease['status']): Promise<Lease> => {
+    if (!user?.companyId) {
+      throw new Error('Company ID is required');
+    }
+    const response = await api.patch(`/leases/${id}/status`, { status });
+    return response.data;
+  };
+
+  const renew = async (id: string, lease: Partial<Lease>): Promise<Lease> => {
+    if (!user?.companyId) {
+      throw new Error('Company ID is required');
+    }
+    const response = await api.post(`/leases/${id}/renew`, {
+      ...lease,
+      companyId: user.companyId
+    });
+    return response.data;
+  };
+
+  const terminate = async (id: string, payload: { reason?: string; moveOutDate?: string; deductions?: number; penalties?: number; settlementNotes?: string } = {}): Promise<Lease> => {
+    if (!user?.companyId) {
+      throw new Error('Company ID is required');
+    }
+    const response = await api.post(`/leases/${id}/terminate`, payload);
+    return response.data;
+  };
+
+  const closeSettlement = async (id: string, notes?: string): Promise<Lease> => {
+    if (!user?.companyId) {
+      throw new Error('Company ID is required');
+    }
+    const response = await api.post(`/leases/${id}/close-settlement`, { notes });
+    return response.data;
+  };
+
   const remove = async (id: string): Promise<void> => {
     if (!user?.companyId) {
       throw new Error('Company ID is required');
@@ -101,6 +136,10 @@ export const useLeaseService = () => {
     getById,
     create,
     update,
+    updateStatus,
+    renew,
+    terminate,
+    closeSettlement,
     delete: remove,
     uploadDocument
   };

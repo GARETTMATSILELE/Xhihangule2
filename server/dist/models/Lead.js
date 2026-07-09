@@ -43,6 +43,40 @@ const LeadSchema = new mongoose_1.Schema({
     email: { type: String, trim: true },
     phone: { type: String, trim: true },
     status: { type: String, enum: ['New', 'Contacted', 'Qualified', 'Viewing', 'Offer', 'Won', 'Lost'], default: 'New' },
+    pipelineStage: {
+        type: String,
+        enum: ['NEW', 'CONTACTED', 'VIEWING_SCHEDULED', 'VIEWED', 'APPLICATION_RECEIVED', 'APPROVED', 'LEASE_PENDING', 'CONVERTED', 'LOST'],
+        default: 'NEW'
+    },
+    leadScore: { type: Number, min: 0, max: 100, required: false },
+    nextFollowUpDate: { type: Date, required: false },
+    lastContactDate: { type: Date, required: false },
+    followUpStatus: {
+        type: String,
+        enum: ['pending', 'due', 'overdue', 'completed', 'snoozed'],
+        default: 'pending'
+    },
+    assignedAgent: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User' },
+    interestedPropertyIds: [{ type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Property' }],
+    convertedTenantId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Tenant' },
+    convertedLeaseId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'Lease' },
+    convertedAt: { type: Date, required: false },
+    archivedAt: { type: Date, required: false },
+    activityTimeline: [{
+            type: { type: String, trim: true },
+            label: { type: String, trim: true },
+            notes: { type: String, trim: true },
+            createdAt: { type: Date, default: Date.now },
+            createdBy: { type: mongoose_1.default.Schema.Types.ObjectId, ref: 'User' }
+        }],
+    followUpTasks: [{
+            type: { type: String, trim: true },
+            title: { type: String, trim: true },
+            dueDate: { type: Date },
+            status: { type: String, enum: ['pending', 'completed', 'cancelled'], default: 'pending' },
+            notes: { type: String, trim: true },
+            createdAt: { type: Date, default: Date.now }
+        }],
     // Requirements (optional)
     budgetMin: { type: Number, min: 0, required: false },
     budgetMax: { type: Number, min: 0, required: false },
@@ -65,4 +99,6 @@ const LeadSchema = new mongoose_1.Schema({
 }, { timestamps: true });
 LeadSchema.index({ companyId: 1 });
 LeadSchema.index({ ownerId: 1 });
+LeadSchema.index({ companyId: 1, pipelineStage: 1, createdAt: -1 });
+LeadSchema.index({ companyId: 1, nextFollowUpDate: 1 });
 exports.Lead = mongoose_1.default.model('Lead', LeadSchema, 'leads');

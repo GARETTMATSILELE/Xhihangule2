@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
-import { MaintenanceRequest } from '../types/maintenance';
+import { MaintenanceRequestExtended } from '../types/maintenanceManagement';
 import { apiService } from '../api';
 import { User } from '../types/auth';
 
 export interface UseMaintenanceReturn {
-  requests: MaintenanceRequest[];
+  requests: MaintenanceRequestExtended[];
   loading: boolean;
   error: string | null;
   fetchRequests: () => Promise<void>;
-  createRequest: (data: Partial<MaintenanceRequest>) => Promise<MaintenanceRequest>;
-  updateRequest: (id: string, data: Partial<MaintenanceRequest>) => Promise<MaintenanceRequest>;
+  createRequest: (data: Partial<MaintenanceRequestExtended>) => Promise<MaintenanceRequestExtended>;
+  updateRequest: (id: string, data: Partial<MaintenanceRequestExtended>) => Promise<MaintenanceRequestExtended>;
   deleteRequest: (id: string) => Promise<void>;
 }
 
 export const useMaintenance = (user?: User): UseMaintenanceReturn => {
-  const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
+  const [requests, setRequests] = useState<MaintenanceRequestExtended[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,7 +51,7 @@ export const useMaintenance = (user?: User): UseMaintenanceReturn => {
     }
   };
 
-  const createRequest = async (data: Partial<MaintenanceRequest>) => {
+  const createRequest = async (data: Partial<MaintenanceRequestExtended>) => {
     try {
       setLoading(true);
       const response = await apiService.createMaintenanceRequest(data);
@@ -66,7 +66,7 @@ export const useMaintenance = (user?: User): UseMaintenanceReturn => {
     }
   };
 
-  const updateRequest = async (id: string, data: Partial<MaintenanceRequest>) => {
+  const updateRequest = async (id: string, data: Partial<MaintenanceRequestExtended>) => {
     try {
       setLoading(true);
       const response = await apiService.updateMaintenanceRequest(id, data);

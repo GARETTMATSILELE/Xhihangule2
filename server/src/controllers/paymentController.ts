@@ -18,10 +18,48 @@ import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotif
 import accountingIntegrationService from '../services/accountingIntegrationService';
 import { emitEvent } from '../events/eventBus';
 import trustEventRetryService from '../services/trustEventRetryService';
+import chargeTypeService from '../services/chargeTypeService';
+import {
+  resolveCombinedRentalAllocation,
+  createLinkedLevyPayment,
+  voidLinkedLevyPayment,
+  sumRentPaidForPeriod,
+  type CombinedAllocationResult,
+} from '../services/combinedPaymentService';
 
 const isConfirmedStatus = (status?: string): boolean => {
   const s = String(status || '').toLowerCase();
   return s === 'completed' || s === 'confirmed';
+};
+
+const normalizePaymentLines = async (rawLines: any, companyId: string | mongoose.Types.ObjectId) => {
+  if (!Array.isArray(rawLines) || rawLines.length === 0) return undefined;
+  const normalized = [];
+  for (const rawLine of rawLines) {
+    const code = String(rawLine?.chargeTypeCode || rawLine?.code || '').trim().toUpperCase();
+    const amount = Number(rawLine?.amount || 0);
+    if (!code || amount <= 0) continue;
+    const chargeType = await chargeTypeService.getChargeTypeByCode(code, companyId, { throwIfMissing: true });
+    normalized.push({
+      chargeTypeCode: chargeType!.code,
+      chargeTypeId: chargeType!._id,
+      amount: Number(amount.toFixed(2)),
+      description: rawLine?.description ? String(rawLine.description) : chargeType!.name,
+      referenceId: rawLine?.referenceId ? String(rawLine.referenceId) : undefined,
+      metadata: rawLine?.metadata && typeof rawLine.metadata === 'object' ? rawLine.metadata : undefined,
+      chargeTypeCategory: chargeType!.category,
+      ownerIncome: chargeType!.ownerIncome
+    });
+  }
+  if (normalized.length === 0) {
+    throw new AppError('At least one valid payment line is required', 400);
+  }
+  return normalized;
+};
+
+const sumPaymentLines = (lines?: Array<{ amount: number }>): number | undefined => {
+  if (!Array.isArray(lines) || lines.length === 0) return undefined;
+  return Number(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0).toFixed(2));
 };
 
 const emitPaymentConfirmedIfNeeded = async (payment: any, sourceEvent: string): Promise<void> => {
@@ -828,6 +866,17 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     } = req.body as any;
     // Extract optional advance fields
     const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = (req.body as any);
+    if (!user.companyId) {
+      return { error: { status: 400, message: 'Company ID is required' } };
+    }
+    const normalizedPaymentLines = await normalizePaymentLines((req.body as any).paymentLines, String(user.companyId));
+    const lineTotal = sumPaymentLines(normalizedPaymentLines);
+    const effectiveAmount = lineTotal ?? Number(amount || 0);
+    const configuredNonOwnerTotal = Array.isArray(normalizedPaymentLines)
+      ? normalizedPaymentLines
+        .filter((line: any) => line.chargeTypeCategory !== 'PROPERTY_INCOME' || line.ownerIncome !== true)
+        .reduce((sum: number, line: any) => sum + Number(line.amount || 0), 0)
+      : 0;
 
     // Safely extract ids (string or nested {_id})
     const extractId = (v: any): string | undefined => {
@@ -849,7 +898,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     if (!paymentDate) {
       return { error: { status: 400, message: 'Missing required field: paymentDate' } };
     }
-    const numericAmount = Number(amount || 0);
+    const numericAmount = Number(effectiveAmount || 0);
     const numericDeposit = Number(depositAmount || 0);
     if (numericAmount <= 0 && numericDeposit <= 0) {
       return { error: { status: 400, message: 'Either amount or depositAmount must be greater than 0' } };
@@ -898,11 +947,72 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       return { error: { status: 400, message: 'Invalid ownerId format' } };
     }
 
+    let resolvedPaymentType: 'sale' | 'rental' | 'introduction';
+    if (manualProperty) {
+      if (!paymentType) {
+        return { error: { status: 400, message: 'paymentType is required for manual property payments because Property.rentalType cannot be resolved' } };
+      }
+      resolvedPaymentType = paymentType as any;
+    } else {
+      try {
+        const ledgerResolution = await propertyAccountService.resolveLedgerTypeForProperty(
+          rawPropertyId!,
+          'createPaymentAccountant'
+        );
+        const suppliedPaymentType = paymentType ? String(paymentType).toLowerCase() : '';
+        if (suppliedPaymentType === 'sale' && ledgerResolution.ledgerType !== 'sale') {
+          return {
+            error: {
+              status: 400,
+              message: `Payment type sale does not match Property.rentalType (${ledgerResolution.businessType}) for property ${rawPropertyId}`
+            }
+          };
+        }
+        if (suppliedPaymentType && suppliedPaymentType !== 'sale' && ledgerResolution.ledgerType !== 'rental') {
+          return {
+            error: {
+              status: 400,
+              message: `Payment type ${suppliedPaymentType} does not match Property.rentalType (${ledgerResolution.businessType}) for property ${rawPropertyId}`
+            }
+          };
+        }
+        resolvedPaymentType = (paymentType as any) || (ledgerResolution.ledgerType === 'sale' ? 'sale' : 'rental');
+      } catch (error: any) {
+        return { error: { status: Number(error?.statusCode || 400), message: error?.message || 'Unable to resolve payment ledger type from property' } };
+      }
+    }
+
+    // Resolve rent/levy allocation for combined payments (levy-first split)
+    let combinedAllocation: CombinedAllocationResult | null = null;
+    const isRentalPayment = resolvedPaymentType !== 'sale';
+    if (isRentalPayment && !normalizedPaymentLines && !manualProperty && !manualTenant && rawPropertyId && rawTenantId) {
+      const allocationResult = await resolveCombinedRentalAllocation({
+        companyId: new mongoose.Types.ObjectId(user.companyId),
+        propertyId: new mongoose.Types.ObjectId(rawPropertyId),
+        tenantId: new mongoose.Types.ObjectId(rawTenantId),
+        amount: Number(effectiveAmount || 0),
+        depositAmount: Number(depositAmount || 0),
+        rentalPeriodMonth: Number(rentalPeriodMonth),
+        rentalPeriodYear: Number(rentalPeriodYear),
+        advanceMonthsPaid: Number(advanceMonthsPaid || 1),
+        rentUsed: typeof rentUsed === 'number' ? Number(rentUsed) : undefined,
+        levyUsed: typeof (req.body as any).levyUsed === 'number' ? Number((req.body as any).levyUsed) : undefined,
+      });
+      if ('status' in allocationResult) {
+        return { error: { status: allocationResult.status, message: allocationResult.message } };
+      }
+      combinedAllocation = allocationResult;
+    }
+
+    const commissionBaseAmount = combinedAllocation
+      ? combinedAllocation.rentAllocated
+      : Number(amount || 0);
+
     // Calculate commission: apply "single-month" rule only for introduction; management uses full amount (including advance periods)
     let finalCommissionDetails = commissionDetails;
     let resolvedOwnerId: string | undefined = rawOwnerId;
     try {
-      const isRental = (paymentType || 'rental') === 'rental';
+      const isRental = resolvedPaymentType !== 'sale';
       const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
       const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose.Types.ObjectId(rawPropertyId) : undefined);
       const amountNum = Number(amount || 0);
@@ -952,7 +1062,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
                 oneMonthRent = Number((prop as any)?.rent || 0);
               } catch {}
             }
-            const commissionable = oneMonthRent > 0 ? Math.min(Math.max(0, amountNum), oneMonthRent) : Math.max(0, amountNum);
+            const commissionable = oneMonthRent > 0
+              ? Math.min(Math.max(0, commissionBaseAmount), oneMonthRent)
+              : Math.max(0, commissionBaseAmount);
             if (commissionable > 0) {
               const tmp = await CommissionService.calculate(
                 commissionable,
@@ -964,22 +1076,32 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
                 preaFee: tmp.preaFee,
                 agentShare: tmp.agentShare,
                 agencyShare: tmp.agencyShare,
-                ownerAmount: Math.max(0, amountNum - tmp.totalCommission)
+                ownerAmount: Math.max(0, commissionBaseAmount - tmp.totalCommission)
               };
             }
           }
           // Not first or zero commissionable → zero commission
           if (!computed) {
-            computed = { totalCommission: 0, preaFee: 0, agentShare: 0, agencyShare: 0, ownerAmount: amountNum };
+            computed = {
+              totalCommission: 0,
+              preaFee: 0,
+              agentShare: 0,
+              agencyShare: 0,
+              ownerAmount: commissionBaseAmount
+            };
           }
         } else {
-          // Management (or unknown): standard commission on the full rent amount (advance supported)
+          // Management (or unknown): standard commission on rent portion only (advance supported)
           const tmp = await CommissionService.calculate(
-            Math.max(0, amountNum),
+            Math.max(0, commissionBaseAmount),
             commissionPercentResolved,
             new mongoose.Types.ObjectId(user.companyId)
           ) as any;
           computed = tmp;
+        }
+        // Levy portion passes through to owner (not commissioned)
+        if (combinedAllocation?.hasLevy && computed) {
+          computed.ownerAmount = Number(computed.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
         }
       } else {
         // Non-rental or insufficient linkage: default to standard on amount (safe)
@@ -1006,7 +1128,8 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
 
     // Remaining-balance enforcement for rental payments (single month) and advance-payment handling
-    if ((paymentType || 'rental') === 'rental') {
+    // Skip when combined allocation already validated rent+levy together.
+    if (isRentalPayment && !combinedAllocation?.hasLevy) {
       const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
       const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose.Types.ObjectId(rawPropertyId) : undefined);
       const isAdvanceRental = typeof advanceMonthsPaid === 'number' && advanceMonthsPaid > 1;
@@ -1044,7 +1167,20 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
                 status: { $in: ['pending', 'completed'] }
               }
             },
-            { $group: { _id: null, total: { $sum: '$amount' } } }
+            {
+              $group: {
+                _id: null,
+                total: {
+                  $sum: {
+                    $cond: [
+                      { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
+                      '$rentAllocated',
+                      '$amount'
+                    ]
+                  }
+                }
+              }
+            }
           ]);
           // Determine monthly rent baseline for single-month enforcement
           let rentBaseline = typeof rentUsed === 'number' ? rentUsed : 0;
@@ -1058,7 +1194,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
           const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
           const remainingCents = rentCents - alreadyPaidCents;
           if (rentCents > 0) {
-            const amountCents = Math.round((amount || 0) * 100);
+            const amountCents = Math.round((effectiveAmount || 0) * 100);
             const depositCents = Math.round((Number(depositAmount || 0)) * 100);
             const isDepositOnly = amountCents === 0 && depositCents > 0;
             if (!isDepositOnly) {
@@ -1086,7 +1222,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     const markProvisional = Boolean(manualProperty || manualTenant);
     // Create payment record
     const payment = new Payment({
-      paymentType: paymentType || 'rental',
+      paymentType: resolvedPaymentType,
       propertyType: propertyType || 'residential',
       propertyId: manualProperty ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(rawPropertyId!), // Generate new ID for manual entries
       tenantId: manualTenant ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(rawTenantId!), // Generate new ID for manual entries
@@ -1094,8 +1230,16 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(user.companyId),
       paymentDate: new Date(paymentDate),
       paymentMethod,
-      amount,
+      amount: effectiveAmount,
       depositAmount: depositAmount || 0,
+      paymentLines: normalizedPaymentLines?.map((line: any) => ({
+        chargeTypeCode: line.chargeTypeCode,
+        chargeTypeId: line.chargeTypeId,
+        amount: line.amount,
+        description: line.description,
+        referenceId: line.referenceId,
+        metadata: line.metadata
+      })),
       rentalPeriodMonth,
       rentalPeriodYear,
       referenceNumber: referenceNumber || `RCPT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -1105,7 +1249,10 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       status: 'completed',
       currency: currency || 'USD',
       leaseId: rawLeaseId ? new mongoose.Types.ObjectId(rawLeaseId) : undefined,
-      rentUsed,
+      rentUsed: combinedAllocation?.rentUsed ?? rentUsed,
+      levyUsed: combinedAllocation?.levyUsed,
+      rentAllocated: combinedAllocation ? combinedAllocation.rentAllocated : undefined,
+      levyAllocated: combinedAllocation ? combinedAllocation.levyAllocated : undefined,
       advanceMonthsPaid: advanceMonthsPaid || 1,
       advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
       advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
@@ -1122,6 +1269,36 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     });
     // Save and related updates (with or without session)
     await payment.save(session ? { session } : undefined);
+
+    // Create linked levy ledger entry when rent+levy combined
+    if (combinedAllocation?.levyAllocated && combinedAllocation.levyAllocated > 0) {
+      const levyId = await createLinkedLevyPayment(
+        {
+          _id: payment._id as mongoose.Types.ObjectId,
+          propertyId: payment.propertyId,
+          companyId: payment.companyId,
+          paymentDate: payment.paymentDate,
+          paymentMethod: payment.paymentMethod,
+          currency: payment.currency,
+          referenceNumber: payment.referenceNumber,
+          notes: payment.notes,
+          processedBy: payment.processedBy,
+          levyAllocated: combinedAllocation.levyAllocated,
+          levyUsed: combinedAllocation.levyUsed,
+          rentalPeriodMonth: payment.rentalPeriodMonth,
+          rentalPeriodYear: payment.rentalPeriodYear,
+          advanceMonthsPaid: payment.advanceMonthsPaid,
+          advancePeriodStart: payment.advancePeriodStart,
+          advancePeriodEnd: payment.advancePeriodEnd,
+        },
+        session
+      );
+      if (levyId) {
+        payment.linkedLevyPaymentId = levyId;
+        await payment.save(session ? { session } : undefined);
+      }
+    }
+
     await logPaymentAudit({
       paymentId: String(payment._id),
       companyId: String(payment.companyId),
@@ -1164,9 +1341,13 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
 
     if (!payment.isProvisional) {
       if ((paymentType === 'rental' || paymentType === 'introduction') && resolvedOwnerId) {
+        const ownerBalanceIncrement = Math.max(
+          0,
+          Number(finalCommissionDetails.ownerAmount || 0) - Number(combinedAllocation?.levyAllocated || configuredNonOwnerTotal || 0)
+        );
         await User.findByIdAndUpdate(
           new mongoose.Types.ObjectId(resolvedOwnerId),
-          { $inc: { balance: finalCommissionDetails.ownerAmount } },
+          { $inc: { balance: ownerBalanceIncrement } },
           session ? { session } : undefined
         );
       }
@@ -2298,6 +2479,14 @@ export const reversePayment = async (req: Request, res: Response) => {
         paymentMethod: lockedOriginal.paymentMethod,
         amount: -Math.abs(Number(lockedOriginal.amount || 0)),
         depositAmount: -Math.abs(Number((lockedOriginal as any).depositAmount || 0)),
+        rentAllocated: (lockedOriginal as any).rentAllocated != null
+          ? -Math.abs(Number((lockedOriginal as any).rentAllocated || 0))
+          : undefined,
+        levyAllocated: (lockedOriginal as any).levyAllocated != null
+          ? -Math.abs(Number((lockedOriginal as any).levyAllocated || 0))
+          : undefined,
+        rentUsed: (lockedOriginal as any).rentUsed,
+        levyUsed: (lockedOriginal as any).levyUsed,
         referenceNumber: `REV-${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
         rentalPeriodMonth: (lockedOriginal as any).rentalPeriodMonth,
         rentalPeriodYear: (lockedOriginal as any).rentalPeriodYear,
@@ -2330,6 +2519,12 @@ export const reversePayment = async (req: Request, res: Response) => {
         saleId: (lockedOriginal as any).saleId,
       });
       await reversal.save(dbSession ? { session: dbSession } : undefined);
+
+      await voidLinkedLevyPayment(
+        (lockedOriginal as any).linkedLevyPaymentId,
+        `Reversal of ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}: ${reason}`,
+        dbSession
+      );
 
       const correctedCommissionDetails = await buildSaleCommissionDetails({
         amount: Math.max(0, Number(lockedOriginal.amount || 0)),
@@ -3117,6 +3312,15 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       if (Number.isFinite(rentAmountForDisplay)) {
         (receipt as any).rentAmount = rentAmountForDisplay;
       }
+      if (typeof (payment as any).rentAllocated === 'number') {
+        (receipt as any).rentAllocated = Number((payment as any).rentAllocated);
+      }
+      if (typeof (payment as any).levyAllocated === 'number') {
+        (receipt as any).levyAllocated = Number((payment as any).levyAllocated);
+      }
+      if (typeof (payment as any).levyUsed === 'number') {
+        (receipt as any).levyAmount = Number((payment as any).levyUsed);
+      }
     } catch {
       // ignore
     }
@@ -3143,12 +3347,38 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       };
       const agg = await Payment.aggregate([
         { $match: match },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
+        {
+          $group: {
+            _id: null,
+            total: {
+              $sum: {
+                $cond: [
+                  { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
+                  '$rentAllocated',
+                  '$amount'
+                ]
+              }
+            }
+          }
+        }
       ]);
       const paidToDate = Number(agg?.[0]?.total || 0);
       const rentalOutstanding = Math.max(0, rentAmountForDisplay - paidToDate);
       (receipt as any).paidToDate = paidToDate;
       (receipt as any).rentalOutstanding = rentalOutstanding;
+
+      const levyBaseline = typeof (receipt as any).levyAmount === 'number' ? Number((receipt as any).levyAmount) : 0;
+      if (levyBaseline > 0) {
+        const { sumLevyPaidForPeriod } = await import('../services/combinedPaymentService');
+        const levyPaidToDate = await sumLevyPaidForPeriod({
+          companyId: payment.companyId as mongoose.Types.ObjectId,
+          propertyId: ((payment as any).propertyId?._id || (payment as any).propertyId) as mongoose.Types.ObjectId,
+          levyPeriodMonth: periodMonth,
+          levyPeriodYear: periodYear,
+        });
+        (receipt as any).levyPaidToDate = levyPaidToDate;
+        (receipt as any).levyOutstanding = Math.max(0, levyBaseline - levyPaidToDate);
+      }
     } catch {
       // ignore
     }
@@ -3419,5 +3649,61 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     return res.status(500).json({ message: 'Failed to finalize payment', error: error?.message || 'Unknown error' });
   } finally {
     // no-op
+  }
+};
+
+/** Remaining rent + levy for a rental period (combined payment UI). */
+export const getCombinedRemaining = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.companyId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    const { propertyId, tenantId, rentalPeriodMonth, rentalPeriodYear } = req.query as any;
+    if (!propertyId || !tenantId || !rentalPeriodMonth || !rentalPeriodYear) {
+      return res.status(400).json({ message: 'propertyId, tenantId, rentalPeriodMonth, rentalPeriodYear are required' });
+    }
+    const companyId = new mongoose.Types.ObjectId(req.user.companyId);
+    const propId = new mongoose.Types.ObjectId(String(propertyId));
+    const tenId = new mongoose.Types.ObjectId(String(tenantId));
+    const month = Number(rentalPeriodMonth);
+    const year = Number(rentalPeriodYear);
+
+    const { loadPropertyCombinedBaselines, sumRentPaidForPeriod, sumLevyPaidForPeriod } = await import('../services/combinedPaymentService');
+    const baselines = await loadPropertyCombinedBaselines(propId);
+    const rentPaid = await sumRentPaidForPeriod({
+      companyId,
+      propertyId: propId,
+      tenantId: tenId,
+      rentalPeriodMonth: month,
+      rentalPeriodYear: year,
+    });
+    const rentRemaining = Math.max(0, baselines.monthlyRent - rentPaid);
+    let levyPaid = 0;
+    let levyRemaining = 0;
+    if (baselines.hasLevy) {
+      levyPaid = await sumLevyPaidForPeriod({
+        companyId,
+        propertyId: propId,
+        levyPeriodMonth: month,
+        levyPeriodYear: year,
+      });
+      levyRemaining = Math.max(0, baselines.monthlyLevy - levyPaid);
+    }
+
+    return res.json({
+      data: {
+        monthlyRent: baselines.monthlyRent,
+        monthlyLevy: baselines.monthlyLevy,
+        hasLevy: baselines.hasLevy,
+        rentPaid,
+        levyPaid,
+        rentRemaining,
+        levyRemaining,
+        combinedRemaining: rentRemaining + levyRemaining,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error fetching combined remaining:', error);
+    return res.status(500).json({ message: error?.message || 'Failed to fetch remaining balance' });
   }
 };

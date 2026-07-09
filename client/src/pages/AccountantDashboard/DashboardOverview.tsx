@@ -59,6 +59,7 @@ const DashboardOverview: React.FC = () => {
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
   const [showOutstandingLevies, setShowOutstandingLevies] = useState(false);
+  const [showPassThroughBalances, setShowPassThroughBalances] = useState(false);
   // Show welcome message only on first visit per session (per browser tab)
   const [showWelcome] = useState<boolean>(() => {
     try {
@@ -229,6 +230,16 @@ const DashboardOverview: React.FC = () => {
     .filter(p => p.paymentType === 'sale')
     .reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), [periodFilteredPayments]);
   const totalRevenue = useMemo(() => rentalRevenue + salesRevenue, [rentalRevenue, salesRevenue]);
+  const passThroughRows = useMemo(() => {
+    const byType = outstandingBreakdown?.passThroughByType || dashboardSummary?.passThroughByType || {};
+    return Object.entries(byType).map(([type, row]) => ({
+      type,
+      label: row.label || type,
+      collected: Number(row.collected || 0),
+      paid: Number(row.paid || 0),
+      outstanding: Number(row.outstanding || 0)
+    })).sort((a, b) => b.outstanding - a.outstanding);
+  }, [outstandingBreakdown, dashboardSummary]);
 
   const renderOutstandingProperties = (
     items: OutstandingPropertyBreakdown[],
@@ -286,6 +297,7 @@ const DashboardOverview: React.FC = () => {
     { title: 'Expenses', value: (dashboardSummary?.expenses ?? expensesForPeriod), icon: <UrgentIcon />, color: 'error.main', path: '/accountant-dashboard/revenue' },
     { title: 'Outstanding rentals', value: outstandingBreakdown?.outstandingRentals ?? 0, icon: <PaymentIcon />, color: 'error.main', path: '' },
     { title: 'Outstanding levies', value: outstandingBreakdown?.outstandingLevies ?? 0, icon: <PendingActionsIcon />, color: 'warning.main', path: '' },
+    { title: 'Pass-Through Balances', value: outstandingBreakdown?.passThroughOutstanding ?? dashboardSummary?.passThroughOutstanding ?? 0, icon: <PendingActionsIcon />, color: 'secondary.main', path: '' },
     { title: 'Bank Revenue', value: periodFilteredPayments.filter(p => p.paymentMethod === 'bank_transfer').reduce((s, p) => s + (p.commissionDetails?.agencyShare || 0), 0), icon: <PaymentIcon />, color: 'success.main', path: '/accountant-dashboard/revenue' }
   ];
 
@@ -321,7 +333,8 @@ const DashboardOverview: React.FC = () => {
             'Sales + Sales Payments',
             'Bank Revenue',
             'Outstanding rentals',
-            'Outstanding levies'
+            'Outstanding levies',
+            'Pass-Through Balances'
           ].includes(stat.title);
           const isDeferredDataCard = [
             'Expenses',
@@ -343,8 +356,9 @@ const DashboardOverview: React.FC = () => {
                   '&:hover': { elevation: 4 }
                 }}
                 onClick={() => {
-                  if (stat.title === 'Outstanding rentals') { setShowOutstandingRentals(true); setShowOutstandingLevies(false); return; }
-                  if (stat.title === 'Outstanding levies') { setShowOutstandingLevies(true); setShowOutstandingRentals(false); return; }
+                  if (stat.title === 'Outstanding rentals') { setShowOutstandingRentals(true); setShowOutstandingLevies(false); setShowPassThroughBalances(false); return; }
+                  if (stat.title === 'Outstanding levies') { setShowOutstandingLevies(true); setShowOutstandingRentals(false); setShowPassThroughBalances(false); return; }
+                  if (stat.title === 'Pass-Through Balances') { setShowPassThroughBalances(true); setShowOutstandingRentals(false); setShowOutstandingLevies(false); return; }
                   if (stat.path) navigate(stat.path);
                 }}
               >
@@ -374,9 +388,41 @@ const DashboardOverview: React.FC = () => {
       </Grid>
 
       {/* Outstanding Details */}
-      {(showOutstandingLevies || showOutstandingRentals) && (
+      {(showOutstandingLevies || showOutstandingRentals || showPassThroughBalances) && (
         <Box>
-          {showOutstandingLevies ? (
+          {showPassThroughBalances ? (
+            <Box>
+              <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+                <Typography variant="h6">Pass-Through Balances</Typography>
+                <Button size="small" onClick={() => setShowPassThroughBalances(false)}>Hide</Button>
+              </Box>
+              <Grid container spacing={2}>
+                {(passThroughRows.length ? passThroughRows : [{
+                  type: 'empty',
+                  label: 'No pass-through balances',
+                  collected: 0,
+                  paid: 0,
+                  outstanding: 0
+                }]).map((row) => (
+                  <Grid item xs={12} md={4} key={row.type}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{row.label}</Typography>
+                        <Typography color="text.secondary">Collected: ${Number(row.collected || 0).toLocaleString()}</Typography>
+                        <Typography color="text.secondary">Paid: ${Number(row.paid || 0).toLocaleString()}</Typography>
+                        <Chip
+                          label={`Outstanding: $${Number(row.outstanding || 0).toLocaleString()}`}
+                          color={Number(row.outstanding || 0) > 0 ? 'warning' : 'success'}
+                          size="small"
+                          sx={{ mt: 1 }}
+                        />
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            </Box>
+          ) : showOutstandingLevies ? (
             <Box>
               <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
                 <Typography variant="h6">Properties Without Levy Payments</Typography>

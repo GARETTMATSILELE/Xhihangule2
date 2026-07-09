@@ -139,6 +139,12 @@ const LevyPaymentSchema = new mongoose_1.Schema({
         month: { type: Number, min: 1, max: 12 },
         year: { type: Number }
     },
+    parentPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Payment',
+        required: false,
+        index: true,
+    },
     payout: {
         paidOut: { type: Boolean, default: false },
         paidToName: { type: String },

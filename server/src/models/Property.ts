@@ -6,6 +6,11 @@ export interface IProperty extends Document {
   name: string;
   address: string;
   type?: 'apartment' | 'house' | 'commercial' | 'land';
+  propertyCategory?: 'Residential' | 'Commercial' | 'Land' | 'Special Use';
+  propertySubtype?: string;
+  propertySpecifications?: Record<string, any>;
+  propertyOperationalStatus?: 'Vacant' | 'Occupied' | 'Under Maintenance' | 'Reserved' | 'Archived';
+  propertyUse?: 'Rental' | 'Sale' | 'Both' | 'Internal';
   status?: 'available' | 'rented' | 'maintenance' | 'under_offer' | 'sold';
   rent?: number;
   price?: number;
@@ -69,6 +74,30 @@ const PropertySchema: Schema = new Schema({
       message: 'Property type must be one of: apartment, house, commercial, land'
     },
     default: 'apartment'
+  },
+  propertyCategory: {
+    type: String,
+    enum: ['Residential', 'Commercial', 'Land', 'Special Use'],
+    required: false
+  },
+  propertySubtype: {
+    type: String,
+    trim: true,
+    required: false
+  },
+  propertySpecifications: {
+    type: Schema.Types.Mixed,
+    default: {}
+  },
+  propertyOperationalStatus: {
+    type: String,
+    enum: ['Vacant', 'Occupied', 'Under Maintenance', 'Reserved', 'Archived'],
+    default: 'Vacant'
+  },
+  propertyUse: {
+    type: String,
+    enum: ['Rental', 'Sale', 'Both', 'Internal'],
+    default: 'Rental'
   },
   status: { 
     type: String, 

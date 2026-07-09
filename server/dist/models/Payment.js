@@ -134,6 +134,59 @@ const PaymentSchema = new mongoose_1.Schema({
         type: Number,
         required: false,
     },
+    rentAllocated: {
+        type: Number,
+        required: false,
+    },
+    levyAllocated: {
+        type: Number,
+        required: false,
+    },
+    levyUsed: {
+        type: Number,
+        required: false,
+    },
+    linkedLevyPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'LevyPayment',
+        required: false,
+    },
+    chargeTypeCode: {
+        type: String,
+        required: false,
+        uppercase: true,
+        trim: true
+    },
+    paymentLines: [{
+            chargeTypeCode: {
+                type: String,
+                required: true,
+                uppercase: true,
+                trim: true
+            },
+            chargeTypeId: {
+                type: mongoose_1.Schema.Types.ObjectId,
+                ref: 'ChargeType',
+                required: false
+            },
+            amount: {
+                type: Number,
+                required: true,
+                min: 0
+            },
+            description: {
+                type: String,
+                required: false
+            },
+            referenceId: {
+                type: String,
+                required: false
+            },
+            metadata: {
+                type: mongoose_1.Schema.Types.Mixed,
+                required: false
+            }
+        }],
     notes: {
         type: String,
     },
@@ -396,15 +449,15 @@ PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partial
 PaymentSchema.index({ companyId: 1, externalProvider: 1, externalTransactionId: 1 }, {
     unique: true,
     partialFilterExpression: {
-        externalProvider: { $exists: true, $type: 'string', $ne: '' },
-        externalTransactionId: { $exists: true, $type: 'string', $ne: '' }
+        externalProvider: { $exists: true, $type: 'string', $gt: '' },
+        externalTransactionId: { $exists: true, $type: 'string', $gt: '' }
     }
 });
 // Ensure a payment reference cannot repeat within a company (guards manual edits/imports)
 PaymentSchema.index({ companyId: 1, referenceNumber: 1 }, {
     unique: true,
     partialFilterExpression: {
-        referenceNumber: { $exists: true, $type: 'string', $ne: '' }
+        referenceNumber: { $exists: true, $type: 'string', $gt: '' }
     }
 });
 // Prevent history-changing bulk updates on core fields; use document.save() with workflows instead
@@ -440,6 +493,10 @@ function isIllegalPaymentUpdate(update) {
 }
 PaymentSchema.pre('save', function (next) {
     try {
+        const lines = Array.isArray(this.paymentLines) ? this.paymentLines : [];
+        if (lines.length > 0) {
+            this.amount = Number(lines.reduce((sum, line) => sum + Number((line === null || line === void 0 ? void 0 : line.amount) || 0), 0).toFixed(2));
+        }
         // Keep postingStatus consistent with status to avoid "completed but draft" conflicts.
         // This is critical for reversal eligibility and ledger posting correctness.
         const status = String(this.status || '').toLowerCase();
