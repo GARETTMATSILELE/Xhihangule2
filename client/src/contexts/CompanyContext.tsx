@@ -189,20 +189,14 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       const run = (async () => {
       let response: any;
-      let endpoint = '/companies/current';
-      
-      // If user has a companyId, use it to fetch the company
-      if (user.companyId) {
-        endpoint = `/companies/${user.companyId}`;
-      }
 
       try {
-        response = await api.get(endpoint);
+        // Normal tenant users must use /current; /companies/:id is restricted to
+        // platform admins and returns 403 for accountant/admin dashboard users.
+        response = await api.get('/companies/current');
       } catch (apiError: any) {
-        // If the first attempt fails and we used companyId, try the current endpoint
-        if (user.companyId && apiError.response?.status === 404) {
-          console.log('Company not found by ID, trying current endpoint');
-          response = await api.get('/companies/current');
+        if (user.companyId && user.role === 'system_admin') {
+          response = await api.get(`/companies/${user.companyId}`);
         } else {
           throw apiError;
         }
