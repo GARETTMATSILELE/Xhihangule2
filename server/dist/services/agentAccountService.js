@@ -20,6 +20,9 @@ const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
 const money_1 = require("../utils/money");
+const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
+const commissionProjection_1 = require("./commissionProjection");
+const propertyAccountTotals_1 = require("./propertyAccountTotals");
 class AgentAccountService {
     static getInstance() {
         if (!AgentAccountService.instance) {
@@ -33,65 +36,28 @@ class AgentAccountService {
      */
     syncCommissionForPayment(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId)
-                    .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status')
+                    .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status reversalOfPaymentId')
                     .lean();
                 if (!payment)
                     return;
-                // Guard: never post commissions for provisional/suspense/unfinalized payments
-                if (payment.isProvisional === true)
+                if (!(0, accountingPostingPolicy_1.shouldPostAgentCommission)(payment))
                     return;
-                if (payment.isInSuspense === true)
-                    return;
-                if (payment.commissionFinalized === false)
-                    return;
-                // Also require a completed status for rentals/sales that use status field
-                if (payment.status && String(payment.status) !== 'completed')
-                    return;
-                // Handle non-split rentals/introduction as a single agent lane
-                const isSale = payment.paymentType === 'sale' || payment.paymentType === 'introduction';
-                const split = (payment === null || payment === void 0 ? void 0 : payment.commissionDetails) && payment.commissionDetails.agentSplit;
-                // Helper to post to an agent lane idempotently
-                const postLane = (agentUserId, amount, roleLabel) => __awaiter(this, void 0, void 0, function* () {
-                    if (!agentUserId || !amount || amount <= 0)
-                        return;
+                const lanes = (0, commissionProjection_1.projectCommissionLanes)(payment);
+                for (const lane of lanes) {
                     const referenceBase = String(payment.referenceNumber || '');
-                    const ref = isSale && roleLabel !== 'agent' ? `${String(paymentId)}-${roleLabel}` : String(paymentId);
-                    const description = roleLabel === 'agent'
+                    const description = lane.role === 'agent'
                         ? `Commission from payment ${referenceBase}`
-                        : `Commission (${roleLabel}) from payment ${referenceBase}`;
-                    yield this.addCommission(String(agentUserId), {
-                        amount: Number(amount),
+                        : `Commission (${lane.role}) from payment ${referenceBase}`;
+                    yield this.addCommission(lane.agentId, {
+                        amount: lane.amount,
                         date: new Date(payment.paymentDate || new Date()),
                         description,
-                        reference: ref,
+                        reference: lane.reference,
                         notes: `Property: ${payment.propertyId || ''}, Tenant: ${payment.tenantId || ''}`,
                         paymentId: String(paymentId)
                     });
-                });
-                if (isSale && split) {
-                    const ownerId = (split === null || split === void 0 ? void 0 : split.ownerUserId) ? String(split.ownerUserId) : undefined;
-                    const collabId = (split === null || split === void 0 ? void 0 : split.collaboratorUserId) ? String(split.collaboratorUserId) : undefined;
-                    const ownerAmt = Number((split === null || split === void 0 ? void 0 : split.ownerAgentShare) || 0);
-                    const collabAmt = Number((split === null || split === void 0 ? void 0 : split.collaboratorAgentShare) || 0);
-                    const hasValidOwner = Boolean(ownerId && ownerAmt > 0);
-                    const hasValidCollab = Boolean(collabId && collabAmt > 0);
-                    if (hasValidOwner)
-                        yield postLane(ownerId, ownerAmt, 'owner');
-                    if (hasValidCollab)
-                        yield postLane(collabId, collabAmt, 'collaborator');
-                    // Only return early if at least one valid split lane posted; otherwise fall through to single agent lane.
-                    if (hasValidOwner || hasValidCollab) {
-                        return;
-                    }
-                }
-                // Rentals and non-split sales/introduction: single agent
-                const agentId = payment.agentId ? String(payment.agentId) : undefined;
-                const amount = Number(((_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0);
-                if (agentId && amount && amount > 0) {
-                    yield postLane(agentId, amount, 'agent');
                 }
             }
             catch (error) {
@@ -114,16 +80,9 @@ class AgentAccountService {
                     if (!commissionRows.length)
                         continue;
                     for (const row of commissionRows) {
-                        const roleSuffix = String(row.reference || '').includes('-owner')
-                            ? 'owner'
-                            : String(row.reference || '').includes('-collaborator')
-                                ? 'collaborator'
-                                : 'agent';
-                        const reversalRef = `REV-${paymentId}-${roleSuffix}`;
-                        const exists = (account.transactions || []).some((t) => t.type === 'penalty' && String(t.reference || '') === reversalRef);
-                        if (exists)
-                            continue;
-                        account.transactions.push({
+                        const role = (0, commissionProjection_1.inferCommissionRoleFromReference)(String(row.reference || ''));
+                        const reversalRef = (0, commissionProjection_1.commissionReversalReference)(String(paymentId), role);
+                        const penalty = {
                             type: 'penalty',
                             amount: Number(row.amount || 0),
                             date: new Date(),
@@ -131,11 +90,14 @@ class AgentAccountService {
                             reference: reversalRef,
                             status: 'completed',
                             notes: reason || 'Manual payment reversal',
-                            paymentId: String(paymentId),
-                        });
+                            paymentId: String(paymentId)
+                        };
+                        yield AgentAccount_1.AgentAccount.updateOne({ _id: account._id, 'transactions.reference': { $ne: reversalRef } }, { $push: { transactions: penalty }, $set: { lastUpdated: new Date() } });
                     }
-                    yield this.recalculateBalance(account);
-                    yield account.save();
+                    const fresh = yield AgentAccount_1.AgentAccount.findById(account._id);
+                    if (fresh) {
+                        yield this.recalculateBalance(fresh);
+                    }
                 }
             }
             catch (error) {
@@ -175,10 +137,6 @@ class AgentAccountService {
                     });
                     yield account.save();
                     logger_1.logger.info(`Created new agent account for agent: ${agentId}`);
-                }
-                else {
-                    // Recalculate balance for existing account
-                    yield this.recalculateBalance(account);
                 }
                 return account;
             }
@@ -273,7 +231,6 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const account = yield this.getOrCreateAgentAccount(agentId);
-                // Dedupe by reference: if a commission with same reference already exists, no-op
                 if (commissionData.reference) {
                     const exists = account.transactions.some(t => t.type === 'commission' &&
                         typeof t.reference === 'string' &&
@@ -281,14 +238,6 @@ class AgentAccountService {
                         t.reference === commissionData.reference);
                     if (exists) {
                         logger_1.logger.warn(`Duplicate commission reference "${commissionData.reference}" for agent ${agentId} ignored.`);
-                        return account;
-                    }
-                }
-                // Dedupe by paymentId when provided
-                if (commissionData.paymentId) {
-                    const existsByPayment = account.transactions.some(t => t.type === 'commission' && String(t.paymentId || '') === String(commissionData.paymentId));
-                    if (existsByPayment) {
-                        logger_1.logger.warn(`Duplicate commission by paymentId "${commissionData.paymentId}" for agent ${agentId} ignored.`);
                         return account;
                     }
                 }
@@ -304,23 +253,23 @@ class AgentAccountService {
                 if (commissionData.paymentId) {
                     transaction.paymentId = commissionData.paymentId;
                 }
-                account.transactions.push(transaction);
-                account.totalCommissions += commissionData.amount;
-                account.lastCommissionDate = commissionData.date;
-                account.lastUpdated = new Date();
-                yield this.recalculateBalance(account);
-                try {
-                    yield account.save();
+                const filter = { agentId: new mongoose_1.default.Types.ObjectId(agentId) };
+                if (commissionData.reference) {
+                    filter['transactions.reference'] = { $ne: commissionData.reference };
                 }
-                catch (e) {
-                    // In case of a race, unique index on (agentId, transactions.type, transactions.reference) will throw here
-                    if (e && e.code === 11000) {
-                        logger_1.logger.warn(`Duplicate commission prevented by unique index for agent ${agentId}, ref "${commissionData.reference}".`);
-                        return yield AgentAccount_1.AgentAccount.findOne({ agentId }).lean();
-                    }
-                    throw e;
+                const pushed = yield AgentAccount_1.AgentAccount.updateOne(filter, {
+                    $push: { transactions: transaction },
+                    $set: { lastCommissionDate: commissionData.date, lastUpdated: new Date() }
+                });
+                if (Number(pushed.modifiedCount || 0) === 0) {
+                    return yield AgentAccount_1.AgentAccount.findOne({ agentId: new mongoose_1.default.Types.ObjectId(agentId) });
                 }
-                logger_1.logger.info(`Added commission of ${commissionData.amount} to agent ${agentId}`);
+                const fresh = yield AgentAccount_1.AgentAccount.findOne({ agentId: new mongoose_1.default.Types.ObjectId(agentId) });
+                if (fresh) {
+                    yield this.recalculateBalance(fresh);
+                    logger_1.logger.info(`Added commission of ${commissionData.amount} to agent ${agentId}`);
+                    return fresh;
+                }
                 return account;
             }
             catch (error) {
@@ -447,35 +396,23 @@ class AgentAccountService {
     recalculateBalance(account) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                // Use integer cents to prevent rounding drift
-                let balanceCents = 0;
-                let commissionCents = 0;
-                let payoutCents = 0;
-                let penaltyCents = 0;
-                // Sort transactions by date
-                const sortedTransactions = account.transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                for (const transaction of sortedTransactions) {
-                    const amountCents = Math.round((transaction.amount || 0) * 100);
-                    const isCompleted = transaction.status === 'completed';
-                    if (transaction.type === 'commission' && isCompleted) {
-                        commissionCents += amountCents;
-                        balanceCents += amountCents;
-                    }
-                    else if (transaction.type === 'payout' && isCompleted) {
-                        payoutCents += amountCents;
-                        balanceCents -= amountCents;
-                    }
-                    else if (transaction.type === 'penalty' && isCompleted) {
-                        penaltyCents += amountCents;
-                        balanceCents -= amountCents;
-                    }
-                    transaction.runningBalance = Number((balanceCents / 100).toFixed(2));
-                }
-                account.totalCommissions = Number((commissionCents / 100).toFixed(2));
-                account.totalPayouts = Number((payoutCents / 100).toFixed(2));
-                account.totalPenalties = Number((penaltyCents / 100).toFixed(2));
-                account.runningBalance = Number((balanceCents / 100).toFixed(2));
+                const totals = (0, propertyAccountTotals_1.computeAgentAccountTotals)(account);
+                account.totalCommissions = totals.totalCommissions;
+                account.totalPayouts = totals.totalPayouts;
+                account.totalPenalties = totals.totalPenalties;
+                account.runningBalance = totals.runningBalance;
                 account.lastUpdated = new Date();
+                if (account._id) {
+                    yield AgentAccount_1.AgentAccount.updateOne({ _id: account._id }, {
+                        $set: {
+                            totalCommissions: totals.totalCommissions,
+                            totalPayouts: totals.totalPayouts,
+                            totalPenalties: totals.totalPenalties,
+                            runningBalance: totals.runningBalance,
+                            lastUpdated: new Date()
+                        }
+                    });
+                }
             }
             catch (error) {
                 logger_1.logger.error('Error recalculating balance:', error);
@@ -488,14 +425,13 @@ class AgentAccountService {
      */
     getAgentAccount(agentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d;
+            var _a;
             try {
-                // First try to get or create the account
-                const account = yield this.getOrCreateAgentAccount(agentId);
-                // Sync commission transactions from payments to ensure balance is up to date
-                yield this.syncCommissionTransactions(agentId);
-                // Refresh the account after syncing
-                let updatedAccount = yield this.getOrCreateAgentAccount(agentId);
+                const account = yield AgentAccount_1.AgentAccount.findOne({ agentId: new mongoose_1.default.Types.ObjectId(agentId) });
+                if (!account) {
+                    throw new errorHandler_1.AppError('Agent account not found', 404);
+                }
+                let updatedAccount = account;
                 // Get commission data from payments for display
                 console.log('Fetching commission data for agentId:', agentId);
                 // Fetch both rentals and sales where this agent is involved either as the payment.agentId
@@ -542,72 +478,12 @@ class AgentAccountService {
                     .sort({ paymentDate: -1 })
                     .lean(); // Use lean() for better performance
                 console.log('Found commission data:', commissionData.length, 'records');
-                if (commissionData.length > 0) {
-                    console.log('Sample commission record:', {
-                        paymentDate: commissionData[0].paymentDate,
-                        amount: commissionData[0].amount,
-                        agentShare: (_a = commissionData[0].commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare,
-                        propertyName: (_b = commissionData[0].propertyId) === null || _b === void 0 ? void 0 : _b.propertyName
-                    });
-                }
-                // Defensive guarantee: for each payment visible in Commission Summary, ensure a matching
-                // commission transaction exists in the ledger for THIS agent. If missing, sync that payment.
-                try {
-                    const needsSync = [];
-                    const txByRef = new Set((updatedAccount.transactions || [])
-                        .filter(t => t.type === 'commission')
-                        .map(t => String(t.reference || '')));
-                    for (const p of commissionData) {
-                        const pid = String((p === null || p === void 0 ? void 0 : p._id) || '');
-                        const split = (_c = p === null || p === void 0 ? void 0 : p.commissionDetails) === null || _c === void 0 ? void 0 : _c.agentSplit;
-                        if (p.paymentType === 'sale' && split) {
-                            const ownerId = (split === null || split === void 0 ? void 0 : split.ownerUserId) ? String(split.ownerUserId) : undefined;
-                            const collabId = (split === null || split === void 0 ? void 0 : split.collaboratorUserId) ? String(split.collaboratorUserId) : undefined;
-                            const ownerAmt = Number((split === null || split === void 0 ? void 0 : split.ownerAgentShare) || 0);
-                            const collabAmt = Number((split === null || split === void 0 ? void 0 : split.collaboratorAgentShare) || 0);
-                            if (ownerId === agentId && ownerAmt > 0) {
-                                const ref = `${pid}-owner`;
-                                if (!txByRef.has(ref))
-                                    needsSync.push(pid);
-                            }
-                            else if (collabId === agentId && collabAmt > 0) {
-                                const ref = `${pid}-collaborator`;
-                                if (!txByRef.has(ref))
-                                    needsSync.push(pid);
-                            }
-                        }
-                        else {
-                            // Non-split (rentals and non-development sales)
-                            const ref = pid;
-                            if (!txByRef.has(ref))
-                                needsSync.push(pid);
-                        }
-                    }
-                    // Deduplicate and sync each missing payment lazily
-                    if (needsSync.length > 0) {
-                        const uniq = Array.from(new Set(needsSync));
-                        console.log(`Backfilling ${uniq.length} missing commission transactions for agent ${agentId}`);
-                        for (const pid of uniq) {
-                            try {
-                                yield this.syncCommissionForPayment(pid);
-                            }
-                            catch (e) {
-                                console.warn(`Failed to backfill commission for payment ${pid}:`, (e === null || e === void 0 ? void 0 : e.message) || e);
-                            }
-                        }
-                        // Refresh account after backfill
-                        updatedAccount = yield this.getOrCreateAgentAccount(agentId);
-                    }
-                }
-                catch (defErr) {
-                    console.warn('Defensive commission backfill encountered an error (non-fatal):', defErr);
-                }
                 const accountData = updatedAccount.toObject();
                 const result = Object.assign(Object.assign({}, accountData), { commissionData });
                 console.log('Returning agent account with commission data:', {
                     agentId: result.agentId,
                     agentName: result.agentName,
-                    commissionDataCount: ((_d = result.commissionData) === null || _d === void 0 ? void 0 : _d.length) || 0,
+                    commissionDataCount: ((_a = result.commissionData) === null || _a === void 0 ? void 0 : _a.length) || 0,
                     totalCommissions: result.totalCommissions,
                     runningBalance: result.runningBalance
                 });
@@ -637,18 +513,7 @@ class AgentAccountService {
                     ]
                 });
                 const agentIds = agents.map(agent => agent._id);
-                // For each agent, sync commission transactions (covers rentals and sales, including split roles),
-                // then fetch the updated account to ensure totals and balances are current for the list view.
-                const accounts = yield Promise.all(agentIds.map((agentObjectId) => __awaiter(this, void 0, void 0, function* () {
-                    const id = agentObjectId.toString();
-                    try {
-                        yield this.syncCommissionTransactions(id);
-                    }
-                    catch (e) {
-                        logger_1.logger.warn(`Failed to sync commissions for agent ${id} (non-fatal):`, e);
-                    }
-                    return yield this.getOrCreateAgentAccount(id);
-                })));
+                const accounts = yield AgentAccount_1.AgentAccount.find({ agentId: { $in: agentIds } });
                 return accounts;
             }
             catch (error) {

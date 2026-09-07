@@ -60,6 +60,7 @@ const LedgerDrilldownPage = lazyWithRetry(() => import('./pages/AccountantDashbo
 const CommissionsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/CommissionsPage'));
 const SettingsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/SettingsPage'));
 const ReportsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/ReportsPage'));
+const PropertyDetailsReportPage = lazyWithRetry(() => import('./pages/agent/PropertyDetailsReportPage'));
 const PropertyAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/PropertyAccountsPage'));
 const PropertyAccountDetailPage = lazyWithRetry(() => import('./pages/AccountantDashboard/PropertyAccountDetailPage'));
 const PropertyDepositLedgerPage = lazyWithRetry(() => import('./pages/AccountantDashboard/PropertyDepositLedgerPage'));
@@ -252,6 +253,7 @@ const App: React.FC = () => {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="levies" element={<LevyPaymentsPage />} />
                 <Route path="reports" element={<ReportsPage />} />
+                <Route path="property-details-report" element={<PropertyDetailsReportPage scope="company" />} />
                 <Route path="trust-account-reports" element={<TrustAccountReportsPage />} />
                 <Route path="trust-account-reports/:propertyId" element={<TrustAccountPropertyReportPage />} />
                 <Route path="tasks" element={<TasksPage />} />

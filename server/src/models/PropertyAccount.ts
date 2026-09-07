@@ -1,5 +1,6 @@
 import { Schema, Document, Types } from 'mongoose';
 import { accountingConnection } from '../config/database';
+import { isIllegalPropertyAccountMutation } from '../services/ledgerMutationPolicy';
 
 export type TransactionCategory =
   | 'RENT'
@@ -135,6 +136,7 @@ export interface IPropertyAccount extends Document {
   lastPayoutDate?: Date;
   isArchived?: boolean;
   isActive: boolean;
+  ledgerRevision?: number;
   lastUpdated: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -466,6 +468,10 @@ const PropertyAccountSchema = new Schema<IPropertyAccount>({
     type: Boolean,
     default: false
   },
+  ledgerRevision: {
+    type: Number,
+    default: 0
+  },
   lastUpdated: { 
     type: Date, 
     default: Date.now 
@@ -493,10 +499,11 @@ PropertyAccountSchema.index(
   { propertyId: 1, ledgerType: 1, 'ownerPayouts.referenceNumber': 1 },
   { unique: true, sparse: true }
 );
-// Ensure each paymentId is only recorded once per property ledger
+// Lookup only. Unique-on-paymentId is unsafe: income and configured_expense share paymentId.
+// The unique identity is transactions.idempotencyKey (declared below).
 PropertyAccountSchema.index(
   { propertyId: 1, ledgerType: 1, 'transactions.paymentId': 1 },
-  { unique: true, sparse: true }
+  { unique: false, sparse: true }
 );
 // Optional idempotency unique guards for transactions and payouts when a key is provided
 PropertyAccountSchema.index(
@@ -520,59 +527,11 @@ PropertyAccountSchema.index(
   }
 );
 
-// Guard helper to detect illegal update operators/paths that would mutate history
-function isIllegalLedgerMutation(update: Record<string, any>, rootArrays: string[]): boolean {
-  const illegalSetters = ['$set', '$unset', '$inc'];
-  const illegalRemovers = ['$pull', '$pullAll', '$pop'];
-  const allowedAppends = ['$push', '$addToSet'];
-  const startsWithAny = (k: string, prefixes: string[]) => prefixes.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
-  // Allow-list: status transitions on ownerPayouts via positional operator are permitted
-  const isAllowedSetPath = (path: string): boolean => {
-    // Allow ownerPayouts.$.status and ownerPayouts.$.updatedAt (including array filter variants like $[elem])
-    return /^ownerPayouts\.\$(?:\[[^\]]+\])?\.(status|updatedAt)$/.test(path);
-  };
-
-  // Block setters on nested transaction/payout fields
-  for (const op of illegalSetters) {
-    const payload = (update as any)[op];
-    if (!payload || typeof payload !== 'object') continue;
-    for (const path of Object.keys(payload)) {
-      if (isAllowedSetPath(path)) continue;
-      if (path === 'passThroughAccounts') continue;
-      if (/^passThroughAccounts\.\$(?:\[[^\]]+\])?\.(runningBalance|totalCollected|totalPaid|lastUpdated)$/.test(path)) continue;
-      if (/^passThroughAccounts\..*transactions(?:\.|$)/.test(path)) return true;
-      if (startsWithAny(path, rootArrays)) return true;
-    }
-  }
-
-  // Block removals from the arrays entirely
-  for (const op of illegalRemovers) {
-    const payload = (update as any)[op];
-    if (!payload || typeof payload !== 'object') continue;
-    for (const path of Object.keys(payload)) {
-      if (/^passThroughAccounts\..*transactions(?:\.|$)/.test(path)) return true;
-      if (startsWithAny(path, rootArrays)) return true;
-    }
-  }
-
-  // Allow only root-level appends to the arrays. Block nested $push/$addToSet.
-  for (const op of allowedAppends) {
-    const payload = (update as any)[op];
-    if (!payload || typeof payload !== 'object') continue;
-    for (const path of Object.keys(payload)) {
-      // Only allow direct root paths (e.g., 'transactions' or 'ownerPayouts')
-      if (!rootArrays.includes(path) && path !== 'passThroughAccounts') return true;
-    }
-  }
-  return false;
-}
-
-// Block any history rewrites on updates (immutability enforcement)
+// Block amount/history rewrites. Status cancellation and nested pass-through appends are allowed.
 PropertyAccountSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
   try {
     const update = (this as any).getUpdate?.() || {};
-    const illegal = isIllegalLedgerMutation(update, ['transactions', 'ownerPayouts', 'passThroughAccounts.transactions']);
-    if (illegal) {
+    if (isIllegalPropertyAccountMutation(update)) {
       return next(new Error('PropertyAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
     }
     return next();

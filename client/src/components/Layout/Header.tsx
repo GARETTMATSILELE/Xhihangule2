@@ -24,8 +24,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import notificationService from '../../services/notificationService';
-import { io as socketClient, Socket } from 'socket.io-client';
-import api from '../../api/axios';
+import { initializeSocket, disconnectSocket } from '../../config/socket';
 import { getAccessToken } from '../../contexts/AuthContext';
 
 // Header can optionally offset for a sidebar via the sidebarWidth prop
@@ -57,7 +56,6 @@ export const useNotification = () => {
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     try { return localStorage.getItem('notify:sound') !== 'off'; } catch { return true; }
   });
@@ -65,6 +63,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try { return localStorage.getItem('notify:desktop') === 'on'; } catch { return false; }
   });
   const chimeRef = React.useRef<HTMLAudioElement | null>(null);
+  const soundEnabledRef = React.useRef(soundEnabled);
+  const desktopEnabledRef = React.useRef(desktopEnabled);
+  soundEnabledRef.current = soundEnabled;
+  desktopEnabledRef.current = desktopEnabled;
   if (!chimeRef.current) {
     const a = new Audio('/sounds/notify.mp3');
     a.preload = 'auto';
@@ -97,30 +99,19 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     })();
   }, [isAuthenticated, loading]);
 
-  // Socket.IO subscription for real-time notifications
+  // Socket.IO subscription for real-time notifications (shared singleton)
   useEffect(() => {
-    if (loading || !isAuthenticated) {
-      try { socket?.close(); } catch {}
-      setSocket(null);
+    if (loading) return;
+    if (!isAuthenticated) {
+      try { disconnectSocket(); } catch {}
       return;
     }
 
-    const base = (api.defaults.baseURL || '').replace(/\/api\/?$/, '');
     const token = getAccessToken && getAccessToken();
-    if (!base || !token) return;
+    if (!token) return;
     try {
-      const s = socketClient(base, {
-        auth: { token },
-        transports: ['websocket'],
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 3000,
-        reconnectionDelayMax: 20000,
-        randomizationFactor: 0.5,
-        timeout: 10000
-      });
-      s.on('connect_error', () => {/* no-op */});
-      s.on('newNotification', (n: any) => {
+      const s = initializeSocket(token);
+      const onNotification = (n: any) => {
         const notif: Notification = {
           id: String(n._id || n.id || Date.now()),
           title: n.title,
@@ -130,28 +121,25 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           createdAt: n.createdAt ? new Date(n.createdAt) : new Date()
         };
         setNotifications(prev => [notif, ...prev]);
-        // Play sound
-        if (soundEnabled && chimeRef.current) {
+        if (soundEnabledRef.current && chimeRef.current) {
           chimeRef.current.currentTime = 0;
           chimeRef.current.play().catch(() => {});
         }
-        // Desktop notification
-        if (desktopEnabled && 'Notification' in window && Notification.permission === 'granted') {
+        if (desktopEnabledRef.current && 'Notification' in window && Notification.permission === 'granted') {
           try {
             const dn = new Notification(notif.title, { body: notif.message, icon: '/icon-192.png' });
             dn.onclick = () => { if (notif.link) window.open(notif.link, '_blank'); };
           } catch {}
         }
-      });
-      setSocket(s);
+      };
+      s.on('newNotification', onNotification);
       return () => {
-        try { s.close(); } catch {}
-        setSocket(null);
+        try { s.off('newNotification', onNotification); } catch {}
       };
     } catch {
       // ignore socket init errors
     }
-  }, [isAuthenticated, loading, soundEnabled, desktopEnabled]);
+  }, [isAuthenticated, loading]);
 
   const addNotification = (notification: Notification) => {
     setNotifications(prev => [notification, ...prev]);

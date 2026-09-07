@@ -19,6 +19,9 @@ router.get('/:id/ledger', roles_1.canViewCommissions, trustAccountController_1.g
 router.get('/:id/tax-summary', roles_1.canViewCommissions, trustAccountController_1.getTrustTaxSummary);
 router.get('/:id/audit-logs', roles_1.canViewCommissions, trustAccountController_1.getTrustAuditLogs);
 router.get('/:id/reconciliation', roles_1.canViewCommissions, trustAccountController_1.getTrustReconciliation);
+router.get('/:id/matter', roles_1.canViewCommissions, trustAccountController_1.getTrustMatter);
+router.patch('/:id/matter/custody', roles_1.isAccountant, trustAccountController_1.updateTrustMatterCustody);
+router.patch('/:id/matter/documents', roles_1.isAccountant, trustAccountController_1.updateTrustMatterDocuments);
 router.post('/:id/buyer-payments', roles_1.isAccountant, trustAccountController_1.recordBuyerPayment);
 router.post('/:id/calculate-settlement', roles_1.isAccountant, trustAccountController_1.calculateSettlement);
 router.post('/:id/apply-tax-deductions', roles_1.isAccountant, trustAccountController_1.applyTaxDeductions);

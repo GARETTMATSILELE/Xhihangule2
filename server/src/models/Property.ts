@@ -42,6 +42,8 @@ export interface IProperty extends Document {
   // New fields
   rentalType?: 'management' | 'introduction' | 'sale';
   commission?: number;
+  vatOnCommission?: boolean;
+  vatCommissionTreatment?: 'inclusive' | 'exclusive';
   // New fields for levy/municipal fees
   levyOrMunicipalType?: 'levy' | 'municipal';
   levyOrMunicipalAmount?: number;
@@ -54,6 +56,8 @@ export interface IProperty extends Document {
   isDeleted?: boolean;
   deletedAt?: Date | null;
   deletedBy?: mongoose.Types.ObjectId | null;
+  archivedAt?: Date | null;
+  archivedBy?: mongoose.Types.ObjectId | null;
 }
 
 const PropertySchema: Schema = new Schema({
@@ -236,6 +240,15 @@ const PropertySchema: Schema = new Schema({
     max: [100, 'Commission cannot exceed 100%'],
     default: 15
   },
+  vatOnCommission: {
+    type: Boolean,
+    default: false
+  },
+  vatCommissionTreatment: {
+    type: String,
+    enum: ['inclusive', 'exclusive'],
+    required: false
+  },
   commissionPreaPercent: {
     type: Number,
     min: [0, 'PREA percent cannot be negative'],
@@ -279,6 +292,15 @@ const PropertySchema: Schema = new Schema({
     default: null
   },
   deletedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  archivedAt: {
+    type: Date,
+    default: null
+  },
+  archivedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null

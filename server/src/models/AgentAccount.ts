@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
+import { isIllegalAgentAccountMutation } from '../services/ledgerMutationPolicy';
 
 /**
  * SECURITY NOTE
@@ -210,55 +211,17 @@ agentAccountSchema.index(
     }
   }
 );
-// Prevent duplicate paymentId-backed entries per agent (commission lane)
+// Lookup only. Same agent can hold owner + collaborator lanes for one payment.
+// Uniqueness is (agentId, transactions.type, transactions.reference) above.
 agentAccountSchema.index(
   { agentId: 1, 'transactions.paymentId': 1, 'transactions.type': 1 },
-  {
-    unique: true,
-    sparse: true,
-    partialFilterExpression: {
-      'transactions.type': 'commission',
-      'transactions.paymentId': { $exists: true }
-    }
-  }
+  { unique: false, sparse: true }
 );
-
-// Immutability guard for update operations
-function isIllegalAgentLedgerMutation(update: Record<string, any>): boolean {
-  const illegalSetters = ['$set', '$unset', '$inc'];
-  const illegalRemovers = ['$pull', '$pullAll', '$pop'];
-  const allowedAppends = ['$push', '$addToSet'];
-  const rootArrays = ['transactions', 'agentPayouts'];
-  const startsWithAny = (k: string) => rootArrays.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
-
-  for (const op of illegalSetters) {
-    const payload = (update as any)[op];
-    if (!payload) continue;
-    for (const path of Object.keys(payload)) {
-      if (startsWithAny(path)) return true;
-    }
-  }
-  for (const op of illegalRemovers) {
-    const payload = (update as any)[op];
-    if (!payload) continue;
-    for (const path of Object.keys(payload)) {
-      if (startsWithAny(path)) return true;
-    }
-  }
-  for (const op of allowedAppends) {
-    const payload = (update as any)[op];
-    if (!payload) continue;
-    for (const path of Object.keys(payload)) {
-      if (!rootArrays.includes(path)) return true;
-    }
-  }
-  return false;
-}
 
 agentAccountSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
   try {
     const update = (this as any).getUpdate?.() || {};
-    if (isIllegalAgentLedgerMutation(update)) {
+    if (isIllegalAgentAccountMutation(update)) {
       return next(new Error('AgentAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
     }
     return next();

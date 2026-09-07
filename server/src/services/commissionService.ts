@@ -1,43 +1,70 @@
 import mongoose from 'mongoose';
 import { Company } from '../models/Company';
+import {
+  calculatePropertyCommission,
+  toPaymentCommissionSnapshot,
+  applyLevyPassThroughToSnapshot,
+  type PropertyCommissionInput,
+  type PropertyCommissionResult,
+  type CommissionResult
+} from './propertyCommissionCalculator';
+import { getVatRateForDate } from './taxRateService';
 
-export interface CommissionResult {
-  totalCommission: number;
-  preaFee: number;
-  agentShare: number;
-  agencyShare: number;
-  ownerAmount: number;
-}
+export type { CommissionResult, PropertyCommissionInput, PropertyCommissionResult };
+export { calculatePropertyCommission, toPaymentCommissionSnapshot, applyLevyPassThroughToSnapshot };
 
 export class CommissionService {
   public static async calculate(amount: number, commissionPercentage: number, companyId: mongoose.Types.ObjectId): Promise<CommissionResult> {
     const company = await Company.findById(companyId).lean();
-    const commissionEnabled = company?.featureFlags?.commissionEnabled !== false;
-    if (!commissionEnabled) {
-      return {
-        totalCommission: 0,
-        preaFee: 0,
-        agentShare: 0,
-        agencyShare: 0,
-        ownerAmount: amount
-      };
-    }
-
-    const totalCommission = (amount * (commissionPercentage || 0)) / 100;
-    const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
-    const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
-    const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
-
-    const preaFee = totalCommission * preaPercentOfTotal;
-    const remainingCommission = totalCommission - preaFee;
-    const agentShare = remainingCommission * agentPercentOfRemaining;
-    const agencyShare = remainingCommission * agencyPercentOfRemaining;
+    const result = calculatePropertyCommission({
+      grossRent: amount,
+      levy: 0,
+      commissionPercentage,
+      vatOnCommission: false,
+      commissionEnabled: company?.featureFlags?.commissionEnabled !== false,
+      preaPercentOfTotal: company?.commissionConfig?.preaPercentOfTotal,
+      agentPercentOfRemaining: company?.commissionConfig?.agentPercentOfRemaining,
+      agencyPercentOfRemaining: company?.commissionConfig?.agencyPercentOfRemaining
+    });
     return {
-      totalCommission,
-      preaFee,
-      agentShare,
-      agencyShare,
-      ownerAmount: amount - totalCommission
+      totalCommission: result.totalCommission,
+      preaFee: result.preaFee,
+      agentShare: result.agentShare,
+      agencyShare: result.agencyShare,
+      ownerAmount: result.ownerAmount
     };
+  }
+
+  public static async calculateForProperty(input: {
+    companyId: mongoose.Types.ObjectId | string | undefined;
+    grossRent: number;
+    levy?: number;
+    commissionPercentage: number;
+    vatOnCommission?: boolean;
+    vatTreatment?: 'inclusive' | 'exclusive' | null;
+    vatRate?: number;
+    paymentDate?: Date;
+  }): Promise<PropertyCommissionResult> {
+    const company = input.companyId ? await Company.findById(input.companyId).lean() : null;
+    const vatOnCommission = Boolean(input.vatOnCommission);
+    let vatRate = Number(input.vatRate);
+    if (vatOnCommission && !Number.isFinite(vatRate) && input.companyId) {
+      const lookedUp = await getVatRateForDate(input.companyId, input.paymentDate || new Date());
+      vatRate = lookedUp.decimal;
+    }
+    if (!Number.isFinite(vatRate) || vatRate < 0) vatRate = 0;
+
+    return calculatePropertyCommission({
+      grossRent: input.grossRent,
+      levy: input.levy,
+      commissionPercentage: input.commissionPercentage,
+      vatOnCommission,
+      vatTreatment: input.vatTreatment,
+      vatRate,
+      commissionEnabled: company?.featureFlags?.commissionEnabled !== false,
+      preaPercentOfTotal: company?.commissionConfig?.preaPercentOfTotal,
+      agentPercentOfRemaining: company?.commissionConfig?.agentPercentOfRemaining,
+      agencyPercentOfRemaining: company?.commissionConfig?.agencyPercentOfRemaining
+    });
   }
 }

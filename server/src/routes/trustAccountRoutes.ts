@@ -13,13 +13,16 @@ import {
   getTrustAccountFull,
   getTrustAuditLogs,
   getTrustLedger,
+  getTrustMatter,
   getTrustReconciliation,
   getTrustTaxSummary,
   listTrustAccounts,
   recordBuyerPayment,
   transferToSeller,
   transitionTrustWorkflow,
-  runTrustReconciliation
+  runTrustReconciliation,
+  updateTrustMatterCustody,
+  updateTrustMatterDocuments
 } from '../controllers/trustAccountController';
 
 const router = express.Router();
@@ -36,6 +39,9 @@ router.get('/:id/ledger', canViewCommissions, getTrustLedger);
 router.get('/:id/tax-summary', canViewCommissions, getTrustTaxSummary);
 router.get('/:id/audit-logs', canViewCommissions, getTrustAuditLogs);
 router.get('/:id/reconciliation', canViewCommissions, getTrustReconciliation);
+router.get('/:id/matter', canViewCommissions, getTrustMatter);
+router.patch('/:id/matter/custody', isAccountant, updateTrustMatterCustody);
+router.patch('/:id/matter/documents', isAccountant, updateTrustMatterDocuments);
 
 router.post('/:id/buyer-payments', isAccountant, recordBuyerPayment);
 router.post('/:id/calculate-settlement', isAccountant, calculateSettlement);

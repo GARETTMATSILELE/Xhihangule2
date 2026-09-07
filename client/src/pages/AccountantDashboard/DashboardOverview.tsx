@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -42,6 +42,29 @@ import accountingService, {
   OutstandingPropertyBreakdown
 } from '../../services/accountingService';
 
+type DashboardPeriod = 'month' | 'quarter' | 'year';
+
+function getDashboardPeriodRange(period: DashboardPeriod): { start: Date; end: Date } {
+  const now = new Date();
+  if (period === 'month') {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth(), 1),
+      end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+    };
+  }
+  if (period === 'quarter') {
+    const q = Math.floor(now.getMonth() / 3);
+    return {
+      start: new Date(now.getFullYear(), q * 3, 1),
+      end: new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999)
+    };
+  }
+  return {
+    start: new Date(now.getFullYear(), 0, 1),
+    end: new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999)
+  };
+}
+
 const DashboardOverview: React.FC = () => {
   const { user } = useAuth();
   const { company } = useCompany();
@@ -50,7 +73,11 @@ const DashboardOverview: React.FC = () => {
   const [loading, setLoading] = useState(true); // core loading for above-the-fold
   const [deferredLoading, setDeferredLoading] = useState(true); // deferred data below-the-fold
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState<'month' | 'quarter' | 'year'>('month');
+  const [period, setPeriod] = useState<DashboardPeriod>('month');
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedCoreRef = useRef(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
@@ -76,44 +103,14 @@ const DashboardOverview: React.FC = () => {
     } catch {}
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    // Run core and deferred in parallel so cards fill in as data arrives; page renders immediately
-    (async () => {
-      const runCore = async () => {
-        if (cancelled) return;
-        await loadCore();
-      };
-      const runDeferred = async () => {
-        if (cancelled) return;
-        await loadDeferred();
-      };
-      runCore();
-      runDeferred();
-    })();
-    return () => { cancelled = true; };
-    // Re-load when company context changes
-  }, [user?.companyId]);
-
-  // Live refresh when payments change (to keep Outstanding cards in sync with agent dashboard)
-  useEffect(() => {
-    const onPaymentsChanged = () => {
-      // Refresh both core and deferred datasets that feed the outstanding cards
-      loadCore();
-      loadDeferred();
-    };
-    window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
-    return () => {
-      window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
-    };
-  }, []);
-
-  const loadCore = async () => {
+  const loadCore = useCallback(async () => {
+    const isFirstLoad = !hasLoadedCoreRef.current;
     try {
-      setLoading(true);
+      if (isFirstLoad) setLoading(true);
+      const { start, end } = getDashboardPeriodRange(period);
       const [prRes, paymentsData, summary, acctSummary, outstanding] = await Promise.all([
         paymentRequestService.getPaymentRequests(),
-        paymentService.getPayments(),
+        paymentService.getPayments({ startDate: start, endDate: end }),
         (async () => { try { return await companyAccountService.getSummary(); } catch { return null; } })(),
         (async () => { try { return await accountingService.getDashboardSummary(); } catch { return null; } })(),
         accountingService.getDashboardOutstanding()
@@ -123,15 +120,16 @@ const DashboardOverview: React.FC = () => {
       if (summary) setCompanySummary(summary);
       if (acctSummary) setDashboardSummary(acctSummary);
       setOutstandingBreakdown(outstanding);
+      hasLoadedCoreRef.current = true;
     } catch (err: any) {
       console.error('Error loading core dashboard data:', err);
       setError('Failed to load dashboard');
     } finally {
-      setLoading(false);
+      if (isFirstLoad) setLoading(false);
     }
-  };
+  }, [period]);
 
-  const loadDeferred = async () => {
+  const loadDeferred = useCallback(async () => {
     try {
       setDeferredLoading(true);
       try {
@@ -153,7 +151,55 @@ const DashboardOverview: React.FC = () => {
     } finally {
       setDeferredLoading(false);
     }
-  };
+  }, []);
+
+  const refreshDashboard = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
+    try {
+      await Promise.all([loadCore(), loadDeferred()]);
+    } finally {
+      refreshInFlightRef.current = false;
+      if (refreshPendingRef.current) {
+        refreshPendingRef.current = false;
+        void refreshDashboard();
+      }
+    }
+  }, [loadCore, loadDeferred]);
+
+  const scheduleDashboardRefresh = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void refreshDashboard();
+    }, 400);
+  }, [refreshDashboard]);
+
+  useEffect(() => {
+    hasLoadedCoreRef.current = false;
+  }, [user?.companyId]);
+
+  useEffect(() => {
+    void loadCore();
+  }, [user?.companyId, loadCore]);
+
+  useEffect(() => {
+    void loadDeferred();
+  }, [user?.companyId, loadDeferred]);
+
+  useEffect(() => {
+    const onPaymentsChanged = () => {
+      scheduleDashboardRefresh();
+    };
+    window.addEventListener('payments:changed', onPaymentsChanged as EventListener);
+    return () => {
+      window.removeEventListener('payments:changed', onPaymentsChanged as EventListener);
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, [scheduleDashboardRefresh]);
 
   const pendingRequests = paymentRequests.filter(req => req.status === 'pending');
   const urgentRequests = pendingRequests.filter(req => 
@@ -161,30 +207,16 @@ const DashboardOverview: React.FC = () => {
   );
 
   const periodFilteredPayments = useMemo(() => {
-    const now = new Date();
-    if (period === 'month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      return payments.filter(p => new Date(p.paymentDate) >= start && new Date(p.paymentDate) <= end);
-    } else if (period === 'quarter') {
-      const q = Math.floor(now.getMonth() / 3);
-      const start = new Date(now.getFullYear(), q * 3, 1);
-      const end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
-      return payments.filter(p => new Date(p.paymentDate) >= start && new Date(p.paymentDate) <= end);
-    }
-    const start = new Date(now.getFullYear(), 0, 1);
-    const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-    return payments.filter(p => new Date(p.paymentDate) >= start && new Date(p.paymentDate) <= end);
+    const { start, end } = getDashboardPeriodRange(period);
+    return payments.filter(p => {
+      const t = new Date(p.paymentDate).getTime();
+      return t >= start.getTime() && t <= end.getTime();
+    });
   }, [payments, period]);
 
   const [periodStart, periodEnd] = useMemo(() => {
-    const now = new Date();
-    if (period === 'month') return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)] as const;
-    if (period === 'quarter') {
-      const q = Math.floor(now.getMonth() / 3);
-      return [new Date(now.getFullYear(), q * 3, 1), new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999)] as const;
-    }
-    return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999)] as const;
+    const range = getDashboardPeriodRange(period);
+    return [range.start, range.end] as const;
   }, [period]);
 
   const periodInvoices = useMemo(() => {

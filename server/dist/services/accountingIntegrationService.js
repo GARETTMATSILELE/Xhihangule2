@@ -18,6 +18,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Payment_1 = require("../models/Payment");
 const CompanyAccount_1 = require("../models/CompanyAccount");
 const VatRecord_1 = require("../models/VatRecord");
+const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const toMoney = (value) => Number(Number(value || 0).toFixed(2));
 const filingPeriodFromDate = (value) => {
     const date = value ? new Date(value) : new Date();
@@ -48,11 +49,46 @@ class AccountingIntegrationService {
                 $set: {
                     vatCollected: totalVatCollected,
                     vatPaid: 0,
-                    vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                    vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
                     filingPeriod: filingPeriodFromDate(payment.paymentDate),
                     status: 'pending'
                 }
             }, { upsert: true });
+        });
+    }
+    /**
+     * CompanyAccount is the commission-revenue source of truth.
+     * Company.revenue is a denormalized cache and is not written here.
+     */
+    postCompanyCommission(payment) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (!(0, accountingPostingPolicy_1.shouldPostCompanyCommission)(payment))
+                return;
+            const agencyShare = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare) || 0);
+            if (!(agencyShare > 0) || !payment.companyId)
+                return;
+            const companyId = payment.companyId;
+            const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
+            const txDoc = {
+                type: 'income',
+                source: desiredSource,
+                amount: agencyShare,
+                date: payment.paymentDate || new Date(),
+                currency: payment.currency || 'USD',
+                paymentMethod: payment.paymentMethod,
+                paymentId: payment._id,
+                referenceNumber: payment.referenceNumber,
+                description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+                processedBy: payment.processedBy,
+                notes: payment.notes
+            };
+            yield CompanyAccount_1.CompanyAccount.updateOne({ companyId }, { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
+            yield CompanyAccount_1.CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id, isArchived: { $ne: true } } } } }, {
+                $push: { transactions: txDoc },
+                $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
+                $set: { lastUpdated: new Date() }
+            });
         });
     }
     syncPaymentReceived(payment, opts) {
@@ -61,6 +97,8 @@ class AccountingIntegrationService {
             const companyId = String(payment.companyId);
             const paymentId = String(payment._id);
             try {
+                if (!(0, accountingPostingPolicy_1.shouldPostJournal)(payment))
+                    return;
                 // Reversal entries are handled by syncPaymentReversed.
                 if (payment === null || payment === void 0 ? void 0 : payment.reversalOfPaymentId)
                     return;
@@ -138,6 +176,7 @@ class AccountingIntegrationService {
                     message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync payment to accounting',
                     metadata: { paymentReference: payment.referenceNumber }
                 });
+                throw error;
             }
         });
     }
@@ -213,8 +252,8 @@ class AccountingIntegrationService {
                         yield CompanyAccount_1.CompanyAccount.updateOne({ companyId: new mongoose_1.default.Types.ObjectId(companyId) }, { $set: { totalIncome, totalExpenses, runningBalance: totalIncome - totalExpenses, lastUpdated: new Date() } });
                     }
                 }
-                catch (_c) {
-                    // Non-fatal: accounting journal reversal remains source of truth.
+                catch (companyErr) {
+                    throw new Error(`CompanyAccount commission archive failed: ${(companyErr === null || companyErr === void 0 ? void 0 : companyErr.message) || companyErr}`);
                 }
                 // Keep VAT reporting aligned with accounting reversals.
                 try {
@@ -226,13 +265,13 @@ class AccountingIntegrationService {
                         $set: {
                             vatCollected: 0,
                             vatPaid: 0,
-                            vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                            vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
                             filingPeriod: filingPeriodFromDate(payment.paymentDate),
                             status: 'reversed'
                         }
                     });
                 }
-                catch (_d) {
+                catch (_c) {
                     // Non-fatal: VAT journal reversal remains source of truth.
                 }
             }
@@ -248,6 +287,7 @@ class AccountingIntegrationService {
                     message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync payment reversal to accounting',
                     metadata: { paymentReference: payment.referenceNumber, reason: (opts === null || opts === void 0 ? void 0 : opts.reason) || '' }
                 });
+                throw error;
             }
         });
     }

@@ -57,10 +57,8 @@ const logger_1 = require("../utils/logger");
 const databaseService_1 = require("./databaseService");
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const events_1 = require("events");
-const propertyAccountService_1 = __importStar(require("./propertyAccountService"));
+const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const ledgerEventService_1 = __importDefault(require("./ledgerEventService"));
-const agentAccountService_1 = __importDefault(require("./agentAccountService"));
-const accountingIntegrationService_1 = __importDefault(require("./accountingIntegrationService"));
 class DatabaseSyncService extends events_1.EventEmitter {
     constructor() {
         super();
@@ -330,20 +328,23 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 const recentPayments = yield Payment_1.Payment.find({
                     updatedAt: { $gte: new Date(Date.now() - 60000) }, // Last minute
                     status: 'completed',
-                    paymentType: { $in: ['rental', 'sale'] },
+                    paymentType: { $in: ['rental', 'sale', 'introduction'] },
                     isProvisional: { $ne: true },
                     isInSuspense: { $ne: true }
                 }).limit(100);
                 for (const payment of recentPayments) {
                     if (payment.status === 'completed' &&
-                        (payment.paymentType === 'rental' || payment.paymentType === 'sale') &&
+                        (payment.paymentType === 'rental' ||
+                            payment.paymentType === 'sale' ||
+                            payment.paymentType === 'introduction') &&
                         !payment.reversalOfPaymentId &&
                         Number(payment.amount || 0) >= 0) {
                         try {
-                            yield this.syncPaymentToAccounting(payment);
+                            const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+                            yield postPaymentAccounting(payment._id.toString());
                         }
                         catch (e) {
-                            // syncPaymentToAccounting already records failure; continue
+                            logger_1.logger.warn('Polling payment accounting post failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
                         }
                     }
                 }
@@ -402,56 +403,32 @@ class DatabaseSyncService extends events_1.EventEmitter {
                 if (operationType === 'insert' || operationType === 'update') {
                     if (fullDocument &&
                         fullDocument.status === 'completed' &&
-                        (fullDocument.paymentType === 'rental' || fullDocument.paymentType === 'sale') &&
+                        (fullDocument.paymentType === 'rental' ||
+                            fullDocument.paymentType === 'sale' ||
+                            fullDocument.paymentType === 'introduction') &&
                         fullDocument.isInSuspense !== true &&
                         fullDocument.isProvisional !== true &&
                         !fullDocument.reversalOfPaymentId &&
                         Number(fullDocument.amount || 0) >= 0) {
                         try {
-                            yield this.syncPaymentToAccounting(fullDocument);
-                            // Reflect to property ledger as well (idempotent)
-                            try {
-                                yield propertyAccountService_1.default.recordIncomeFromPayment(documentId);
-                            }
-                            catch (ledgerErr) {
-                                // Enqueue for retry via ledger event service if immediate posting fails
-                                try {
-                                    yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(documentId);
-                                }
-                                catch (_a) { }
-                                logger_1.logger.warn('Ledger post failed on change stream; enqueued for retry:', (ledgerErr === null || ledgerErr === void 0 ? void 0 : ledgerErr.message) || ledgerErr);
-                            }
-                            // After attempting postings, verify and reconcile postings across ledgers in near-real-time
-                            try {
-                                yield this.verifyAndReconcilePaymentPosting(documentId);
-                            }
-                            catch (verifyErr) {
-                                logger_1.logger.warn('Post-sync verification failed (non-fatal):', (verifyErr === null || verifyErr === void 0 ? void 0 : verifyErr.message) || verifyErr);
-                            }
+                            const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+                            yield postPaymentAccounting(documentId);
                             yield this.clearFailureRecord('payment', documentId);
                         }
                         catch (e) {
-                            // error recorded in syncPaymentToAccounting
+                            logger_1.logger.warn('Change-stream payment accounting post failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
                         }
                     }
                     else if (fullDocument && (fullDocument.status === 'reversed' || String(fullDocument.postingStatus || '') === 'reversed')) {
                         try {
-                            yield accountingIntegrationService_1.default.syncPaymentReversed(fullDocument, { reason: String((fullDocument === null || fullDocument === void 0 ? void 0 : fullDocument.reversalReason) || '') });
+                            const { reversePaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+                            yield reversePaymentAccounting(documentId, {
+                                reason: String((fullDocument === null || fullDocument === void 0 ? void 0 : fullDocument.reversalReason) || ''),
+                                reversalPaymentId: (fullDocument === null || fullDocument === void 0 ? void 0 : fullDocument.reversalPaymentId) ? String(fullDocument.reversalPaymentId) : undefined
+                            });
                         }
                         catch (e) {
                             logger_1.logger.warn('Payment reversal accounting sync failed in databaseSync:', (e === null || e === void 0 ? void 0 : e.message) || e);
-                        }
-                        try {
-                            yield propertyAccountService_1.default.reverseIncomeFromPayment(documentId, { reason: String((fullDocument === null || fullDocument === void 0 ? void 0 : fullDocument.reversalReason) || '') });
-                        }
-                        catch (e) {
-                            logger_1.logger.warn('Property ledger reversal sync failed in databaseSync:', (e === null || e === void 0 ? void 0 : e.message) || e);
-                        }
-                        try {
-                            yield agentAccountService_1.default.reverseCommissionForPayment(documentId, String((fullDocument === null || fullDocument === void 0 ? void 0 : fullDocument.reversalReason) || ''));
-                        }
-                        catch (e) {
-                            logger_1.logger.warn('Agent commission reversal sync failed in databaseSync:', (e === null || e === void 0 ? void 0 : e.message) || e);
                         }
                     }
                 }
@@ -544,41 +521,9 @@ class DatabaseSyncService extends events_1.EventEmitter {
      */
     syncPaymentToAccounting(payment) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
             try {
-                // Record agency commission into company account as revenue (idempotent, race-safe)
-                const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
-                if (payment.companyId && ((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare)) {
-                    const companyId = payment.companyId;
-                    // Determine correct source label based on payment type
-                    const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
-                    const agencyShare = payment.commissionDetails.agencyShare;
-                    const txDoc = {
-                        type: 'income',
-                        source: desiredSource,
-                        amount: agencyShare,
-                        date: payment.paymentDate || new Date(),
-                        currency: payment.currency || 'USD',
-                        paymentMethod: payment.paymentMethod,
-                        paymentId: payment._id,
-                        referenceNumber: payment.referenceNumber,
-                        description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
-                        processedBy: payment.processedBy,
-                        notes: payment.notes
-                    };
-                    yield this.db.executeWithRetry(() => __awaiter(this, void 0, void 0, function* () {
-                        // 1) Ensure base account exists (idempotent)
-                        yield CompanyAccount.updateOne({ companyId }, { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
-                        // 2) Append commission transaction only if not already present; do NOT upsert here to avoid duplicate docs
-                        const res = yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id, isArchived: { $ne: true } } } } }, {
-                            $push: { transactions: txDoc },
-                            $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
-                            $set: { lastUpdated: new Date() }
-                        });
-                        // If already present (matchedCount === 0), treat as success (idempotent)
-                    }));
-                    logger_1.logger.info(`Recorded company revenue ${agencyShare} for company ${companyId} from payment ${payment._id}`);
-                }
+                const accountingIntegrationService = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
+                yield accountingIntegrationService.postCompanyCommission(payment);
                 this.recordSyncSuccess();
             }
             catch (error) {
@@ -798,7 +743,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 const payments = yield Payment_1.Payment.find({
                     status: 'completed',
-                    paymentType: { $in: ['rental', 'sale'] },
+                    paymentType: { $in: ['rental', 'sale', 'introduction'] },
                     isProvisional: { $ne: true },
                     isInSuspense: { $ne: true },
                     reversalOfPaymentId: { $exists: false },
@@ -1150,7 +1095,7 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     const since = new Date(Date.now() - resolvedLookbackDays * 24 * 60 * 60 * 1000);
                     const payments = yield Payment_1.Payment.find({
                         status: 'completed',
-                        paymentType: { $in: ['rental', 'sale'] },
+                        paymentType: { $in: ['rental', 'sale', 'introduction'] },
                         isProvisional: { $ne: true },
                         isInSuspense: { $ne: true },
                         $or: [
@@ -1286,12 +1231,12 @@ class DatabaseSyncService extends events_1.EventEmitter {
      */
     verifyAndReconcilePaymentPosting(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a;
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId).lean();
                 if (!payment || payment.status !== 'completed')
                     return;
-                if (payment.isInSuspense === true)
+                const { evaluatePermanentAccountingPolicy } = yield Promise.resolve().then(() => __importStar(require('./accountingPostingPolicy')));
+                if (!evaluatePermanentAccountingPolicy(payment).allowed)
                     return;
                 // Property/development ledgers: idempotent record and dedupe if needed
                 try {
@@ -1302,102 +1247,18 @@ class DatabaseSyncService extends events_1.EventEmitter {
                     try {
                         yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(paymentId);
                     }
-                    catch (_b) { }
+                    catch (_a) { }
                     logger_1.logger.warn('verifyAndReconcile: property ledger post failed; enqueued for retry:', (e === null || e === void 0 ? void 0 : e.message) || e);
                 }
-                // Dedupe any property ledgers that contain this payment more than once
-                try {
-                    const PropertyAccount = database_1.accountingConnection.model('PropertyAccount');
-                    const accountsWithPayment = yield PropertyAccount.find({ 'transactions.paymentId': payment._id })
-                        .select('_id propertyId ledgerType transactions').lean();
-                    for (const acc of accountsWithPayment) {
-                        // Count occurrences of this paymentId
-                        const occurrences = (acc.transactions || []).filter((t) => String((t === null || t === void 0 ? void 0 : t.paymentId) || '') === String(payment._id)).length;
-                        if (occurrences > 1) {
-                            try {
-                                yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acc.propertyId));
-                                logger_1.logger.info(`verifyAndReconcile: deduped property ledger for property ${String(acc.propertyId)} (${acc.ledgerType})`);
-                            }
-                            catch (dedupeErr) {
-                                logger_1.logger.warn('verifyAndReconcile: failed to dedupe property ledger:', (dedupeErr === null || dedupeErr === void 0 ? void 0 : dedupeErr.message) || dedupeErr);
-                            }
-                        }
-                    }
-                }
-                catch (scanErr) {
-                    logger_1.logger.warn('verifyAndReconcile: scan for property ledger duplicates failed:', (scanErr === null || scanErr === void 0 ? void 0 : scanErr.message) || scanErr);
-                }
-                // Company commission ledger: ensure commission posted (idempotent) and dedupe
-                const agencyShare = Number(((_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare) || 0);
-                if (agencyShare > 0 && (payment === null || payment === void 0 ? void 0 : payment.companyId)) {
+                // Company commission via the same policy-gated writer as the orchestrator.
+                // Do not archive/dedupe historical rows here — that is Phase 5C repair.
+                if (payment === null || payment === void 0 ? void 0 : payment.companyId) {
                     try {
-                        // Reuse the same logic as syncPaymentToAccounting by constructing tx and pushing if missing
-                        const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
-                        const companyId = payment.companyId;
-                        const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
-                        const txDoc = {
-                            type: 'income',
-                            source: desiredSource,
-                            amount: agencyShare,
-                            date: payment.paymentDate || new Date(),
-                            currency: payment.currency || 'USD',
-                            paymentMethod: payment.paymentMethod,
-                            paymentId: payment._id,
-                            referenceNumber: payment.referenceNumber,
-                            description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
-                            processedBy: payment.processedBy,
-                            notes: payment.notes
-                        };
-                        // Ensure account exists and append only if not already present
-                        yield CompanyAccount.updateOne({ companyId }, { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
-                        yield CompanyAccount.updateOne({ companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id, isArchived: { $ne: true } } } } }, {
-                            $push: { transactions: txDoc },
-                            $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
-                            $set: { lastUpdated: new Date() }
-                        });
+                        const accountingIntegration = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
+                        yield accountingIntegration.postCompanyCommission(payment);
                     }
                     catch (postErr) {
                         logger_1.logger.warn('verifyAndReconcile: failed ensuring company commission posting:', (postErr === null || postErr === void 0 ? void 0 : postErr.message) || postErr);
-                    }
-                    // Dedupe duplicate postings in company ledger (keep earliest, archive the rest)
-                    try {
-                        const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
-                        const ca = yield CompanyAccount.findOne({ companyId: payment.companyId }).lean();
-                        if (ca && Array.isArray(ca.transactions)) {
-                            const dupIds = [];
-                            const grouped = Object.create(null);
-                            for (const t of ca.transactions) {
-                                const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
-                                if (!pid)
-                                    continue;
-                                if (!grouped[pid])
-                                    grouped[pid] = [];
-                                grouped[pid].push({ _id: t._id, date: new Date(t.date) });
-                            }
-                            for (const pid of Object.keys(grouped)) {
-                                const list = grouped[pid];
-                                if (list.length <= 1)
-                                    continue;
-                                const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-                                // archive all but the first
-                                dupIds.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
-                            }
-                            if (dupIds.length > 0) {
-                                // Soft-archive duplicates (bypass immutability guard using native collection update)
-                                yield CompanyAccount.collection.updateOne({ companyId: payment.companyId }, { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } }, { arrayFilters: [{ 't._id': { $in: dupIds } }] });
-                                // Recalculate totals ignoring archived
-                                const fresh = yield CompanyAccount.findOne({ companyId: payment.companyId }).lean();
-                                if (fresh && Array.isArray(fresh.transactions)) {
-                                    const active = fresh.transactions.filter((t) => (t === null || t === void 0 ? void 0 : t.isArchived) !== true);
-                                    const income = active.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                    const expenses = active.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                    yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
-                                }
-                            }
-                        }
-                    }
-                    catch (dedupeErr) {
-                        logger_1.logger.warn('verifyAndReconcile: failed to dedupe company ledger:', (dedupeErr === null || dedupeErr === void 0 ? void 0 : dedupeErr.message) || dedupeErr);
                     }
                 }
             }

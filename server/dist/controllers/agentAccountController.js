@@ -37,7 +37,9 @@ const compareAgentCommissionTotals = (req, res) => __awaiter(void 0, void 0, voi
         const rows = [];
         for (const u of agents) {
             try {
-                const account = yield agentAccountService_1.default.getOrCreateAgentAccount(String(u._id));
+                const account = yield AgentAccount_1.AgentAccount.findOne({ agentId: u._id });
+                if (!account)
+                    continue;
                 const userCommission = Number(u.commission || 0);
                 const ledgerTotal = Number(account.totalCommissions || 0);
                 const delta = Number((ledgerTotal - userCommission).toFixed(2));

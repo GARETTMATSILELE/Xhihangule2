@@ -5,6 +5,10 @@ import mongoose from 'mongoose';
 import { Payment } from '../models/Payment';
 import { CompanyAccount } from '../models/CompanyAccount';
 import { VatRecord } from '../models/VatRecord';
+import {
+  shouldPostCompanyCommission,
+  shouldPostJournal
+} from './accountingPostingPolicy';
 
 const toMoney = (value: number): number => Number(Number(value || 0).toFixed(2));
 
@@ -40,7 +44,7 @@ class AccountingIntegrationService {
         $set: {
           vatCollected: totalVatCollected,
           vatPaid: 0,
-          vatRate: Number((payment as any)?.vatRate || 0),
+          vatRate: Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0),
           filingPeriod: filingPeriodFromDate(payment.paymentDate),
           status: 'pending'
         }
@@ -49,10 +53,49 @@ class AccountingIntegrationService {
     );
   }
 
+  /**
+   * CompanyAccount is the commission-revenue source of truth.
+   * Company.revenue is a denormalized cache and is not written here.
+   */
+  async postCompanyCommission(payment: IPayment): Promise<void> {
+    if (!shouldPostCompanyCommission(payment)) return;
+    const agencyShare = toMoney((payment.commissionDetails as any)?.agencyShare || 0);
+    if (!(agencyShare > 0) || !payment.companyId) return;
+    const companyId = payment.companyId;
+    const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
+    const txDoc = {
+      type: 'income',
+      source: desiredSource,
+      amount: agencyShare,
+      date: (payment as any).paymentDate || new Date(),
+      currency: (payment as any).currency || 'USD',
+      paymentMethod: (payment as any).paymentMethod,
+      paymentId: payment._id,
+      referenceNumber: payment.referenceNumber,
+      description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
+      processedBy: (payment as any).processedBy,
+      notes: (payment as any).notes
+    };
+    await CompanyAccount.updateOne(
+      { companyId },
+      { $setOnInsert: { companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } },
+      { upsert: true }
+    );
+    await CompanyAccount.updateOne(
+      { companyId, transactions: { $not: { $elemMatch: { paymentId: payment._id, isArchived: { $ne: true } } } } },
+      {
+        $push: { transactions: txDoc },
+        $inc: { totalIncome: agencyShare, runningBalance: agencyShare },
+        $set: { lastUpdated: new Date() }
+      }
+    );
+  }
+
   async syncPaymentReceived(payment: IPayment, opts?: { createdBy?: string }): Promise<void> {
     const companyId = String(payment.companyId);
     const paymentId = String(payment._id);
     try {
+      if (!shouldPostJournal(payment)) return;
       // Reversal entries are handled by syncPaymentReversed.
       if ((payment as any)?.reversalOfPaymentId) return;
       if (Number(payment.amount || 0) < 0) return;
@@ -129,6 +172,7 @@ class AccountingIntegrationService {
         message: error?.message || 'Failed to sync payment to accounting',
         metadata: { paymentReference: payment.referenceNumber }
       });
+      throw error;
     }
   }
 
@@ -211,8 +255,8 @@ class AccountingIntegrationService {
             { $set: { totalIncome, totalExpenses, runningBalance: totalIncome - totalExpenses, lastUpdated: new Date() } }
           );
         }
-      } catch {
-        // Non-fatal: accounting journal reversal remains source of truth.
+      } catch (companyErr: any) {
+        throw new Error(`CompanyAccount commission archive failed: ${companyErr?.message || companyErr}`);
       }
 
       // Keep VAT reporting aligned with accounting reversals.
@@ -227,7 +271,7 @@ class AccountingIntegrationService {
             $set: {
               vatCollected: 0,
               vatPaid: 0,
-              vatRate: Number((payment as any)?.vatRate || 0),
+              vatRate: Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0),
               filingPeriod: filingPeriodFromDate(payment.paymentDate),
               status: 'reversed'
             }
@@ -247,6 +291,7 @@ class AccountingIntegrationService {
         message: error?.message || 'Failed to sync payment reversal to accounting',
         metadata: { paymentReference: payment.referenceNumber, reason: opts?.reason || '' }
       });
+      throw error;
     }
   }
 

@@ -26,6 +26,9 @@ class TrustPaymentPostingService {
             if (normalizedStatus !== 'completed' && normalizedStatus !== 'confirmed') {
                 throw new Error(`Payment ${payload.paymentId} is not confirmed/completed`);
             }
+            if (payment.isProvisional === true) {
+                return { skipped: true, reason: 'provisional' };
+            }
             if (!mongoose_1.default.Types.ObjectId.isValid(String(payload.propertyId || ''))) {
                 throw new Error('Invalid propertyId in payment event');
             }
@@ -69,8 +72,7 @@ class TrustPaymentPostingService {
                 propertyId,
                 amount: reversalAmount,
                 paymentId: reversalPaymentId || undefined,
-                reference: String((reversalPayment === null || reversalPayment === void 0 ? void 0 : reversalPayment.reference) || '').trim() ||
-                    `reversal:${String(payload.paymentId)}${payload.reason ? `:${payload.reason}` : ''}`,
+                reference: `reversal:${String(payload.paymentId)}`,
                 sourceEvent: payload.sourceEvent || 'payment.reversed',
                 createdBy: payload.performedBy
             });

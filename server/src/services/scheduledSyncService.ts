@@ -5,6 +5,12 @@ import { logger } from '../utils/logger';
 import { Payment } from '../models/Payment';
 import PropertyAccount from '../models/PropertyAccount';
 import propertyAccountService, { reconcilePropertyLedgerDuplicates } from './propertyAccountService';
+import { runWithJobLease } from './jobLeaseService';
+import {
+  PAYMENT_RECONCILIATION_BATCH_SIZE,
+  buildOwnerIncomeReconciliationPaymentFilter,
+  isRecordIncomeEarlyExit
+} from './paymentReconciliationQuery';
 
 export interface SyncSchedule {
   name: string;
@@ -205,50 +211,50 @@ export class ScheduledSyncService {
     logger.info(`Executing scheduled sync: ${schedule.name}`);
 
     try {
-      // Update schedule info
-      schedule.lastRun = new Date();
-      schedule.runCount++;
+      const leaseResult = await runWithJobLease(`scheduled:${schedule.name}`, async () => {
+        schedule.lastRun = new Date();
+        schedule.runCount++;
 
-      // Execute appropriate sync based on schedule type
-      switch (schedule.name) {
-        case 'daily_sync':
-          await this.executeDailySync();
-          break;
-        case 'hourly_sync':
-          await this.executeHourlySync();
-          break;
-        case 'ledger_reconciliation':
-          await this.executeLedgerReconciliation();
-          break;
-        case 'weekly_consistency_check':
-          await this.executeWeeklyConsistencyCheck();
-          break;
-        case 'monthly_deep_sync':
-          await this.executeMonthlyDeepSync();
-          break;
-        case 'sync_failure_reprocessor':
-          await this.executeFailureReprocessor();
-          break;
-        default:
-          await this.executeCustomSync(schedule);
+        switch (schedule.name) {
+          case 'daily_sync':
+            await this.executeDailySync();
+            break;
+          case 'hourly_sync':
+            await this.executeHourlySync();
+            break;
+          case 'ledger_reconciliation':
+            await this.executeLedgerReconciliation();
+            break;
+          case 'weekly_consistency_check':
+            await this.executeWeeklyConsistencyCheck();
+            break;
+          case 'monthly_deep_sync':
+            await this.executeMonthlyDeepSync();
+            break;
+          case 'sync_failure_reprocessor':
+            await this.executeFailureReprocessor();
+            break;
+          default:
+            await this.executeCustomSync(schedule);
+        }
+
+        const duration = Date.now() - startTime;
+        schedule.averageDuration = (schedule.averageDuration * (schedule.runCount - 1) + duration) / schedule.runCount;
+
+        const job = this.syncJobs.get(schedule.name);
+        if (job) {
+          schedule.nextRun = job.nextDate().toJSDate();
+        }
+
+        logger.info(`Completed scheduled sync: ${schedule.name} in ${duration}ms`);
+      });
+
+      if (leaseResult.skipped) {
+        return;
       }
-
-      // Calculate and update average duration
-      const duration = Date.now() - startTime;
-      schedule.averageDuration = (schedule.averageDuration * (schedule.runCount - 1) + duration) / schedule.runCount;
-
-      // Calculate next run time
-      const job = this.syncJobs.get(schedule.name);
-      if (job) {
-        schedule.nextRun = job.nextDate().toJSDate();
-      }
-
-      logger.info(`Completed scheduled sync: ${schedule.name} in ${duration}ms`);
-      
     } catch (error) {
       logger.error(`Failed to execute scheduled sync ${schedule.name}:`, error);
-      
-      // Emit error event
+
       this.databaseSyncService.emit('scheduledSyncError', {
         scheduleName: schedule.name,
         error: error instanceof Error ? error.message : String(error),
@@ -352,54 +358,53 @@ export class ScheduledSyncService {
   private async executeLedgerReconciliation(): Promise<void> {
     const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
     try {
-      // 1) Re-post recent completed payments (idempotent, guarded by unique indexes)
-      const recentPayments = await Payment.find({ status: 'completed', paymentDate: { $gte: since } }).select('_id');
-      for (const p of recentPayments) {
+      const filter = buildOwnerIncomeReconciliationPaymentFilter({ paymentDateFrom: since });
+      const cursor = Payment.find(filter)
+        .select('_id status amount depositAmount reversalOfPaymentId isProvisional isInSuspense')
+        .sort({ _id: 1 })
+        .batchSize(PAYMENT_RECONCILIATION_BATCH_SIZE)
+        .cursor();
+
+      let selected = 0;
+      let attempted = 0;
+      let skippedEarlyExit = 0;
+      let failures = 0;
+      for await (const p of cursor as AsyncIterable<any>) {
+        selected += 1;
+        if (isRecordIncomeEarlyExit(p)) {
+          skippedEarlyExit += 1;
+          continue;
+        }
         try {
           await propertyAccountService.recordIncomeFromPayment(String((p as any)._id));
+          attempted += 1;
         } catch (e) {
+          failures += 1;
           try { await (await import('./ledgerEventService')).default.enqueueOwnerIncomeEvent(String((p as any)._id)); } catch {}
           logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e as any)?.message || e);
         }
       }
+      logger.info('Ledger reconciliation owner-income pass completed', {
+        windowHours: 48,
+        selected,
+        attempted,
+        skippedEarlyExit,
+        failures
+      });
 
-      // 2) Ensure company commissions are present for recent payments (idempotent)
+      // 2) Ensure company commissions via the policy-gated writer (idempotent; skips provisional)
       try {
-        const { CompanyAccount } = await import('../models/CompanyAccount');
+        const accountingIntegrationService = (await import('./accountingIntegrationService')).default;
+        const { shouldPostCompanyCommission } = await import('./accountingPostingPolicy');
         const payList = await Payment.find({
           status: 'completed',
           paymentDate: { $gte: since },
           'commissionDetails.agencyShare': { $gt: 0 }
-        }).select('_id companyId paymentType commissionDetails paymentDate currency paymentMethod referenceNumber processedBy notes');
+        }).select('_id companyId paymentType commissionDetails paymentDate isProvisional isInSuspense reversalOfPaymentId amount commissionFinalized');
         for (const p of payList as any[]) {
           if (!p.companyId) continue;
-          const desiredSource = p.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
-          const txDoc = {
-            type: 'income',
-            source: desiredSource,
-            amount: Number(p.commissionDetails?.agencyShare || 0),
-            date: p.paymentDate || new Date(),
-            currency: p.currency || 'USD',
-            paymentMethod: p.paymentMethod,
-            paymentId: p._id,
-            referenceNumber: p.referenceNumber,
-            description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
-            processedBy: p.processedBy,
-            notes: p.notes
-          };
-          await CompanyAccount.updateOne(
-            { companyId: p.companyId },
-            { $setOnInsert: { companyId: p.companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } },
-            { upsert: true }
-          );
-          await CompanyAccount.updateOne(
-            { companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id, isArchived: { $ne: true } } } } },
-            {
-              $push: { transactions: txDoc },
-              $inc: { totalIncome: Number(p.commissionDetails?.agencyShare || 0), runningBalance: Number(p.commissionDetails?.agencyShare || 0) },
-              $set: { lastUpdated: new Date() }
-            }
-          );
+          if (!shouldPostCompanyCommission(p)) continue;
+          await accountingIntegrationService.postCompanyCommission(p);
         }
       } catch (ensureErr) {
         logger.warn('Reconciliation: ensuring company commissions skipped:', (ensureErr as any)?.message || ensureErr);

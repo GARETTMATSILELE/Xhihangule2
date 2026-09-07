@@ -1,0 +1,2822 @@
+{
+  "startedAt": "2026-08-31T14:05:15.447Z",
+  "environment": {
+    "mainHost": "localhost:27017",
+    "acctHost": "localhost:27017",
+    "mainDb": "property-management",
+    "acctDb": "accounting",
+    "cosmos": false,
+    "local": true,
+    "replicaSet": null,
+    "mongodVersion": null,
+    "note": "Phase 5B.5 read-only scan of the local application databases. Remote/Cosmos URIs are aborted before connect."
+  },
+  "inventory": {
+    "main": [
+      {
+        "name": "trustauditlogs",
+        "count": 721
+      },
+      {
+        "name": "trusteventfailurelogs",
+        "count": 211
+      },
+      {
+        "name": "developmentunits",
+        "count": 180
+      },
+      {
+        "name": "payments",
+        "count": 157
+      },
+      {
+        "name": "audit_logs",
+        "count": 152
+      },
+      {
+        "name": "ledgerevents",
+        "count": 113
+      },
+      {
+        "name": "trusttransactions",
+        "count": 92
+      },
+      {
+        "name": "journallines",
+        "count": 86
+      },
+      {
+        "name": "eventdeduprecords",
+        "count": 84
+      },
+      {
+        "name": "notifications",
+        "count": 62
+      },
+      {
+        "name": "trustreconciliationresults",
+        "count": 58
+      },
+      {
+        "name": "properties",
+        "count": 56
+      },
+      {
+        "name": "inspections",
+        "count": 55
+      },
+      {
+        "name": "trustaccounts",
+        "count": 49
+      },
+      {
+        "name": "ChargeTypes",
+        "count": 45
+      },
+      {
+        "name": "buyers",
+        "count": 41
+      },
+      {
+        "name": "chartofaccounts",
+        "count": 40
+      },
+      {
+        "name": "journalentries",
+        "count": 38
+      },
+      {
+        "name": "accountingeventlogs",
+        "count": 38
+      },
+      {
+        "name": "chartdatas",
+        "count": 36
+      },
+      {
+        "name": "users",
+        "count": 35
+      },
+      {
+        "name": "files",
+        "count": 33
+      },
+      {
+        "name": "payment_audit_logs",
+        "count": 29
+      },
+      {
+        "name": "levypayments",
+        "count": 29
+      },
+      {
+        "name": "leases",
+        "count": 27
+      },
+      {
+        "name": "tenants",
+        "count": 25
+      },
+      {
+        "name": "trustmatters",
+        "count": 20
+      },
+      {
+        "name": "companies",
+        "count": 19
+      },
+      {
+        "name": "subscriptions",
+        "count": 16
+      },
+      {
+        "name": "rentaldeposits",
+        "count": 15
+      },
+      {
+        "name": "paymentrequests",
+        "count": 14
+      },
+      {
+        "name": "leads",
+        "count": 12
+      },
+      {
+        "name": "taxrecords",
+        "count": 11
+      },
+      {
+        "name": "propertyowners",
+        "count": 11
+      },
+      {
+        "name": "salescontracts",
+        "count": 11
+      },
+      {
+        "name": "deals",
+        "count": 9
+      },
+      {
+        "name": "agentaccounts",
+        "count": 9
+      },
+      {
+        "name": "developments",
+        "count": 8
+      },
+      {
+        "name": "vatrecords",
+        "count": 8
+      },
+      {
+        "name": "maintenancerequests",
+        "count": 6
+      },
+      {
+        "name": "salesowners",
+        "count": 6
+      },
+      {
+        "name": "dashboardkpisnapshots",
+        "count": 6
+      },
+      {
+        "name": "trustsettlements",
+        "count": 6
+      },
+      {
+        "name": "valuations",
+        "count": 6
+      },
+      {
+        "name": "viewings",
+        "count": 4
+      },
+      {
+        "name": "systemsettings",
+        "count": 4
+      },
+      {
+        "name": "companybalances",
+        "count": 4
+      },
+      {
+        "name": "plans",
+        "count": 3
+      },
+      {
+        "name": "maintenancejobs",
+        "count": 3
+      },
+      {
+        "name": "billingpayments",
+        "count": 2
+      },
+      {
+        "name": "vatpayouts",
+        "count": 2
+      },
+      {
+        "name": "vouchers",
+        "count": 2
+      },
+      {
+        "name": "maintenance_contractors",
+        "count": 1
+      },
+      {
+        "name": "adminauditlogs",
+        "count": 1
+      },
+      {
+        "name": "owner_documents",
+        "count": 1
+      },
+      {
+        "name": "maintenance_activities",
+        "count": 1
+      },
+      {
+        "name": "taxpayouts",
+        "count": 1
+      },
+      {
+        "name": "backupjobs",
+        "count": 0
+      },
+      {
+        "name": "maintenance_work_orders",
+        "count": 0
+      },
+      {
+        "name": "duty_roster_shifts",
+        "count": 0
+      },
+      {
+        "name": "maintenance_verifications",
+        "count": 0
+      },
+      {
+        "name": "municipalpayments",
+        "count": 0
+      },
+      {
+        "name": "agent_availabilities",
+        "count": 0
+      },
+      {
+        "name": "public_holidays",
+        "count": 0
+      },
+      {
+        "name": "platforminvoices",
+        "count": 0
+      },
+      {
+        "name": "ownership_history",
+        "count": 0
+      },
+      {
+        "name": "maintenancepayments",
+        "count": 0
+      },
+      {
+        "name": "cashpayments",
+        "count": 0
+      },
+      {
+        "name": "sync_failures",
+        "count": 0
+      },
+      {
+        "name": "owner_preferences",
+        "count": 0
+      },
+      {
+        "name": "leave_requests",
+        "count": 0
+      },
+      {
+        "name": "maintenance_attachments",
+        "count": 0
+      },
+      {
+        "name": "payment_sessions",
+        "count": 0
+      },
+      {
+        "name": "banktransactions",
+        "count": 0
+      },
+      {
+        "name": "onboarding_sessions",
+        "count": 0
+      },
+      {
+        "name": "bankaccounts",
+        "count": 0
+      },
+      {
+        "name": "owner_banking_details",
+        "count": 0
+      },
+      {
+        "name": "maintenance_quotes",
+        "count": 0
+      },
+      {
+        "name": "supporttickets",
+        "count": 0
+      }
+    ],
+    "accounting": [
+      {
+        "name": "propertyaccounts",
+        "count": 131
+      },
+      {
+        "name": "invoices",
+        "count": 6
+      },
+      {
+        "name": "companyaccounts",
+        "count": 4
+      },
+      {
+        "name": "bank",
+        "count": 0
+      },
+      {
+        "name": "files",
+        "count": 0
+      },
+      {
+        "name": "chartdatas",
+        "count": 0
+      }
+    ],
+    "indexes": {
+      "propertyaccounts": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        },
+        {
+          "v": 2,
+          "key": {
+            "ownerId": 1
+          },
+          "name": "ownerId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "transactions.date": -1
+          },
+          "name": "transactions.date_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "ownerPayouts.date": -1
+          },
+          "name": "ownerPayouts.date_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "runningBalance": 1
+          },
+          "name": "runningBalance_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "propertyId": 1,
+            "lastUpdated": -1
+          },
+          "name": "propertyId_1_lastUpdated_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "propertyId": 1,
+            "ledgerType": 1
+          },
+          "name": "propertyId_1_ledgerType_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "isArchived": false
+          }
+        },
+        {
+          "v": 2,
+          "key": {
+            "propertyId": 1,
+            "ledgerType": 1,
+            "ownerPayouts.referenceNumber": 1
+          },
+          "name": "propertyId_1_ledgerType_1_ownerPayouts.referenceNumber_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "isArchived": false,
+            "ownerPayouts.referenceNumber": {
+              "$exists": true,
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "v": 2,
+          "key": {
+            "propertyId": 1,
+            "ledgerType": 1,
+            "transactions.paymentId": 1
+          },
+          "name": "propertyId_1_ledgerType_1_transactions.paymentId_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "isArchived": false,
+            "transactions.paymentId": {
+              "$exists": true
+            }
+          }
+        }
+      ],
+      "companyaccounts": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1
+          },
+          "name": "companyId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "transactions.date": -1
+          },
+          "name": "companyId_1_transactions.date_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "transactions.paymentId": 1
+          },
+          "name": "companyId_1_transactions.paymentId_1",
+          "background": true,
+          "unique": true,
+          "sparse": true
+        }
+      ],
+      "agentaccounts": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        }
+      ],
+      "trusttransactions": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "type": 1,
+            "createdAt": -1
+          },
+          "name": "companyId_1_type_1_createdAt_-1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "trustAccountId": 1,
+            "createdAt": -1
+          },
+          "name": "trustAccountId_1_createdAt_-1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "paymentId": 1
+          },
+          "name": "paymentId_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "paymentId": {
+              "$exists": true,
+              "$type": "objectId"
+            }
+          }
+        }
+      ],
+      "ledgerevents": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        }
+      ],
+      "payments": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        },
+        {
+          "v": 2,
+          "key": {
+            "leaseId": 1
+          },
+          "name": "leaseId_1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "paymentDate": 1
+          },
+          "name": "paymentDate_1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "status": 1
+          },
+          "name": "status_1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1
+          },
+          "name": "companyId_1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "paymentDate": -1,
+            "status": 1
+          },
+          "name": "paymentDate_-1_status_1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "paymentDate": -1
+          },
+          "name": "companyId_1_paymentDate_-1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "propertyId": 1
+          },
+          "name": "propertyId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "tenantId": 1
+          },
+          "name": "tenantId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "agentId": 1
+          },
+          "name": "agentId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "postingStatus": 1
+          },
+          "name": "postingStatus_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "idempotencyKey": 1
+          },
+          "name": "idempotencyKey_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "reversalOfPaymentId": 1
+          },
+          "name": "reversalOfPaymentId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "isCorrectionEntry": 1
+          },
+          "name": "isCorrectionEntry_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "paymentType": 1,
+            "paymentDate": -1
+          },
+          "name": "companyId_1_paymentType_1_paymentDate_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "paymentType": 1,
+            "saleMode": 1,
+            "developmentId": 1,
+            "paymentDate": -1
+          },
+          "name": "companyId_1_paymentType_1_saleMode_1_developmentId_1_paymentDate_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "paymentType": 1,
+            "status": 1,
+            "saleId": 1
+          },
+          "name": "companyId_1_paymentType_1_status_1_saleId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "paymentType": 1,
+            "status": 1,
+            "propertyId": 1,
+            "tenantId": 1,
+            "rentalPeriodYear": 1,
+            "rentalPeriodMonth": 1
+          },
+          "name": "companyId_1_paymentType_1_status_1_propertyId_1_tenantId_1_rentalPeriodYear_1_rentalPeriodMonth_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "isProvisional": 1,
+            "createdAt": -1
+          },
+          "name": "companyId_1_isProvisional_1_createdAt_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "agentId": 1,
+            "status": 1,
+            "paymentDate": -1
+          },
+          "name": "agentId_1_status_1_paymentDate_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "saleId": 1
+          },
+          "name": "saleId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "developmentId": 1
+          },
+          "name": "developmentId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "developmentUnitId": 1
+          },
+          "name": "developmentUnitId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "isProvisional": 1
+          },
+          "name": "isProvisional_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "postingStatus": 1,
+            "paymentDate": -1
+          },
+          "name": "companyId_1_postingStatus_1_paymentDate_-1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "idempotencyKey": 1
+          },
+          "name": "companyId_1_idempotencyKey_1",
+          "background": true,
+          "unique": true,
+          "partialFilterExpression": {
+            "idempotencyKey": {
+              "$exists": true,
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "externalProvider": 1,
+            "externalTransactionId": 1
+          },
+          "name": "companyId_1_externalProvider_1_externalTransactionId_1",
+          "background": true,
+          "unique": true,
+          "partialFilterExpression": {
+            "externalProvider": {
+              "$exists": true,
+              "$type": "string",
+              "$gt": ""
+            },
+            "externalTransactionId": {
+              "$exists": true,
+              "$type": "string",
+              "$gt": ""
+            }
+          }
+        }
+      ],
+      "journalentries": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "reference": 1
+          },
+          "name": "companyId_1_reference_1",
+          "unique": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "transactionDate": -1
+          },
+          "name": "companyId_1_transactionDate_-1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "sourceModule": 1,
+            "transactionDate": -1
+          },
+          "name": "companyId_1_sourceModule_1_transactionDate_-1"
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1
+          },
+          "name": "companyId_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "transactionDate": 1
+          },
+          "name": "transactionDate_1",
+          "background": true
+        },
+        {
+          "v": 2,
+          "key": {
+            "companyId": 1,
+            "sourceModule": 1,
+            "sourceId": 1
+          },
+          "name": "companyId_1_sourceModule_1_sourceId_1",
+          "background": true,
+          "unique": true,
+          "sparse": true
+        }
+      ],
+      "sync_failures": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        }
+      ],
+      "accountingeventlogs": [
+        {
+          "v": 2,
+          "key": {
+            "_id": 1
+          },
+          "name": "_id_"
+        }
+      ]
+    }
+  },
+  "parts": {
+    "passThrough": {
+      "duplicateIdempotencyKeys": [],
+      "duplicatePaymentIds": [],
+      "vsPayment": [
+        {
+          "paymentId": "6a1ea88042b7a73860322593",
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a3512b364e5210d95f35d2b",
+          "propertyId": "6a33b5e950ffd2d4c91f6b6d",
+          "amount": 650,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 50,
+          "actualCount": 1,
+          "actualAmount": 50,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a366b3a4d08bf74915a1ff7",
+          "propertyId": "6a36666e4d08bf749159dfc2",
+          "amount": 550,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 50,
+          "actualCount": 1,
+          "actualAmount": 50,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a4cfe120375ea7aa0aff226",
+          "propertyId": "6a3134a6e3c715382a928d63",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a4cffc90375ea7aa0affe76",
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a4d07630375ea7aa0b01c34",
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a4f411a8ada0a653ed36a27",
+          "propertyId": "6a3134a6e3c715382a928d63",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a4f992d8bbe9f9495086505",
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        },
+        {
+          "paymentId": "6a4f9b078bbe9f949508882b",
+          "propertyId": "6a4f9a2f8bbe9f9495087e2f",
+          "amount": 1100,
+          "currency": "USD",
+          "status": "completed",
+          "isProvisional": false,
+          "expectedCode": "LEVY",
+          "expectedAmount": 100,
+          "actualCount": 1,
+          "actualAmount": 100,
+          "missing": false,
+          "duplicate": false
+        }
+      ],
+      "payoutVsCollection": [
+        {
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "ledgerType": "rental",
+          "type": "LEVY",
+          "collected": 400,
+          "paid": 0,
+          "outstanding": 400,
+          "storedOutstanding": 400,
+          "payoutWithoutCollection": false,
+          "payoutExceedsCollection": false,
+          "duplicatePayoutKeys": false
+        },
+        {
+          "propertyId": "6a3134a6e3c715382a928d63",
+          "ledgerType": "rental",
+          "type": "LEVY",
+          "collected": 200,
+          "paid": 0,
+          "outstanding": 200,
+          "storedOutstanding": 200,
+          "payoutWithoutCollection": false,
+          "payoutExceedsCollection": false,
+          "duplicatePayoutKeys": false
+        },
+        {
+          "propertyId": "6a33b5e950ffd2d4c91f6b6d",
+          "ledgerType": "rental",
+          "type": "LEVY",
+          "collected": 50,
+          "paid": 0,
+          "outstanding": 50,
+          "storedOutstanding": 50,
+          "payoutWithoutCollection": false,
+          "payoutExceedsCollection": false,
+          "duplicatePayoutKeys": false
+        },
+        {
+          "propertyId": "6a36666e4d08bf749159dfc2",
+          "ledgerType": "rental",
+          "type": "LEVY",
+          "collected": 50,
+          "paid": 0,
+          "outstanding": 50,
+          "storedOutstanding": 50,
+          "payoutWithoutCollection": false,
+          "payoutExceedsCollection": false,
+          "duplicatePayoutKeys": false
+        },
+        {
+          "propertyId": "6a4f9a2f8bbe9f9495087e2f",
+          "ledgerType": "rental",
+          "type": "LEVY",
+          "collected": 100,
+          "paid": 0,
+          "outstanding": 100,
+          "storedOutstanding": 100,
+          "payoutWithoutCollection": false,
+          "payoutExceedsCollection": false,
+          "duplicatePayoutKeys": false
+        }
+      ],
+      "raceIndicators": [
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "68baf504f230ec47f16790a9",
+          "paymentIds": "68bffbc3d13cffb480d482c9;68bffbc6d13cffb480d482d2",
+          "deltaMs": 3152
+        },
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "68baf504f230ec47f16790a9",
+          "paymentIds": "68bffbc6d13cffb480d482d2;68bffbc9d13cffb480d482db",
+          "deltaMs": 2968
+        },
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "68baf504f230ec47f16790a9",
+          "paymentIds": "68bffbc9d13cffb480d482db;68bffbcdd13cffb480d482e4",
+          "deltaMs": 4148
+        },
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "69008c1879b2c1e02e86579e",
+          "paymentIds": "69009607aa36cead42997fa4;69009607aa36cead42997fa8",
+          "deltaMs": 49
+        },
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "698c2faf3eda316741c0bc4f",
+          "paymentIds": "6999cb626c0171e30be9ddd2;6999cb626c0171e30be9ddd4",
+          "deltaMs": 17
+        },
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "698b1c1abed9637338457948",
+          "paymentIds": "6999cb0f6c0171e30be9dd14;6999cb0f6c0171e30be9dd16",
+          "deltaMs": 23
+        },
+        {
+          "type": "payments-created-close-together",
+          "propertyId": "699c26d36d09fb46b683f622",
+          "paymentIds": "699c287a6d09fb46b6840382;699c287a6d09fb46b6840384",
+          "deltaMs": 55
+        },
+        {
+          "type": "pass-through-timestamps-clustered",
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "deltaMs": 166,
+          "paymentIds": "6a4d07630375ea7aa0b01c34;6a4cffc90375ea7aa0affe76"
+        }
+      ]
+    },
+    "balances": {
+      "mismatches": [
+        {
+          "propertyId": "68778f56a77a7624d898bde7",
+          "accountId": "6889d00f0c4f5d6e515904e5",
+          "ledgerType": "rental",
+          "ownerName": "Garett Matsilele",
+          "ownerId": "68583b3402abcc117d1c037d",
+          "txCount": 5,
+          "diffs": [
+            {
+              "field": "runningBalance",
+              "stored": 5500,
+              "calculated": 1675,
+              "difference": 3825
+            },
+            {
+              "field": "totalIncome",
+              "stored": 6600,
+              "calculated": 2775,
+              "difference": 3825
+            },
+            {
+              "field": "netOwnerBalance",
+              "stored": 5500,
+              "calculated": 1675,
+              "difference": 3825
+            }
+          ]
+        },
+        {
+          "propertyId": "6881ecd8a15ae3f0afd218ff",
+          "accountId": "6889d00f0c4f5d6e515904ea",
+          "ledgerType": "rental",
+          "ownerName": "Garett Matsilele",
+          "ownerId": "68583b3402abcc117d1c037d",
+          "txCount": 5,
+          "diffs": [
+            {
+              "field": "runningBalance",
+              "stored": 6600,
+              "calculated": 5325,
+              "difference": 1275
+            },
+            {
+              "field": "totalIncome",
+              "stored": 6600,
+              "calculated": 5325,
+              "difference": 1275
+            },
+            {
+              "field": "netOwnerBalance",
+              "stored": 6600,
+              "calculated": 5325,
+              "difference": 1275
+            }
+          ]
+        }
+      ],
+      "accountsScanned": 131
+    },
+    "configuredExpense": {
+      "uniquePaymentIdIndex": {
+        "v": 2,
+        "key": {
+          "propertyId": 1,
+          "ledgerType": 1,
+          "transactions.paymentId": 1
+        },
+        "name": "propertyId_1_ledgerType_1_transactions.paymentId_1",
+        "unique": true,
+        "partialFilterExpression": {
+          "isArchived": false,
+          "transactions.paymentId": {
+            "$exists": true
+          }
+        }
+      },
+      "incomeAndExpenseSamePayment": [],
+      "expenseVsPayment": [],
+      "reversedActiveExpense": []
+    },
+    "reversals": {
+      "count": 5,
+      "rows": [
+        {
+          "paymentId": "6999a778d0d16f54222e09d0",
+          "paymentType": "sale",
+          "propertyId": "698c2faf3eda316741c0bc4f",
+          "amount": 219999.99,
+          "currency": "USD",
+          "reversedAt": "2026-02-21T15:12:34.393Z",
+          "flags": {
+            "A_activeIncome": false,
+            "B_activeExpense": false,
+            "C_activeCompany": true,
+            "D_agentNoPenalty": false,
+            "E_missingJournalReversal": false,
+            "F_missingTrustReversal": true,
+            "G_originalStillActive": true
+          },
+          "income": [
+            {
+              "targetId": "698c2faf3eda316741c0bc4f",
+              "accountId": "698dd2e6741d0c9356d13703",
+              "ledgerType": "sale",
+              "amount": 179476.18,
+              "status": "cancelled",
+              "category": "sale_income",
+              "idempotencyKey": "payment:6999a778d0d16f54222e09d0",
+              "txId": "6999a779d0d16f54222e0a07"
+            }
+          ],
+          "expenses": [],
+          "companyTx": [
+            {
+              "accountId": "68aa44f42c5f00386d11a63b",
+              "amount": 4619.05,
+              "type": "income",
+              "source": "sales_commission",
+              "isArchived": false,
+              "currency": "USD",
+              "txId": "6999a7a0d0d16f54222e0a89",
+              "date": "2026-02-21T00:00:00.000Z"
+            }
+          ],
+          "agentTx": [
+            {
+              "agentId": "68d2804b21344cbef4e24aed",
+              "accountId": "68dd3b7a316bb6bf60bcce41",
+              "type": "commission",
+              "amount": 4619.05,
+              "status": "completed",
+              "reference": "6999a778d0d16f54222e09d0",
+              "txId": "6999a779d0d16f54222e0a02"
+            },
+            {
+              "agentId": "68d2804b21344cbef4e24aed",
+              "accountId": "68dd3b7a316bb6bf60bcce41",
+              "type": "penalty",
+              "amount": 4619.05,
+              "status": "completed",
+              "reference": "REV-6999a778d0d16f54222e09d0-agent",
+              "txId": "6999cb626c0171e30be9de4a"
+            }
+          ],
+          "journalOrigCount": 1,
+          "journalRevCount": 1,
+          "journalComRevCount": 1,
+          "trustCount": 1,
+          "trustRevCount": 0
+        },
+        {
+          "paymentId": "6999c9e6e974adc08f29eb7d",
+          "paymentType": "sale",
+          "propertyId": "698b1c1abed9637338457948",
+          "amount": 199999.83,
+          "currency": "USD",
+          "reversedAt": "2026-02-21T15:11:11.703Z",
+          "flags": {
+            "A_activeIncome": false,
+            "B_activeExpense": false,
+            "C_activeCompany": false,
+            "D_agentNoPenalty": false,
+            "E_missingJournalReversal": false,
+            "F_missingTrustReversal": true,
+            "G_originalStillActive": false
+          },
+          "income": [
+            {
+              "targetId": "698b1c1abed9637338457948",
+              "accountId": "698b2836bed96373384584a3",
+              "ledgerType": "sale",
+              "amount": 163160.04,
+              "status": "cancelled",
+              "category": "sale_income",
+              "idempotencyKey": "payment:6999c9e6e974adc08f29eb7d",
+              "txId": "6999c9e6e974adc08f29ebb5"
+            }
+          ],
+          "expenses": [],
+          "companyTx": [],
+          "agentTx": [
+            {
+              "agentId": "68d2804b21344cbef4e24aed",
+              "accountId": "68dd3b7a316bb6bf60bcce41",
+              "type": "commission",
+              "amount": 4199.13,
+              "status": "completed",
+              "reference": "6999c9e6e974adc08f29eb7d",
+              "txId": "6999c9e6e974adc08f29ebb0"
+            },
+            {
+              "agentId": "68d2804b21344cbef4e24aed",
+              "accountId": "68dd3b7a316bb6bf60bcce41",
+              "type": "penalty",
+              "amount": 4199.13,
+              "status": "completed",
+              "reference": "REV-6999c9e6e974adc08f29eb7d-agent",
+              "txId": "6999cb106c0171e30be9dd97"
+            }
+          ],
+          "journalOrigCount": 1,
+          "journalRevCount": 1,
+          "journalComRevCount": 1,
+          "trustCount": 1,
+          "trustRevCount": 0
+        },
+        {
+          "paymentId": "699c28656d09fb46b6840191",
+          "paymentType": "sale",
+          "propertyId": "699c26d36d09fb46b683f622",
+          "amount": 130000,
+          "currency": "USD",
+          "reversedAt": "2026-02-23T10:14:18.282Z",
+          "flags": {
+            "A_activeIncome": false,
+            "B_activeExpense": false,
+            "C_activeCompany": false,
+            "D_agentNoPenalty": true,
+            "E_missingJournalReversal": false,
+            "F_missingTrustReversal": true,
+            "G_originalStillActive": false
+          },
+          "income": [
+            {
+              "targetId": "699c26d36d09fb46b683f622",
+              "accountId": "699c27ef6d09fb46b683f7e4",
+              "ledgerType": "sale",
+              "amount": 106054.1,
+              "status": "cancelled",
+              "category": "sale_income",
+              "idempotencyKey": "payment:699c28656d09fb46b6840191",
+              "txId": "699c28656d09fb46b68401cc"
+            }
+          ],
+          "expenses": [],
+          "companyTx": [],
+          "agentTx": [
+            {
+              "agentId": "68d2804b21344cbef4e24aed",
+              "accountId": "68dd3b7a316bb6bf60bcce41",
+              "type": "commission",
+              "amount": 2729.44,
+              "status": "completed",
+              "reference": "699c28656d09fb46b6840191",
+              "txId": "699c28656d09fb46b68401c7"
+            }
+          ],
+          "journalOrigCount": 1,
+          "journalRevCount": 1,
+          "journalComRevCount": 1,
+          "trustCount": 1,
+          "trustRevCount": 0
+        },
+        {
+          "paymentId": "69ba734618ae7e900167c1f5",
+          "paymentType": "sale",
+          "propertyId": "699d5017d8858aa4cfb30b96",
+          "amount": 250000,
+          "currency": "USD",
+          "reversedAt": "2026-04-16T07:55:47.225Z",
+          "flags": {
+            "A_activeIncome": true,
+            "B_activeExpense": false,
+            "C_activeCompany": true,
+            "D_agentNoPenalty": true,
+            "E_missingJournalReversal": false,
+            "F_missingTrustReversal": true,
+            "G_originalStillActive": true
+          },
+          "income": [
+            {
+              "targetId": "699d5017d8858aa4cfb30b96",
+              "accountId": "699d505fd8858aa4cfb30bd9",
+              "ledgerType": "sale",
+              "amount": 203950.22,
+              "status": "completed",
+              "category": "sale_income",
+              "idempotencyKey": "payment:69ba734618ae7e900167c1f5",
+              "txId": "69ba734618ae7e900167c234"
+            }
+          ],
+          "expenses": [],
+          "companyTx": [
+            {
+              "accountId": "68aa44f42c5f00386d11a63b",
+              "amount": 5248.92,
+              "type": "income",
+              "source": "sales_commission",
+              "isArchived": false,
+              "currency": "USD",
+              "txId": "69ba741c18ae7e900167dd74",
+              "date": "2026-03-18T00:00:00.000Z"
+            }
+          ],
+          "agentTx": [
+            {
+              "agentId": "68d2804b21344cbef4e24aed",
+              "accountId": "68dd3b7a316bb6bf60bcce41",
+              "type": "commission",
+              "amount": 5248.92,
+              "status": "completed",
+              "reference": "69ba734618ae7e900167c1f5",
+              "txId": "69ba734618ae7e900167c22e"
+            }
+          ],
+          "journalOrigCount": 0,
+          "journalRevCount": 1,
+          "journalComRevCount": 1,
+          "trustCount": 1,
+          "trustRevCount": 0
+        },
+        {
+          "paymentId": "69dfa1a95c387a0812160742",
+          "paymentType": "rental",
+          "propertyId": "69df880c17359b59e4c4f98a",
+          "amount": 0,
+          "currency": "USD",
+          "reversedAt": "2026-04-16T07:54:53.091Z",
+          "flags": {
+            "A_activeIncome": false,
+            "B_activeExpense": false,
+            "C_activeCompany": false,
+            "D_agentNoPenalty": false,
+            "E_missingJournalReversal": false,
+            "F_missingTrustReversal": false,
+            "G_originalStillActive": false
+          },
+          "income": [],
+          "expenses": [],
+          "companyTx": [],
+          "agentTx": [],
+          "journalOrigCount": 0,
+          "journalRevCount": 0,
+          "journalComRevCount": 0,
+          "trustCount": 0,
+          "trustRevCount": 0
+        }
+      ]
+    },
+    "companyRevenue": [
+      {
+        "companyId": "683403ccf652d8cd543c6932",
+        "companyName": "The Benjamins Realty",
+        "currency": "USD",
+        "paymentAgencyShare": 171304.33,
+        "companyAccountActive": 179053.84,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 124963.48,
+        "journal4001_4002": 1181918.45,
+        "companyBalanceTotalRevenue": 199740.87,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 134
+      },
+      {
+        "companyId": "68a6d94b0dc3267acb5ce1cc",
+        "companyName": "Pam Golding Properties",
+        "currency": "USD",
+        "paymentAgencyShare": 151.32,
+        "companyAccountActive": 151.32,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 0,
+        "journal4001_4002": 0,
+        "companyBalanceTotalRevenue": 0,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 2
+      },
+      {
+        "companyId": "68eea2c729af2baa6ee23aff",
+        "companyName": "Pakanaka Matore",
+        "currency": "USD",
+        "paymentAgencyShare": 40.74,
+        "companyAccountActive": 40.74,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 0,
+        "journal4001_4002": 0,
+        "companyBalanceTotalRevenue": 0,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 1
+      },
+      {
+        "companyId": "69024870cc4c25f5eb48b498",
+        "companyName": "Croco Motors",
+        "currency": "USD",
+        "paymentAgencyShare": 139.68,
+        "companyAccountActive": 139.68,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 139.68,
+        "journal4001_4002": 0,
+        "companyBalanceTotalRevenue": 0,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 2
+      },
+      {
+        "companyId": "69aab9f8b77cb18d366b2c7d",
+        "companyName": "Muscline Properties",
+        "currency": "USD",
+        "paymentAgencyShare": 0,
+        "companyAccountActive": 0,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 0,
+        "journal4001_4002": 800,
+        "companyBalanceTotalRevenue": 800,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 1
+      },
+      {
+        "companyId": "6a084dc5d5840c81a809ee9c",
+        "companyName": "Backsberg Backsberg",
+        "currency": "USD",
+        "paymentAgencyShare": 0,
+        "companyAccountActive": 0,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 0,
+        "journal4001_4002": 1200,
+        "companyBalanceTotalRevenue": 1200,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 2
+      },
+      {
+        "companyId": "6a33e10978291af118811855",
+        "companyName": "Samsung Properties",
+        "currency": "USD",
+        "paymentAgencyShare": 0,
+        "companyAccountActive": 0,
+        "companyAccountArchived": 0,
+        "companyRevenueField": 0,
+        "journal4001_4002": 2000,
+        "companyBalanceTotalRevenue": 2000,
+        "duplicateActiveCompanyRows": 0,
+        "paymentCount": 1
+      }
+    ],
+    "agent": {
+      "missing": [
+        {
+          "paymentId": "687e370b1a13203601cb3d91",
+          "agentId": "68583b3402abcc117d1c037d",
+          "expected": 392.85,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "6881f6b3dfe96de1940ac962",
+          "agentId": "68583b3402abcc117d1c037d",
+          "expected": 130.95,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "689799ae266f23c64881bda3",
+          "agentId": "68583b3402abcc117d1c037d",
+          "expected": 130.95,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "6897a039ba5ae216868b44ee",
+          "agentId": "68583b3402abcc117d1c037d",
+          "expected": 130.95,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "689f26bfd42f725d7e400be5",
+          "agentId": "68583b3402abcc117d1c037d",
+          "expected": 130.95,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "68a707897a1f3f54b6ccc1a1",
+          "agentId": "68a6f7dbbbfe5eb39dc89953",
+          "expected": 113.49,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "68a837ac0956668dc6a8b3f0",
+          "agentId": "68a6f7dbbbfe5eb39dc89953",
+          "expected": 113.49,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "68eeb6a032f4189fa54e0c30",
+          "agentId": "68eea2c729af2baa6ee23afd",
+          "expected": 61.11,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "6902503d7edc7c988cd64286",
+          "agentId": "69024870cc4c25f5eb48b496",
+          "expected": 104.76,
+          "actual": 0,
+          "currency": "USD"
+        },
+        {
+          "paymentId": "690254cb6f963ed113c92c91",
+          "agentId": "69024870cc4c25f5eb48b496",
+          "expected": 104.76,
+          "actual": 0,
+          "currency": "USD"
+        }
+      ],
+      "duplicates": [
+        {
+          "paymentId": "68ff10a2f1a47a84ebee3187",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Lake City - 9 ADYLINN APARTMENTS, Marlborough Harare - Unit 8-owner|Lake City - 9 ADYLINN APARTMENTS, Marlborough Harare - Unit 8-collaborator"
+        },
+        {
+          "paymentId": "68ff1669f1a47a84ebee358f",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 1-owner|Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 1-collaborator"
+        },
+        {
+          "paymentId": "68ff2150f7cad707b5671370",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 2-owner|Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 2-collaborator"
+        },
+        {
+          "paymentId": "68ff53f71c4b70c2ccabf3da",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 3-owner|Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 3-collaborator"
+        },
+        {
+          "paymentId": "68ff56bd17cb001119e76043",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 4-owner|Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 4-collaborator"
+        },
+        {
+          "paymentId": "6903314aa81500795e956986",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 6-owner|Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 6-collaborator"
+        },
+        {
+          "paymentId": "690b02881581ef84bfdecf92",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "291|291",
+          "refs": "Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 8-owner|Tynwald Incgraig - 25 Inchgraig road Tynwald Harare - Unit 8-collaborator"
+        },
+        {
+          "paymentId": "6915dd2917fca3a7c31acc99",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "121.25|121.25",
+          "refs": "6915dd2917fca3a7c31acc99-owner|6915dd2917fca3a7c31acc99-collaborator"
+        },
+        {
+          "paymentId": "6916d79136daa31d2ae86b0e",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "121.25|121.25",
+          "refs": "6916d79136daa31d2ae86b0e-owner|6916d79136daa31d2ae86b0e-collaborator"
+        },
+        {
+          "paymentId": "6925aa2fc12d8d32e888a9e3",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "121.25|121.25",
+          "refs": "6925aa2fc12d8d32e888a9e3-owner|6925aa2fc12d8d32e888a9e3-collaborator"
+        },
+        {
+          "paymentId": "6925aaa3c12d8d32e888aa9b",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "121.25|121.25",
+          "refs": "6925aaa3c12d8d32e888aa9b-owner|6925aaa3c12d8d32e888aa9b-collaborator"
+        },
+        {
+          "paymentId": "6925bbd6194e125fa954fc15",
+          "agentId": "68d2804b21344cbef4e24aed",
+          "count": 2,
+          "amounts": "24.25|24.25",
+          "refs": "6925bbd6194e125fa954fc15-owner|6925bbd6194e125fa954fc15-collaborator"
+        }
+      ]
+    },
+    "provisional": [
+      {
+        "paymentId": "68c2c8a3e329519c550c6a09",
+        "propertyId": "68c2c8a3e329519c550c6a07",
+        "amount": 240000,
+        "income": 0,
+        "company": 0,
+        "agent": 1,
+        "journal": 0,
+        "trust": 0
+      },
+      {
+        "paymentId": "68c2c951e329519c550c6c8a",
+        "propertyId": "68c2c951e329519c550c6c88",
+        "amount": 240000,
+        "income": 0,
+        "company": 0,
+        "agent": 1,
+        "journal": 0,
+        "trust": 0
+      }
+    ],
+    "pending": [
+      {
+        "paymentId": "69e095cd5c387a0812163d96",
+        "propertyId": "69df880c17359b59e4c4f98a",
+        "period": "2026-5",
+        "amount": 0,
+        "otherPendingOrCompletedCount": 0,
+        "otherAmounts": 0
+      }
+    ],
+    "saleDual": [
+      {
+        "paymentId": "68e39d45ef13a11d37c6f13d",
+        "developmentId": "68e392fdef13a11d37c68198",
+        "unitId": "68e392fdef13a11d37c6819c",
+        "ownerAmount": 237500.01,
+        "unitAmount": 237500.01,
+        "devAmount": 237500.01,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68e39ea6ef13a11d37c6f5c9",
+        "developmentId": "68e392fdef13a11d37c68198",
+        "unitId": "68e392fdef13a11d37c6819e",
+        "ownerAmount": 66500,
+        "unitAmount": 66500,
+        "devAmount": 66500,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68e39f0fef13a11d37c6faed",
+        "developmentId": "68e392fdef13a11d37c68198",
+        "unitId": "68e392fdef13a11d37c6819e",
+        "ownerAmount": 66500,
+        "unitAmount": 66500,
+        "devAmount": 66500,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68e39f5aef13a11d37c6ff0d",
+        "developmentId": "68e392fdef13a11d37c68198",
+        "unitId": "68e392fdef13a11d37c6819e",
+        "ownerAmount": 104500,
+        "unitAmount": 104500,
+        "devAmount": 104500,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68fe1258f1a47a84ebee1c35",
+        "developmentId": "68ef9e944f2fec14d65160ff",
+        "unitId": "68ef9e944f2fec14d6516103",
+        "ownerAmount": 22800,
+        "unitAmount": 22800,
+        "devAmount": 22800,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68ff10a2f1a47a84ebee3187",
+        "developmentId": "68ef9e944f2fec14d65160ff",
+        "unitId": "68ef9e944f2fec14d6516109",
+        "ownerAmount": 22800,
+        "unitAmount": 22800,
+        "devAmount": 22800,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68ff1669f1a47a84ebee358f",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d3",
+        "ownerAmount": 22799.98,
+        "unitAmount": 22799.98,
+        "devAmount": 22799.98,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68ff2150f7cad707b5671370",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d4",
+        "ownerAmount": 22800,
+        "unitAmount": 22800,
+        "devAmount": 22800,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68ff53f71c4b70c2ccabf3da",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d5",
+        "ownerAmount": 22800,
+        "unitAmount": 22800,
+        "devAmount": 22800,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "68ff56bd17cb001119e76043",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d6",
+        "ownerAmount": 22799.99,
+        "unitAmount": 22799.99,
+        "devAmount": 22799.99,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "690330bea81500795e95653e",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d7",
+        "ownerAmount": 22800,
+        "unitAmount": 22800,
+        "devAmount": 22800,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6903314aa81500795e956986",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d8",
+        "ownerAmount": 22800,
+        "unitAmount": 22800,
+        "devAmount": 22800,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "690b01641581ef84bfdecc36",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32d9",
+        "ownerAmount": 22620,
+        "unitAmount": 22620,
+        "devAmount": 22620,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "690b02881581ef84bfdecf92",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32da",
+        "ownerAmount": 22620,
+        "unitAmount": 22620,
+        "devAmount": 22620,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "690cacbced3e9bc4e4ba3ca2",
+        "developmentId": "690cab37ed3e9bc4e4ba36f3",
+        "unitId": "690cab37ed3e9bc4e4ba36f6",
+        "ownerAmount": 23562.5,
+        "unitAmount": 23562.5,
+        "devAmount": 23562.5,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6911d30ce32a8e9748352bc0",
+        "developmentId": "690cab37ed3e9bc4e4ba36f3",
+        "unitId": "690cab37ed3e9bc4e4ba36f7",
+        "ownerAmount": 23562.5,
+        "unitAmount": 23562.5,
+        "devAmount": 23562.5,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6915b6f9ea768b888fa63040",
+        "developmentId": "690cab37ed3e9bc4e4ba36f3",
+        "unitId": "690cab37ed3e9bc4e4ba36f8",
+        "ownerAmount": 23562.49,
+        "unitAmount": 23562.49,
+        "devAmount": 23562.49,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6915b9ad0a996aba48ee7195",
+        "developmentId": "690cab37ed3e9bc4e4ba36f3",
+        "unitId": "690cab37ed3e9bc4e4ba36f9",
+        "ownerAmount": 23562.5,
+        "unitAmount": 23562.5,
+        "devAmount": 23562.5,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6915d6e46d3ce1f9ae95b826",
+        "developmentId": "690cab37ed3e9bc4e4ba36f3",
+        "unitId": "690cab37ed3e9bc4e4ba36fa",
+        "ownerAmount": 9425,
+        "unitAmount": 9425,
+        "devAmount": 9425,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6915dd2917fca3a7c31acc99",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32db",
+        "ownerAmount": 9425,
+        "unitAmount": 9425,
+        "devAmount": 9425,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6916d79136daa31d2ae86b0e",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "68ff128ef1a47a84ebee32dc",
+        "ownerAmount": 9425,
+        "unitAmount": 9425,
+        "devAmount": 9425,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6925aa2fc12d8d32e888a9e3",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "690339f9505525041ff9397b",
+        "ownerAmount": 9425,
+        "unitAmount": 9425,
+        "devAmount": 9425,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6925aaa3c12d8d32e888aa9b",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "690339f9505525041ff9397b",
+        "ownerAmount": 9425,
+        "unitAmount": 9425,
+        "devAmount": 9425,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6925bbd6194e125fa954fc15",
+        "developmentId": "68ff128ef1a47a84ebee32cf",
+        "unitId": "690339f9505525041ff9397b",
+        "ownerAmount": 1885,
+        "unitAmount": 1885,
+        "devAmount": 1885,
+        "unitMissing": false,
+        "devMissing": false
+      },
+      {
+        "paymentId": "6970961183e2f03bfae17d4f",
+        "developmentId": "690cab37ed3e9bc4e4ba36f3",
+        "unitId": "690cab37ed3e9bc4e4ba36f6",
+        "ownerAmount": 23556.25,
+        "unitAmount": 23556.25,
+        "devAmount": 23556.25,
+        "unitMissing": false,
+        "devMissing": false
+      }
+    ],
+    "ledgerEvents": {
+      "total": 113,
+      "byStatus": {
+        "completed": 86,
+        "pending": 27
+      },
+      "duplicateOpen": [],
+      "stuckProcessing": []
+    },
+    "journal": {
+      "failedSyncCount": 0,
+      "journalGaps": [],
+      "duplicateJournals": []
+    },
+    "ownerIdentity": {
+      "sampleCount": 56,
+      "ownerIdIsUserCount": 53,
+      "ownerIdIsPropertyOwnerCount": 0,
+      "idsDifferCount": 23,
+      "usersWithBalance": [
+        {
+          "id": "683dc55672d212a2f8aebff0",
+          "role": "agent",
+          "balance": 22250,
+          "name": "Debbie Lee Vico"
+        },
+        {
+          "id": "68a87e730a904b150ddec26b",
+          "role": "agent",
+          "balance": 4375,
+          "name": "Garett Matsilele"
+        },
+        {
+          "id": "69024870cc4c25f5eb48b496",
+          "role": "admin",
+          "balance": 2040,
+          "name": "Moses Chigwena"
+        },
+        {
+          "id": "69aab9f8b77cb18d366b2c7b",
+          "role": "admin",
+          "balance": 800,
+          "name": "Muscline Properties"
+        },
+        {
+          "id": "6a084dc5d5840c81a809ee9a",
+          "role": "admin",
+          "balance": 1200,
+          "name": "Backsberg Backsberg"
+        },
+        {
+          "id": "6a33e10978291af118811853",
+          "role": "admin",
+          "balance": 2000,
+          "name": "Samsung Properties"
+        }
+      ]
+    },
+    "currency": {
+      "paymentCounts": {
+        "USD": 157
+      },
+      "paymentTotals": {
+        "USD": 7715096.96
+      },
+      "mixedCurrencyAccounts": []
+    },
+    "referential": {
+      "multiActiveLeases": [],
+      "orphanPayments": [
+        {
+          "paymentId": "68aa547b83f881b6082c56fd",
+          "reason": "missing-tenant",
+          "tenantId": "68aa547b83f881b6082c56fc"
+        },
+        {
+          "paymentId": "68aa547b83f881b6082c56fd",
+          "reason": "missing-property",
+          "propertyId": "68aa547b83f881b6082c56fb"
+        },
+        {
+          "paymentId": "68aa5b29592945e431200e99",
+          "reason": "missing-tenant",
+          "tenantId": "68aa5b29592945e431200e98"
+        },
+        {
+          "paymentId": "68aa5b29592945e431200e99",
+          "reason": "missing-property",
+          "propertyId": "68aa5b29592945e431200e97"
+        },
+        {
+          "paymentId": "68aa5bba592945e431201038",
+          "reason": "missing-tenant",
+          "tenantId": "68aa5bba592945e431201037"
+        },
+        {
+          "paymentId": "68aa5bba592945e431201038",
+          "reason": "missing-property",
+          "propertyId": "68aa5bba592945e431201036"
+        },
+        {
+          "paymentId": "68c2c8a3e329519c550c6a09",
+          "reason": "missing-tenant",
+          "tenantId": "68c2c8a3e329519c550c6a08"
+        },
+        {
+          "paymentId": "68c2c8a3e329519c550c6a09",
+          "reason": "missing-property",
+          "propertyId": "68c2c8a3e329519c550c6a07"
+        },
+        {
+          "paymentId": "68c2c951e329519c550c6c8a",
+          "reason": "missing-tenant",
+          "tenantId": "68c2c951e329519c550c6c89"
+        },
+        {
+          "paymentId": "68c2c951e329519c550c6c8a",
+          "reason": "missing-property",
+          "propertyId": "68c2c951e329519c550c6c88"
+        },
+        {
+          "paymentId": "68c2d2646d542abc5fd57c85",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68c2d2646d542abc5fd57c85",
+          "reason": "missing-property",
+          "propertyId": "68c2d2646d542abc5fd57c84"
+        },
+        {
+          "paymentId": "68c3d0918313dabf9866de50",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68c3f48af059076e86b04e23",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68c42489a5fcbc4752ac99ba",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68c42503a5fcbc4752ac9d39",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68c4254da5fcbc4752ac9f31",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68c4277da5fcbc4752aca516",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68d538ecd069b8525073e5e7",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68d53911d069b8525073e701",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68d5393fd069b8525073e7c7",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68e39d45ef13a11d37c6f13d",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68e39d45ef13a11d37c6f13d",
+          "reason": "missing-property",
+          "propertyId": "68e39d45ef13a11d37c6f13c"
+        },
+        {
+          "paymentId": "68e39ea6ef13a11d37c6f5c9",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68e39ea6ef13a11d37c6f5c9",
+          "reason": "missing-property",
+          "propertyId": "68e39ea6ef13a11d37c6f5c8"
+        },
+        {
+          "paymentId": "68e39f0fef13a11d37c6faed",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68e39f0fef13a11d37c6faed",
+          "reason": "missing-property",
+          "propertyId": "68e39f0fef13a11d37c6faec"
+        },
+        {
+          "paymentId": "68e39f5aef13a11d37c6ff0d",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68e39f5aef13a11d37c6ff0d",
+          "reason": "missing-property",
+          "propertyId": "68e39f5aef13a11d37c6ff0c"
+        },
+        {
+          "paymentId": "68fe1258f1a47a84ebee1c35",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68fe1258f1a47a84ebee1c35",
+          "reason": "missing-property",
+          "propertyId": "68fe1258f1a47a84ebee1c34"
+        },
+        {
+          "paymentId": "68ff10a2f1a47a84ebee3187",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68ff10a2f1a47a84ebee3187",
+          "reason": "missing-property",
+          "propertyId": "68ff10a2f1a47a84ebee3186"
+        },
+        {
+          "paymentId": "68ff1669f1a47a84ebee358f",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68ff1669f1a47a84ebee358f",
+          "reason": "missing-property",
+          "propertyId": "68ff1669f1a47a84ebee358e"
+        },
+        {
+          "paymentId": "68ff2150f7cad707b5671370",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68ff2150f7cad707b5671370",
+          "reason": "missing-property",
+          "propertyId": "68ff2150f7cad707b567136f"
+        },
+        {
+          "paymentId": "68ff53f71c4b70c2ccabf3da",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68ff53f71c4b70c2ccabf3da",
+          "reason": "missing-property",
+          "propertyId": "68ff53f71c4b70c2ccabf3d9"
+        },
+        {
+          "paymentId": "68ff56bd17cb001119e76043",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "68ff56bd17cb001119e76043",
+          "reason": "missing-property",
+          "propertyId": "68ff56bd17cb001119e76042"
+        },
+        {
+          "paymentId": "690330bea81500795e95653e",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "690330bea81500795e95653e",
+          "reason": "missing-property",
+          "propertyId": "690330bea81500795e95653d"
+        },
+        {
+          "paymentId": "6903314aa81500795e956986",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6903314aa81500795e956986",
+          "reason": "missing-property",
+          "propertyId": "6903314aa81500795e956985"
+        },
+        {
+          "paymentId": "6909d0029bea16adba4895ec",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6909d3fdbe72c2668d1b3709",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "690b01641581ef84bfdecc36",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "690b01641581ef84bfdecc36",
+          "reason": "missing-property",
+          "propertyId": "690b01641581ef84bfdecc35"
+        },
+        {
+          "paymentId": "690b02881581ef84bfdecf92",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "690b02881581ef84bfdecf92",
+          "reason": "missing-property",
+          "propertyId": "690b02881581ef84bfdecf91"
+        },
+        {
+          "paymentId": "690cacbced3e9bc4e4ba3ca2",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "690cacbced3e9bc4e4ba3ca2",
+          "reason": "missing-property",
+          "propertyId": "690cacbced3e9bc4e4ba3ca1"
+        },
+        {
+          "paymentId": "6911d30ce32a8e9748352bc0",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6911d30ce32a8e9748352bc0",
+          "reason": "missing-property",
+          "propertyId": "6911d30ce32a8e9748352bbf"
+        },
+        {
+          "paymentId": "6911d38be32a8e9748353227",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6911ddbda288fab601fe85d7",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69132067ec7bd48566612180",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6913248010735f077724c186",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6913252610735f077724c53e",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69132a14fe3d6fc92e6843f2",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69132bdf7e43781719fd3888",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69143667d4310a4d84ecba9e",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69143a7af3e00e23011933a3",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "691455f5f3e00e23011955dc",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "691457b0f358319f45064a7a",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "691469616345097c6938e973",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6915a7ed6288645cb3ff3c40",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6915b6f9ea768b888fa63040",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6915b6f9ea768b888fa63040",
+          "reason": "missing-property",
+          "propertyId": "6915b6f9ea768b888fa6303f"
+        },
+        {
+          "paymentId": "6915b9ad0a996aba48ee7195",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6915b9ad0a996aba48ee7195",
+          "reason": "missing-property",
+          "propertyId": "6915b9ad0a996aba48ee7194"
+        },
+        {
+          "paymentId": "6915d6e46d3ce1f9ae95b826",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6915d6e46d3ce1f9ae95b826",
+          "reason": "missing-property",
+          "propertyId": "6915d6e46d3ce1f9ae95b825"
+        },
+        {
+          "paymentId": "6915dd2917fca3a7c31acc99",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6915dd2917fca3a7c31acc99",
+          "reason": "missing-property",
+          "propertyId": "6915dd2917fca3a7c31acc98"
+        },
+        {
+          "paymentId": "6916d79136daa31d2ae86b0e",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6916d79136daa31d2ae86b0e",
+          "reason": "missing-property",
+          "propertyId": "6916d79136daa31d2ae86b0d"
+        },
+        {
+          "paymentId": "6925aa2fc12d8d32e888a9e3",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6925aa2fc12d8d32e888a9e3",
+          "reason": "missing-property",
+          "propertyId": "6925aa2fc12d8d32e888a9e2"
+        },
+        {
+          "paymentId": "6925aaa3c12d8d32e888aa9b",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6925aaa3c12d8d32e888aa9b",
+          "reason": "missing-property",
+          "propertyId": "6925aaa3c12d8d32e888aa9a"
+        },
+        {
+          "paymentId": "6925bbd6194e125fa954fc15",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6925bbd6194e125fa954fc15",
+          "reason": "missing-property",
+          "propertyId": "6925bbd6194e125fa954fc14"
+        },
+        {
+          "paymentId": "696f5a7954059c1a1fa43002",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "697077ad17ae6d0cb11a5d9f",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6970961183e2f03bfae17d4f",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6970961183e2f03bfae17d4f",
+          "reason": "missing-property",
+          "propertyId": "6970961183e2f03bfae17d4e"
+        },
+        {
+          "paymentId": "698c38c73eda316741c0fda6",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "698c397b3eda316741c10910",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "698dd141741d0c9356d1013d",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6992e5b631ec588c904c1440",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6997366a9a5dde81c79eebdd",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6999a778d0d16f54222e09d0",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6999c9e6e974adc08f29eb7d",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6999cb0f6c0171e30be9dd14",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6999cb0f6c0171e30be9dd16",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6999cb626c0171e30be9ddd2",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6999cb626c0171e30be9ddd4",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "699c28656d09fb46b6840191",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "699c287a6d09fb46b6840382",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "699c287a6d09fb46b6840384",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "699c90f6721a905fb9eac2b7",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "699d526ed8858aa4cfb317e7",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69ba734618ae7e900167c1f5",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69e096035c387a0812163eaf",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "69e096035c387a0812163eb4",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6a0075f9f014e44fb3ad68c5",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        },
+        {
+          "paymentId": "6a007620f014e44fb3ad697d",
+          "reason": "missing-tenant",
+          "tenantId": "6d616e75616c5f6275796572"
+        }
+      ],
+      "orphanAccounts": [],
+      "staleOwnerProps": []
+    },
+    "levy": {
+      "count": 29,
+      "municipalCount": 0,
+      "gaps": [
+        {
+          "levyId": "68876bb379b65bcddb8db51e",
+          "propertyId": "6881ecd8a15ae3f0afd218ff",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68a707cc7a1f3f54b6ccc1ab",
+          "propertyId": "68a705ad7a1f3f54b6cc93ec",
+          "amount": 100,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68a85f22dd67b3d8cd380a00",
+          "propertyId": "68a705ad7a1f3f54b6cc93ec",
+          "amount": 100,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68b862f5e65e778ef5350a00",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68b98c0dc26238321ed93cb5",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68c0021f765aed88ad3784b6",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68c00275765aed88ad378508",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68c00847765aed88ad378762",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68c00b1f765aed88ad3788c7",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68c00c85765aed88ad378993",
+          "propertyId": "68bab7e7e84308265da8e8a4",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68c015b7765aed88ad378bdb",
+          "propertyId": "68c0148b765aed88ad378aee",
+          "amount": 200,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68e8c4f31c380d60f79110a0",
+          "propertyId": "68c0148b765aed88ad378aee",
+          "amount": 200,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68e8c4f31c380d60f79110a0",
+          "propertyId": "68c0148b765aed88ad378aee",
+          "amount": 200,
+          "status": "completed",
+          "kind": "missing-payout"
+        },
+        {
+          "levyId": "68e8df0ce5ff9c00727b338f",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "paid_out",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68e8df0ce5ff9c00727b338f",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "paid_out",
+          "kind": "missing-payout"
+        },
+        {
+          "levyId": "68ee47d36f822ed11aefce26",
+          "propertyId": "68bab7e7e84308265da8e8a4",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68f5f99d7b747b2383c0c92f",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68f8a8a1e777812b63b573f1",
+          "propertyId": "68bab7e7e84308265da8e8a4",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "68f8af23e777812b63b5760c",
+          "propertyId": "68b861c3e65e778ef53508f1",
+          "amount": 150,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "6902504a7edc7c988cd6429c",
+          "propertyId": "690249f5cc4c25f5eb48b51d",
+          "amount": 300,
+          "status": "completed",
+          "kind": "missing-collection"
+        },
+        {
+          "levyId": "690254de6f963ed113c92ca7",
+          "propertyId": "690254156f963ed113c92b85",
+          "amount": 300,
+          "status": "completed",
+          "kind": "missing-collection"
+        }
+      ]
+    }
+  },
+  "endedAt": "2026-08-31T14:05:28.492Z",
+  "durationMs": 13046,
+  "counts": {
+    "payments": 157,
+    "propertyAccounts": 131,
+    "companyAccounts": 4,
+    "agentAccounts": 9,
+    "journalEntries": 38,
+    "trustTransactions": 92,
+    "ledgerEvents": 113,
+    "findings": 56
+  },
+  "exposure": {
+    "USD": {
+      "missingAgentCommission": 1414.26,
+      "missingOwnerIncome": 1200825,
+      "missingCompanyCommission": 18915
+    },
+    "ZWL": {},
+    "OTHER": {}
+  },
+  "score": {
+    "value": 32,
+    "deductions": {
+      "reversed": 24,
+      "balances": 4,
+      "missing": 20,
+      "duplicates": 12,
+      "provisional": 8
+    }
+  },
+  "findingSummary": {
+    "confirmedDamage": 52,
+    "highConfidenceRisk": 2,
+    "codeOnlyOrInfo": 2
+  }
+}

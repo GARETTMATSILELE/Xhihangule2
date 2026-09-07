@@ -48,7 +48,7 @@ declare global {
   }
 }
 
-async function resolveCompanyContext(userData: JwtPayload): Promise<CompanyContext> {
+export async function resolveCompanyContext(userData: JwtPayload): Promise<CompanyContext> {
   const cacheKey = `${userData.userId}:${userData.companyId || 'legacy-none'}`;
   const now = Date.now();
   const cached = companyContextCache.get(cacheKey);

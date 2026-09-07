@@ -1,0 +1,100 @@
+{
+  "environment5b5": {
+    "mainHost": "localhost:27017",
+    "acctHost": "localhost:27017",
+    "mainDb": "property-management",
+    "acctDb": "accounting",
+    "cosmos": false,
+    "local": true,
+    "replicaSet": null,
+    "mongodVersion": null,
+    "note": "Phase 5B.5 read-only scan of the local application databases. Remote/Cosmos URIs are aborted before connect."
+  },
+  "metrics": {
+    "payments": [
+      157,
+      157
+    ],
+    "propertyAccounts": [
+      131,
+      131
+    ],
+    "companyAccounts": [
+      4,
+      4
+    ],
+    "agentAccounts": [
+      9,
+      9
+    ],
+    "journalEntries": [
+      38,
+      38
+    ],
+    "trustTransactions": [
+      92,
+      92
+    ],
+    "ledgerEvents": [
+      113,
+      113
+    ],
+    "pendingLedgerEvents": [
+      27,
+      27
+    ],
+    "processingLedgerEvents": [
+      0,
+      0
+    ],
+    "balanceMismatches": [
+      2,
+      2
+    ],
+    "reversedSaleCount": [
+      5,
+      5
+    ],
+    "reversedLeftovers": [
+      0,
+      0
+    ],
+    "missingOwnerIncome": [
+      1200825,
+      1200825
+    ],
+    "missingAgentCommission": [
+      1414.26,
+      1414.26
+    ],
+    "levyGaps": [
+      21,
+      21
+    ],
+    "findings": [
+      56,
+      56
+    ],
+    "score": [
+      32,
+      32
+    ]
+  },
+  "collectionDelta": [],
+  "indexDelta": [],
+  "leftoverIncomePaymentIds": {
+    "phase5a": [],
+    "phase5b5": []
+  },
+  "pendingEventCount": {
+    "phase5a": 1,
+    "byStatusA": {
+      "completed": 86,
+      "pending": 27
+    },
+    "byStatusB": {
+      "completed": 86,
+      "pending": 27
+    }
+  }
+}

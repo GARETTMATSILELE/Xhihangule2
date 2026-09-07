@@ -21,7 +21,12 @@
     "companies:workspace-type:dry": "npm run build && node dist/scripts/migrateCompanyWorkspaceType.js",
     "companies:workspace-type:apply": "npm run build && node dist/scripts/migrateCompanyWorkspaceType.js --apply",
     "saas:indexes": "npm run build && node dist/scripts/saasSafeIndexes.js",
-    "test": "jest"
+    "test": "jest",
+    "test:reporting": "npm run build && node dist/reporting/tests/runReportingTests.js",
+    "test:phase2a": "npm run build && node dist/scripts/runPhase2aSafetyTests.js",
+    "test:phase2b": "npm run build && node dist/scripts/runPhase2bCompletenessTests.js",
+    "test:phase5b": "npm run build && node dist/scripts/runPhase5bAccountingTests.js",
+    "test:vat-commission": "npm run build && node dist/scripts/runVatOnCommissionTests.js"
   },
   "keywords": [],
   "author": "",

@@ -3,6 +3,8 @@ import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
 import { config } from 'dotenv';
 import { JWT_CONFIG } from './jwt';
+import { resolveCompanyContext } from '../middleware/auth';
+import { JwtPayload, UserRole } from '../types/auth';
 
 config();
 
@@ -46,8 +48,9 @@ export const initializeSocket = (httpServer: HttpServer) => {
     pingInterval: 25000
   });
 
-  // Socket.IO authentication middleware
-  io.use((socket: Socket, next: (err?: Error) => void) => {
+  // Socket.IO authentication middleware — same JWT verification as before,
+  // then the same DB-backed company context used by HTTP auth.
+  io.use(async (socket: Socket, next: (err?: Error) => void) => {
     const token = socket.handshake.auth.token;
     if (!token) {
       return next(new Error('Authentication error: No token provided'));
@@ -62,7 +65,24 @@ export const initializeSocket = (httpServer: HttpServer) => {
       if (!userId) {
         return next(new Error('Authentication error: Invalid token payload'));
       }
-      (socket as CustomSocket).data = { user: { ...decoded, id: userId } };
+
+      const claims: JwtPayload = {
+        userId,
+        role: decoded.role as UserRole,
+        roles: (decoded as any).roles,
+        companyId: decoded.companyId
+      };
+      const context = await resolveCompanyContext(claims);
+      const authorisedCompanyId = context.companyId || undefined;
+
+      (socket as CustomSocket).data = {
+        user: {
+          ...decoded,
+          id: userId,
+          role: context.role || decoded.role,
+          companyId: authorisedCompanyId
+        }
+      };
       next();
     } catch (err) {
       next(new Error('Authentication error: Invalid token'));
@@ -73,11 +93,15 @@ export const initializeSocket = (httpServer: HttpServer) => {
     const customSocket = socket as CustomSocket;
     console.log('Client connected:', socket.id);
 
-    // Join relevant rooms based on user role/permissions
+    // Join rooms from authenticated context. Company rooms use the authorised
+    // company from resolveCompanyContext (DB when available), not a stale JWT claim.
     if (customSocket.data?.user) {
       socket.join(`user-${customSocket.data.user.id}`);
       if (customSocket.data.user.role) {
         socket.join(`role-${customSocket.data.user.role}`);
+      }
+      if (customSocket.data.user.companyId) {
+        socket.join(`company-${customSocket.data.user.companyId}`);
       }
     }
 

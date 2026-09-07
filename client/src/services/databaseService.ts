@@ -1,20 +1,14 @@
 import { RetryOptions } from '../types/database';
-import api from '../api/axios';
-import publicApi from '../api/publicApi';
 
 export class DatabaseService {
   private static instance: DatabaseService;
-  private isConnected: boolean = false;
-  private connectionCheckInterval: NodeJS.Timeout | null = null;
+  private isConnected: boolean = true;
   private failureCount: number = 0;
-  private readonly MAX_FAILURES: number = 5;
-  private readonly HEALTH_CHECK_INTERVAL: number = 30000; // 30 seconds
   private readonly INITIAL_RETRY_DELAY: number = 1000; // 1 second
   private readonly MAX_RETRY_DELAY: number = 30000; // 30 seconds
-  private readonly HEALTH_CHECK_TIMEOUT: number = 8000; // 8 seconds
 
   private constructor() {
-    this.startConnectionCheck();
+    // No periodic health polling. Operation retries handle transient API failures.
   }
 
   public static getInstance(): DatabaseService {
@@ -22,117 +16,6 @@ export class DatabaseService {
       DatabaseService.instance = new DatabaseService();
     }
     return DatabaseService.instance;
-  }
-
-  private async checkConnection(): Promise<void> {
-    try {
-      console.log('Checking database connection...');
-
-      // Prefer a fast readiness probe; on failure/timeout, fall back to liveness
-      // Use the public API instance (no credentials) to avoid unnecessary preflights/cookies
-      const tryReady = () => publicApi.get('/health/ready', {
-        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 7000),
-        validateStatus: (status) => status < 500
-      });
-      const tryLive = () => publicApi.get('/health/live', {
-        timeout: Math.min(this.HEALTH_CHECK_TIMEOUT, 5000),
-        validateStatus: (status) => status < 500
-      });
-
-      let response;
-      try {
-        response = await tryReady();
-      } catch (e) {
-        // Swallow and try liveness quickly to avoid blocking UX
-        try {
-          response = await tryLive();
-        } catch (liveErr) {
-          throw liveErr;
-        }
-      }
-
-      // If live responded, consider server reachable; only mark unhealthy if explicit unhealthy reported
-      const isHealthy = Boolean(response?.data?.database?.isHealthy) || response?.data?.status === 'ok';
-      if (isHealthy) {
-        this.isConnected = true;
-        this.failureCount = 0;
-        console.log('Database connection is healthy:', response.data);
-      } else {
-        this.isConnected = false;
-        this.failureCount++;
-        console.warn('Database reported unhealthy state:', response?.data);
-        if (this.failureCount >= this.MAX_FAILURES) {
-          this.handleConnectionLoss();
-        }
-      }
-    } catch (error: any) {
-      console.error('Database connection check failed:', error);
-      this.isConnected = false;
-      this.failureCount++;
-      
-      // Handle specific error types
-      if (error.code === 'ERR_NETWORK') {
-        console.error('Network error - Server might be down or unreachable');
-      } else if (error.code === 'ECONNABORTED') {
-        console.error('Connection timeout - Server is not responding');
-      } else if (error.response?.status === 503) {
-        console.error('Service unavailable - Database might be down');
-      }
-      
-      if (this.failureCount >= this.MAX_FAILURES) {
-        console.error('Database connection lost. Circuit breaker opened.');
-        this.handleConnectionLoss();
-      }
-    }
-  }
-
-  private handleConnectionLoss(): void {
-    // Clear existing interval
-    if (this.connectionCheckInterval) {
-      clearInterval(this.connectionCheckInterval);
-      this.connectionCheckInterval = null;
-    }
-
-    let retryDelay = this.INITIAL_RETRY_DELAY;
-
-    const attemptReconnection = async () => {
-      try {
-        await this.checkConnection();
-        if (this.isConnected) {
-          console.log('Connection restored');
-          this.startConnectionCheck(); // Resume normal health checks
-          return;
-        }
-      } catch (error) {
-        console.error('Reconnection attempt failed:', error);
-      }
-
-      // Exponential backoff with jitter
-      retryDelay = Math.min(retryDelay * 1.5, this.MAX_RETRY_DELAY);
-      const jitter = Math.random() * 0.1 + 0.95; // 0.95 to 1.05
-      const nextDelay = retryDelay * jitter;
-
-      console.log(`Next reconnection attempt in ${Math.round(nextDelay / 1000)} seconds`);
-      setTimeout(attemptReconnection, nextDelay);
-    };
-
-    attemptReconnection();
-  }
-
-  private startConnectionCheck(): void {
-    // Clear any existing interval
-    if (this.connectionCheckInterval) {
-      clearInterval(this.connectionCheckInterval);
-      this.connectionCheckInterval = null;
-    }
-
-    // Initial check
-    this.checkConnection();
-
-    // Set up periodic checks
-    this.connectionCheckInterval = setInterval(() => {
-      this.checkConnection();
-    }, this.HEALTH_CHECK_INTERVAL);
   }
 
   public async executeWithRetry<T>(
@@ -151,20 +34,16 @@ export class DatabaseService {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        // Do not hard-block operations on transient health probe failures.
-        // If we think we're disconnected, kick off a background check but proceed.
-        if (!this.isConnected) {
-          try { this.checkConnection(); } catch {}
-        }
-
-        // If the operation itself sets a no-retry header, honor it
         const result = await operation();
+        this.isConnected = true;
+        this.failureCount = 0;
         return result;
       } catch (error: any) {
         lastError = error;
+        this.isConnected = false;
+        this.failureCount++;
         console.error(`Operation failed (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
-        
-        // Respect per-request no-retry hint when available
+
         const noRetry = error?.config?.headers?.['x-no-retry'] === '1' || error?.config?.headers?.['x-no-retry'] === 1;
         if (noRetry) {
           break;
@@ -174,13 +53,11 @@ export class DatabaseService {
           break;
         }
 
-        // Add jitter to avoid thundering herd problem
         const jitterFactor = jitter ? Math.random() * 0.1 + 0.95 : 1;
         const currentDelay = Math.min(delay * jitterFactor, maxDelay);
-        
-        console.log(`Retrying in ${Math.round(currentDelay / 1000)} seconds...`);
+
         await new Promise(resolve => setTimeout(resolve, currentDelay));
-        delay *= 2; // Exponential backoff
+        delay *= 2;
       }
     }
 
@@ -214,9 +91,6 @@ export class DatabaseService {
   }
 
   public cleanup(): void {
-    if (this.connectionCheckInterval) {
-      clearInterval(this.connectionCheckInterval);
-      this.connectionCheckInterval = null;
-    }
+    // No interval to clear; retained for callers that previously stopped health polling.
   }
-} 
+}

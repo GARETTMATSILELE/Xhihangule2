@@ -10,7 +10,7 @@ import { isDatabaseAvailable } from '../config/database';
 // CommissionService is imported elsewhere in the codebase; this service does not need a singleton
 import { logger } from '../utils/logger';
 import { DatabaseService } from './databaseService';
-import { CommissionService } from './commissionService';
+import { CommissionService, applyLevyPassThroughToSnapshot } from './commissionService';
 import { sendAgentPaymentNotificationEmail } from './agentPaymentNotificationService';
 
 const dbService = DatabaseService.getInstance();
@@ -95,11 +95,16 @@ export const createPayment = async (req: Request, res: Response) => {
     const commissionPercent = typeof property.commission === 'number'
       ? property.commission
       : ((propertyType || 'residential') === 'residential' ? 15 : 10);
-    const commissionDetails = await CommissionService.calculate(
-      amount,
-      commissionPercent,
-      new mongoose.Types.ObjectId(req.user.companyId)
-    );
+    const commissionResult = await CommissionService.calculateForProperty({
+      companyId: req.user.companyId,
+      grossRent: amount,
+      levy: 0,
+      commissionPercentage: commissionPercent,
+      vatOnCommission: Boolean((property as any)?.vatOnCommission),
+      vatTreatment: (property as any)?.vatCommissionTreatment,
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+    });
+    const commissionDetails = applyLevyPassThroughToSnapshot(commissionResult, amount, 0);
 
     // Create payment record
     const payment = new Payment({
@@ -117,23 +122,15 @@ export const createPayment = async (req: Request, res: Response) => {
       notes,
       processedBy: req.user.userId,
       commissionDetails,
+      applyVatOnCommission: commissionResult.vatOnCommission,
+      vatOnCommissionRate: commissionResult.vatRate || 0,
+      vatCommissionTreatment: commissionResult.vatTreatment,
       status: 'completed',
     });
 
     await payment.save({ session });
 
-    // Update company revenue
-    await Company.findByIdAndUpdate(
-      req.user.companyId,
-      {
-        $inc: {
-          revenue: commissionDetails.agencyShare,
-        },
-      },
-      { session }
-    );
-
-    // Update agent commission
+    // Update agent commission total (denormalized User.commission; AgentAccount is the ledger SSOT)
     await User.findByIdAndUpdate(
       agentId,
       {
@@ -144,19 +141,7 @@ export const createPayment = async (req: Request, res: Response) => {
       { session }
     );
 
-    // If it's a rental payment, update property owner's balance
-    if (paymentType === 'rental' && property.ownerId) {
-      await User.findByIdAndUpdate(
-        property.ownerId,
-        {
-          $inc: {
-            balance: commissionDetails.ownerAmount,
-          },
-        },
-        { session }
-      );
-
-      // Update property statistics
+    if (paymentType === 'rental') {
       await Property.findByIdAndUpdate(
         propertyId,
         {
@@ -174,6 +159,9 @@ export const createPayment = async (req: Request, res: Response) => {
     }
 
     await session.commitTransaction();
+
+    const { postPaymentAccounting } = await import('./paymentAccountingOrchestrator');
+    await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
 
     // Notify agent by email (fire-and-forget)
     void sendAgentPaymentNotificationEmail(payment);
@@ -281,60 +269,15 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
 
     // If payment is being marked as failed, reverse the commission and revenue updates
     if (oldStatus === 'completed' && status === 'failed') {
-      const { commissionDetails } = payment;
-
-      // Reverse company revenue
-      await Company.findByIdAndUpdate(
-        payment.companyId,
-        {
-          $inc: {
-            revenue: -commissionDetails.agencyShare,
-          },
-        },
-        { session }
-      );
-
-      // Reverse agent commission
-      await User.findByIdAndUpdate(
-        payment.agentId,
-        {
-          $inc: {
-            commission: -commissionDetails.agentShare,
-          },
-        },
-        { session }
-      );
-
-      // If it was a rental payment, reverse property owner's balance
-      if (payment.paymentType === 'rental') {
-        const property = await Property.findById(payment.propertyId).session(session);
-        if (property) {
-          await User.findByIdAndUpdate(
-            property.ownerId,
-            {
-              $inc: {
-                balance: -commissionDetails.ownerAmount,
-              },
-            },
-            { session }
-          );
-
-          // Update property statistics
-          await Property.findByIdAndUpdate(
-            payment.propertyId,
-            {
-              $inc: {
-                totalRentCollected: -payment.amount,
-                occupancyRate: -100 / (property.units || 1),
-              },
-              $set: {
-                status: 'available',
-                occupiedUnits: Math.max(0, (property.occupiedUnits || 0) - 1),
-              },
-            },
-            { session }
-          );
-        }
+      const { reversePaymentAccounting } = await import('./paymentAccountingOrchestrator');
+      await reversePaymentAccounting(String(payment._id), { reason: 'Payment marked failed' });
+      const agentShare = Number((payment as any)?.commissionDetails?.agentShare || 0);
+      if (agentShare) {
+        await User.findByIdAndUpdate(
+          payment.agentId,
+          { $inc: { commission: -agentShare } },
+          { session }
+        );
       }
     }
 

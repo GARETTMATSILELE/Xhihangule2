@@ -12,6 +12,7 @@ import mongoose from 'mongoose';
 import { hasAnyRole, hasRole } from '../utils/access';
 import { Buyer } from '../models/Buyer';
 import trustAccountService from '../services/trustAccountService';
+import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
 
 // Helper function to extract user context from request
 const getUserContext = (req: Request) => {
@@ -434,13 +435,18 @@ export const createProperty = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
+    const vatSettings = sanitizePropertyVatSettings(req.body || {});
     const propertyData = {
       ...req.body,
       ownerId: req.user.userId,
       companyId: req.user.companyId,
       rentalType: req.body.rentalType,
-      commission: req.body.commission
+      commission: req.body.commission,
+      vatOnCommission: vatSettings.vatOnCommission,
+      vatCommissionTreatment: vatSettings.vatCommissionTreatment
     };
+    delete (propertyData as any).vatRate;
+    delete (propertyData as any).vatPercentOnCommission;
     
     console.log('Processed property data:', propertyData);
     console.log('User context:', {
@@ -751,11 +757,16 @@ export const updateProperty = async (req: Request, res: Response) => {
       }
     }
 
+    const vatSettings = sanitizePropertyVatSettings(req.body || {});
     const updateDoc: any = {
       ...req.body,
       ownerId: req.user.userId,
-      companyId: req.user.companyId
+      companyId: req.user.companyId,
+      vatOnCommission: vatSettings.vatOnCommission,
+      vatCommissionTreatment: vatSettings.vatCommissionTreatment
     };
+    delete updateDoc.vatRate;
+    delete updateDoc.vatPercentOnCommission;
     // Ensure we only ever write a validated buyerId
     if (Object.prototype.hasOwnProperty.call(updateDoc, 'buyerId')) {
       delete updateDoc.buyerId;

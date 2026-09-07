@@ -401,7 +401,9 @@ exports.deleteMaintenanceRequest = deleteMaintenanceRequest;
 // Public function for getting maintenance requests (no authentication required)
 const getMaintenanceRequestsPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        console.log('getMaintenanceRequestsPublic called with query:', req.query);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log('getMaintenanceRequestsPublic called');
+        }
         const { propertyId, companyId } = req.query;
         const query = {};
         // If propertyId is specified, filter by that property
@@ -418,14 +420,18 @@ const getMaintenanceRequestsPublic = (req, res) => __awaiter(void 0, void 0, voi
             }
             query.companyId = companyId;
         }
-        console.log('Query to execute:', query);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log('Maintenance query to execute:', { propertyId: query.propertyId, companyId: query.companyId });
+        }
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find(query)
             .populate('requestedBy', 'firstName lastName')
             .populate('propertyId', 'name address')
             .populate('ownerId', 'firstName lastName')
             .populate('contractorId', 'companyName trade')
             .sort({ lastActivityAt: -1, createdAt: -1 });
-        console.log('Found maintenance requests:', maintenanceRequests.length);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log('Found maintenance requests:', maintenanceRequests.length);
+        }
         // Return empty array if no requests found instead of error
         if (!maintenanceRequests || maintenanceRequests.length === 0) {
             return res.json([]);

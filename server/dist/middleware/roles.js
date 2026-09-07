@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.canViewAgentAccounts = exports.canViewAccountantDashboard = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
+exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.canViewAgentAccounts = exports.canViewPropertyDetailsReport = exports.canViewAccountantDashboard = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
 const errorHandler_1 = require("./errorHandler");
 const isAgent = (req, res, next) => {
     if (!req.user) {
@@ -58,6 +58,17 @@ const canViewAccountantDashboard = (req, res, next) => {
     next();
 };
 exports.canViewAccountantDashboard = canViewAccountantDashboard;
+const canViewPropertyDetailsReport = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    const roles = req.user.roles || [req.user.role];
+    if (!roles.some(r => ['agent', 'sales', 'admin', 'accountant', 'principal', 'prea'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. You do not have permission to view this report.', 403);
+    }
+    next();
+};
+exports.canViewPropertyDetailsReport = canViewPropertyDetailsReport;
 // Read-only access to agent accounts for Admin, Principal, PREA and Accountant
 const canViewAgentAccounts = (req, res, next) => {
     if (!req.user) {

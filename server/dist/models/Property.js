@@ -217,6 +217,15 @@ const PropertySchema = new mongoose_1.Schema({
         max: [100, 'Commission cannot exceed 100%'],
         default: 15
     },
+    vatOnCommission: {
+        type: Boolean,
+        default: false
+    },
+    vatCommissionTreatment: {
+        type: String,
+        enum: ['inclusive', 'exclusive'],
+        required: false
+    },
     commissionPreaPercent: {
         type: Number,
         min: [0, 'PREA percent cannot be negative'],
@@ -260,6 +269,15 @@ const PropertySchema = new mongoose_1.Schema({
         default: null
     },
     deletedBy: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    archivedAt: {
+        type: Date,
+        default: null
+    },
+    archivedBy: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'User',
         default: null

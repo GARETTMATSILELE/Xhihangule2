@@ -16,6 +16,7 @@ import {
   Checkbox,
   FormControlLabel,
   Divider,
+  Switch,
 } from '@mui/material';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTimes, faUpload } from '@fortawesome/free-solid-svg-icons';
@@ -27,7 +28,6 @@ import {
   AMENITIES_BY_CATEGORY,
   PROPERTY_CATEGORIES,
   PROPERTY_OPERATIONAL_STATUSES,
-  PROPERTY_TEMPLATES,
   PROPERTY_USES,
   getLegacyTypeForCategory,
   getSpecificationFields,
@@ -86,7 +86,9 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
       status: 'available',
       occupiedUnits: 0,
       rentalType: 'management',
-      commission: 15
+      commission: 15,
+      vatOnCommission: false,
+      vatCommissionTreatment: 'exclusive'
     };
 
     if (initialData) {
@@ -274,23 +276,6 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
     });
   };
 
-  const applyTemplate = (templateName: string) => {
-    const template = PROPERTY_TEMPLATES.find(t => t.name === templateName);
-    if (!template) return;
-
-    setProperty(prev => ({
-      ...prev,
-      type: template.type,
-      propertyCategory: template.category,
-      propertySubtype: template.subtype,
-      propertySpecifications: {
-        ...(((prev as any).propertySpecifications || {}) as Record<string, unknown>),
-        ...template.specifications,
-      },
-      amenities: Array.from(new Set([...(prev.amenities || []), ...template.amenities])),
-    }));
-  };
-
   const handleAmenityToggle = (amenity: string) => {
     setProperty((prev: PropertyFormData) => ({
       ...prev,
@@ -400,37 +385,12 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
           </FormControl>
         </Grid>
         <Grid item xs={12}>
-          <Typography variant="subtitle2" gutterBottom>Templates</Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {PROPERTY_TEMPLATES.map(template => (
-              <Chip
-                key={template.name}
-                label={template.name}
-                onClick={() => applyTemplate(template.name)}
-                variant="outlined"
-                clickable
-              />
-            ))}
-          </Box>
-        </Grid>
-        <Grid item xs={12}>
           <TextField
             required
             fullWidth
             name="address"
             label="Address"
             value={property.address}
-            onChange={handleChange}
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <TextField
-            fullWidth
-            multiline
-            rows={4}
-            name="description"
-            label="Description"
-            value={property.description}
             onChange={handleChange}
           />
         </Grid>
@@ -465,6 +425,36 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
             )}
           </Grid>
         ))}
+
+        <Grid item xs={12}>
+          <Divider sx={{ my: 1 }} />
+          <Typography variant="h6" gutterBottom>Amenities</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+            {categoryAmenities.map((amenity) => (
+              <Chip
+                key={amenity}
+                label={amenity}
+                onClick={() => handleAmenityToggle(amenity)}
+                color={property.amenities.includes(amenity) ? 'primary' : 'default'}
+              />
+            ))}
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <TextField
+              fullWidth
+              label="Custom Amenity"
+              value={customAmenity}
+              onChange={(e) => setCustomAmenity(e.target.value)}
+            />
+            <Button
+              variant="outlined"
+              onClick={handleAddCustomAmenity}
+              disabled={!customAmenity}
+            >
+              Add
+            </Button>
+          </Box>
+        </Grid>
 
         <Grid item xs={12}>
           <Divider sx={{ my: 1 }} />
@@ -661,36 +651,6 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
         </Grid>
 
         <Grid item xs={12}>
-          <Divider sx={{ my: 1 }} />
-          <Typography variant="h6" gutterBottom>Amenities</Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-            {categoryAmenities.map((amenity) => (
-              <Chip
-                key={amenity}
-                label={amenity}
-                onClick={() => handleAmenityToggle(amenity)}
-                color={property.amenities.includes(amenity) ? 'primary' : 'default'}
-              />
-            ))}
-          </Box>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField
-              fullWidth
-              label="Custom Amenity"
-              value={customAmenity}
-              onChange={(e) => setCustomAmenity(e.target.value)}
-            />
-            <Button
-              variant="outlined"
-              onClick={handleAddCustomAmenity}
-              disabled={!customAmenity}
-            >
-              Add
-            </Button>
-          </Box>
-        </Grid>
-
-        <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>Images</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
             {property.images.map((image, index) => (
@@ -734,6 +694,10 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
 
         {!individualMode && (
           <>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="h6" gutterBottom>Financial Settings</Typography>
+            </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth required>
                 <InputLabel>Rental Type</InputLabel>
@@ -768,6 +732,56 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
                     : 'Default: 100% for introduction'
                 }
               />
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="h6" gutterBottom>VAT on Commission</Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean(property.vatOnCommission)}
+                    onChange={e => setProperty(prev => ({
+                      ...prev,
+                      vatOnCommission: e.target.checked,
+                      vatCommissionTreatment: e.target.checked ? (prev.vatCommissionTreatment || 'exclusive') : undefined
+                    }))}
+                  />
+                }
+                label={property.vatOnCommission ? 'VAT on Commission: ON' : 'VAT on Commission: OFF'}
+              />
+            </Grid>
+            {property.vatOnCommission && (
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>VAT Treatment</InputLabel>
+                  <Select
+                    label="VAT Treatment"
+                    value={property.vatCommissionTreatment || 'exclusive'}
+                    onChange={e => setProperty(prev => ({
+                      ...prev,
+                      vatCommissionTreatment: e.target.value as 'inclusive' | 'exclusive'
+                    }))}
+                  >
+                    <MenuItem value="exclusive">Exclusive — VAT is added on top of commission</MenuItem>
+                    <MenuItem value="inclusive">Inclusive — commission already includes VAT</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary">
+                Current VAT Rate: {Number(((company as any)?.commissionConfig?.vatPercentOnCommission || 0) * 100).toFixed(1)}%.
+                Managed under Accounting → Settings → Finance. The VAT rate cannot be edited on the property.
+              </Typography>
+              {property.vatOnCommission && (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                  {property.vatCommissionTreatment === 'inclusive'
+                    ? 'Inclusive: the owner deduction stays at the commission amount; VAT is extracted from it.'
+                    : 'Exclusive: VAT is added on top of commission and deducted from the owner.'}
+                </Typography>
+              )}
             </Grid>
           </>
         )}

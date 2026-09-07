@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,6 +17,7 @@ const socket_io_1 = require("socket.io");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const dotenv_1 = require("dotenv");
 const jwt_1 = require("./jwt");
+const auth_1 = require("../middleware/auth");
 (0, dotenv_1.config)();
 let ioRef = null;
 const initializeSocket = (httpServer) => {
@@ -28,8 +38,9 @@ const initializeSocket = (httpServer) => {
         pingTimeout: 60000,
         pingInterval: 25000
     });
-    // Socket.IO authentication middleware
-    io.use((socket, next) => {
+    // Socket.IO authentication middleware — same JWT verification as before,
+    // then the same DB-backed company context used by HTTP auth.
+    io.use((socket, next) => __awaiter(void 0, void 0, void 0, function* () {
         const token = socket.handshake.auth.token;
         if (!token) {
             return next(new Error('Authentication error: No token provided'));
@@ -43,22 +54,36 @@ const initializeSocket = (httpServer) => {
             if (!userId) {
                 return next(new Error('Authentication error: Invalid token payload'));
             }
-            socket.data = { user: Object.assign(Object.assign({}, decoded), { id: userId }) };
+            const claims = {
+                userId,
+                role: decoded.role,
+                roles: decoded.roles,
+                companyId: decoded.companyId
+            };
+            const context = yield (0, auth_1.resolveCompanyContext)(claims);
+            const authorisedCompanyId = context.companyId || undefined;
+            socket.data = {
+                user: Object.assign(Object.assign({}, decoded), { id: userId, role: context.role || decoded.role, companyId: authorisedCompanyId })
+            };
             next();
         }
         catch (err) {
             next(new Error('Authentication error: Invalid token'));
         }
-    });
+    }));
     io.on('connection', (socket) => {
         var _a;
         const customSocket = socket;
         console.log('Client connected:', socket.id);
-        // Join relevant rooms based on user role/permissions
+        // Join rooms from authenticated context. Company rooms use the authorised
+        // company from resolveCompanyContext (DB when available), not a stale JWT claim.
         if ((_a = customSocket.data) === null || _a === void 0 ? void 0 : _a.user) {
             socket.join(`user-${customSocket.data.user.id}`);
             if (customSocket.data.user.role) {
                 socket.join(`role-${customSocket.data.user.role}`);
+            }
+            if (customSocket.data.user.companyId) {
+                socket.join(`company-${customSocket.data.user.companyId}`);
             }
         }
         // Handle errors

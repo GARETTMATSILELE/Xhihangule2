@@ -147,6 +147,12 @@ export const handlePaymentConfirmationWebhook = async (req: Request, res: Respon
     }
 
     if (normalizedStatus === 'completed') {
+      try {
+        const { postPaymentAccounting } = await import('../services/paymentAccountingOrchestrator');
+        await postPaymentAccounting(String(payment._id));
+      } catch (postErr: any) {
+        console.warn('Webhook payment accounting post failed:', postErr?.message || postErr);
+      }
       const updateResult = await Payment.updateOne(
         { _id: payment._id, companyId: payment.companyId, trustEventEmittedAt: { $exists: false } },
         { $set: { trustEventEmittedAt: new Date(), lastTrustEventSource: 'webhook.payment-confirmation' } }

@@ -39,6 +39,7 @@ import {
 import { useCompany } from '../../contexts/CompanyContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../api';
+import accountingService, { TaxRateRecord } from '../../services/accountingService';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -138,6 +139,10 @@ const SettingsPage: React.FC = () => {
 
   const [fiscalHealth, setFiscalHealth] = useState<any>(null);
   const [checkingFiscal, setCheckingFiscal] = useState<boolean>(false);
+  const [taxRates, setTaxRates] = useState<TaxRateRecord[]>([]);
+  const [taxRatesLoading, setTaxRatesLoading] = useState(false);
+  const [newVatRate, setNewVatRate] = useState('15.5');
+  const [newVatEffectiveFrom, setNewVatEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
 
   const checkFiscalConnection = useCallback(async () => {
     if (!company?._id) return;
@@ -250,6 +255,17 @@ const SettingsPage: React.FC = () => {
       checkFiscalConnection();
     }
   }, [activeTab, company?._id, checkFiscalConnection]);
+
+  useEffect(() => {
+    if (activeTab !== 2 || !company?._id) return;
+    let mounted = true;
+    setTaxRatesLoading(true);
+    accountingService.getTaxRates('VAT')
+      .then((rows) => { if (mounted) setTaxRates(rows); })
+      .catch(() => { if (mounted) setTaxRates([]); })
+      .finally(() => { if (mounted) setTaxRatesLoading(false); });
+    return () => { mounted = false; };
+  }, [activeTab, company?._id]);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, checked, type } = event.target as HTMLInputElement & { name: string };
@@ -979,14 +995,89 @@ const SettingsPage: React.FC = () => {
           <TextField
             fullWidth
             type="number"
-            label="VAT on commission (0-1)"
+            label="Current VAT on commission (0-1, read-only)"
             name="vatPercentOnCommission"
             value={(settings as any).vatPercentOnCommission}
-            onChange={handleInputChange}
             margin="normal"
-            inputProps={{ step: 0.01, min: 0, max: 1 }}
-            helperText="Applied to total commission for sales owner payout"
+            inputProps={{ step: 0.001, min: 0, max: 1, readOnly: true }}
+            helperText="Synced from the dated VAT tax rates below. Do not edit this field directly."
           />
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="h6" gutterBottom>VAT Rates</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                VAT on commission uses the rate effective on the payment date. Historical payments keep the rate stored on the transaction.
+              </Typography>
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="New VAT rate (%)"
+                    value={newVatRate}
+                    onChange={(e) => setNewVatRate(e.target.value)}
+                    inputProps={{ min: 0, step: 0.1 }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    type="date"
+                    label="Effective from"
+                    value={newVatEffectiveFrom}
+                    onChange={(e) => setNewVatEffectiveFrom(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Button
+                    variant="contained"
+                    disabled={taxRatesLoading}
+                    onClick={async () => {
+                      try {
+                        setTaxRatesLoading(true);
+                        await accountingService.createVatRate({
+                          rate: Number(newVatRate),
+                          effectiveFrom: newVatEffectiveFrom
+                        });
+                        const rows = await accountingService.getTaxRates('VAT');
+                        setTaxRates(rows);
+                        const current = await accountingService.getCurrentVatRate();
+                        if (current?.decimalRate != null) {
+                          setSettings(prev => ({ ...prev, vatPercentOnCommission: current.decimalRate } as any));
+                        }
+                        await refreshCompany();
+                        setMessage({ type: 'success', text: 'VAT rate saved. Previous rate was closed off.' });
+                      } catch (error: any) {
+                        setMessage({ type: 'error', text: error?.response?.data?.message || error?.message || 'Failed to save VAT rate' });
+                      } finally {
+                        setTaxRatesLoading(false);
+                      }
+                    }}
+                  >
+                    Add VAT Rate
+                  </Button>
+                </Grid>
+              </Grid>
+              {taxRatesLoading && taxRates.length === 0 ? (
+                <CircularProgress size={24} />
+              ) : (
+                <List>
+                  {taxRates.map((row) => (
+                    <ListItem key={row._id} divider>
+                      <ListItemText
+                        primary={`VAT ${Number(row.rate).toFixed(1)}%`}
+                        secondary={`Effective from ${new Date(row.effectiveFrom).toLocaleDateString()}${row.effectiveTo ? ` to ${new Date(row.effectiveTo).toLocaleDateString()}` : ' — open'} · ${row.isActive ? 'Active' : 'Closed'}`}
+                      />
+                    </ListItem>
+                  ))}
+                  {taxRates.length === 0 && (
+                    <ListItem>
+                      <ListItemText primary="No dated VAT rates yet. The company commission VAT setting will be used until a rate is added." />
+                    </ListItem>
+                  )}
+                </List>
+              )}
             </Grid>
           </Grid>
           <Alert severity="info" sx={{ mt: 2 }}>

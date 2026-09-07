@@ -13,6 +13,12 @@ import mongoose from 'mongoose';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
 import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationService';
+import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
+
+const activePropertyVisibilityFilter = {
+  isDeleted: { $ne: true },
+  propertyOperationalStatus: { $ne: 'Archived' }
+};
 
 // Get properties managed by the agent
 export const getAgentProperties = async (req: Request, res: Response) => {
@@ -24,32 +30,40 @@ export const getAgentProperties = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
-    console.log('Fetching properties for agent:', {
-      companyId: req.user.companyId,
-      userId: req.user.userId,
-      role: req.user.role
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Fetching properties for agent:', {
+        companyId: req.user.companyId,
+        userId: req.user.userId,
+        role: req.user.role
+      });
+    }
 
     // Get only properties where the agent is the owner (ownerId matches the agent's userId)
     const showDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
-    const query = {
+    const query: any = {
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       ownerId: new mongoose.Types.ObjectId(req.user.userId), // Only properties owned by this agent
       isDeleted: showDeleted ? true : { $ne: true }
     };
+    if (!showDeleted) {
+      query.propertyOperationalStatus = { $ne: 'Archived' };
+    }
     
-    console.log('Agent properties query:', query);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Agent properties query:', query);
+    }
     
     const properties = await Property.find(query)
     .populate('ownerId', 'firstName lastName email')
     .populate('propertyOwnerId', 'firstName lastName email phone')
     .sort({ createdAt: -1 }); // Sort by newest first
 
-    console.log('Found properties for agent:', {
-      count: properties.length,
-      agentId: req.user.userId,
-      query
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Found properties for agent:', {
+        count: properties.length,
+        agentId: req.user.userId
+      });
+    }
 
     res.json(properties);
   } catch (error) {
@@ -108,11 +122,13 @@ export const getAgentTenants = async (req: Request, res: Response) => {
     // Fetch properties managed by this agent
     const ownedProperties = await Property.find({
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId)
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      ...activePropertyVisibilityFilter
     })
       .select('_id')
       .lean();
     const ownedPropertyIds = ownedProperties.map((p: any) => p._id);
+    const activePropertyIdSet = new Set(ownedPropertyIds.map((id: any) => String(id)));
 
     // Get tenants either created by this agent OR linked to the agent's properties
     const tenants = await Tenant.find({
@@ -126,7 +142,16 @@ export const getAgentTenants = async (req: Request, res: Response) => {
       .populate('propertyId', 'name address')
       .sort({ createdAt: -1 });
 
-    res.json(tenants);
+    const visibleTenants = tenants.filter((tenant: any) => {
+      const linkedPropertyIds = [
+        tenant.propertyId?._id || tenant.propertyId,
+        ...(Array.isArray(tenant.propertyIds) ? tenant.propertyIds : [])
+      ].filter(Boolean).map((id: any) => String(id));
+
+      return linkedPropertyIds.length === 0 || linkedPropertyIds.some((id: string) => activePropertyIdSet.has(id));
+    });
+
+    res.json(visibleTenants);
   } catch (error) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ message: error.message });
@@ -146,10 +171,17 @@ export const getAgentLeases = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 400);
     }
 
+    const activePropertyIds = await Property.find({
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      ...activePropertyVisibilityFilter
+    }).distinct('_id');
+
     // Get leases created by this agent (using ownerId)
     const leases = await Lease.find({ 
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId) // Filter by agent who created the lease
+      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Filter by agent who created the lease
+      propertyId: { $in: activePropertyIds as any }
     })
     .populate('propertyId', 'name address')
     .populate('tenantId', 'firstName lastName email')
@@ -180,7 +212,8 @@ export const getAgentFiles = async (req: Request, res: Response) => {
     // Determine properties that belong to this agent within the company
     const agentPropertyIds = await Property.find({
       ownerId: new mongoose.Types.ObjectId(req.user.userId),
-      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...activePropertyVisibilityFilter
     }).distinct('_id');
 
     // Fetch files where propertyId is within the agent's properties and scoped to company
@@ -228,11 +261,17 @@ export const getAgentCommission = async (req: Request, res: Response) => {
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
+    const activePropertyIds = await Property.find({
+      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...activePropertyVisibilityFilter
+    }).distinct('_id');
 
     // Fetch completed payments for this agent in this company
     const payments = await Payment.find({
       agentId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      propertyId: { $in: activePropertyIds as any },
       status: 'completed'
     }).select('commissionDetails paymentDate rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd');
 
@@ -301,12 +340,13 @@ export const createAgentProperty = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
-    console.log('Agent creating property:', {
-      userId: req.user.userId,
-      companyId: req.user.companyId,
-      role: req.user.role,
-      body: req.body
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Agent creating property:', {
+        userId: req.user.userId,
+        companyId: req.user.companyId,
+        role: req.user.role
+      });
+    }
 
     // Validate required fields
     if (!req.body.name || !req.body.address) {
@@ -318,6 +358,7 @@ export const createAgentProperty = async (req: Request, res: Response) => {
       throw new AppError('Invalid property type: Must be one of: apartment, house, commercial', 400);
     }
 
+    const vatSettings = sanitizePropertyVatSettings(req.body || {});
     const propertyData = {
       ...req.body,
       ownerId: new mongoose.Types.ObjectId(req.user.userId), // Agent becomes the owner
@@ -334,22 +375,29 @@ export const createAgentProperty = async (req: Request, res: Response) => {
       createdAt: new Date(),
       updatedAt: new Date(),
       rentalType: req.body.rentalType,
-      commission: req.body.commission
+      commission: req.body.commission,
+      vatOnCommission: vatSettings.vatOnCommission,
+      vatCommissionTreatment: vatSettings.vatCommissionTreatment
     };
+    delete (propertyData as any).vatRate;
+    delete (propertyData as any).vatPercentOnCommission;
 
-    console.log('Creating property with data:', propertyData);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Creating property with data:', {
+        name: (propertyData as any)?.name,
+        companyId: (propertyData as any)?.companyId
+      });
+    }
 
     const property = new Property(propertyData);
     const savedProperty = await property.save();
 
-    console.log('Property created successfully:', {
-      id: savedProperty._id,
-      name: savedProperty.name,
-      address: savedProperty.address,
-      type: savedProperty.type,
-      ownerId: savedProperty.ownerId,
-      companyId: savedProperty.companyId
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Property created successfully:', {
+        id: savedProperty._id,
+        name: savedProperty.name
+      });
+    }
 
     res.status(201).json(savedProperty);
   } catch (error) {
@@ -639,6 +687,8 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
       'amenities',
       'rentalType',
       'commission',
+      'vatOnCommission',
+      'vatCommissionTreatment',
       // Allow updating levy/municipal fields
       'levyOrMunicipalType',
       'levyOrMunicipalAmount'
@@ -646,6 +696,14 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
     const updateData: any = { updatedAt: new Date() };
     for (const key of allowedFields) {
       if (key in req.body) updateData[key] = (req.body as any)[key];
+    }
+    if ('vatOnCommission' in req.body || 'vatCommissionTreatment' in req.body) {
+      const vatSettings = sanitizePropertyVatSettings({
+        vatOnCommission: 'vatOnCommission' in req.body ? req.body.vatOnCommission : existing.vatOnCommission,
+        vatCommissionTreatment: 'vatCommissionTreatment' in req.body ? req.body.vatCommissionTreatment : existing.vatCommissionTreatment
+      });
+      updateData.vatOnCommission = vatSettings.vatOnCommission;
+      updateData.vatCommissionTreatment = vatSettings.vatCommissionTreatment;
     }
 
     const updated = await Property.findByIdAndUpdate(
@@ -661,6 +719,53 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
     }
     console.error('Error updating agent property:', error);
     res.status(500).json({ message: 'Error updating property' });
+  }
+};
+
+// Archive a property owned by the agent without using the delete lifecycle
+export const archiveAgentProperty = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      throw new AppError('Authentication required', 401);
+    }
+    if (!req.user?.companyId) {
+      throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
+    }
+
+    const propertyId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(propertyId)) {
+      return res.status(400).json({ message: 'Invalid property ID format.' });
+    }
+
+    const property = await Property.findOneAndUpdate(
+      {
+        _id: new mongoose.Types.ObjectId(propertyId),
+        ownerId: new mongoose.Types.ObjectId(req.user.userId),
+        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+        isDeleted: { $ne: true }
+      },
+      {
+        $set: {
+          propertyOperationalStatus: 'Archived',
+          archivedAt: new Date(),
+          archivedBy: new mongoose.Types.ObjectId(req.user.userId),
+          updatedAt: new Date()
+        }
+      },
+      { new: true }
+    );
+
+    if (!property) {
+      return res.status(404).json({ message: 'Property not found or already deleted.' });
+    }
+
+    return res.json({ message: 'Property archived successfully.', property });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error archiving agent property:', error);
+    return res.status(500).json({ message: 'Error archiving property' });
   }
 };
 
@@ -1033,41 +1138,8 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       }
     }
 
-    // Update company revenue
-    await mongoose.model('Company').findByIdAndUpdate(
-      new mongoose.Types.ObjectId(req.user.companyId),
-      {
-        $inc: {
-          revenue: commissionDetails.agencyShare,
-        },
-      }
-    );
-
-    // Sync commission from saved payment (SSOT)
-    await agentAccountService.syncCommissionForPayment(payment._id.toString());
-
-    // If it's a rental payment, update property owner's balance
-    if (resolvedPaymentType !== 'sale' && property.ownerId) {
-      await mongoose.model('User').findByIdAndUpdate(
-        property.ownerId,
-        {
-          $inc: {
-            balance: commissionDetails.ownerAmount,
-          },
-        }
-      );
-    }
-
-    // Ensure owner income is recorded in property ledger (enqueue retry on failure)
-    try {
-      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
-    } catch (e) {
-      try {
-        const ledgerEventService = (await import('../services/ledgerEventService')).default;
-        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
-      } catch {}
-      console.warn('Non-fatal: property account record failed (agent create), enqueued for retry', (e as any)?.message || e);
-    }
+    const { postPaymentAccounting } = await import('../services/paymentAccountingOrchestrator');
+    await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
 
     // Notify agent by email with payment details (fire-and-forget)
     void sendAgentPaymentNotificationEmail(payment);
@@ -1090,13 +1162,14 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 // Update a payment for the agent
 export const updateAgentPayment = async (req: Request, res: Response) => {
   try {
-    console.log('updateAgentPayment called with:', {
-      paymentId: req.params.id,
-      userId: req.user?.userId,
-      companyId: req.user?.companyId,
-      role: req.user?.role,
-      body: req.body
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('updateAgentPayment called with:', {
+        paymentId: req.params.id,
+        userId: req.user?.userId,
+        companyId: req.user?.companyId,
+        role: req.user?.role
+      });
+    }
 
     if (!req.user?.userId) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -1115,15 +1188,19 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
 
     // Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(paymentId)) {
-      console.log('Invalid ObjectId:', paymentId);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Invalid ObjectId:', paymentId);
+      }
       return res.status(400).json({ message: 'Invalid payment ID format.' });
     }
 
-    console.log('Looking for payment with:', {
-      paymentId,
-      agentId: req.user.userId,
-      companyId: req.user.companyId
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Looking for payment with:', {
+        paymentId,
+        agentId: req.user.userId,
+        companyId: req.user.companyId
+      });
+    }
 
     // Find the payment and ensure it belongs to this agent
     const payment = await Payment.findOne({ 
@@ -1132,17 +1209,21 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId) 
     });
 
-    console.log('Payment found:', payment ? 'Yes' : 'No');
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Payment found:', payment ? 'Yes' : 'No');
+    }
 
     if (!payment) {
       return res.status(404).json({ message: 'Payment not found or you do not have permission to update it.' });
     }
 
-    console.log('Original payment:', {
-      id: payment._id,
-      amount: payment.amount,
-      propertyType: payment.propertyType
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Original payment:', {
+        id: payment._id,
+        amount: payment.amount,
+        propertyType: payment.propertyType
+      });
+    }
 
     // If amount is being updated, recalculate commission using property's commission and company splits
     if (updateData.amount && updateData.amount !== payment.amount) {
@@ -1167,10 +1248,14 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
         ownerAmount: updateData.amount - totalCommission,
       };
 
-      console.log('Recalculated commission:', updateData.commissionDetails);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Recalculated commission for payment', paymentId);
+      }
     }
 
-    console.log('Updating payment with data:', updateData);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Updating payment', paymentId);
+    }
 
     // Update the payment
     const updatedPayment = await Payment.findByIdAndUpdate(
@@ -1179,7 +1264,9 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
       { new: true }
     );
 
-    console.log('Payment updated successfully:', updatedPayment ? 'Yes' : 'No');
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Payment updated successfully:', updatedPayment ? 'Yes' : 'No');
+    }
 
     res.json({
       status: 'success',
@@ -1209,7 +1296,8 @@ export const getAgentPayments = async (req: Request, res: Response) => {
     // Find agent's property IDs
     const agentPropertyIds = await Property.find({
       ownerId: new mongoose.Types.ObjectId(req.user.userId),
-      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...activePropertyVisibilityFilter
     }).distinct('_id');
 
     // Build base query
@@ -1267,7 +1355,8 @@ export const getAgentLevyPayments = async (req: Request, res: Response) => {
 
     const agentPropertyIds = await Property.find({
       ownerId: new mongoose.Types.ObjectId(req.user.userId),
-      companyId: new mongoose.Types.ObjectId(req.user.companyId)
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...activePropertyVisibilityFilter
     }).distinct('_id');
 
     const levies = await LevyPayment.find({
@@ -1361,11 +1450,13 @@ export const getAgentPropertyOwners = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
-    console.log('Fetching property owners for agent:', {
-      companyId: req.user.companyId,
-      userId: req.user.userId,
-      role: req.user.role
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Fetching property owners for agent:', {
+        companyId: req.user.companyId,
+        userId: req.user.userId,
+        role: req.user.role
+      });
+    }
 
     // Get property owners for the agent's company
     const owners = await PropertyOwner.find({ 

@@ -25,6 +25,80 @@ import { Property } from '../../types/property';
 import { Tenant } from '../../types/tenant';
 import { LeaseFormData } from '../../types/lease';
 
+function getId(id: unknown): string {
+  if (!id) return '';
+  if (typeof id === 'string') return id;
+  if (typeof id === 'object') {
+    const obj = id as { $oid?: string; _id?: unknown };
+    if (obj.$oid) return String(obj.$oid);
+    if (obj._id) return getId(obj._id);
+  }
+  return String(id);
+}
+
+function getPropertyRent(property?: Property | null): number {
+  if (!property) return 0;
+  const specs = ((property as any).propertySpecifications || {}) as Record<string, unknown>;
+  const rent = Number(
+    (property as any).rent ??
+    (property as any).monthlyRent ??
+    specs.monthlyRent ??
+    specs.expectedRent ??
+    0
+  );
+  return Number.isFinite(rent) && rent > 0 ? rent : 0;
+}
+
+function tenantLinkedPropertyIds(tenant?: Tenant): string[] {
+  if (!tenant) return [];
+  const single = getId((tenant as any).propertyId);
+  const multi = Array.isArray((tenant as any).propertyIds)
+    ? ((tenant as any).propertyIds as unknown[]).map(getId)
+    : [];
+  return [single, ...multi].filter(Boolean);
+}
+
+function findTenantsForProperty(tenants: Tenant[], propertyId: string): Tenant[] {
+  const id = getId(propertyId);
+  if (!id) return [];
+  return tenants.filter((tenant) => tenantLinkedPropertyIds(tenant).includes(id));
+}
+
+function preferredTenant(linkedTenants: Tenant[]): Tenant | undefined {
+  return linkedTenants.find((tenant) => tenant.status === 'Active') || linkedTenants[0];
+}
+
+function rentDefaults(property?: Property | null) {
+  const rent = getPropertyRent(property);
+  return {
+    monthlyRent: rent,
+    rentAmount: rent,
+    // Deposit defaults to one month's rent and remains independently editable afterwards.
+    securityDeposit: rent,
+    depositAmount: rent,
+  };
+}
+
+const emptyFormData: LeaseFormData = {
+  propertyId: '',
+  tenantId: '',
+  startDate: '',
+  endDate: '',
+  rentAmount: 0,
+  depositAmount: 0,
+  status: 'active',
+  monthlyRent: 0,
+  securityDeposit: 0,
+  petDeposit: 0,
+  isPetAllowed: false,
+  maxOccupants: 1,
+  isUtilitiesIncluded: false,
+  utilitiesDetails: '',
+  rentDueDay: 1,
+  lateFee: 0,
+  gracePeriod: 0,
+};
+
 interface LeaseFormProps {
   open: boolean;
   properties: Property[];
@@ -42,41 +116,64 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
   onSubmit,
   onCancel,
 }) => {
-  const [formData, setFormData] = useState<LeaseFormData>({
-    propertyId: '',
-    tenantId: '',
-    startDate: '',
-    endDate: '',
-    rentAmount: 0,
-    depositAmount: 0,
-    status: 'active',
-    monthlyRent: 0,
-    securityDeposit: 0,
-    petDeposit: 0,
-    isPetAllowed: false,
-    maxOccupants: 1,
-    isUtilitiesIncluded: false,
-    utilitiesDetails: '',
-    rentDueDay: 1,
-    lateFee: 0,
-    gracePeriod: 0,
-  });
+  const [formData, setFormData] = useState<LeaseFormData>(emptyFormData);
 
   useEffect(() => {
+    if (!open) return;
+
     if (initialData) {
-      // Ensure dates are properly formatted strings or empty strings
-      const formattedData = {
+      const monthlyRent = Number(initialData.monthlyRent ?? initialData.rentAmount ?? 0) || 0;
+      const securityDeposit = Number(initialData.securityDeposit ?? initialData.depositAmount ?? 0) || 0;
+      setFormData({
+        ...emptyFormData,
         ...initialData,
-        startDate: initialData.startDate && !isNaN(new Date(initialData.startDate).getTime()) 
-          ? initialData.startDate 
+        propertyId: getId(initialData.propertyId),
+        tenantId: getId(initialData.tenantId),
+        startDate: initialData.startDate && !isNaN(new Date(initialData.startDate).getTime())
+          ? initialData.startDate
           : '',
-        endDate: initialData.endDate && !isNaN(new Date(initialData.endDate).getTime()) 
-          ? initialData.endDate 
+        endDate: initialData.endDate && !isNaN(new Date(initialData.endDate).getTime())
+          ? initialData.endDate
           : '',
-      };
-      setFormData(formattedData);
+        monthlyRent,
+        rentAmount: monthlyRent,
+        securityDeposit,
+        depositAmount: securityDeposit,
+      });
+      return;
     }
-  }, [initialData]);
+
+    setFormData(emptyFormData);
+  }, [open, initialData]);
+
+  const handlePropertyChange = (e: SelectChangeEvent) => {
+    const propertyId = getId(e.target.value);
+    const selectedProperty = properties.find((property) => getId(property._id) === propertyId);
+    const linkedTenant = preferredTenant(findTenantsForProperty(tenants, propertyId));
+
+    setFormData((prev) => ({
+      ...prev,
+      propertyId,
+      tenantId: linkedTenant ? getId(linkedTenant._id) : '',
+      ...rentDefaults(selectedProperty),
+    }));
+  };
+
+  const handleTenantChange = (e: SelectChangeEvent) => {
+    const tenantId = getId(e.target.value);
+    const selectedTenant = tenants.find((tenant) => getId(tenant._id) === tenantId);
+    const mappedPropertyId = tenantLinkedPropertyIds(selectedTenant)[0] || '';
+    const selectedProperty = mappedPropertyId
+      ? properties.find((property) => getId(property._id) === mappedPropertyId)
+      : undefined;
+
+    setFormData((prev) => ({
+      ...prev,
+      tenantId,
+      propertyId: mappedPropertyId || prev.propertyId,
+      ...(selectedProperty ? rentDefaults(selectedProperty) : {}),
+    }));
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }> | SelectChangeEvent) => {
     const { name, value } = e.target;
@@ -85,10 +182,28 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
     const numericFields = ['monthlyRent', 'securityDeposit', 'petDeposit', 'maxOccupants', 'rentDueDay', 'lateFee', 'gracePeriod'];
     const processedValue = numericFields.includes(name as string) ? Number(value) : value;
     
-    setFormData((prev) => ({
-      ...prev,
-      [name as string]: processedValue,
-    }));
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        [name as string]: processedValue,
+      };
+
+      if (name === 'monthlyRent') {
+        const nextRent = Number(processedValue) || 0;
+        updated.rentAmount = nextRent;
+        // Keep deposit aligned with rent until the user edits the deposit independently.
+        if (prev.securityDeposit === prev.monthlyRent || prev.securityDeposit === prev.rentAmount) {
+          updated.securityDeposit = nextRent;
+          updated.depositAmount = nextRent;
+        }
+      }
+
+      if (name === 'securityDeposit') {
+        updated.depositAmount = Number(processedValue) || 0;
+      }
+
+      return updated;
+    });
   };
 
   const handleSwitchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,12 +234,12 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
                     <InputLabel>Property</InputLabel>
                     <Select
                       name="propertyId"
-                      value={formData.propertyId}
-                      onChange={handleChange}
+                      value={getId(formData.propertyId)}
+                      onChange={handlePropertyChange}
                       required
                     >
                       {properties.map((property) => (
-                        <MenuItem key={property._id} value={property._id}>
+                        <MenuItem key={getId(property._id)} value={getId(property._id)}>
                           {property.address}
                         </MenuItem>
                       ))}
@@ -137,12 +252,12 @@ const LeaseForm: React.FC<LeaseFormProps> = ({
                     <InputLabel>Tenant</InputLabel>
                     <Select
                       name="tenantId"
-                      value={formData.tenantId}
-                      onChange={handleChange}
+                      value={getId(formData.tenantId)}
+                      onChange={handleTenantChange}
                       required
                     >
                       {tenants.map((tenant) => (
-                        <MenuItem key={tenant._id} value={tenant._id}>
+                        <MenuItem key={getId(tenant._id)} value={getId(tenant._id)}>
                           {tenant.firstName} {tenant.lastName}
                         </MenuItem>
                       ))}

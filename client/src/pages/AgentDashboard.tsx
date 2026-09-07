@@ -42,8 +42,6 @@ import {
   SwapHoriz as SwapHorizIcon,
   Settings as SettingsIcon,
   Logout as LogoutIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
   ReceiptLong as ReceiptLongIcon,
 } from '@mui/icons-material';
 import { AgentSidebar } from '../components/Layout/AgentSidebar';
@@ -68,6 +66,7 @@ import { SchedulePage } from './agent';
 import paymentService from '../services/paymentService';
 import AgentLeadsPage from './agent/AgentLeadsPage';
 import PropertyDetailsPage from './agent/PropertyDetailsPage';
+import PropertyDetailsReportPage from './agent/PropertyDetailsReportPage';
 import { User } from '../types/auth';
 import { RentalWorkflowCenter, WorkflowStatusChip } from '../components/rentalWorkflow';
 import { buildPortfolioWorkflowSummary } from '../utils/rentalWorkflow';
@@ -116,7 +115,7 @@ const StatCard = ({
           {loading ? (
             <CircularProgress size={24} />
           ) : (
-            <Typography variant="h3" sx={{ fontWeight: 800, letterSpacing: '-0.04em', color: '#101828' }}>
+            <Typography variant="h5" sx={{ fontWeight: 800, letterSpacing: '-0.04em', color: '#101828' }}>
               {value}
             </Typography>
           )}
@@ -251,7 +250,6 @@ const AgentDashboard: React.FC = () => {
   const { notifications, markAllRead } = useNotification();
   const [notifAnchorEl, setNotifAnchorEl] = useState<null | HTMLElement>(null);
   const [workspaceAnchorEl, setWorkspaceAnchorEl] = useState<null | HTMLElement>(null);
-  const kpiScrollerRef = useRef<HTMLDivElement | null>(null);
   const kpiDetailRef = useRef<HTMLDivElement | null>(null);
   const authControls = useAuth() as any;
   const { logout, stopImpersonation, isImpersonating, setActiveRole } = authControls;
@@ -805,11 +803,6 @@ const AgentDashboard: React.FC = () => {
       console.error('Stop impersonation failed:', error);
     }
   };
-  const scrollKpiCards = (direction: 'left' | 'right') => {
-    const node = kpiScrollerRef.current;
-    if (!node) return;
-    node.scrollBy({ left: direction === 'left' ? -360 : 360, behavior: 'smooth' });
-  };
   const resetDashboardDrilldown = () => {
     setShowLeaseInsights(false);
     setShowCommissionDetails(false);
@@ -825,10 +818,10 @@ const AgentDashboard: React.FC = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f6f8fb' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f6f8fb', overflowX: 'hidden', '@media print': { display: 'block', bgcolor: '#fff', minHeight: 'auto', overflow: 'visible' } }}>
       <AgentSidebar activeTab={activeTab} onTabChange={setActiveTab} />
-      <Box sx={{ flexGrow: 1 }}>
-        <Box sx={{ px: { xs: 2, md: 4, xl: 6 }, py: { xs: 3, md: 5 } }}>
+      <Box sx={{ flexGrow: 1, minWidth: 0, overflowX: 'hidden', '@media print': { overflow: 'visible', width: '100%' } }}>
+        <Box sx={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', px: { xs: 2, md: 4, xl: 6 }, py: { xs: 3, md: 5 }, '@media print': { px: 0, py: 0 } }}>
           <Routes>
             <Route index element={
               <>
@@ -1091,34 +1084,12 @@ const AgentDashboard: React.FC = () => {
                           Portfolio Metrics
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
-                          Scroll through operational KPIs and open drill-downs.
+                          Operational KPIs at a glance. Select a card to open drill-downs.
                         </Typography>
                       </Box>
-                      <Stack direction="row" spacing={1}>
-                        <IconButton onClick={() => scrollKpiCards('left')} sx={{ bgcolor: 'white', boxShadow: '0 10px 25px rgba(15,23,42,0.08)' }}>
-                          <ChevronLeftIcon />
-                        </IconButton>
-                        <IconButton onClick={() => scrollKpiCards('right')} sx={{ bgcolor: 'white', boxShadow: '0 10px 25px rgba(15,23,42,0.08)' }}>
-                          <ChevronRightIcon />
-                        </IconButton>
-                      </Stack>
                     </Stack>
-                    <Box
-                      ref={kpiScrollerRef}
-                      sx={{
-                        display: 'grid',
-                        gridAutoFlow: 'column',
-                        gridAutoColumns: { xs: '86%', sm: '48%', lg: '24%' },
-                        gap: 2.5,
-                        overflowX: 'auto',
-                        scrollSnapType: 'x mandatory',
-                        pb: 1,
-                        scrollbarWidth: 'none',
-                        '&::-webkit-scrollbar': { display: 'none' },
-                        '& > *': { scrollSnapAlign: 'start' },
-                      }}
-                    >
-                      <Box>
+                    <Grid container spacing={2.5}>
+                      <Grid item xs={12} sm={6} lg={4} xl={2}>
                         <StatCard
                           title="My Properties"
                           value={dashboardData.totalProperties.toString()}
@@ -1132,8 +1103,8 @@ const AgentDashboard: React.FC = () => {
                             setShowPropertiesList(true);
                           }}
                         />
-                      </Box>
-                      <Box>
+                      </Grid>
+                      <Grid item xs={12} sm={6} lg={4} xl={2}>
                         <StatCard
                           title="Active Tenants"
                           value={dashboardData.activeTenants.toString()}
@@ -1147,8 +1118,8 @@ const AgentDashboard: React.FC = () => {
                             setShowActiveTenants(true);
                           }}
                         />
-                      </Box>
-                      <Box>
+                      </Grid>
+                      <Grid item xs={12} sm={6} lg={4} xl={2}>
                         <StatCard
                           title="Active Leases"
                           value={dashboardData.activeLeases.toString()}
@@ -1163,8 +1134,8 @@ const AgentDashboard: React.FC = () => {
                             setSelectedLeaseCategory('all');
                           }}
                         />
-                      </Box>
-                      <Box>
+                      </Grid>
+                      <Grid item xs={12} sm={6} lg={4} xl={2}>
                         <StatCard
                           title="Monthly Commission"
                           value={`$${((filteredMonthlyAgentShare != null ? filteredMonthlyAgentShare : dashboardData.monthlyCommission) || 0).toLocaleString()}`}
@@ -1178,8 +1149,8 @@ const AgentDashboard: React.FC = () => {
                             loadCommissionPayments();
                           }}
                         />
-                      </Box>
-                      <Box>
+                      </Grid>
+                      <Grid item xs={12} sm={6} lg={4} xl={2}>
                         <StatCard
                           title="Outstanding Rentals"
                           value={`$${Number(displayedOutstandingRentals || 0).toLocaleString()}`}
@@ -1194,8 +1165,8 @@ const AgentDashboard: React.FC = () => {
                             revealKpiDetail();
                           }}
                         />
-                      </Box>
-                      <Box>
+                      </Grid>
+                      <Grid item xs={12} sm={6} lg={4} xl={2}>
                         <StatCard
                           title="Outstanding Levies"
                           value={`$${Number(displayedOutstandingLevies || 0).toLocaleString()}`}
@@ -1210,8 +1181,8 @@ const AgentDashboard: React.FC = () => {
                             revealKpiDetail();
                           }}
                         />
-                      </Box>
-                    </Box>
+                      </Grid>
+                    </Grid>
                     {showCommissionDetails && (
                       <Card sx={{ ...softCardSx, mt: 2.5 }}>
                         <CardContent sx={{ p: 3 }}>
@@ -2087,6 +2058,7 @@ const AgentDashboard: React.FC = () => {
               }
             />
             <Route path="inspections" element={<Inspections />} />
+            <Route path="property-details-report" element={<PropertyDetailsReportPage />} />
             <Route path="tasks" element={<AgentLeadsPage />} />
             <Route path="schedule" element={<SchedulePage />} />
             <Route path="settings" element={<AgentSettings />} />

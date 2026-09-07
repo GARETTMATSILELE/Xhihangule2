@@ -395,6 +395,22 @@ export const Properties: React.FC = () => {
     }
   };
 
+  const handleArchiveProperty = async (propertyId: string) => {
+    if (!isAgentRoute || showDeletedProperties) return;
+    if (!window.confirm('Archive this property? It will be hidden from active properties, tenants, outstanding rentals, and levies.')) {
+      return;
+    }
+
+    try {
+      await agentService.archiveProperty(propertyId);
+      setAgentProperties(prev => prev.filter(p => p._id !== propertyId));
+      notifyRentalWorkflowChanged('property');
+    } catch (err) {
+      console.error('Error archiving property:', err);
+      alert('Failed to archive property. Please try again.');
+    }
+  };
+
   const filteredProperties = properties?.filter(property => {
     const displayStatus = getPropertyDisplayStatus(property);
     const matchesStatus = filters.status === 'all' || displayStatus === filters.status;
@@ -592,6 +608,7 @@ export const Properties: React.FC = () => {
           properties={propertiesForList}
           onPropertyClick={handleUpdateProperty}
           onDeleteProperty={handleDeleteProperty}
+          onArchiveProperty={isAgentRoute && !showDeletedProperties ? handleArchiveProperty : undefined}
           onAddProperty={() => setShowForm(true)}
           isAdminRoute={isAdminRoute}
           agentNamesById={agentNamesById}

@@ -22,6 +22,7 @@ import {
 } from '../../types/ownerManagement';
 import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
+import reportingService from '../../reporting/reportingService';
 
 type OwnerDocumentType = (typeof OWNER_DOCUMENT_TYPES)[number];
 
@@ -150,6 +151,21 @@ const OwnerPortfolioHub: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const downloadEnterpriseOwnerStatement = async (propertyId: string) => {
+    try {
+      setError(null);
+      const blob = await reportingService.downloadOwnerStatement(propertyId, 'pdf', { includeAllTransactions: true });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `owner-statement-${propertyId}-all-transactions.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Unable to download enterprise owner statement.');
+    }
+  };
+
   const saveProfile = async () => {
     if (!ownerId) return;
     await ownerManagementService.patchProfile(ownerId, {
@@ -254,6 +270,14 @@ const OwnerPortfolioHub: React.FC = () => {
                   onClick={() => window.open(`/accountant-dashboard/property-accounts/${prop._id}`, '_blank')}
                 >
                   Property Account
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<StatementIcon />}
+                  onClick={() => downloadEnterpriseOwnerStatement(prop._id)}
+                >
+                  Enterprise Statement
                 </Button>
                 {prop.leaseId && (
                   <Button size="small" variant="outlined" onClick={() => navigate('/agent-dashboard/leases')}>View Lease</Button>
@@ -456,7 +480,13 @@ const OwnerPortfolioHub: React.FC = () => {
 
       {tab === 5 && (
         <Stack spacing={1} maxWidth={400}>
-          {(['owner-statement', 'portfolio-report', 'outstanding-rent', 'maintenance-summary', 'ownership-history'] as OwnerReportType[]).map((t) => (
+          {(portfolio.portfolio || []).map((p: OwnerPortfolioProperty) => (
+            <Button key={`enterprise-${p._id}`} variant="contained" startIcon={<StatementIcon />} onClick={() => downloadEnterpriseOwnerStatement(p._id)}>
+              Enterprise Owner Statement - {p.propertyName}
+            </Button>
+          ))}
+          <Divider />
+          {(['portfolio-report', 'outstanding-rent', 'maintenance-summary', 'ownership-history'] as OwnerReportType[]).map((t) => (
             <Button key={t} variant="outlined" startIcon={<DownloadIcon />} onClick={() => downloadReport(t)}>
               {t.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
             </Button>

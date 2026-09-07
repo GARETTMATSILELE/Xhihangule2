@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import {
   Box,
@@ -54,6 +54,9 @@ import paymentService from '../../services/paymentService';
 import { Paid as PaidIcon } from '@mui/icons-material';
 import { developmentService } from '../../services/developmentService';
 import { developmentUnitService } from '../../services/developmentUnitService';
+import { OwnerStatementDTO, OwnerStatementPreview, reportingService, ReportFormat } from '../../reporting';
+import { usePropertyAccountLiveRefresh, PropertyAccountRefreshSource } from '../../hooks/usePropertyAccountLiveRefresh';
+import { PropertyAccountChangeIds } from '../../utils/paymentsChanged';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -91,6 +94,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [ownerMap, setOwnerMap] = useState<Record<string, string>>({});
   const [depositSummary, setDepositSummary] = useState<{ totalPaid: number; totalPayout: number; held: number } | null>(null);
+  const [paymentBreakdowns, setPaymentBreakdowns] = useState<Record<string, { totalCommission: number; vatOnCommission: number; ownerAmount: number; levy: number }>>({});
   
   // Dialog states
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -122,14 +126,22 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [statementData, setStatementData] = useState({
     startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1), // First day of current month
     endDate: new Date(),
-    includeAllTransactions: false
+    includeAllTransactions: true
   });
+  const [enterpriseStatement, setEnterpriseStatement] = useState<OwnerStatementDTO | null>(null);
+  const [enterpriseStatementLoading, setEnterpriseStatementLoading] = useState(false);
+  const enterpriseStatementPrintRef = useRef<HTMLDivElement | null>(null);
   
   // Form states
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showAuditRows, setShowAuditRows] = useState(false);
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const accountRef = useRef<PropertyAccount | null>(null);
+  accountRef.current = account;
 
   // Levies state and payout controls (moved before any early returns to satisfy Hooks rules)
   const [levyRows, setLevyRows] = useState<any[]>([]);
@@ -137,6 +149,10 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [payoutRow, setPayoutRow] = useState<any>(null);
   const [payoutForm, setPayoutForm] = useState({ paidToName: '', paidToAccount: '', paidToContact: '', payoutDate: '', payoutMethod: 'bank_transfer', payoutReference: '', notes: '' });
+
+  useEffect(() => {
+    setEnterpriseStatement(null);
+  }, [propertyId, statementData.startDate, statementData.endDate, statementData.includeAllTransactions]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -164,6 +180,22 @@ const PropertyAccountDetailPage: React.FC = () => {
         ]);
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
+        try {
+          const payments = await paymentService.getPayments({ propertyId });
+          const map: Record<string, { totalCommission: number; vatOnCommission: number; ownerAmount: number; levy: number }> = {};
+          for (const p of Array.isArray(payments) ? payments : []) {
+            const cd = (p as any)?.commissionDetails || {};
+            map[String((p as any)._id)] = {
+              totalCommission: Number(cd.totalCommission || 0),
+              vatOnCommission: Number(cd.vatOnCommission || cd.vatAmount || 0),
+              ownerAmount: Number(cd.ownerAmount || 0),
+              levy: Number(cd.levy || (p as any).levyAllocated || 0)
+            };
+          }
+          setPaymentBreakdowns(map);
+        } catch {
+          setPaymentBreakdowns({});
+        }
         // If property could not be fetched (development/unit), fallback to account metadata
         if (!found && accountData) {
           const fallback: any = {
@@ -249,6 +281,77 @@ const PropertyAccountDetailPage: React.FC = () => {
     
     fetchData();
   }, [propertyId]);
+
+  const silentRefreshAccount = useCallback(async () => {
+    if (!propertyId) return;
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
+    try {
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('Property account refresh triggered');
+      }
+      const [accountData, depositSum] = await Promise.all([
+        propertyAccountService.getPropertyAccount(propertyId),
+        paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
+      ]);
+      setAccount(accountData);
+      if (depositSum) setDepositSummary(depositSum);
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('Property account refreshed successfully');
+      }
+    } catch (err) {
+      console.error('Property account refresh failed (keeping current data)', err);
+    } finally {
+      refreshInFlightRef.current = false;
+      if (refreshPendingRef.current) {
+        refreshPendingRef.current = false;
+        void silentRefreshAccount();
+      }
+    }
+  }, [propertyId]);
+
+  const scheduleAccountRefresh = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void silentRefreshAccount();
+    }, 400);
+  }, [silentRefreshAccount]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  usePropertyAccountLiveRefresh((source: PropertyAccountRefreshSource, ids: PropertyAccountChangeIds) => {
+    if (source === 'reconnect' || source === 'visibility') {
+      scheduleAccountRefresh();
+      return;
+    }
+
+    const currentAccountId = accountRef.current?._id ? String(accountRef.current._id) : '';
+    const currentPropertyId = propertyId ? String(propertyId) : '';
+    const accountPropertyId = accountRef.current?.propertyId ? String(accountRef.current.propertyId) : '';
+
+    if (ids.accountId) {
+      if (currentAccountId && ids.accountId !== currentAccountId) return;
+    } else if (ids.propertyId) {
+      if (
+        ids.propertyId !== currentPropertyId &&
+        ids.propertyId !== accountPropertyId
+      ) {
+        return;
+      }
+    } else if (source === 'socket') {
+      return;
+    }
+
+    scheduleAccountRefresh();
+  });
 
   // Lazy-load levy payments when Levies tab is opened
   useEffect(() => {
@@ -495,440 +598,108 @@ const PropertyAccountDetailPage: React.FC = () => {
     }
   };
 
-  const handlePrintStatement = async () => {
-    if (!propertyId) return;
-    
+  const getEnterpriseStatementPeriod = () => {
+    const baseDate = statementData.startDate || new Date();
+    const year = baseDate.getFullYear();
+    const month = String(baseDate.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  const getEnterpriseStatementPropertyId = () => {
+    const accountPropertyId = (account?.propertyId as any)?._id || account?.propertyId;
+    return String(accountPropertyId || propertyId || '');
+  };
+
+  const toStatementDateParam = (date: Date) => date.toISOString().slice(0, 10);
+
+  const getEnterpriseStatementQuery = () => {
+    if (statementData.includeAllTransactions) {
+      return { includeAllTransactions: true };
+    }
+    return {
+      from: toStatementDateParam(statementData.startDate),
+      to: toStatementDateParam(statementData.endDate)
+    };
+  };
+
+  const handleLoadEnterpriseStatement = async () => {
+    const statementPropertyId = getEnterpriseStatementPropertyId();
+    if (!statementPropertyId) return;
+    setEnterpriseStatementLoading(true);
+    setSubmitError(null);
     try {
-      // Create a new window for printing
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        setSubmitError('Please allow popups to print the statement');
-        return;
-      }
+      const statement = await reportingService.getOwnerStatement(statementPropertyId, getEnterpriseStatementQuery());
+      setEnterpriseStatement(statement);
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Failed to load enterprise owner statement');
+    } finally {
+      setEnterpriseStatementLoading(false);
+    }
+  };
 
-      // Get company details and property information
-      const companyName = company?.name || 'Property Management Company';
-      const propertyAddress = property?.address || 'Property Address Not Available';
-      const ownerName = ownerMap[propertyId!] || account?.ownerName || 'Unknown Owner';
-      
-      // Deduplicate base transactions (by type + paymentId) then filter by date range
-      const baseDeduped = (() => {
-        const seen = new Set<string>();
-        const result: typeof transactions = [];
-        for (const t of transactions) {
-          const paymentId = (t as any)?.paymentId ? String((t as any).paymentId) : '';
-          const key = paymentId
-            ? `${t.type}:${paymentId}`
-            : `${t.type}:${t.referenceNumber || ''}:${new Date(t.date).getTime()}:${Number(t.amount || 0)}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          result.push(t);
-        }
-        return result;
-      })();
-      let filteredTransactions = baseDeduped;
-      if (!statementData.includeAllTransactions) {
-        filteredTransactions = baseDeduped.filter(transaction => {
-          const transactionDate = new Date(transaction.date);
-          return transactionDate >= statementData.startDate && transactionDate <= statementData.endDate;
-        });
-      }
+  const handleDownloadEnterpriseStatement = async (format: ReportFormat) => {
+    const statementPropertyId = getEnterpriseStatementPropertyId();
+    if (!statementPropertyId) return;
+    setEnterpriseStatementLoading(true);
+    setSubmitError(null);
+    try {
+      const blob = await reportingService.downloadOwnerStatement(statementPropertyId, format, getEnterpriseStatementQuery());
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `owner-statement-${statementPropertyId}-${getEnterpriseStatementPeriod()}.${format === 'excel' ? 'xls' : format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setSubmitError(err?.message || `Failed to download ${format.toUpperCase()} statement`);
+    } finally {
+      setEnterpriseStatementLoading(false);
+    }
+  };
 
-      const normalizePassThroughType = (value?: string) => String(value || 'OTHER')
-        .trim()
-        .toUpperCase()
-        .replace(/[^A-Z0-9_]+/g, '_')
-        .replace(/^_+|_+$/g, '') || 'OTHER';
-      const passThroughLabel = (type: string) => {
-        const labels: Record<string, string> = {
-          LEVY: 'Levies',
-          WATER: 'Water Recoveries',
-          ELECTRICITY: 'Electricity Recoveries',
-          RATES: 'Rates',
-          SECURITY: 'Security',
-          INSURANCE: 'Insurance Recoveries',
-          MUNICIPAL: 'Municipal Charges',
-          OTHER: 'Other Pass-Through Charges'
-        };
-        const normalized = normalizePassThroughType(type);
-        return labels[normalized] || normalized.toLowerCase().split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
-      };
-      const inferPassThroughType = (entry: any): string => {
-        const explicit = entry?.passThroughType || entry?.type;
-        const text = `${entry?.category || ''} ${entry?.description || ''} ${entry?.referenceNumber || ''}`.toLowerCase();
-        if (String(explicit || '').toUpperCase() !== 'COLLECTION' && String(explicit || '').toUpperCase() !== 'PAYMENT') {
-          const normalized = normalizePassThroughType(explicit);
-          if (normalized !== 'OTHER') return normalized;
-        }
-        if (/levy|levies|hoa/.test(text)) return 'LEVY';
-        if (/water/.test(text)) return 'WATER';
-        if (/electric/.test(text)) return 'ELECTRICITY';
-        if (/rates?/.test(text)) return 'RATES';
-        if (/security/.test(text)) return 'SECURITY';
-        if (/insurance/.test(text)) return 'INSURANCE';
-        if (/municipal/.test(text)) return 'MUNICIPAL';
-        return 'OTHER';
-      };
-      const isPassThroughTransaction = (transaction: any) => {
-        if (transaction?.accountingTreatment === 'PASS_THROUGH' || transaction?.transactionCategory === 'PASS_THROUGH') return true;
-        const text = `${transaction?.category || ''} ${transaction?.description || ''}`.toLowerCase();
-        return /levy|levies|hoa|water|electric|rates?|municipal|security|insurance/.test(text);
-      };
-      const addPassThroughRow = (
-        rows: Record<string, { label: string; collected: number; paid: number }>,
-        type: string,
-        direction: 'collection' | 'payment',
-        amount: number
-      ) => {
-        const normalized = normalizePassThroughType(type);
-        rows[normalized] = rows[normalized] || { label: passThroughLabel(normalized), collected: 0, paid: 0 };
-        if (direction === 'collection') rows[normalized].collected += Number(amount || 0);
-        if (direction === 'payment') rows[normalized].paid += Number(amount || 0);
-      };
-      const passThroughRows: Record<string, { label: string; collected: number; paid: number }> = {};
-      for (const passThroughAccount of (account?.passThroughAccounts || [])) {
-        for (const entry of (passThroughAccount.transactions || [])) {
-          const entryDate = new Date(entry.date);
-          if (!statementData.includeAllTransactions && (entryDate < statementData.startDate || entryDate > statementData.endDate)) continue;
-          if (entry.status === 'cancelled' || entry.status === 'failed') continue;
-          if (entry.type === 'collection' || entry.type === 'payment') {
-            addPassThroughRow(passThroughRows, passThroughAccount.type, entry.type, Number(entry.amount || 0));
-          }
-        }
-      }
-      for (const transaction of filteredTransactions) {
-        if (!isPassThroughTransaction(transaction)) continue;
-        const direction = transaction.type === 'income' ? 'collection' : 'payment';
-        addPassThroughRow(passThroughRows, inferPassThroughType(transaction), direction, Number(transaction.amount || 0));
-      }
-      const passThroughSummaryRows = Object.entries(passThroughRows).map(([type, row]) => ({
-        type,
-        label: row.label,
-        collected: Number(row.collected.toFixed(2)),
-        paid: Number(row.paid.toFixed(2)),
-        outstanding: Number((row.collected - row.paid).toFixed(2))
-      }));
-      const passThroughCollected = passThroughSummaryRows.reduce((sum, row) => sum + row.collected, 0);
-      const passThroughPaid = passThroughSummaryRows.reduce((sum, row) => sum + row.paid, 0);
-      const passThroughOutstanding = passThroughCollected - passThroughPaid;
+  const handlePrintEnterpriseStatement = () => {
+    if (!enterpriseStatement || !enterpriseStatementPrintRef.current) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setSubmitError('Unable to open print window. Please allow pop-ups and try again.');
+      return;
+    }
 
-      // Calculate summary for the period
-      const periodIncome = filteredTransactions
-        .filter(t => t.type === 'income' && t.status === 'completed' && !isPassThroughTransaction(t))
-        .reduce((sum, t) => sum + t.amount, 0);
-      
-      const periodExpenses = filteredTransactions
-        .filter(t => t.type === 'expense' && t.status === 'completed' && !isPassThroughTransaction(t))
-        .reduce((sum, t) => sum + t.amount, 0);
-      
-      // Get payouts from the account's ownerPayouts array and filter by date range
-      let periodPayouts = 0;
-      let filteredPayouts: OwnerPayout[] = [];
-      
-      if (account?.ownerPayouts) {
-        if (statementData.includeAllTransactions) {
-          filteredPayouts = account.ownerPayouts.filter(p => p.status === 'completed');
-          periodPayouts = filteredPayouts.reduce((sum, payout) => sum + payout.amount, 0);
-        } else {
-          filteredPayouts = account.ownerPayouts.filter(payout => {
-            const payoutDate = new Date(payout.date);
-            return payout.status === 'completed' && payoutDate >= statementData.startDate && payoutDate <= statementData.endDate;
-          });
-          periodPayouts = filteredPayouts.reduce((sum, payout) => sum + payout.amount, 0);
-        }
-      }
+    const statementHtml = (
+      enterpriseStatementPrintRef.current.querySelector('.property-account-statement') as HTMLElement | null
+    )?.outerHTML || enterpriseStatementPrintRef.current.outerHTML;
 
-      // Calculate net income after payouts
-      const netIncomeAfterPayouts = periodIncome - periodPayouts;
-      const netIncomeAfterExpenses = netIncomeAfterPayouts - periodExpenses;
-
-      // Fetch commission breakdowns for income transactions with linked paymentId
-      const paymentIdSet = new Set<string>();
-      for (const t of filteredTransactions) {
-        if (t.type === 'income' && (t as any)?.paymentId) {
-          paymentIdSet.add(String((t as any).paymentId));
-        }
-      }
-      const commissionByPaymentId: Record<string, { totalCommission: number; vatOnCommission: number; ownerAmount: number }> = {};
-      if (paymentIdSet.size > 0) {
-        try {
-          const ids = Array.from(paymentIdSet.values());
-          const details = await Promise.all(ids.map(async (id) => {
-            try {
-              const p = await paymentService.getPayment(id);
-              const cd = (p as any)?.commissionDetails || {};
-              const totalCommission = Number(cd?.totalCommission || 0);
-              const vatOnCommission = Number(cd?.vatOnCommission || 0);
-              const ownerAmount = Number(cd?.ownerAmount || Math.max(0, (p as any)?.amount - totalCommission - vatOnCommission));
-              return [id, { totalCommission, vatOnCommission, ownerAmount }] as const;
-            } catch {
-              return null;
-            }
-          }));
-          for (const entry of details) {
-            if (entry && entry[0]) {
-              commissionByPaymentId[entry[0]] = entry[1];
-            }
-          }
-        } catch {
-          // ignore failures; table will omit breakdowns when unavailable
-        }
-      }
-
-      // Create the print content
-      const printContent = `
-        <!DOCTYPE html>
-        <html>
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
         <head>
-          <title>Property Statement</title>
+          <title>Property Account Statement</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
-            .title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
-            .subtitle { font-size: 16px; color: #666; margin-bottom: 5px; }
-            .property-address { font-size: 14px; color: #666; }
-            .property-info { margin: 20px 0; padding: 15px; background: #f9f9f9; border-radius: 5px; }
-            .info-row { display: flex; justify-content: space-between; margin: 8px 0; }
-            .info-label { font-weight: bold; min-width: 120px; }
-            .info-value { flex: 1; }
-            .period-info { margin: 20px 0; padding: 15px; background: #e3f2fd; border-radius: 5px; }
-            .summary-section { margin: 20px 0; }
-            .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 15px 0; }
-            .summary-card { padding: 15px; border: 1px solid #ddd; border-radius: 5px; text-align: center; }
-            .summary-amount { font-size: 20px; font-weight: bold; margin: 5px 0; }
-            .income { color: #4caf50; }
-            .expense { color: #f44336; }
-            .payout { color: #2196f3; }
-            .pass-through { color: #7b1fa2; }
-            .transactions-table { margin: 30px 0; }
-            .transactions-table table { width: 100%; border-collapse: collapse; }
-            .transactions-table th, .transactions-table td { 
-              border: 1px solid #ddd; 
-              padding: 8px; 
-              text-align: left; 
-            }
-            .transactions-table th { background: #f5f5f5; font-weight: bold; }
-            .income-row { background: #f1f8e9; }
-            .expense-row { background: #ffebee; }
-            .payout-row { background: #e3f2fd; }
-            .pass-through-row { background: #f3e5f5; }
-            .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #666; }
+            html, body { margin: 0; padding: 0; width: auto; background: #ffffff; font-family: Arial, Helvetica, sans-serif; color: #0f172a; overflow: visible; }
+            body { padding: 0; }
+            .property-account-statement { width: 100%; max-width: none; overflow: visible; }
+            .statement-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+            .statement-table thead { display: table-header-group; }
+            .statement-table tfoot { display: table-footer-group; }
+            .statement-table tr { page-break-inside: avoid; break-inside: avoid; }
+            .statement-table th, .statement-table td { overflow-wrap: anywhere; }
+            button, .no-print { display: none !important; }
+            @page { size: A4 landscape; margin: 10mm; }
             @media print {
-              body { margin: 20px; }
-              .no-print { display: none; }
+              html, body { width: auto; margin: 0; padding: 0; background: #fff !important; overflow: visible !important; }
+              thead { display: table-header-group; }
+              tfoot { display: table-footer-group; }
+              tr { page-break-inside: avoid; }
+              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             }
           </style>
         </head>
-        <body>
-          <div class="header">
-            <div class="title">Property Statement</div>
-            <div class="subtitle">${companyName}</div>
-            <div class="property-address">${propertyAddress}</div>
-          </div>
-          
-          <div class="property-info">
-            <div class="info-row">
-              <span class="info-label">Property Owner:</span>
-              <span class="info-value">${ownerName}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Property Address:</span>
-              <span class="info-value">${propertyAddress}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Statement Period:</span>
-              <span class="info-value">${statementData.includeAllTransactions ? 'All Transactions' : `${statementData.startDate.toLocaleDateString()} to ${statementData.endDate.toLocaleDateString()}`}</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Generated On:</span>
-              <span class="info-value">${new Date().toLocaleString()}</span>
-            </div>
-          </div>
-          
-          <div class="summary-section">
-            <h3>Period Summary</h3>
-            <div class="summary-grid">
-              <div class="summary-card">
-                <div>Total Rent Income</div>
-                <div class="summary-amount income">${propertyAccountService.formatCurrency(periodIncome)}</div>
-              </div>
-              <div class="summary-card">
-                <div>Owner Payouts (Deductions)</div>
-                <div class="summary-amount expense">-${propertyAccountService.formatCurrency(periodPayouts)}</div>
-              </div>
-              <div class="summary-card">
-                <div>Net Income After Payouts</div>
-                <div class="summary-amount ${netIncomeAfterPayouts >= 0 ? 'income' : 'expense'}">${propertyAccountService.formatCurrency(netIncomeAfterPayouts)}</div>
-              </div>
-            </div>
-            <div class="summary-grid" style="margin-top: 15px;">
-              <div class="summary-card">
-                <div>Total Expenses</div>
-                <div class="summary-amount expense">${propertyAccountService.formatCurrency(periodExpenses)}</div>
-              </div>
-              <div class="summary-card">
-                <div>Final Net Income</div>
-                <div class="summary-amount ${netIncomeAfterExpenses >= 0 ? 'income' : 'expense'}">${propertyAccountService.formatCurrency(netIncomeAfterExpenses)}</div>
-              </div>
-              <div class="summary-card" style="background: #f5f5f5;">
-                <div>Available for Payouts</div>
-                <div class="summary-amount payout">${propertyAccountService.formatCurrency(account?.netOwnerBalance ?? account?.runningBalance ?? 0)}</div>
-              </div>
-            </div>
-          </div>
-          
-          <div class="summary-section">
-            <h3>Pass-Through Charges</h3>
-            <div class="summary-grid">
-              <div class="summary-card">
-                <div>Collected</div>
-                <div class="summary-amount pass-through">${propertyAccountService.formatCurrency(passThroughCollected)}</div>
-              </div>
-              <div class="summary-card">
-                <div>Paid</div>
-                <div class="summary-amount pass-through">${propertyAccountService.formatCurrency(passThroughPaid)}</div>
-              </div>
-              <div class="summary-card">
-                <div>Outstanding</div>
-                <div class="summary-amount pass-through">${propertyAccountService.formatCurrency(passThroughOutstanding)}</div>
-              </div>
-            </div>
-            ${passThroughSummaryRows.length > 0 ? `
-            <div class="transactions-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Charge Type</th>
-                    <th>Collected</th>
-                    <th>Paid</th>
-                    <th>Outstanding</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${passThroughSummaryRows.map(row => `
-                    <tr class="pass-through-row">
-                      <td>${row.label}</td>
-                      <td>${propertyAccountService.formatCurrency(row.collected)}</td>
-                      <td>${propertyAccountService.formatCurrency(row.paid)}</td>
-                      <td>${propertyAccountService.formatCurrency(row.outstanding)}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-            ` : '<p>No pass-through charges recorded for this period.</p>'}
-          </div>
-          
-          <div class="transactions-table">
-            <h3>Income, Expense & Opening Balance Transactions</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th>Total Paid</th>
-                  <th>Commission</th>
-                  <th>VAT on Commission</th>
-                  <th>Owner Amount</th>
-                  <th>Balance</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${filteredTransactions
-                  .filter(transaction => transaction.type !== 'owner_payout' && !isPassThroughTransaction(transaction))
-                  .map(transaction => {
-                    const isIncome = transaction.type === 'income';
-                    const isOpeningCredit = transaction.type === 'opening_balance' && transaction.direction !== 'debit';
-                    const totalPaid = Number(transaction.amount || 0);
-                    const isPositive = isIncome || isOpeningCredit;
-                    const amountDisplay = (isPositive ? '+' : '-') + propertyAccountService.formatCurrency(totalPaid);
-                    const pid = String((transaction as any)?.paymentId || '');
-                    const breakdown = pid ? commissionByPaymentId[pid] : undefined;
-                    const commissionCell = breakdown ? propertyAccountService.formatCurrency(breakdown.totalCommission || 0) : (isIncome ? '-' : '');
-                    const vatCell = breakdown ? propertyAccountService.formatCurrency(breakdown.vatOnCommission || 0) : (isIncome ? '-' : '');
-                    const ownerCell = breakdown ? propertyAccountService.formatCurrency(breakdown.ownerAmount || 0) : (isIncome ? '-' : '');
-                    const typeLabel = transaction.type === 'opening_balance'
-                      ? `Opening Balance ${transaction.direction === 'debit' ? 'Debit' : 'Credit'}`
-                      : propertyAccountService.getTransactionTypeLabel(transaction.type);
-                    
-                    return `
-                      <tr class="${isPositive ? 'income-row' : 'expense-row'}">
-                        <td>${new Date(transaction.date).toLocaleDateString()}</td>
-                        <td>${typeLabel}</td>
-                        <td>${transaction.description}</td>
-                        <td style="color: ${isPositive ? '#4caf50' : '#f44336'};">
-                          ${amountDisplay}
-                        </td>
-                        <td>${isIncome ? commissionCell : '-'}</td>
-                        <td>${isIncome ? vatCell : '-'}</td>
-                        <td>${isIncome ? ownerCell : '-'}</td>
-                        <td>${propertyAccountService.formatCurrency(transaction.runningBalance || 0)}</td>
-                        <td>${transaction.status}</td>
-                      </tr>
-                    `;
-                  }).join('')}
-              </tbody>
-            </table>
-          </div>
-          
-          ${filteredPayouts.length > 0 ? `
-          <div class="transactions-table">
-            <h3>Owner Payouts (Deductions from Rent)</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Reference</th>
-                  <th>Recipient</th>
-                  <th>Amount (Deduction)</th>
-                  <th>Payment Method</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${filteredPayouts.map(payout => `
-                  <tr class="payout-row">
-                    <td>${new Date(payout.date).toLocaleDateString()}</td>
-                    <td>${payout.referenceNumber}</td>
-                    <td>${payout.recipientName}</td>
-                    <td style="color: #ff9800; font-weight: bold;">
-                      -${propertyAccountService.formatCurrency(payout.amount)} (Deduction)
-                    </td>
-                    <td>${propertyAccountService.getPaymentMethodLabel(payout.paymentMethod)}</td>
-                    <td>${payout.status}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-          ` : ''}
-          
-          <div class="footer">
-            <p>This statement shows all transactions for the specified period. Please keep this for your records.</p>
-            <p>Generated by ${companyName} on ${new Date().toLocaleString()}</p>
-          </div>
-          
-          <div class="no-print" style="position: fixed; top: 20px; right: 20px;">
-            <button onclick="window.print()" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer;">
-              Print Statement
-            </button>
-            <button onclick="window.close()" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">
-              Close
-            </button>
-          </div>
-        </body>
-        </html>
-      `;
-
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      setStatementDialogOpen(false);
-      
-    } catch (err: any) {
-      setSubmitError(err.message || 'Failed to generate statement');
-    }
+        <body>${statementHtml}</body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 250);
   };
 
   const getStatusIcon = (status: string) => {
@@ -1218,6 +989,9 @@ const PropertyAccountDetailPage: React.FC = () => {
                 <TableCell>Type</TableCell>
                 <TableCell>Description</TableCell>
                 <TableCell>Amount</TableCell>
+                <TableCell>Commission</TableCell>
+                <TableCell>VAT on Commission</TableCell>
+                <TableCell>Owner Amount</TableCell>
                 <TableCell>Balance</TableCell>
                 <TableCell>Status</TableCell>
               </TableRow>
@@ -1257,6 +1031,21 @@ const PropertyAccountDetailPage: React.FC = () => {
                       {transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit') ? '+' : '-'}
                       {propertyAccountService.formatCurrency(transaction.amount)}
                     </Typography>
+                  </TableCell>
+                  <TableCell>
+                    {transaction.type === 'income' && (transaction as any)?.paymentId && paymentBreakdowns[String((transaction as any).paymentId)]
+                      ? propertyAccountService.formatCurrency(paymentBreakdowns[String((transaction as any).paymentId)].totalCommission)
+                      : (transaction.type === 'income' ? '-' : '')}
+                  </TableCell>
+                  <TableCell>
+                    {transaction.type === 'income' && (transaction as any)?.paymentId && paymentBreakdowns[String((transaction as any).paymentId)]
+                      ? propertyAccountService.formatCurrency(paymentBreakdowns[String((transaction as any).paymentId)].vatOnCommission)
+                      : (transaction.type === 'income' ? '-' : '')}
+                  </TableCell>
+                  <TableCell>
+                    {transaction.type === 'income' && (transaction as any)?.paymentId && paymentBreakdowns[String((transaction as any).paymentId)]
+                      ? propertyAccountService.formatCurrency(paymentBreakdowns[String((transaction as any).paymentId)].ownerAmount)
+                      : (transaction.type === 'income' ? '-' : '')}
                   </TableCell>
                   <TableCell>{propertyAccountService.formatCurrency(transaction.runningBalance || 0)}</TableCell>
                   <TableCell>
@@ -1489,6 +1278,12 @@ const PropertyAccountDetailPage: React.FC = () => {
                   <Typography variant="body2" color="text.secondary">
                     Last Payout: {account.lastPayoutDate ? new Date(account.lastPayoutDate).toLocaleDateString() : 'Never'}
                   </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    VAT on Commission: {propertyAccountService.formatCurrency(Object.values(paymentBreakdowns).reduce((sum, row) => sum + Number(row.vatOnCommission || 0), 0))}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Management Commission: {propertyAccountService.formatCurrency(Object.values(paymentBreakdowns).reduce((sum, row) => sum + Number(row.totalCommission || 0), 0))}
+                  </Typography>
                 </Box>
               </CardContent>
             </Card>
@@ -1527,7 +1322,10 @@ const PropertyAccountDetailPage: React.FC = () => {
                     variant="outlined"
                     fullWidth
                     sx={{ mb: 1 }}
-                    onClick={() => setStatementDialogOpen(true)}
+                    onClick={() => {
+                      setStatementDialogOpen(true);
+                      setTimeout(() => handleLoadEnterpriseStatement(), 0);
+                    }}
                     startIcon={<PrintIcon />}
                   >
                     Print Statement
@@ -1769,7 +1567,7 @@ const PropertyAccountDetailPage: React.FC = () => {
       </Dialog>
 
       {/* Print Statement Dialog */}
-      <Dialog open={statementDialogOpen} onClose={() => setStatementDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={statementDialogOpen} onClose={() => setStatementDialogOpen(false)} maxWidth="xl" fullWidth>
         <DialogTitle>Print Property Statement</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
@@ -1831,13 +1629,42 @@ const PropertyAccountDetailPage: React.FC = () => {
                 </Typography>
               </Alert>
             </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+                <Button onClick={handleLoadEnterpriseStatement} variant="contained" disabled={enterpriseStatementLoading}>
+                  {enterpriseStatementLoading ? <CircularProgress size={20} /> : 'Refresh Statement Data'}
+                </Button>
+                <Button onClick={handlePrintEnterpriseStatement} variant="contained" disabled={!enterpriseStatement || enterpriseStatementLoading}>
+                  Print Statement
+                </Button>
+                <Button onClick={() => handleDownloadEnterpriseStatement('pdf')} variant="outlined" disabled={enterpriseStatementLoading}>
+                  Download PDF
+                </Button>
+                <Button onClick={() => handleDownloadEnterpriseStatement('excel')} variant="outlined" disabled={enterpriseStatementLoading}>
+                  Download Excel
+                </Button>
+                <Button onClick={() => handleDownloadEnterpriseStatement('csv')} variant="outlined" disabled={enterpriseStatementLoading}>
+                  Download CSV
+                </Button>
+                <Button onClick={() => handleDownloadEnterpriseStatement('json')} variant="outlined" disabled={enterpriseStatementLoading}>
+                  Download JSON
+                </Button>
+              </Box>
+              {enterpriseStatement ? (
+                <Box ref={enterpriseStatementPrintRef} sx={{ width: '100%', overflowX: 'auto', bgcolor: '#fff', p: 1, '@media print': { overflow: 'visible', p: 0 } }}>
+                  <OwnerStatementPreview statement={enterpriseStatement} />
+                </Box>
+              ) : (
+                <Alert severity="info">
+                  The printed statement uses this property account&apos;s ledger. Choose a period, then print.
+                </Alert>
+              )}
+            </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setStatementDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handlePrintStatement} variant="contained" disabled={submitting}>
-            {submitting ? <CircularProgress size={24} /> : 'Print Statement'}
-          </Button>
         </DialogActions>
       </Dialog>
     </Box>

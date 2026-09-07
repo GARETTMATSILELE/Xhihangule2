@@ -10,6 +10,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   IconButton,
   Dialog,
   DialogTitle,
@@ -57,20 +58,30 @@ export const PaymentList: React.FC = () => {
   const [receiptDialog, setReceiptDialog] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
   const [loadingReceipt, setLoadingReceipt] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
 
   const leaseService = useLeaseService();
 
   useEffect(() => {
-    fetchPayments();
     fetchTenants();
     fetchLeases();
     fetchProperties();
   }, []);
 
+  useEffect(() => {
+    fetchPayments();
+  }, [page, rowsPerPage]);
+
   const fetchPayments = async () => {
     try {
-      const data = await paymentService.getPayments();
-      setPayments(data || []);
+      const { items, total } = await paymentService.getPaymentsPage({
+        page: page + 1,
+        limit: rowsPerPage
+      });
+      setPayments(items || []);
+      setTotalCount(total);
     } catch (error) {
       console.error('Error fetching payments:', error);
     }
@@ -268,6 +279,17 @@ export const PaymentList: React.FC = () => {
             ))}
           </TableBody>
         </Table>
+          <TablePagination
+            component="div"
+            count={totalCount}
+            page={page}
+            onPageChange={(_event, newPage) => setPage(newPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(parseInt(event.target.value, 10));
+              setPage(0);
+            }}
+          />
       </TableContainer>
 
       <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>

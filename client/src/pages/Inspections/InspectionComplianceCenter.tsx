@@ -50,6 +50,7 @@ import {
   MoreVert,
   NotificationsNone,
   PlayArrow,
+  PrintOutlined,
   PlaylistAddCheck,
   PublishedWithChanges,
   Save,
@@ -67,7 +68,7 @@ import {
 } from '../../utils/workspaceDataSources';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCompany } from '../../contexts/CompanyContext';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useNotification } from '../../components/Layout/Header';
 import { InspectionRecord, InspectionStatus, InspectionType, inspectionService } from '../../services/inspectionService';
 
@@ -230,6 +231,7 @@ export const InspectionComplianceCenter: React.FC = () => {
   const { user } = useAuth();
   const { company } = useCompany();
   const location = useLocation();
+  const navigate = useNavigate();
   const useAgentRoutes = shouldUseAgentDataRoutes(location.pathname, {
     workspaceType: company?.workspaceType,
     plan: company?.plan,
@@ -743,6 +745,9 @@ export const InspectionComplianceCenter: React.FC = () => {
         </Button>
         <Button variant="outlined" startIcon={<Download />} onClick={handleExport} sx={{ borderRadius: '14px', px: 2.2, py: 1.2, textTransform: 'none', fontWeight: 900, bgcolor: '#fff' }}>
           Export Report
+        </Button>
+        <Button variant="outlined" startIcon={<PrintOutlined />} onClick={() => navigate('/agent-dashboard/property-details-report')} sx={{ borderRadius: '14px', px: 2.2, py: 1.2, textTransform: 'none', fontWeight: 900, bgcolor: '#fff' }}>
+          Print Property Details
         </Button>
       </Stack>
 

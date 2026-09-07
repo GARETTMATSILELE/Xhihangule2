@@ -9,38 +9,61 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CommissionService = void 0;
+exports.CommissionService = exports.applyLevyPassThroughToSnapshot = exports.toPaymentCommissionSnapshot = exports.calculatePropertyCommission = void 0;
 const Company_1 = require("../models/Company");
+const propertyCommissionCalculator_1 = require("./propertyCommissionCalculator");
+Object.defineProperty(exports, "calculatePropertyCommission", { enumerable: true, get: function () { return propertyCommissionCalculator_1.calculatePropertyCommission; } });
+Object.defineProperty(exports, "toPaymentCommissionSnapshot", { enumerable: true, get: function () { return propertyCommissionCalculator_1.toPaymentCommissionSnapshot; } });
+Object.defineProperty(exports, "applyLevyPassThroughToSnapshot", { enumerable: true, get: function () { return propertyCommissionCalculator_1.applyLevyPassThroughToSnapshot; } });
+const taxRateService_1 = require("./taxRateService");
 class CommissionService {
     static calculate(amount, commissionPercentage, companyId) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e, _f, _g;
+            var _a, _b, _c, _d;
             const company = yield Company_1.Company.findById(companyId).lean();
-            const commissionEnabled = ((_a = company === null || company === void 0 ? void 0 : company.featureFlags) === null || _a === void 0 ? void 0 : _a.commissionEnabled) !== false;
-            if (!commissionEnabled) {
-                return {
-                    totalCommission: 0,
-                    preaFee: 0,
-                    agentShare: 0,
-                    agencyShare: 0,
-                    ownerAmount: amount
-                };
-            }
-            const totalCommission = (amount * (commissionPercentage || 0)) / 100;
-            const preaPercentOfTotal = Math.max(0, Math.min(1, (_c = (_b = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _b === void 0 ? void 0 : _b.preaPercentOfTotal) !== null && _c !== void 0 ? _c : 0.03));
-            const agentPercentOfRemaining = Math.max(0, Math.min(1, (_e = (_d = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _d === void 0 ? void 0 : _d.agentPercentOfRemaining) !== null && _e !== void 0 ? _e : 0.6));
-            const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_g = (_f = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _f === void 0 ? void 0 : _f.agencyPercentOfRemaining) !== null && _g !== void 0 ? _g : 0.4));
-            const preaFee = totalCommission * preaPercentOfTotal;
-            const remainingCommission = totalCommission - preaFee;
-            const agentShare = remainingCommission * agentPercentOfRemaining;
-            const agencyShare = remainingCommission * agencyPercentOfRemaining;
+            const result = (0, propertyCommissionCalculator_1.calculatePropertyCommission)({
+                grossRent: amount,
+                levy: 0,
+                commissionPercentage,
+                vatOnCommission: false,
+                commissionEnabled: ((_a = company === null || company === void 0 ? void 0 : company.featureFlags) === null || _a === void 0 ? void 0 : _a.commissionEnabled) !== false,
+                preaPercentOfTotal: (_b = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _b === void 0 ? void 0 : _b.preaPercentOfTotal,
+                agentPercentOfRemaining: (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.agentPercentOfRemaining,
+                agencyPercentOfRemaining: (_d = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _d === void 0 ? void 0 : _d.agencyPercentOfRemaining
+            });
             return {
-                totalCommission,
-                preaFee,
-                agentShare,
-                agencyShare,
-                ownerAmount: amount - totalCommission
+                totalCommission: result.totalCommission,
+                preaFee: result.preaFee,
+                agentShare: result.agentShare,
+                agencyShare: result.agencyShare,
+                ownerAmount: result.ownerAmount
             };
+        });
+    }
+    static calculateForProperty(input) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c, _d;
+            const company = input.companyId ? yield Company_1.Company.findById(input.companyId).lean() : null;
+            const vatOnCommission = Boolean(input.vatOnCommission);
+            let vatRate = Number(input.vatRate);
+            if (vatOnCommission && !Number.isFinite(vatRate) && input.companyId) {
+                const lookedUp = yield (0, taxRateService_1.getVatRateForDate)(input.companyId, input.paymentDate || new Date());
+                vatRate = lookedUp.decimal;
+            }
+            if (!Number.isFinite(vatRate) || vatRate < 0)
+                vatRate = 0;
+            return (0, propertyCommissionCalculator_1.calculatePropertyCommission)({
+                grossRent: input.grossRent,
+                levy: input.levy,
+                commissionPercentage: input.commissionPercentage,
+                vatOnCommission,
+                vatTreatment: input.vatTreatment,
+                vatRate,
+                commissionEnabled: ((_a = company === null || company === void 0 ? void 0 : company.featureFlags) === null || _a === void 0 ? void 0 : _a.commissionEnabled) !== false,
+                preaPercentOfTotal: (_b = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _b === void 0 ? void 0 : _b.preaPercentOfTotal,
+                agentPercentOfRemaining: (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.agentPercentOfRemaining,
+                agencyPercentOfRemaining: (_d = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _d === void 0 ? void 0 : _d.agencyPercentOfRemaining
+            });
         });
     }
 }

@@ -452,21 +452,64 @@ class PaymentService {
 
   // Authenticated method for downloading payment receipt as blob
   async downloadReceipt(id: string, companyId?: string): Promise<Blob> {
+    const requestPdf = async (url: string) => {
+      const config: any = { responseType: 'blob', params: { format: 'pdf' } };
+      if (companyId) config.params.companyId = companyId;
+      return api.get(url, config);
+    };
+
+    const asPdfBlob = async (blob: Blob, contentType?: string): Promise<Blob> => {
+      const type = String(contentType || blob.type || '').toLowerCase();
+      const header = await blob.slice(0, 8).text();
+      if (header.startsWith('%PDF')) {
+        return blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' });
+      }
+
+      const body = await blob.text();
+      if (type.includes('json') || body.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(body);
+          throw new Error(parsed.message || parsed.error || 'Failed to download receipt');
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err;
+        }
+      }
+      throw new Error('Receipt download was not a valid PDF. Please try again.');
+    };
+
+    const messageFromBlobError = async (error: any): Promise<string> => {
+      const data = error?.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await data.text());
+          return parsed.message || parsed.error || 'Failed to download receipt';
+        } catch {
+          return 'Failed to download receipt';
+        }
+      }
+      return error?.response?.data?.message || error?.message || 'Failed to download receipt';
+    };
+
     try {
       return await this.db.executeWithRetry(async () => {
-        const config: any = { responseType: 'blob', params: { format: 'pdf' } };
-        if (companyId) config.params.companyId = companyId;
         try {
-          const response = await api.get(`/payments/${id}/receipt/download`, config);
-          return response.data;
+          const response = await requestPdf(`/payments/${id}/receipt/download`);
+          return asPdfBlob(response.data, response.headers?.['content-type']);
         } catch (err: any) {
-          const levyResp = await api.get(`/levy-payments/${id}/receipt/download`, { responseType: 'blob', params: { ...(companyId ? { companyId } : {}), format: 'pdf' } });
-          return levyResp.data;
+          if (err?.response?.status && err.response.status < 500 && err.response.status !== 404) {
+            throw new Error(await messageFromBlobError(err));
+          }
+          try {
+            const levyResp = await requestPdf(`/levy-payments/${id}/receipt/download`);
+            return asPdfBlob(levyResp.data, levyResp.headers?.['content-type']);
+          } catch (levyErr: any) {
+            throw new Error(await messageFromBlobError(levyErr));
+          }
         }
-      });
+      }, { maxRetries: 0 });
     } catch (error: any) {
       console.error('Error downloading payment receipt:', error);
-      throw new Error(error.response?.data?.message || 'Failed to download receipt');
+      throw new Error(error?.message || 'Failed to download receipt');
     }
   }
 

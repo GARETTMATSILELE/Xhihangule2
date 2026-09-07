@@ -66,6 +66,7 @@ import {
   derivePaymentStatus,
   type PaymentStatus
 } from './ownerDashboardUtils';
+import { OwnerStatementDTO, OwnerStatementPreview, reportingService } from '../../reporting';
 
 interface Property {
   _id: string;
@@ -135,6 +136,8 @@ const PropertyDetails: React.FC = () => {
   const [financialData, setFinancialData] = useState<FinancialData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [enterpriseStatement, setEnterpriseStatement] = useState<OwnerStatementDTO | null>(null);
+  const [enterpriseStatementLoading, setEnterpriseStatementLoading] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const formatCurrency = useMemo(() => (value: number) => `$${Number(value || 0).toLocaleString()}`, []);
@@ -471,6 +474,41 @@ const PropertyDetails: React.FC = () => {
     doc.save(`owner_statement_${filenameSafeProperty}.pdf`);
   };
 
+  const ownerStatementQuery = { includeAllTransactions: true };
+
+  const loadEnterpriseStatement = async () => {
+    if (!propertyId) return;
+    setEnterpriseStatementLoading(true);
+    setError('');
+    try {
+      const statement = await reportingService.getOwnerStatement(propertyId, ownerStatementQuery);
+      setEnterpriseStatement(statement);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load enterprise owner statement');
+    } finally {
+      setEnterpriseStatementLoading(false);
+    }
+  };
+
+  const downloadEnterpriseStatementPdf = async () => {
+    if (!propertyId) return;
+    setEnterpriseStatementLoading(true);
+    setError('');
+    try {
+      const blob = await reportingService.downloadOwnerStatement(propertyId, 'pdf', ownerStatementQuery);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `owner-statement-${propertyId}-all-transactions.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to download enterprise owner statement');
+    } finally {
+      setEnterpriseStatementLoading(false);
+    }
+  };
+
   // Helpers for displaying lease period
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -631,12 +669,20 @@ const PropertyDetails: React.FC = () => {
               <Typography variant="h6">Owner Financial Summary</Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap">
                 <Button
+                  variant="contained"
+                  sx={{ flex: { xs: '1 1 calc(50% - 4px)', sm: '0 1 auto' } }}
+                  onClick={loadEnterpriseStatement}
+                  disabled={enterpriseStatementLoading}
+                >
+                  {enterpriseStatementLoading ? <CircularProgress size={20} /> : 'Enterprise Preview'}
+                </Button>
+                <Button
                   variant="outlined"
                   sx={{ flex: { xs: '1 1 calc(50% - 4px)', sm: '0 1 auto' } }}
-                  onClick={downloadStatementPdf}
-                  disabled={!financialData}
+                  onClick={downloadEnterpriseStatementPdf}
+                  disabled={enterpriseStatementLoading}
                 >
-                  Download Statement
+                  Enterprise PDF
                 </Button>
                 <Button variant="outlined" color="warning" sx={{ flex: { xs: '1 1 calc(50% - 4px)', sm: '0 1 auto' } }}>Add Maintenance</Button>
               </Stack>
@@ -697,6 +743,11 @@ const PropertyDetails: React.FC = () => {
                 </Paper>
               </Grid>
             </Grid>
+            {enterpriseStatement && (
+              <Box sx={{ mt: 3 }}>
+                <OwnerStatementPreview statement={enterpriseStatement} />
+              </Box>
+            )}
           </Paper>
         </Grid>
 

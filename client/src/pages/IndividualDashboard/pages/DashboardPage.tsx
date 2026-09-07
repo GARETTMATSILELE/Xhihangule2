@@ -30,6 +30,7 @@ export function DashboardPage() {
     ownerBriefChecks,
     outstandingBillsTotal,
     maintenanceOpen,
+    occupancyCounts,
     upcomingLeaseRenewals
   } = usePortfolioContext();
 
@@ -59,8 +60,8 @@ export function DashboardPage() {
 
       <Grid container spacing={2}>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Total Properties" value={String(data.summary.totalProperties)} icon={<HomeWork />} /></Grid>
-        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Occupied" value={String(data.summary.occupiedUnits)} icon={<HomeWork />} accent={INDIVIDUAL_THEME.success} /></Grid>
-        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Vacant" value={String(data.summary.vacantUnits)} icon={<HomeWork />} accent={INDIVIDUAL_THEME.warning} /></Grid>
+        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Occupied" value={String(occupancyCounts.occupied)} icon={<HomeWork />} accent={INDIVIDUAL_THEME.success} /></Grid>
+        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Vacant" value={String(occupancyCounts.vacant)} icon={<HomeWork />} accent={INDIVIDUAL_THEME.warning} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Tenants" value={String(data.summary.totalTenants)} icon={<People />} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Income This Month" value={money(data.summary.monthlyIncome)} icon={<TrendingUp />} accent={INDIVIDUAL_THEME.success} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Expenses This Month" value={money(data.summary.monthlyExpenses)} icon={<TrendingDown />} accent={INDIVIDUAL_THEME.danger} /></Grid>

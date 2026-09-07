@@ -98,6 +98,7 @@ const accountingRoutes_1 = __importDefault(require("./routes/accountingRoutes"))
 const trustAccountRoutes_1 = __importDefault(require("./routes/trustAccountRoutes"));
 const webhookRoutes_1 = __importDefault(require("./routes/webhookRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
+const api_1 = __importDefault(require("./reporting/api"));
 const database_1 = require("./config/database");
 const errorHandler_1 = require("./middleware/errorHandler");
 const http_1 = require("http");
@@ -470,6 +471,7 @@ if (exposeDiagnostics) {
 // Reports (public and authenticated)
 app.use('/api/public/reports', publicReportRoutes_1.default);
 app.use('/api/reports', reportRoutes_1.default);
+app.use('/api/reporting', api_1.default);
 // System Admin (global)
 app.use('/api/system-admin', systemAdminRoutes_1.default);
 app.use('/api/admin', adminRoutes_1.default);

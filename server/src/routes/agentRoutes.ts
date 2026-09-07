@@ -1,7 +1,7 @@
 import express from 'express';
 import { auth } from '../middleware/auth';
 import { enforcePropertyLimit } from '../middleware/limits';
-import { isAgent } from '../middleware/roles';
+import { canViewPropertyDetailsReport, isAgent } from '../middleware/roles';
 import multer from 'multer';
 import {
   getAgentProperties,
@@ -23,9 +23,11 @@ import {
   updateAgentPropertyOwner,
   deleteAgentPropertyOwner,
   updateAgentProperty,
+  archiveAgentProperty,
   deleteAgentProperty,
   restoreAgentProperty
 } from '../controllers/agentController';
+import { getAgentPropertyDetailsReport } from '../controllers/agentPropertyReportController';
 import {
   ownersDashboard,
   ownerPortfolio,
@@ -69,20 +71,23 @@ const upload = multer({
 
 // Debug middleware
 router.use((req, res, next) => {
-  console.log('Agent routes middleware - Request path:', req.path);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Agent routes middleware - Request path:', req.path);
+  }
   next();
 });
 
 // Apply auth middleware to all routes
 router.use(auth);
+router.get('/reports/property-details', canViewPropertyDetailsReport, getAgentPropertyDetailsReport);
 router.use(isAgent);
 
 // Agent dashboard routes
 router.get('/properties', (req, res) => {
-  console.log('Agent properties route hit');
   getAgentProperties(req, res);
 });
 router.post('/properties', enforcePropertyLimit, createAgentProperty);
+router.put('/properties/:id/archive', archiveAgentProperty);
 router.put('/properties/:id', updateAgentProperty);
 router.delete('/properties/:id', deleteAgentProperty);
 router.put('/properties/:id/restore', restoreAgentProperty);

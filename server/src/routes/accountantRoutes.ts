@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { auth } from '../middleware/auth';
 import { isAccountant, canManagePayments, canViewAccountantDashboard, canViewCommissions, canViewSalesPayments, canViewAgentAccounts } from '../middleware/roles';
+import { getCompanyPropertyDetailsReport } from '../controllers/agentPropertyReportController';
 import {
   getAgentCommissions,
   getAgencyCommission,
@@ -84,6 +85,7 @@ import {
   getTrustLedger,
   getTrustTaxSummary,
   getTrustAuditLogs,
+  getTrustMatter,
   getTrustReconciliation,
   recordBuyerPayment as recordTrustBuyerPayment,
   calculateSettlement as calculateTrustSettlement,
@@ -92,7 +94,9 @@ import {
   closeTrustAccount as closeFullTrustAccount,
   transitionTrustWorkflow,
   generateTrustReport,
-  runTrustReconciliation
+  runTrustReconciliation,
+  updateTrustMatterCustody,
+  updateTrustMatterDocuments
 } from '../controllers/trustAccountController';
 import { createPerCompanyConcurrencyGuard } from '../middleware/companyLoadShedding';
 
@@ -159,6 +163,9 @@ router.get('/trust-accounts/:id/ledger', canViewCommissions, getTrustLedger);
 router.get('/trust-accounts/:id/tax-summary', canViewCommissions, getTrustTaxSummary);
 router.get('/trust-accounts/:id/audit-logs', canViewCommissions, getTrustAuditLogs);
 router.get('/trust-accounts/:id/reconciliation', canViewCommissions, getTrustReconciliation);
+router.get('/trust-accounts/:id/matter', canViewCommissions, getTrustMatter);
+router.patch('/trust-accounts/:id/matter/custody', isAccountant, updateTrustMatterCustody);
+router.patch('/trust-accounts/:id/matter/documents', isAccountant, updateTrustMatterDocuments);
 router.post('/trust-accounts/:id/buyer-payments', isAccountant, recordTrustBuyerPayment);
 router.post('/trust-accounts/:id/calculate-settlement', isAccountant, calculateTrustSettlement);
 router.post('/trust-accounts/:id/apply-tax-deductions', isAccountant, applyTrustTaxDeductions);
@@ -254,6 +261,9 @@ router.post('/property-accounts/:propertyId/reconcile-duplicates', canViewCommis
 router.post('/property-accounts/:propertyId/merge-duplicates', canViewCommissions, mergePropertyAccountDuplicatesForProperty);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', canViewCommissions, getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', canViewCommissions, getAcknowledgementDocument);
+
+// Company-wide property details report (same builder as the agent report)
+router.get('/reports/property-details', canViewAccountantDashboard, getCompanyPropertyDetailsReport);
 
 // Company account routes
 router.get('/company-account/summary', canViewAccountantDashboard, getCompanyAccountSummary);

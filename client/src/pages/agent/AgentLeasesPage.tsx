@@ -203,7 +203,7 @@ const AgentLeasesPage: React.FC = () => {
         await leaseService.renew(selectedLease._id, {
           ...finalServerData,
           previousLeaseId: selectedLease._id,
-          status: formData.status || 'pending_approval',
+          status: formData.status || 'active',
         } as any);
         const propertyId = getId(formData.propertyId || selectedLease.propertyId);
         const property = properties.find(p => getId(p._id) === propertyId) || resolvePropertyFromLease(selectedLease, properties);
@@ -260,6 +260,17 @@ const AgentLeasesPage: React.FC = () => {
     setSelectedLease(lease);
     setFormMode('renew');
     setDialogOpen(true);
+  };
+
+  const handleApproveLease = async (lease: Lease) => {
+    try {
+      setError(null);
+      await leaseService.updateStatus(lease._id, 'active');
+      await loadData();
+      notifyRentalWorkflowChanged('lease');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to approve lease renewal.');
+    }
   };
 
   const handleTerminateLease = async (lease: Lease) => {
@@ -524,7 +535,7 @@ const AgentLeasesPage: React.FC = () => {
                       : selectedLease.endDate,
                     rentAmount: renewalRent,
                     depositAmount: renewalDeposit,
-                    status: formMode === 'renew' ? 'pending_approval' : selectedLease.status,
+                    status: formMode === 'renew' ? 'active' : selectedLease.status,
                     previousLeaseId: formMode === 'renew' ? selectedLease._id : selectedLease.previousLeaseId,
                     monthlyRent: renewalRent,
                     securityDeposit: renewalDeposit,
@@ -635,11 +646,24 @@ const AgentLeasesPage: React.FC = () => {
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <Chip 
-                            label={leaseStatusLabels[status]}
-                            color={statusColor as any}
-                            size="small" 
-                          />
+                          <Stack spacing={0.75} alignItems="flex-start">
+                            <Chip 
+                              label={leaseStatusLabels[status]}
+                              color={statusColor as any}
+                              size="small" 
+                            />
+                            {status === 'pending_approval' && (
+                              <Button
+                                size="small"
+                                color="success"
+                                variant="outlined"
+                                startIcon={<CloseIcon />}
+                                onClick={() => handleApproveLease(lease)}
+                              >
+                                Approve
+                              </Button>
+                            )}
+                          </Stack>
                         </TableCell>
                         <TableCell>
                           <Stack spacing={0.5}>

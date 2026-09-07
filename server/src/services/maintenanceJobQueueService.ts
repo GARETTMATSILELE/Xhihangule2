@@ -137,13 +137,38 @@ class MaintenanceJobQueueService {
     );
   }
 
+  private async renewClaimedLease(job: IMaintenanceJob): Promise<void> {
+    await MaintenanceJob.updateOne(
+      { _id: job._id, status: 'running', workerId: this.workerId },
+      { $set: { leaseExpiresAt: new Date(Date.now() + LEASE_MS) } }
+    );
+  }
+
   private async executeJob(job: IMaintenanceJob): Promise<void> {
+    const heartbeatMs = Math.max(15_000, Math.floor(LEASE_MS / 3));
+    const heartbeat = setInterval(() => {
+      void this.renewClaimedLease(job).catch((error) => {
+        logger.warn(`Maintenance lease renewal failed for ${String(job._id)}:`, error);
+      });
+    }, heartbeatMs);
     try {
       let result: any = {};
       if (job.operation === 'sync_property_accounts') {
-        await propertyAccountService.syncPropertyAccountsWithPayments();
-        const migrated = await propertyAccountService.migrateSalesLedgerForCompany();
-        result = { migrated };
+        const companyId = job.companyId ? String(job.companyId).trim() : '';
+        const syncStats = await propertyAccountService.syncPropertyAccountsWithPayments({
+          companyId: companyId || undefined,
+          onProgress: () => this.renewClaimedLease(job)
+        });
+        let migrated = { moved: 0, propertiesAffected: 0 };
+        if (companyId) {
+          const entityIds = await propertyAccountService.getLedgerEntityIdsForCompany(companyId);
+          if (entityIds.length > 0) {
+            migrated = await propertyAccountService.migrateSalesLedgerForCompany(entityIds);
+          }
+        } else {
+          migrated = await propertyAccountService.migrateSalesLedgerForCompany();
+        }
+        result = { migrated, syncStats, companyScoped: Boolean(companyId) };
       } else if (job.operation === 'ensure_development_ledgers') {
         result = await propertyAccountService.ensureDevelopmentLedgersAndBackfillPayments({
           companyId: job.companyId || undefined
@@ -184,6 +209,8 @@ class MaintenanceJobQueueService {
         }
       );
       logger.error(`Maintenance job ${String(job._id)} failed (${job.operation}):`, error);
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 }

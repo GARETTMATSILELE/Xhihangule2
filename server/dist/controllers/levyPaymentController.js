@@ -200,6 +200,15 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         catch (ledgerErr) {
             console.error('Failed to record levy pass-through collection:', ledgerErr);
+            try {
+                const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
+                yield ledgerEventService.enqueueEvent('levy_collection', undefined, {
+                    levyPaymentId: String(levyPayment._id)
+                });
+            }
+            catch (enqueueErr) {
+                console.error('Failed to enqueue levy collection retry:', enqueueErr);
+            }
         }
         // Populate the created levy payment for response
         const populatedLevyPayment = yield LevyPayment_1.LevyPayment.findById(levyPayment._id)
@@ -352,6 +361,15 @@ const initiateLevyPayout = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         catch (ledgerErr) {
             console.error('Failed to record levy pass-through payout:', ledgerErr);
+            try {
+                const ledgerEventService = (yield Promise.resolve().then(() => __importStar(require('../services/ledgerEventService')))).default;
+                yield ledgerEventService.enqueueEvent('levy_payout', undefined, {
+                    levyPaymentId: String(levy._id)
+                });
+            }
+            catch (enqueueErr) {
+                console.error('Failed to enqueue levy payout retry:', enqueueErr);
+            }
         }
         const populated = yield LevyPayment_1.LevyPayment.findById(levy._id)
             .populate('propertyId', 'name address')

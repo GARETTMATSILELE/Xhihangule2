@@ -60,6 +60,8 @@ const logger_1 = require("../utils/logger");
 const Payment_1 = require("../models/Payment");
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const propertyAccountService_1 = __importStar(require("./propertyAccountService"));
+const jobLeaseService_1 = require("./jobLeaseService");
+const paymentReconciliationQuery_1 = require("./paymentReconciliationQuery");
 class ScheduledSyncService {
     constructor() {
         this.syncJobs = new Map();
@@ -218,45 +220,45 @@ class ScheduledSyncService {
             const startTime = Date.now();
             logger_1.logger.info(`Executing scheduled sync: ${schedule.name}`);
             try {
-                // Update schedule info
-                schedule.lastRun = new Date();
-                schedule.runCount++;
-                // Execute appropriate sync based on schedule type
-                switch (schedule.name) {
-                    case 'daily_sync':
-                        yield this.executeDailySync();
-                        break;
-                    case 'hourly_sync':
-                        yield this.executeHourlySync();
-                        break;
-                    case 'ledger_reconciliation':
-                        yield this.executeLedgerReconciliation();
-                        break;
-                    case 'weekly_consistency_check':
-                        yield this.executeWeeklyConsistencyCheck();
-                        break;
-                    case 'monthly_deep_sync':
-                        yield this.executeMonthlyDeepSync();
-                        break;
-                    case 'sync_failure_reprocessor':
-                        yield this.executeFailureReprocessor();
-                        break;
-                    default:
-                        yield this.executeCustomSync(schedule);
+                const leaseResult = yield (0, jobLeaseService_1.runWithJobLease)(`scheduled:${schedule.name}`, () => __awaiter(this, void 0, void 0, function* () {
+                    schedule.lastRun = new Date();
+                    schedule.runCount++;
+                    switch (schedule.name) {
+                        case 'daily_sync':
+                            yield this.executeDailySync();
+                            break;
+                        case 'hourly_sync':
+                            yield this.executeHourlySync();
+                            break;
+                        case 'ledger_reconciliation':
+                            yield this.executeLedgerReconciliation();
+                            break;
+                        case 'weekly_consistency_check':
+                            yield this.executeWeeklyConsistencyCheck();
+                            break;
+                        case 'monthly_deep_sync':
+                            yield this.executeMonthlyDeepSync();
+                            break;
+                        case 'sync_failure_reprocessor':
+                            yield this.executeFailureReprocessor();
+                            break;
+                        default:
+                            yield this.executeCustomSync(schedule);
+                    }
+                    const duration = Date.now() - startTime;
+                    schedule.averageDuration = (schedule.averageDuration * (schedule.runCount - 1) + duration) / schedule.runCount;
+                    const job = this.syncJobs.get(schedule.name);
+                    if (job) {
+                        schedule.nextRun = job.nextDate().toJSDate();
+                    }
+                    logger_1.logger.info(`Completed scheduled sync: ${schedule.name} in ${duration}ms`);
+                }));
+                if (leaseResult.skipped) {
+                    return;
                 }
-                // Calculate and update average duration
-                const duration = Date.now() - startTime;
-                schedule.averageDuration = (schedule.averageDuration * (schedule.runCount - 1) + duration) / schedule.runCount;
-                // Calculate next run time
-                const job = this.syncJobs.get(schedule.name);
-                if (job) {
-                    schedule.nextRun = job.nextDate().toJSDate();
-                }
-                logger_1.logger.info(`Completed scheduled sync: ${schedule.name} in ${duration}ms`);
             }
             catch (error) {
                 logger_1.logger.error(`Failed to execute scheduled sync ${schedule.name}:`, error);
-                // Emit error event
                 this.databaseSyncService.emit('scheduledSyncError', {
                     scheduleName: schedule.name,
                     error: error instanceof Error ? error.message : String(error),
@@ -358,55 +360,72 @@ class ScheduledSyncService {
      */
     executeLedgerReconciliation() {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, e_1, _b, _c;
-            var _d, _e, _f;
+            var _a, e_1, _b, _c, _d, e_2, _e, _f;
             const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
             try {
-                // 1) Re-post recent completed payments (idempotent, guarded by unique indexes)
-                const recentPayments = yield Payment_1.Payment.find({ status: 'completed', paymentDate: { $gte: since } }).select('_id');
-                for (const p of recentPayments) {
-                    try {
-                        yield propertyAccountService_1.default.recordIncomeFromPayment(String(p._id));
-                    }
-                    catch (e) {
-                        try {
-                            yield (yield Promise.resolve().then(() => __importStar(require('./ledgerEventService')))).default.enqueueOwnerIncomeEvent(String(p._id));
+                const filter = (0, paymentReconciliationQuery_1.buildOwnerIncomeReconciliationPaymentFilter)({ paymentDateFrom: since });
+                const cursor = Payment_1.Payment.find(filter)
+                    .select('_id status amount depositAmount reversalOfPaymentId isProvisional isInSuspense')
+                    .sort({ _id: 1 })
+                    .batchSize(paymentReconciliationQuery_1.PAYMENT_RECONCILIATION_BATCH_SIZE)
+                    .cursor();
+                let selected = 0;
+                let attempted = 0;
+                let skippedEarlyExit = 0;
+                let failures = 0;
+                try {
+                    for (var _g = true, _h = __asyncValues(cursor), _j; _j = yield _h.next(), _a = _j.done, !_a; _g = true) {
+                        _c = _j.value;
+                        _g = false;
+                        const p = _c;
+                        selected += 1;
+                        if ((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)(p)) {
+                            skippedEarlyExit += 1;
+                            continue;
                         }
-                        catch (_g) { }
-                        logger_1.logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                        try {
+                            yield propertyAccountService_1.default.recordIncomeFromPayment(String(p._id));
+                            attempted += 1;
+                        }
+                        catch (e) {
+                            failures += 1;
+                            try {
+                                yield (yield Promise.resolve().then(() => __importStar(require('./ledgerEventService')))).default.enqueueOwnerIncomeEvent(String(p._id));
+                            }
+                            catch (_k) { }
+                            logger_1.logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                        }
                     }
                 }
-                // 2) Ensure company commissions are present for recent payments (idempotent)
+                catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                finally {
+                    try {
+                        if (!_g && !_a && (_b = _h.return)) yield _b.call(_h);
+                    }
+                    finally { if (e_1) throw e_1.error; }
+                }
+                logger_1.logger.info('Ledger reconciliation owner-income pass completed', {
+                    windowHours: 48,
+                    selected,
+                    attempted,
+                    skippedEarlyExit,
+                    failures
+                });
+                // 2) Ensure company commissions via the policy-gated writer (idempotent; skips provisional)
                 try {
-                    const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
+                    const accountingIntegrationService = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
+                    const { shouldPostCompanyCommission } = yield Promise.resolve().then(() => __importStar(require('./accountingPostingPolicy')));
                     const payList = yield Payment_1.Payment.find({
                         status: 'completed',
                         paymentDate: { $gte: since },
                         'commissionDetails.agencyShare': { $gt: 0 }
-                    }).select('_id companyId paymentType commissionDetails paymentDate currency paymentMethod referenceNumber processedBy notes');
+                    }).select('_id companyId paymentType commissionDetails paymentDate isProvisional isInSuspense reversalOfPaymentId amount commissionFinalized');
                     for (const p of payList) {
                         if (!p.companyId)
                             continue;
-                        const desiredSource = p.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
-                        const txDoc = {
-                            type: 'income',
-                            source: desiredSource,
-                            amount: Number(((_d = p.commissionDetails) === null || _d === void 0 ? void 0 : _d.agencyShare) || 0),
-                            date: p.paymentDate || new Date(),
-                            currency: p.currency || 'USD',
-                            paymentMethod: p.paymentMethod,
-                            paymentId: p._id,
-                            referenceNumber: p.referenceNumber,
-                            description: desiredSource === 'sales_commission' ? 'Sales commission income' : 'Rental commission income',
-                            processedBy: p.processedBy,
-                            notes: p.notes
-                        };
-                        yield CompanyAccount.updateOne({ companyId: p.companyId }, { $setOnInsert: { companyId: p.companyId, runningBalance: 0, totalIncome: 0, totalExpenses: 0, lastUpdated: new Date() } }, { upsert: true });
-                        yield CompanyAccount.updateOne({ companyId: p.companyId, transactions: { $not: { $elemMatch: { paymentId: p._id, isArchived: { $ne: true } } } } }, {
-                            $push: { transactions: txDoc },
-                            $inc: { totalIncome: Number(((_e = p.commissionDetails) === null || _e === void 0 ? void 0 : _e.agencyShare) || 0), runningBalance: Number(((_f = p.commissionDetails) === null || _f === void 0 ? void 0 : _f.agencyShare) || 0) },
-                            $set: { lastUpdated: new Date() }
-                        });
+                        if (!shouldPostCompanyCommission(p))
+                            continue;
+                        yield accountingIntegrationService.postCompanyCommission(p);
                     }
                 }
                 catch (ensureErr) {
@@ -434,10 +453,10 @@ class ScheduledSyncService {
                         .lean()
                         .cursor();
                     try {
-                        for (var _h = true, _j = __asyncValues(cursor), _k; _k = yield _j.next(), _a = _k.done, !_a; _h = true) {
-                            _c = _k.value;
-                            _h = false;
-                            const ca = _c;
+                        for (var _l = true, _m = __asyncValues(cursor), _o; _o = yield _m.next(), _d = _o.done, !_d; _l = true) {
+                            _f = _o.value;
+                            _l = false;
+                            const ca = _f;
                             try {
                                 const grouped = Object.create(null);
                                 const txs = Array.isArray(ca.transactions) ? ca.transactions : [];
@@ -473,12 +492,12 @@ class ScheduledSyncService {
                             }
                         }
                     }
-                    catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                    catch (e_2_1) { e_2 = { error: e_2_1 }; }
                     finally {
                         try {
-                            if (!_h && !_a && (_b = _j.return)) yield _b.call(_j);
+                            if (!_l && !_d && (_e = _m.return)) yield _e.call(_m);
                         }
-                        finally { if (e_1) throw e_1.error; }
+                        finally { if (e_2) throw e_2.error; }
                     }
                 }
                 catch (dedupeErr) {

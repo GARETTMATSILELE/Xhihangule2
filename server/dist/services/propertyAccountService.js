@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -7,6 +40,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
+};
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -32,6 +72,12 @@ const SystemSetting_1 = __importDefault(require("../models/SystemSetting"));
 const uuid_1 = require("uuid");
 const database_1 = require("../config/database");
 const chargeTypeService_1 = __importDefault(require("./chargeTypeService"));
+const propertyAccountSocket_1 = require("../events/propertyAccountSocket");
+const paymentReconciliationQuery_1 = require("./paymentReconciliationQuery");
+const paymentAccountingCompleteness_1 = require("./paymentAccountingCompleteness");
+const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
+const propertyAccountTotals_1 = require("./propertyAccountTotals");
+const ledgerMutationPolicy_1 = require("./ledgerMutationPolicy");
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise = null;
 const PASS_THROUGH_TYPE_LABELS = {
@@ -105,6 +151,48 @@ class PropertyAccountService {
     normalizeLedgerType(value) {
         const normalized = String(value || '').trim().toLowerCase();
         return normalized === 'sale' ? 'sale' : 'rental';
+    }
+    resolveCompanyIdForEntity(entityId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const property = yield Property_1.Property.findById(entityId).select('companyId').lean();
+                if (property === null || property === void 0 ? void 0 : property.companyId)
+                    return String(property.companyId);
+                const development = yield Development_1.Development.findById(entityId).select('companyId').lean();
+                if (development === null || development === void 0 ? void 0 : development.companyId)
+                    return String(development.companyId);
+                const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(entityId).select('developmentId').lean();
+                if (unit === null || unit === void 0 ? void 0 : unit.developmentId) {
+                    const parent = yield Development_1.Development.findById(unit.developmentId).select('companyId').lean();
+                    if (parent === null || parent === void 0 ? void 0 : parent.companyId)
+                        return String(parent.companyId);
+                }
+            }
+            catch (error) {
+                logger_1.logger.warn('Failed to resolve companyId for property-account socket emit', { entityId, error });
+            }
+            return undefined;
+        });
+    }
+    notifyAccountUpdated(opts) {
+        void (() => __awaiter(this, void 0, void 0, function* () {
+            try {
+                let companyId = opts.companyId ? String(opts.companyId) : undefined;
+                if (!companyId && opts.propertyId) {
+                    companyId = yield this.resolveCompanyIdForEntity(opts.propertyId);
+                }
+                (0, propertyAccountSocket_1.emitPropertyAccountUpdated)({
+                    companyId,
+                    propertyId: opts.propertyId,
+                    accountId: opts.accountId ? String(opts.accountId) : undefined,
+                    paymentId: opts.paymentId,
+                    eventType: opts.eventType
+                });
+            }
+            catch (error) {
+                logger_1.logger.warn('propertyAccount.updated notify failed (non-fatal)', error);
+            }
+        }))();
     }
     shouldRunOneTimeDuplicateCleanup() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -378,6 +466,128 @@ class PropertyAccountService {
         target.transactions.push(transaction);
         return { accounts: nextAccounts, inserted: true };
     }
+    reloadWritableAccount(accountId, propertyId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const fresh = yield PropertyAccount_1.default.findOne({
+                _id: accountId,
+                isArchived: false,
+                isActive: { $ne: false }
+            });
+            if (!fresh) {
+                return this.validateWritableAccount(yield this.getOrCreatePropertyAccount(propertyId), propertyId, 'reloadWritableAccount');
+            }
+            return this.validateWritableAccount(fresh, propertyId, 'reloadWritableAccount');
+        });
+    }
+    /**
+     * Append a pass-through row without replacing the sibling buckets/transactions.
+     */
+    pushPassThroughTransactionAtomic(opts) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { account, propertyId, chargeType, transaction, idKey } = opts;
+            const type = this.normalizePassThroughType(chargeType);
+            const amountIncCollected = Number(opts.incrementCollected || 0);
+            const amountIncPaid = Number(opts.incrementPaid || 0);
+            const already = yield PropertyAccount_1.default.findOne({
+                _id: account._id,
+                'passThroughAccounts.transactions.idempotencyKey': idKey
+            }).select('_id').lean();
+            if (already)
+                return 'duplicate';
+            const intoBucket = yield PropertyAccount_1.default.updateOne({
+                _id: account._id,
+                propertyId: account.propertyId,
+                isArchived: false,
+                isActive: { $ne: false },
+                passThroughAccounts: {
+                    $elemMatch: {
+                        type,
+                        'transactions.idempotencyKey': { $ne: idKey }
+                    }
+                }
+            }, {
+                $push: { 'passThroughAccounts.$.transactions': transaction },
+                $inc: {
+                    passThroughCollected: amountIncCollected,
+                    passThroughPaid: amountIncPaid,
+                    ledgerRevision: 1
+                },
+                $set: { lastUpdated: new Date() }
+            });
+            if (Number(intoBucket.modifiedCount || 0) > 0) {
+                const fresh = yield PropertyAccount_1.default.findOne({ _id: account._id, isArchived: false });
+                if (fresh)
+                    yield this.recalculateBalance(fresh);
+                return 'inserted';
+            }
+            const created = yield PropertyAccount_1.default.updateOne({
+                _id: account._id,
+                propertyId: account.propertyId,
+                isArchived: false,
+                isActive: { $ne: false },
+                'passThroughAccounts.type': { $ne: type },
+                'passThroughAccounts.transactions.idempotencyKey': { $ne: idKey }
+            }, {
+                $push: {
+                    passThroughAccounts: {
+                        type,
+                        label: this.getPassThroughLabel(type),
+                        runningBalance: amountIncCollected - amountIncPaid,
+                        totalCollected: amountIncCollected,
+                        totalPaid: amountIncPaid,
+                        transactions: [transaction],
+                        lastUpdated: new Date()
+                    }
+                },
+                $inc: {
+                    passThroughCollected: amountIncCollected,
+                    passThroughPaid: amountIncPaid,
+                    ledgerRevision: 1
+                },
+                $set: { lastUpdated: new Date() }
+            });
+            if (Number(created.modifiedCount || 0) > 0) {
+                const fresh = yield PropertyAccount_1.default.findOne({ _id: account._id, isArchived: false });
+                if (fresh)
+                    yield this.recalculateBalance(fresh);
+                return 'inserted';
+            }
+            const raced = yield PropertyAccount_1.default.findOne({
+                _id: account._id,
+                'passThroughAccounts.transactions.idempotencyKey': idKey
+            }).select('_id').lean();
+            if (raced)
+                return 'duplicate';
+            const retry = yield PropertyAccount_1.default.updateOne({
+                _id: account._id,
+                propertyId: account.propertyId,
+                isArchived: false,
+                isActive: { $ne: false },
+                passThroughAccounts: {
+                    $elemMatch: {
+                        type,
+                        'transactions.idempotencyKey': { $ne: idKey }
+                    }
+                }
+            }, {
+                $push: { 'passThroughAccounts.$.transactions': transaction },
+                $inc: {
+                    passThroughCollected: amountIncCollected,
+                    passThroughPaid: amountIncPaid,
+                    ledgerRevision: 1
+                },
+                $set: { lastUpdated: new Date() }
+            });
+            if (Number(retry.modifiedCount || 0) > 0) {
+                const fresh = yield PropertyAccount_1.default.findOne({ _id: account._id, isArchived: false });
+                if (fresh)
+                    yield this.recalculateBalance(fresh);
+                return 'inserted';
+            }
+            logger_1.logger.warn('Pass-through atomic push matched no document', { propertyId, type, idKey });
+            return 'duplicate';
+        });
+    }
     calculatePassThroughSummary(account) {
         const summary = this.recalculatePassThroughAccounts((account === null || account === void 0 ? void 0 : account.passThroughAccounts) || []);
         const byType = {};
@@ -422,23 +632,25 @@ class PropertyAccountService {
                 createdAt: new Date(),
                 updatedAt: new Date()
             };
-            const { accounts, inserted } = this.upsertPassThroughTransaction(account.passThroughAccounts || [], chargeType, transaction, (tx) => String((tx === null || tx === void 0 ? void 0 : tx.idempotencyKey) || '') === idKey ||
-                Boolean(input.paymentId && (tx === null || tx === void 0 ? void 0 : tx.type) === 'collection' && String((tx === null || tx === void 0 ? void 0 : tx.paymentId) || '') === String(input.paymentId)));
-            if (!inserted) {
-                return (yield this.getPropertyAccount(input.propertyId));
-            }
-            const summary = this.recalculatePassThroughAccounts(accounts);
-            yield PropertyAccount_1.default.updateOne({ _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } }, {
-                $set: {
-                    passThroughAccounts: summary.accounts,
-                    passThroughCollected: summary.collected,
-                    passThroughPaid: summary.paid,
-                    passThroughOutstanding: summary.outstanding,
-                    netOwnerBalance: account.runningBalance || 0,
-                    lastUpdated: new Date()
-                }
+            const pushed = yield this.pushPassThroughTransactionAtomic({
+                account,
+                propertyId: input.propertyId,
+                chargeType,
+                transaction,
+                idKey,
+                incrementCollected: amount
             });
-            return (yield this.getPropertyAccount(input.propertyId));
+            if (pushed === 'duplicate') {
+                return account;
+            }
+            this.notifyAccountUpdated({
+                companyId: input.companyId,
+                propertyId: input.propertyId,
+                accountId: account._id,
+                paymentId: input.paymentId,
+                eventType: 'pass_through_updated'
+            });
+            return this.reloadWritableAccount(account._id, input.propertyId);
         });
     }
     recordPassThroughPayment(input) {
@@ -471,23 +683,25 @@ class PropertyAccountService {
                 createdAt: new Date(),
                 updatedAt: new Date()
             };
-            const { accounts, inserted } = this.upsertPassThroughTransaction(account.passThroughAccounts || [], chargeType, transaction, (tx) => String((tx === null || tx === void 0 ? void 0 : tx.idempotencyKey) || '') === idKey ||
-                Boolean(input.levyPaymentId && (tx === null || tx === void 0 ? void 0 : tx.type) === 'payment' && String((tx === null || tx === void 0 ? void 0 : tx.levyPaymentId) || '') === String(input.levyPaymentId)));
-            if (!inserted) {
-                return (yield this.getPropertyAccount(input.propertyId));
-            }
-            const summary = this.recalculatePassThroughAccounts(accounts);
-            yield PropertyAccount_1.default.updateOne({ _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } }, {
-                $set: {
-                    passThroughAccounts: summary.accounts,
-                    passThroughCollected: summary.collected,
-                    passThroughPaid: summary.paid,
-                    passThroughOutstanding: summary.outstanding,
-                    netOwnerBalance: account.runningBalance || 0,
-                    lastUpdated: new Date()
-                }
+            const pushed = yield this.pushPassThroughTransactionAtomic({
+                account,
+                propertyId: input.propertyId,
+                chargeType,
+                transaction,
+                idKey,
+                incrementPaid: amount
             });
-            return (yield this.getPropertyAccount(input.propertyId));
+            if (pushed === 'duplicate') {
+                return account;
+            }
+            this.notifyAccountUpdated({
+                companyId: input.companyId,
+                propertyId: input.propertyId,
+                accountId: account._id,
+                paymentId: input.paymentId,
+                eventType: 'pass_through_updated'
+            });
+            return this.reloadWritableAccount(account._id, input.propertyId);
         });
     }
     getCompanyPassThroughSummary(companyId) {
@@ -546,36 +760,15 @@ class PropertyAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, _b, _c, _d, _e, _f;
             try {
-                // Ensure indexes support multi-ledger before any creates
-                yield this.ensureLedgerIndexes();
-                console.log('getOrCreatePropertyAccount called with propertyId:', propertyId);
-                console.log('Converting to ObjectId:', new mongoose_1.default.Types.ObjectId(propertyId));
                 const resolution = yield this.resolveLedgerTypeForProperty(propertyId, 'getOrCreatePropertyAccount');
                 const effectiveLedger = resolution.ledgerType;
                 const propertyObjectId = new mongoose_1.default.Types.ObjectId(propertyId);
-                yield PropertyAccount_1.default.updateMany({
-                    propertyId: propertyObjectId,
-                    isArchived: false,
-                    isActive: { $ne: false },
-                    $or: [
-                        { ledgerType: { $exists: false } },
-                        { ledgerType: null },
-                        { ledgerType: '' },
-                        { ledgerType: { $nin: ['rental', 'sale'] } }
-                    ]
-                }, { $set: { ledgerType: effectiveLedger, lastUpdated: new Date() } });
                 const activeAccounts = yield PropertyAccount_1.default.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
                 if (activeAccounts.length > 1) {
                     throw new errorHandler_1.AppError(`Multiple active PropertyAccounts found for property ${propertyId} (${effectiveLedger}); refusing to choose a writable ledger`, 409);
                 }
                 let account = activeAccounts[0];
-                console.log('Database query result:', account ? 'Found active account' : 'No active account found');
                 if (account) {
-                    if (!account.ledgerType) {
-                        account.ledgerType = effectiveLedger;
-                        yield account.save();
-                    }
-                    yield this.recalculateBalance(account);
                     return this.validateWritableAccount(account, propertyId, 'getOrCreatePropertyAccount');
                 }
                 if (!account) {
@@ -690,10 +883,6 @@ class PropertyAccountService {
                     }
                     logger_1.logger.info(`Created new property account for property: ${propertyId}`);
                 }
-                else {
-                    // Recalculate balance for existing account
-                    yield this.recalculateBalance(account);
-                }
                 return this.validateWritableAccount(account, propertyId, 'getOrCreatePropertyAccount');
             }
             catch (error) {
@@ -702,9 +891,13 @@ class PropertyAccountService {
             }
         });
     }
-    // One-time index upgrade to support { propertyId, ledgerType } uniqueness
+    // One-time index upgrade to support { propertyId, ledgerType } uniqueness.
+    // Phase 5B: never create/drop indexes or mutate documents unless explicitly enabled.
     ensureLedgerIndexes() {
         return __awaiter(this, void 0, void 0, function* () {
+            if (!(0, ledgerMutationPolicy_1.isIndexCreationAllowed)()) {
+                return;
+            }
             if (!ledgerIndexUpgradePromise) {
                 ledgerIndexUpgradePromise = (() => __awaiter(this, void 0, void 0, function* () {
                     try {
@@ -918,54 +1111,61 @@ class PropertyAccountService {
     recalculateBalance(account) {
         return __awaiter(this, void 0, void 0, function* () {
             this.validateWritableAccount(account, String(account.propertyId), 'recalculateBalance');
-            // Calculate totals from transactions
-            const totalIncome = account.transactions
-                .filter(t => t.type === 'income' && t.status === 'completed' && t.accountingTreatment !== 'PASS_THROUGH')
-                .reduce((sum, t) => sum + t.amount, 0);
-            const totalExpenses = account.transactions
-                .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed' && t.accountingTreatment !== 'PASS_THROUGH')
-                .reduce((sum, t) => sum + t.amount, 0);
-            const totalOwnerPayouts = account.ownerPayouts
-                .filter(p => p.status === 'completed')
-                .reduce((sum, p) => sum + p.amount, 0);
-            const openingBalance = account.transactions
-                .filter(t => t.type === 'opening_balance' && t.status === 'completed')
-                .reduce((sum, t) => sum + (t.direction === 'debit' ? -t.amount : t.amount), 0);
-            // Calculate running balance
-            const newRunningBalance = totalIncome - totalExpenses - totalOwnerPayouts + openingBalance;
-            const passThroughSummary = this.recalculatePassThroughAccounts(account.passThroughAccounts || []);
-            // Update the account if balance has changed
-            if (account.runningBalance !== newRunningBalance ||
-                Number(account.passThroughCollected || 0) !== passThroughSummary.collected ||
-                Number(account.passThroughPaid || 0) !== passThroughSummary.paid ||
-                Number(account.passThroughOutstanding || 0) !== passThroughSummary.outstanding ||
-                Number(account.netOwnerBalance || 0) !== newRunningBalance) {
-                account.runningBalance = newRunningBalance;
-                account.totalIncome = totalIncome;
-                account.totalExpenses = totalExpenses;
-                account.totalOwnerPayouts = totalOwnerPayouts;
-                account.passThroughAccounts = passThroughSummary.accounts;
-                account.passThroughCollected = passThroughSummary.collected;
-                account.passThroughPaid = passThroughSummary.paid;
-                account.passThroughOutstanding = passThroughSummary.outstanding;
-                account.netOwnerBalance = newRunningBalance;
-                account.lastUpdated = new Date();
-                // Use updateOne instead of save() to avoid triggering pre-save middleware
-                yield PropertyAccount_1.default.updateOne({ _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } }, {
-                    $set: {
-                        runningBalance: newRunningBalance,
-                        totalIncome: totalIncome,
-                        totalExpenses: totalExpenses,
-                        totalOwnerPayouts: totalOwnerPayouts,
-                        passThroughAccounts: passThroughSummary.accounts,
-                        passThroughCollected: passThroughSummary.collected,
-                        passThroughPaid: passThroughSummary.paid,
-                        passThroughOutstanding: passThroughSummary.outstanding,
-                        netOwnerBalance: newRunningBalance,
-                        lastUpdated: new Date()
-                    }
+            const totals = (0, propertyAccountTotals_1.computePropertyAccountTotals)(account);
+            const revision = Number(account.ledgerRevision || 0);
+            const scalarsUnchanged = account.runningBalance === totals.runningBalance &&
+                Number(account.totalIncome || 0) === totals.totalIncome &&
+                Number(account.totalExpenses || 0) === totals.totalExpenses &&
+                Number(account.totalOwnerPayouts || 0) === totals.totalOwnerPayouts &&
+                Number(account.passThroughCollected || 0) === totals.passThroughCollected &&
+                Number(account.passThroughPaid || 0) === totals.passThroughPaid &&
+                Number(account.passThroughOutstanding || 0) === totals.passThroughOutstanding &&
+                Number(account.netOwnerBalance || 0) === totals.runningBalance;
+            if (scalarsUnchanged)
+                return;
+            account.runningBalance = totals.runningBalance;
+            account.totalIncome = totals.totalIncome;
+            account.totalExpenses = totals.totalExpenses;
+            account.totalOwnerPayouts = totals.totalOwnerPayouts;
+            account.passThroughCollected = totals.passThroughCollected;
+            account.passThroughPaid = totals.passThroughPaid;
+            account.passThroughOutstanding = totals.passThroughOutstanding;
+            account.netOwnerBalance = totals.runningBalance;
+            account.lastUpdated = new Date();
+            // Never $set passThroughAccounts/transactions arrays â€” concurrent $push must win.
+            const result = yield PropertyAccount_1.default.updateOne({
+                _id: account._id,
+                propertyId: account.propertyId,
+                isArchived: false,
+                isActive: { $ne: false },
+                $or: [{ ledgerRevision: revision }, { ledgerRevision: { $exists: false } }]
+            }, {
+                $set: {
+                    runningBalance: totals.runningBalance,
+                    totalIncome: totals.totalIncome,
+                    totalExpenses: totals.totalExpenses,
+                    totalOwnerPayouts: totals.totalOwnerPayouts,
+                    passThroughCollected: totals.passThroughCollected,
+                    passThroughPaid: totals.passThroughPaid,
+                    passThroughOutstanding: totals.passThroughOutstanding,
+                    netOwnerBalance: totals.runningBalance,
+                    lastUpdated: new Date()
+                },
+                $inc: { ledgerRevision: 1 }
+            });
+            if (Number(result.modifiedCount || 0) === 0 && Number(result.matchedCount || 0) === 0) {
+                const fresh = yield PropertyAccount_1.default.findOne({
+                    _id: account._id,
+                    isArchived: false,
+                    isActive: { $ne: false }
                 });
-                console.log(`Recalculated balance for property ${account.propertyId} (${account.ledgerType || 'rental'}): ${newRunningBalance}`);
+                if (fresh && String(fresh.ledgerRevision || 0) !== String(revision)) {
+                    logger_1.logger.warn('Skipped stale PropertyAccount total write', {
+                        accountId: String(account._id),
+                        expectedRevision: revision,
+                        actualRevision: fresh.ledgerRevision
+                    });
+                }
             }
         });
     }
@@ -1024,6 +1224,36 @@ class PropertyAccountService {
             }
         });
     }
+    ownerIncomeCompletenessDeps() {
+        return {
+            resolveLedgerTypeForProperty: (propertyId) => this.resolveLedgerTypeForProperty(propertyId, 'recordIncomeFromPayment'),
+            getCompatibilityChargeLines: (payment, companyId) => chargeTypeService_1.default.getCompatibilityChargeLines(payment, companyId),
+            findActivePropertyAccounts: (propertyId, ledgerType) => __awaiter(this, void 0, void 0, function* () {
+                const pid = new mongoose_1.default.Types.ObjectId(propertyId);
+                return PropertyAccount_1.default.find(this.activeAccountCandidatesQuery(pid, ledgerType))
+                    .select({
+                    propertyId: 1,
+                    ledgerType: 1,
+                    isArchived: 1,
+                    isActive: 1,
+                    'transactions.type': 1,
+                    'transactions.paymentId': 1,
+                    'transactions.status': 1,
+                    'transactions.idempotencyKey': 1,
+                    'passThroughAccounts.type': 1,
+                    'passThroughAccounts.transactions.type': 1,
+                    'passThroughAccounts.transactions.paymentId': 1,
+                    'passThroughAccounts.transactions.status': 1,
+                    'passThroughAccounts.transactions.idempotencyKey': 1
+                })
+                    .lean();
+            }),
+            findDevelopmentIdForUnit: (unitId) => __awaiter(this, void 0, void 0, function* () {
+                const unitDoc = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).select('developmentId').lean();
+                return (unitDoc === null || unitDoc === void 0 ? void 0 : unitDoc.developmentId) ? String(unitDoc.developmentId) : undefined;
+            })
+        };
+    }
     /**
      * Record income from rental payments
      */
@@ -1035,47 +1265,48 @@ class PropertyAccountService {
                 if (!payment) {
                     throw new errorHandler_1.AppError('Payment not found', 404);
                 }
-                // Reversal rows and correction entries must not be posted as new income.
-                if (payment.reversalOfPaymentId)
-                    return;
-                if (Number(payment.amount || 0) < 0)
-                    return;
-                if (payment.status !== 'completed') {
-                    logger_1.logger.info(`Skipping income recording for payment ${paymentId} - status: ${payment.status}`);
+                const policy = (0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)(payment);
+                if (!policy.allowed) {
+                    logger_1.logger.info(`Skipping income recording for payment ${paymentId} - ${policy.reason}`);
                     return;
                 }
-                // Guard: exclude deposit-only payments from income
-                const deposit = payment.depositAmount || 0;
-                if (deposit > 0 && (payment.amount <= deposit)) {
-                    logger_1.logger.info(`Skipping income for deposit-only payment ${paymentId} (amount: ${payment.amount}, deposit: ${deposit})`);
-                    return;
+                try {
+                    const completeness = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(payment, this.ownerIncomeCompletenessDeps());
+                    if ((0, paymentAccountingCompleteness_1.shouldSkipRecordIncomePosting)(completeness)) {
+                        logger_1.logger.debug('payment completeness check passed', { paymentId: String(payment._id) });
+                        return;
+                    }
+                    logger_1.logger.debug(`payment completeness check failed: ${completeness.reason || 'not_proven'}`, {
+                        paymentId: String(payment._id)
+                    });
+                }
+                catch (_d) {
+                    logger_1.logger.debug('payment completeness check failed: completeness_error', { paymentId: String(payment._id) });
                 }
                 const baseResolution = yield this.resolveLedgerTypeForProperty(String(payment.propertyId), 'recordIncomeFromPayment');
-                const isSale = baseResolution.ledgerType === 'sale';
-                if (payment.paymentType && ((payment.paymentType === 'sale') !== isSale)) {
+                const isSale = baseResolution.ledgerType === 'sale' || payment.paymentType === 'sale';
+                if (payment.paymentType &&
+                    payment.paymentType !== 'introduction' &&
+                    ((payment.paymentType === 'sale') !== (baseResolution.ledgerType === 'sale'))) {
                     throw new errorHandler_1.AppError(`Payment type ${payment.paymentType} does not match Property.rentalType (${baseResolution.businessType}) for property ${String(payment.propertyId)}`, 400);
                 }
-                let devId = payment === null || payment === void 0 ? void 0 : payment.developmentId;
-                const unitId = payment === null || payment === void 0 ? void 0 : payment.developmentUnitId;
-                const targets = [];
-                if (isSale) {
-                    if (unitId)
-                        targets.push({ id: unitId.toString(), ledger: baseResolution.ledgerType });
-                    if (!devId && unitId) {
+                const targets = yield (0, paymentAccountingCompleteness_1.buildOwnerIncomeLedgerTargets)({
+                    isSale,
+                    ledgerType: baseResolution.ledgerType,
+                    propertyId: String(payment.propertyId),
+                    developmentId: payment === null || payment === void 0 ? void 0 : payment.developmentId,
+                    developmentUnitId: payment === null || payment === void 0 ? void 0 : payment.developmentUnitId,
+                    findDevelopmentIdForUnit: (unitId) => __awaiter(this, void 0, void 0, function* () {
                         try {
                             const unitDoc = yield DevelopmentUnit_1.DevelopmentUnit.findById(unitId).select('developmentId');
-                            devId = unitDoc === null || unitDoc === void 0 ? void 0 : unitDoc.developmentId;
+                            return (unitDoc === null || unitDoc === void 0 ? void 0 : unitDoc.developmentId) ? String(unitDoc.developmentId) : undefined;
                         }
-                        catch (_d) { }
-                    }
-                    if (devId)
-                        targets.push({ id: devId.toString(), ledger: baseResolution.ledgerType });
-                    if (!unitId && !devId)
-                        targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
-                }
-                else {
-                    targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
-                }
+                        catch (_a) {
+                            return undefined;
+                        }
+                    }),
+                    unitLookupErrors: 'swallow'
+                });
                 let postedToAtLeastOneTarget = false;
                 let notFoundCount = 0;
                 const chargeLines = isSale
@@ -1111,9 +1342,11 @@ class PropertyAccountService {
                     const totalCommission = ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.totalCommission) || 0;
                     // Align owner income with commission-calculated owner amount while removing non-owner charge lines.
                     // Deposit-only payments are already excluded above.
-                    const incomeAmount = isSale
-                        ? Math.max(0, ownerAmount)
-                        : Math.max(0, Number(ownerAmount || 0) - passThroughTotal);
+                    const incomeAmount = (0, paymentAccountingCompleteness_1.computeOwnerIncomeAmount)({
+                        isSale,
+                        ownerAmount,
+                        passThroughTotal
+                    });
                     const recordPassThroughIfNeeded = () => __awaiter(this, void 0, void 0, function* () {
                         const grouped = new Map();
                         for (const line of passThroughLines) {
@@ -1152,7 +1385,6 @@ class PropertyAccountService {
                             type: 'expense',
                             amount: propertyExpenseTotal,
                             date: payment.paymentDate || payment.createdAt,
-                            paymentId: new mongoose_1.default.Types.ObjectId(paymentId),
                             idempotencyKey: idKey,
                             description: `Configured property expense - ${payment.referenceNumber}`,
                             category: 'configured_expense',
@@ -1190,8 +1422,16 @@ class PropertyAccountService {
                         logger_1.logger.info(`Skipping income for payment ${paymentId} due to deposit exclusion or zero owner income (computed=${incomeAmount}).`);
                         yield recordPassThroughIfNeeded();
                         yield recordConfiguredExpensesIfNeeded();
-                        if (passThroughTotal > 0 || propertyExpenseTotal > 0)
+                        if (passThroughTotal > 0 || propertyExpenseTotal > 0) {
                             postedToAtLeastOneTarget = true;
+                            this.notifyAccountUpdated({
+                                companyId: payment.companyId,
+                                propertyId: target.id,
+                                accountId: account._id,
+                                paymentId,
+                                eventType: 'payment_recorded'
+                            });
+                        }
                         continue;
                     }
                     const incomeDescription = isSale
@@ -1221,7 +1461,7 @@ class PropertyAccountService {
                         propertyId: account.propertyId,
                         isArchived: false,
                         isActive: { $ne: false },
-                        'transactions.paymentId': { $ne: new mongoose_1.default.Types.ObjectId(paymentId) }
+                        'transactions.idempotencyKey': { $ne: `payment:${paymentId}` }
                     }, {
                         $push: { transactions: incomeTransaction },
                         $set: { lastUpdated: new Date() }
@@ -1232,7 +1472,14 @@ class PropertyAccountService {
                     }
                     yield recordPassThroughIfNeeded();
                     yield recordConfiguredExpensesIfNeeded();
-                    logger_1.logger.info(`Recorded income of ${incomeAmount} to account ${String(account._id)} (target ${target.id}, ledger ${target.ledger}) from payment ${paymentId}`);
+                    logger_1.logger.info(`Accounting ledger successfully updated for payment ${paymentId} on account ${String(account._id)} (target ${target.id}, ledger ${target.ledger}, income=${incomeAmount})`);
+                    this.notifyAccountUpdated({
+                        companyId: payment.companyId,
+                        propertyId: target.id,
+                        accountId: account._id,
+                        paymentId,
+                        eventType: 'payment_recorded'
+                    });
                     postedToAtLeastOneTarget = true;
                 }
                 // If we could not post to any target and every attempt failed due to missing entities,
@@ -1260,8 +1507,10 @@ class PropertyAccountService {
                 }
                 const baseResolution = yield this.resolveLedgerTypeForProperty(String(payment.propertyId), 'reverseIncomeFromPayment');
                 const targets = [];
-                const isSale = baseResolution.ledgerType === 'sale';
-                if (payment.paymentType && ((payment.paymentType === 'sale') !== isSale)) {
+                const isSale = baseResolution.ledgerType === 'sale' || payment.paymentType === 'sale';
+                if (payment.paymentType &&
+                    payment.paymentType !== 'introduction' &&
+                    ((payment.paymentType === 'sale') !== (baseResolution.ledgerType === 'sale'))) {
                     throw new errorHandler_1.AppError(`Payment type ${payment.paymentType} does not match Property.rentalType (${baseResolution.businessType}) for property ${String(payment.propertyId)}`, 400);
                 }
                 let devId = payment === null || payment === void 0 ? void 0 : payment.developmentId;
@@ -1330,6 +1579,15 @@ class PropertyAccountService {
                         .map((t) => t._id)
                         .filter(Boolean);
                     const idsToCancel = [...originalIncomeIds, ...reversalIncomeIds];
+                    const configuredExpenseIds = (account.transactions || [])
+                        .filter((t) => t.type === 'expense' &&
+                        String(t.category || '') === 'configured_expense' &&
+                        String(t.status || '') === 'completed' &&
+                        (String(t.idempotencyKey || '') === `payment:${paymentId}:configured-expense` ||
+                            String(t.paymentId || '') === String(payment._id || '')))
+                        .map((t) => t._id)
+                        .filter(Boolean);
+                    idsToCancel.push(...configuredExpenseIds);
                     if (idsToCancel.length > 0) {
                         yield PropertyAccount_1.default.updateOne({ _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } }, {
                             $set: {
@@ -1360,6 +1618,13 @@ class PropertyAccountService {
                     if (fresh) {
                         yield this.recalculateBalance(fresh);
                     }
+                    this.notifyAccountUpdated({
+                        companyId: payment.companyId,
+                        propertyId: target.id,
+                        accountId: account._id,
+                        paymentId,
+                        eventType: 'payment_reversed'
+                    });
                 }
             }
             catch (error) {
@@ -1500,6 +1765,11 @@ class PropertyAccountService {
                 if (reloaded)
                     yield this.recalculateBalance(reloaded);
                 logger_1.logger.info(`Added expense (idempotent, guarded) of ${expenseData.amount} to property ${propertyId}`);
+                this.notifyAccountUpdated({
+                    propertyId,
+                    accountId: (reloaded === null || reloaded === void 0 ? void 0 : reloaded._id) || account._id,
+                    eventType: 'expense_recorded'
+                });
                 return (yield this.getPropertyAccount(propertyId));
             }
             catch (error) {
@@ -1568,6 +1838,11 @@ class PropertyAccountService {
                 if (reloaded)
                     yield this.recalculateBalance(reloaded);
                 logger_1.logger.info(`Added opening balance ${openingBalanceData.direction} of ${amount} to property ${propertyId}`);
+                this.notifyAccountUpdated({
+                    propertyId,
+                    accountId: (reloaded === null || reloaded === void 0 ? void 0 : reloaded._id) || account._id,
+                    eventType: 'account_adjusted'
+                });
                 return (yield this.getPropertyAccount(propertyId));
             }
             catch (error) {
@@ -1615,6 +1890,11 @@ class PropertyAccountService {
                 if (fresh)
                     yield this.recalculateBalance(fresh);
                 logger_1.logger.info(`Created owner payout (idempotent) of ${payoutData.amount} for property ${propertyId}`);
+                this.notifyAccountUpdated({
+                    propertyId,
+                    accountId: (fresh === null || fresh === void 0 ? void 0 : fresh._id) || account._id,
+                    eventType: 'payout_recorded'
+                });
                 return { account: (yield this.getPropertyAccount(propertyId)), payout };
             }
             catch (error) {
@@ -1687,6 +1967,11 @@ class PropertyAccountService {
                 if (fresh)
                     yield this.recalculateBalance(fresh);
                 logger_1.logger.info(`Updated payout ${payoutId} status to ${status} for property ${propertyId} on ledger ${String(targetAccount.ledgerType || 'unknown')}`);
+                this.notifyAccountUpdated({
+                    propertyId,
+                    accountId: (fresh === null || fresh === void 0 ? void 0 : fresh._id) || targetAccount._id,
+                    eventType: 'payout_updated'
+                });
                 return (yield this.getPropertyAccount(propertyId, targetAccount.ledgerType));
             }
             catch (error) {
@@ -1700,10 +1985,7 @@ class PropertyAccountService {
      */
     getPropertyAccount(propertyId, legacyLedgerHint) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e, _f;
             try {
-                // Ensure indexes are healthy and up-to-date (partial unique with archive support)
-                yield this.ensureLedgerIndexes();
                 const pid = new mongoose_1.default.Types.ObjectId(propertyId);
                 const resolution = yield this.resolveLedgerTypeForProperty(propertyId, 'getPropertyAccount');
                 const effectiveLedger = resolution.ledgerType;
@@ -1718,8 +2000,7 @@ class PropertyAccountService {
                 });
                 let account = null;
                 if (!candidates || candidates.length === 0) {
-                    // Create if missing
-                    account = (yield this.getOrCreatePropertyAccount(propertyId));
+                    throw new errorHandler_1.AppError('Property account not found', 404);
                 }
                 else if (candidates.length === 1) {
                     account = candidates[0];
@@ -1729,120 +2010,17 @@ class PropertyAccountService {
                 }
                 if (!account)
                     throw new errorHandler_1.AppError('Property account not found', 404);
-                // Update owner information if missing or outdated
-                if (!account.ownerName || account.ownerName === 'Unknown Owner') {
-                    const property = yield Property_1.Property.findById(propertyId);
-                    if (property) {
-                        let ownerName = 'Unknown Owner';
-                        let ownerId = null;
-                        if (property.ownerId) {
-                            const owner = yield PropertyOwner_1.PropertyOwner.findById(property.ownerId);
-                            if (owner) {
-                                ownerName = `${owner.firstName} ${owner.lastName}`.trim();
-                                ownerId = owner._id;
-                            }
-                        }
-                        if (!ownerId) {
-                            const owner = yield PropertyOwner_1.PropertyOwner.findOne({
-                                properties: { $in: [new mongoose_1.default.Types.ObjectId(propertyId)] }
-                            });
-                            if (owner) {
-                                ownerName = `${owner.firstName} ${owner.lastName}`.trim();
-                                ownerId = owner._id;
-                            }
-                        }
-                        if (ownerId) {
-                            this.validateWritableAccount(account, propertyId, 'getPropertyAccount:updateOwner');
-                            account.ownerId = ownerId;
-                            account.ownerName = ownerName;
-                            yield account.save();
-                        }
-                    }
-                    else {
-                        // Fallback: resolve via Development document
-                        const development = yield Development_1.Development.findById(propertyId);
-                        if (development) {
-                            const first = ((_a = development.owner) === null || _a === void 0 ? void 0 : _a.firstName) || '';
-                            const last = ((_b = development.owner) === null || _b === void 0 ? void 0 : _b.lastName) || '';
-                            const companyName = ((_c = development.owner) === null || _c === void 0 ? void 0 : _c.companyName) || '';
-                            const combined = `${first} ${last}`.trim();
-                            const ownerName = combined || companyName || 'Unknown Owner';
-                            this.validateWritableAccount(account, propertyId, 'getPropertyAccount:updateDevelopmentOwner');
-                            account.ownerName = ownerName;
-                            yield account.save();
-                        }
-                        else {
-                            // Fallback: resolve via DevelopmentUnit -> parent Development
-                            const unit = yield DevelopmentUnit_1.DevelopmentUnit.findById(propertyId);
-                            if (unit) {
-                                try {
-                                    const dev = yield Development_1.Development.findById(unit.developmentId);
-                                    const first = ((_d = dev === null || dev === void 0 ? void 0 : dev.owner) === null || _d === void 0 ? void 0 : _d.firstName) || '';
-                                    const last = ((_e = dev === null || dev === void 0 ? void 0 : dev.owner) === null || _e === void 0 ? void 0 : _e.lastName) || '';
-                                    const companyName = ((_f = dev === null || dev === void 0 ? void 0 : dev.owner) === null || _f === void 0 ? void 0 : _f.companyName) || '';
-                                    const combined = `${first} ${last}`.trim();
-                                    const ownerName = combined || companyName || 'Unknown Owner';
-                                    this.validateWritableAccount(account, propertyId, 'getPropertyAccount:updateUnitOwner');
-                                    account.ownerName = ownerName;
-                                    yield account.save();
-                                }
-                                catch (_g) { }
-                            }
-                        }
-                    }
-                }
-                // Defensive backfill for sales ledger: ensure owner income for each completed sale payment exists
-                if (effectiveLedger === 'sale') {
-                    try {
-                        // Determine whether this account is for a Development, a Development Unit, or a Property
-                        const devExists = yield Development_1.Development.exists({ _id: pid });
-                        const unitExists = yield DevelopmentUnit_1.DevelopmentUnit.exists({ _id: pid });
-                        const present = new Set((account.transactions || [])
-                            .filter(t => t.type === 'income' && (t.category === 'sale_income' || !t.category))
-                            .map(t => String(t.paymentId || ''))
-                            .filter(Boolean));
-                        const baseFilter = {
-                            paymentType: 'sale',
-                            status: 'completed',
-                            isProvisional: { $ne: true },
-                            isInSuspense: { $ne: true },
-                            $or: [
-                                { commissionFinalized: true },
-                                { commissionFinalized: { $exists: false } }
-                            ]
-                        };
-                        if (devExists) {
-                            baseFilter.developmentId = pid;
-                        }
-                        else if (unitExists) {
-                            baseFilter.developmentUnitId = pid;
-                        }
-                        else {
-                            baseFilter.propertyId = pid;
-                        }
-                        const payments = yield Payment_1.Payment.find(baseFilter).select('_id');
-                        const missing = payments.map(p => String(p._id)).filter(id => !present.has(id));
-                        for (const mid of missing) {
-                            try {
-                                yield this.recordIncomeFromPayment(mid);
-                            }
-                            catch (e) {
-                                console.warn(`Sales ledger backfill failed for payment ${mid}:`, (e === null || e === void 0 ? void 0 : e.message) || e);
-                            }
-                        }
-                        if (missing.length > 0) {
-                            account = (yield this.getOrCreatePropertyAccount(propertyId));
-                        }
-                    }
-                    catch (defErr) {
-                        console.warn('Sales ledger defensive backfill error (non-fatal):', defErr);
-                    }
-                }
-                // Recalculate balance for the account
-                const finalAccount = account;
-                yield this.reconcileReversedPaymentArtifacts(finalAccount);
-                yield this.recalculateBalance(finalAccount);
-                return finalAccount;
+                const display = account;
+                const totals = (0, propertyAccountTotals_1.computePropertyAccountTotals)(display);
+                display.runningBalance = totals.runningBalance;
+                display.totalIncome = totals.totalIncome;
+                display.totalExpenses = totals.totalExpenses;
+                display.totalOwnerPayouts = totals.totalOwnerPayouts;
+                display.passThroughCollected = totals.passThroughCollected;
+                display.passThroughPaid = totals.passThroughPaid;
+                display.passThroughOutstanding = totals.passThroughOutstanding;
+                display.netOwnerBalance = totals.runningBalance;
+                return display;
             }
             catch (error) {
                 logger_1.logger.error('Error getting property account:', error);
@@ -1976,32 +2154,87 @@ class PropertyAccountService {
         });
     }
     /**
-     * Sync all property accounts with payment data
+     * Bounded safety-net: attempt owner-income posting for completed payments that
+     * are not Payment-field no-ops. Does not skip payments that already have a
+     * ledger income row â€” sale multi-target and pass-through recovery still need
+     * recordIncomeFromPayment. Idempotency inside that function remains the write guard.
      */
-    syncPropertyAccountsWithPayments() {
+    syncPropertyAccountsWithPayments(options) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, e_1, _b, _c;
+            const companyId = typeof (options === null || options === void 0 ? void 0 : options.companyId) === 'string' ? options.companyId.trim() : '';
+            const stats = { selected: 0, attempted: 0, failures: 0 };
             try {
-                logger_1.logger.info('Starting property account sync with payments...');
-                // Get all completed payments (rental and sale) to ensure owner income is posted
-                const payments = yield Payment_1.Payment.find({
-                    status: 'completed'
+                logger_1.logger.info('Starting property account sync with payments...', {
+                    companyScoped: Boolean(companyId)
                 });
-                let syncedCount = 0;
-                for (const payment of payments) {
-                    try {
-                        yield this.recordIncomeFromPayment(payment._id.toString());
-                        syncedCount++;
-                    }
-                    catch (error) {
-                        logger_1.logger.error(`Failed to sync payment ${payment._id}:`, error);
+                const filter = (0, paymentReconciliationQuery_1.buildOwnerIncomeReconciliationPaymentFilter)({
+                    companyId: companyId || undefined
+                });
+                const cursor = Payment_1.Payment.find(filter)
+                    .select('_id status amount depositAmount reversalOfPaymentId companyId')
+                    .sort({ _id: 1 })
+                    .batchSize(paymentReconciliationQuery_1.PAYMENT_RECONCILIATION_BATCH_SIZE)
+                    .cursor();
+                let processedSinceHeartbeat = 0;
+                try {
+                    for (var _d = true, _e = __asyncValues(cursor), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                        _c = _f.value;
+                        _d = false;
+                        const payment = _c;
+                        stats.selected += 1;
+                        processedSinceHeartbeat += 1;
+                        if (processedSinceHeartbeat >= paymentReconciliationQuery_1.PAYMENT_RECONCILIATION_BATCH_SIZE) {
+                            processedSinceHeartbeat = 0;
+                            if (options === null || options === void 0 ? void 0 : options.onProgress) {
+                                yield options.onProgress();
+                            }
+                        }
+                        if ((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)(payment)) {
+                            continue;
+                        }
+                        try {
+                            yield this.recordIncomeFromPayment(String(payment._id));
+                            stats.attempted += 1;
+                        }
+                        catch (error) {
+                            stats.failures += 1;
+                            logger_1.logger.error(`Failed to sync payment ${payment._id}:`, error);
+                        }
                     }
                 }
-                logger_1.logger.info(`Property account sync completed. Synced ${syncedCount} payments.`);
+                catch (e_1_1) { e_1 = { error: e_1_1 }; }
+                finally {
+                    try {
+                        if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                    }
+                    finally { if (e_1) throw e_1.error; }
+                }
+                logger_1.logger.info('Property account sync completed.', stats);
+                return stats;
             }
             catch (error) {
                 logger_1.logger.error('Error syncing property accounts:', error);
                 throw error;
             }
+        });
+    }
+    getLedgerEntityIdsForCompany(companyId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const trimmed = String(companyId || '').trim();
+            if (!trimmed || !mongoose_1.default.Types.ObjectId.isValid(trimmed)) {
+                return [];
+            }
+            const companyObjectId = new mongoose_1.default.Types.ObjectId(trimmed);
+            const [properties, developments] = yield Promise.all([
+                Property_1.Property.find({ companyId: companyObjectId }).select('_id').lean(),
+                Development_1.Development.find({ companyId: companyObjectId }).select('_id').lean()
+            ]);
+            const developmentIds = developments.map((row) => row._id);
+            const units = developmentIds.length
+                ? yield DevelopmentUnit_1.DevelopmentUnit.find({ developmentId: { $in: developmentIds } }).select('_id').lean()
+                : [];
+            return [...properties, ...developments, ...units].map((row) => String(row._id));
         });
     }
     /**
@@ -2471,6 +2704,10 @@ function ensureDevelopmentLedgersAndBackfillPayments(opts) {
 // Initialize/upgrade property account indexes at startup
 function initializePropertyAccountIndexes() {
     return __awaiter(this, void 0, void 0, function* () {
+        const { isIndexCreationAllowed } = yield Promise.resolve().then(() => __importStar(require('./ledgerMutationPolicy')));
+        if (!isIndexCreationAllowed()) {
+            return;
+        }
         const svc = PropertyAccountService.getInstance();
         if (typeof svc.ensureLedgerIndexes === 'function') {
             yield svc.ensureLedgerIndexes();

@@ -5,6 +5,8 @@ import trustAccountService from '../services/trustAccountService';
 import { TrustSettlement } from '../models/TrustSettlement';
 import { generateTrustReportPdf } from '../services/reportGenerator';
 import { runTrustReconciliationOnce } from '../jobs/trustReconciliationJob';
+import trustMatterService from '../services/trustMatterService';
+import { TrustCustodyType } from '../models/TrustMatter';
 
 const companyIdFromReq = (req: Request): string | undefined => (req.user?.companyId ? String(req.user.companyId) : undefined);
 
@@ -168,7 +170,18 @@ export const listTrustAccounts = async (req: Request, res: Response) => {
     const page = Number(req.query.page || 1);
     const limit = Number(req.query.limit || 25);
     const payload = await trustAccountService.listTrustAccounts(companyId, { status, search, page, limit });
-    return res.json({ data: payload.items, page: payload.page, limit: payload.limit, total: payload.total });
+    const items = await Promise.all(
+      payload.items.map(async (item: any) => {
+        try {
+          const trustMatter = await trustMatterService.getForTrustAccount(companyId, String(item._id));
+          return { ...item, trustMatter };
+        } catch (matterError: any) {
+          console.warn('Failed to attach trust matter to list item:', matterError?.message || matterError);
+          return { ...item, trustMatter: null };
+        }
+      })
+    );
+    return res.json({ data: items, page: payload.page, limit: payload.limit, total: payload.total });
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || 'Failed to list trust accounts' });
   }
@@ -352,6 +365,64 @@ export const transitionTrustWorkflow = async (req: Request, res: Response) => {
   }
 };
 
+export const getTrustMatter = async (req: Request, res: Response) => {
+  try {
+    const companyId = ensureCompany(req, res);
+    if (!companyId) return;
+    const trustAccountId = String(req.params.id || '');
+    const account = await trustAccountService.getById(companyId, trustAccountId);
+    if (!account) return res.status(404).json({ message: 'Trust account not found' });
+    const matter = await trustMatterService.getForTrustAccount(companyId, trustAccountId);
+    if (!matter) return res.status(404).json({ message: 'Trust matter not found' });
+    return res.json({ data: matter });
+  } catch (error: any) {
+    return res.status(500).json({ message: error?.message || 'Failed to fetch trust matter' });
+  }
+};
+
+export const updateTrustMatterCustody = async (req: Request, res: Response) => {
+  try {
+    const companyId = ensureCompany(req, res);
+    if (!companyId) return;
+    const trustAccountId = String(req.params.id || '');
+    const account = await trustAccountService.getById(companyId, trustAccountId);
+    if (!account) return res.status(404).json({ message: 'Trust account not found' });
+    const custodyType = String(req.body?.custodyType || '') as TrustCustodyType;
+    if (!custodyType) return res.status(400).json({ message: 'custodyType is required' });
+    const matter = await trustMatterService.updateCustody({
+      companyId,
+      trustAccountId,
+      custodyType,
+      custodyDetails: typeof req.body?.custodyDetails === 'object' && req.body.custodyDetails ? req.body.custodyDetails : {},
+      performedBy: req.user?.userId ? String(req.user.userId) : undefined
+    });
+    return res.json({ message: 'Trust matter custody updated', data: matter });
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message || 'Failed to update trust matter custody' });
+  }
+};
+
+export const updateTrustMatterDocuments = async (req: Request, res: Response) => {
+  try {
+    const companyId = ensureCompany(req, res);
+    if (!companyId) return;
+    const trustAccountId = String(req.params.id || '');
+    const account = await trustAccountService.getById(companyId, trustAccountId);
+    if (!account) return res.status(404).json({ message: 'Trust account not found' });
+    const documents = Array.isArray(req.body?.documents) ? req.body.documents : req.body?.document ? [req.body.document] : [];
+    if (!documents.length) return res.status(400).json({ message: 'documents are required' });
+    const matter = await trustMatterService.upsertDocuments({
+      companyId,
+      trustAccountId,
+      documents,
+      performedBy: req.user?.userId ? String(req.user.userId) : undefined
+    });
+    return res.json({ message: 'Trust matter documents updated', data: matter });
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message || 'Failed to update trust matter documents' });
+  }
+};
+
 export const getTrustLedger = async (req: Request, res: Response) => {
   try {
     const companyId = ensureCompany(req, res);
@@ -410,15 +481,6 @@ export const getTrustAccountFull = async (req: Request, res: Response) => {
     const trustAccountId = String(req.params.id || '');
     const account = await trustAccountService.getById(companyId, trustAccountId);
     if (!account) return res.status(404).json({ message: 'Trust account not found' });
-    try {
-      await trustAccountService.verifyAndRepairAccountInvariants({
-        companyId,
-        trustAccountId,
-        sourceEvent: 'trust.account.full.read'
-      });
-    } catch {
-      // non-fatal on read
-    }
 
     const [refreshedAccount, ledger, taxSummary, auditLogs, reconciliation, settlement] = await Promise.all([
       trustAccountService.getById(companyId, trustAccountId),
@@ -435,9 +497,29 @@ export const getTrustAccountFull = async (req: Request, res: Response) => {
       propertyId ? Property.findById(propertyId).select('price').lean() : Promise.resolve(null)
     ]);
     const filteredLedgerRows = await filterOutReversedLedgerRows(companyId, ledger.items || []);
+    const trustMatterDoc = await trustMatterService.getForTrustAccount(companyId, trustAccountId);
+    const trustMatterPlain = trustMatterDoc ? trustMatterDoc.toObject() : {};
+    const workflowTimeline = trustMatterService.buildWorkflowTimeline({
+      account: (refreshedAccount || account) as any,
+      matter: trustMatterPlain,
+      ledger: filteredLedgerRows,
+      settlement: settlement as any,
+      auditLogs,
+      reconciliation
+    });
+    const fundsAllocation = trustMatterService.buildFundsAllocation({ account: (refreshedAccount || account) as any, settlement: settlement as any });
+    const paymentAllocation = trustMatterService.buildPaymentAllocation({ account: (refreshedAccount || account) as any, settlement: settlement as any });
+    const ledgerPresentation = trustMatterService.buildLedgerPresentation(filteredLedgerRows);
+    const auditPresentation = trustMatterService.buildAuditPresentation(auditLogs);
+    const reconciliationPresentation = trustMatterService.buildReconciliationPresentation({
+      account: (refreshedAccount || account) as any,
+      matter: trustMatterPlain,
+      reconciliation
+    });
     return res.json({
       data: {
         trustAccount: refreshedAccount || account,
+        trustMatter: trustMatterDoc,
         propertySummary: {
           purchasePrice:
             Number((property as any)?.price || 0) > 0
@@ -450,7 +532,13 @@ export const getTrustAccountFull = async (req: Request, res: Response) => {
         auditLogs,
         reconciliation,
         settlement,
-        partyNames
+        partyNames,
+        workflowTimeline,
+        fundsAllocation,
+        paymentAllocation,
+        ledgerPresentation,
+        auditPresentation,
+        reconciliationPresentation
       }
     });
   } catch (error: any) {

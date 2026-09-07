@@ -45,13 +45,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runTrustReconciliation = exports.generateTrustReport = exports.getTrustAccountByPropertyFull = exports.getTrustAccountFull = exports.getTrustReconciliation = exports.getTrustAuditLogs = exports.getTrustTaxSummary = exports.getTrustLedger = exports.transitionTrustWorkflow = exports.closeTrustAccount = exports.transferToSeller = exports.applyTaxDeductions = exports.calculateSettlement = exports.recordBuyerPayment = exports.createTrustAccount = exports.getTrustAccount = exports.getTrustAccountByProperty = exports.listTrustAccounts = void 0;
+exports.runTrustReconciliation = exports.generateTrustReport = exports.getTrustAccountByPropertyFull = exports.getTrustAccountFull = exports.getTrustReconciliation = exports.getTrustAuditLogs = exports.getTrustTaxSummary = exports.getTrustLedger = exports.updateTrustMatterDocuments = exports.updateTrustMatterCustody = exports.getTrustMatter = exports.transitionTrustWorkflow = exports.closeTrustAccount = exports.transferToSeller = exports.applyTaxDeductions = exports.calculateSettlement = exports.recordBuyerPayment = exports.createTrustAccount = exports.getTrustAccount = exports.getTrustAccountByProperty = exports.listTrustAccounts = void 0;
 const Property_1 = require("../models/Property");
 const Payment_1 = require("../models/Payment");
 const trustAccountService_1 = __importDefault(require("../services/trustAccountService"));
 const TrustSettlement_1 = require("../models/TrustSettlement");
 const reportGenerator_1 = require("../services/reportGenerator");
 const trustReconciliationJob_1 = require("../jobs/trustReconciliationJob");
+const trustMatterService_1 = __importDefault(require("../services/trustMatterService"));
 const companyIdFromReq = (req) => { var _a; return (((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : undefined); };
 const emitTrustUpdate = (companyId, trustAccountId, event) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -183,7 +184,17 @@ const listTrustAccounts = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const page = Number(req.query.page || 1);
         const limit = Number(req.query.limit || 25);
         const payload = yield trustAccountService_1.default.listTrustAccounts(companyId, { status, search, page, limit });
-        return res.json({ data: payload.items, page: payload.page, limit: payload.limit, total: payload.total });
+        const items = yield Promise.all(payload.items.map((item) => __awaiter(void 0, void 0, void 0, function* () {
+            try {
+                const trustMatter = yield trustMatterService_1.default.getForTrustAccount(companyId, String(item._id));
+                return Object.assign(Object.assign({}, item), { trustMatter });
+            }
+            catch (matterError) {
+                console.warn('Failed to attach trust matter to list item:', (matterError === null || matterError === void 0 ? void 0 : matterError.message) || matterError);
+                return Object.assign(Object.assign({}, item), { trustMatter: null });
+            }
+        })));
+        return res.json({ data: items, page: payload.page, limit: payload.limit, total: payload.total });
     }
     catch (error) {
         return res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to list trust accounts' });
@@ -399,6 +410,78 @@ const transitionTrustWorkflow = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.transitionTrustWorkflow = transitionTrustWorkflow;
+const getTrustMatter = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const companyId = ensureCompany(req, res);
+        if (!companyId)
+            return;
+        const trustAccountId = String(req.params.id || '');
+        const account = yield trustAccountService_1.default.getById(companyId, trustAccountId);
+        if (!account)
+            return res.status(404).json({ message: 'Trust account not found' });
+        const matter = yield trustMatterService_1.default.getForTrustAccount(companyId, trustAccountId);
+        if (!matter)
+            return res.status(404).json({ message: 'Trust matter not found' });
+        return res.json({ data: matter });
+    }
+    catch (error) {
+        return res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to fetch trust matter' });
+    }
+});
+exports.getTrustMatter = getTrustMatter;
+const updateTrustMatterCustody = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const companyId = ensureCompany(req, res);
+        if (!companyId)
+            return;
+        const trustAccountId = String(req.params.id || '');
+        const account = yield trustAccountService_1.default.getById(companyId, trustAccountId);
+        if (!account)
+            return res.status(404).json({ message: 'Trust account not found' });
+        const custodyType = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.custodyType) || '');
+        if (!custodyType)
+            return res.status(400).json({ message: 'custodyType is required' });
+        const matter = yield trustMatterService_1.default.updateCustody({
+            companyId,
+            trustAccountId,
+            custodyType,
+            custodyDetails: typeof ((_b = req.body) === null || _b === void 0 ? void 0 : _b.custodyDetails) === 'object' && req.body.custodyDetails ? req.body.custodyDetails : {},
+            performedBy: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? String(req.user.userId) : undefined
+        });
+        return res.json({ message: 'Trust matter custody updated', data: matter });
+    }
+    catch (error) {
+        return res.status(400).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to update trust matter custody' });
+    }
+});
+exports.updateTrustMatterCustody = updateTrustMatterCustody;
+const updateTrustMatterDocuments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const companyId = ensureCompany(req, res);
+        if (!companyId)
+            return;
+        const trustAccountId = String(req.params.id || '');
+        const account = yield trustAccountService_1.default.getById(companyId, trustAccountId);
+        if (!account)
+            return res.status(404).json({ message: 'Trust account not found' });
+        const documents = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.documents) ? req.body.documents : ((_b = req.body) === null || _b === void 0 ? void 0 : _b.document) ? [req.body.document] : [];
+        if (!documents.length)
+            return res.status(400).json({ message: 'documents are required' });
+        const matter = yield trustMatterService_1.default.upsertDocuments({
+            companyId,
+            trustAccountId,
+            documents,
+            performedBy: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? String(req.user.userId) : undefined
+        });
+        return res.json({ message: 'Trust matter documents updated', data: matter });
+    }
+    catch (error) {
+        return res.status(400).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to update trust matter documents' });
+    }
+});
+exports.updateTrustMatterDocuments = updateTrustMatterDocuments;
 const getTrustLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companyId = ensureCompany(req, res);
@@ -467,16 +550,6 @@ const getTrustAccountFull = (req, res) => __awaiter(void 0, void 0, void 0, func
         const account = yield trustAccountService_1.default.getById(companyId, trustAccountId);
         if (!account)
             return res.status(404).json({ message: 'Trust account not found' });
-        try {
-            yield trustAccountService_1.default.verifyAndRepairAccountInvariants({
-                companyId,
-                trustAccountId,
-                sourceEvent: 'trust.account.full.read'
-            });
-        }
-        catch (_a) {
-            // non-fatal on read
-        }
         const [refreshedAccount, ledger, taxSummary, auditLogs, reconciliation, settlement] = yield Promise.all([
             trustAccountService_1.default.getById(companyId, trustAccountId),
             trustAccountService_1.default.getLedger(companyId, trustAccountId, { page: 1, limit: 100 }),
@@ -492,9 +565,29 @@ const getTrustAccountFull = (req, res) => __awaiter(void 0, void 0, void 0, func
             propertyId ? Property_1.Property.findById(propertyId).select('price').lean() : Promise.resolve(null)
         ]);
         const filteredLedgerRows = yield filterOutReversedLedgerRows(companyId, ledger.items || []);
+        const trustMatterDoc = yield trustMatterService_1.default.getForTrustAccount(companyId, trustAccountId);
+        const trustMatterPlain = trustMatterDoc ? trustMatterDoc.toObject() : {};
+        const workflowTimeline = trustMatterService_1.default.buildWorkflowTimeline({
+            account: (refreshedAccount || account),
+            matter: trustMatterPlain,
+            ledger: filteredLedgerRows,
+            settlement: settlement,
+            auditLogs,
+            reconciliation
+        });
+        const fundsAllocation = trustMatterService_1.default.buildFundsAllocation({ account: (refreshedAccount || account), settlement: settlement });
+        const paymentAllocation = trustMatterService_1.default.buildPaymentAllocation({ account: (refreshedAccount || account), settlement: settlement });
+        const ledgerPresentation = trustMatterService_1.default.buildLedgerPresentation(filteredLedgerRows);
+        const auditPresentation = trustMatterService_1.default.buildAuditPresentation(auditLogs);
+        const reconciliationPresentation = trustMatterService_1.default.buildReconciliationPresentation({
+            account: (refreshedAccount || account),
+            matter: trustMatterPlain,
+            reconciliation
+        });
         return res.json({
             data: {
                 trustAccount: refreshedAccount || account,
+                trustMatter: trustMatterDoc,
                 propertySummary: {
                     purchasePrice: Number((property === null || property === void 0 ? void 0 : property.price) || 0) > 0
                         ? Number((property === null || property === void 0 ? void 0 : property.price) || 0)
@@ -506,7 +599,13 @@ const getTrustAccountFull = (req, res) => __awaiter(void 0, void 0, void 0, func
                 auditLogs,
                 reconciliation,
                 settlement,
-                partyNames
+                partyNames,
+                workflowTimeline,
+                fundsAllocation,
+                paymentAllocation,
+                ledgerPresentation,
+                auditPresentation,
+                reconciliationPresentation
             }
         });
     }

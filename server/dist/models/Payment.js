@@ -221,6 +221,14 @@ const PaymentSchema = new mongoose_1.Schema({
             type: Number,
             required: true,
         },
+        levy: { type: Number, required: false, default: 0 },
+        commissionBase: { type: Number, required: false },
+        commissionRate: { type: Number, required: false },
+        commissionGross: { type: Number, required: false },
+        commissionNet: { type: Number, required: false },
+        vatTreatment: { type: String, enum: ['inclusive', 'exclusive'], required: false },
+        vatRate: { type: Number, required: false, min: 0, max: 1 },
+        vatAmount: { type: Number, required: false, default: 0 },
         agentSplit: {
             ownerAgentShare: { type: Number, required: false, default: 0 },
             collaboratorAgentShare: { type: Number, required: false, default: 0 },
@@ -259,6 +267,11 @@ const PaymentSchema = new mongoose_1.Schema({
         min: 0,
         max: 1,
         default: 0
+    },
+    vatCommissionTreatment: {
+        type: String,
+        enum: ['inclusive', 'exclusive'],
+        required: false
     },
     status: {
         type: String,
@@ -480,7 +493,7 @@ function isIllegalPaymentUpdate(update) {
                 'status', 'isProvisional', 'isInSuspense', 'commissionFinalized', 'provisionalRelationshipType',
                 'finalizedAt', 'finalizedBy', 'idempotencyKey', 'manualPropertyAddress', 'manualTenantName',
                 'buyerName', 'sellerName', 'saleId', 'developmentId', 'developmentUnitId', 'notes',
-                'postingStatus', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate',
+                'postingStatus', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate', 'vatCommissionTreatment',
                 'reversalOfPaymentId', 'reversalPaymentId', 'correctedPaymentId',
                 'reversedBy', 'reversedAt', 'reversalReason', 'voidedBy', 'voidedAt', 'voidReason', 'isCorrectionEntry'
             ].includes(key))

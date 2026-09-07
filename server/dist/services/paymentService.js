@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -16,7 +49,6 @@ exports.updatePaymentStatus = exports.getPaymentDetails = exports.createPayment 
 const Payment_1 = require("../models/Payment");
 const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
-const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const database_1 = require("../config/database");
@@ -84,7 +116,16 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const commissionPercent = typeof property.commission === 'number'
             ? property.commission
             : ((propertyType || 'residential') === 'residential' ? 15 : 10);
-        const commissionDetails = yield commissionService_1.CommissionService.calculate(amount, commissionPercent, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+        const commissionResult = yield commissionService_1.CommissionService.calculateForProperty({
+            companyId: req.user.companyId,
+            grossRent: amount,
+            levy: 0,
+            commissionPercentage: commissionPercent,
+            vatOnCommission: Boolean(property === null || property === void 0 ? void 0 : property.vatOnCommission),
+            vatTreatment: property === null || property === void 0 ? void 0 : property.vatCommissionTreatment,
+            paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+        });
+        const commissionDetails = (0, commissionService_1.applyLevyPassThroughToSnapshot)(commissionResult, amount, 0);
         // Create payment record
         const payment = new Payment_1.Payment({
             paymentType,
@@ -101,29 +142,19 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             notes,
             processedBy: req.user.userId,
             commissionDetails,
+            applyVatOnCommission: commissionResult.vatOnCommission,
+            vatOnCommissionRate: commissionResult.vatRate || 0,
+            vatCommissionTreatment: commissionResult.vatTreatment,
             status: 'completed',
         });
         yield payment.save({ session });
-        // Update company revenue
-        yield Company_1.Company.findByIdAndUpdate(req.user.companyId, {
-            $inc: {
-                revenue: commissionDetails.agencyShare,
-            },
-        }, { session });
-        // Update agent commission
+        // Update agent commission total (denormalized User.commission; AgentAccount is the ledger SSOT)
         yield User_1.User.findByIdAndUpdate(agentId, {
             $inc: {
                 commission: commissionDetails.agentShare,
             },
         }, { session });
-        // If it's a rental payment, update property owner's balance
-        if (paymentType === 'rental' && property.ownerId) {
-            yield User_1.User.findByIdAndUpdate(property.ownerId, {
-                $inc: {
-                    balance: commissionDetails.ownerAmount,
-                },
-            }, { session });
-            // Update property statistics
+        if (paymentType === 'rental') {
             yield Property_1.Property.findByIdAndUpdate(propertyId, {
                 $inc: {
                     totalRentCollected: amount,
@@ -136,6 +167,8 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }, { session });
         }
         yield session.commitTransaction();
+        const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+        yield postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
         // Notify agent by email (fire-and-forget)
         void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         res.status(201).json({
@@ -205,6 +238,7 @@ const getPaymentDetails = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.getPaymentDetails = getPaymentDetails;
 // Update payment status
 const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -231,40 +265,11 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
         yield payment.save({ session });
         // If payment is being marked as failed, reverse the commission and revenue updates
         if (oldStatus === 'completed' && status === 'failed') {
-            const { commissionDetails } = payment;
-            // Reverse company revenue
-            yield Company_1.Company.findByIdAndUpdate(payment.companyId, {
-                $inc: {
-                    revenue: -commissionDetails.agencyShare,
-                },
-            }, { session });
-            // Reverse agent commission
-            yield User_1.User.findByIdAndUpdate(payment.agentId, {
-                $inc: {
-                    commission: -commissionDetails.agentShare,
-                },
-            }, { session });
-            // If it was a rental payment, reverse property owner's balance
-            if (payment.paymentType === 'rental') {
-                const property = yield Property_1.Property.findById(payment.propertyId).session(session);
-                if (property) {
-                    yield User_1.User.findByIdAndUpdate(property.ownerId, {
-                        $inc: {
-                            balance: -commissionDetails.ownerAmount,
-                        },
-                    }, { session });
-                    // Update property statistics
-                    yield Property_1.Property.findByIdAndUpdate(payment.propertyId, {
-                        $inc: {
-                            totalRentCollected: -payment.amount,
-                            occupancyRate: -100 / (property.units || 1),
-                        },
-                        $set: {
-                            status: 'available',
-                            occupiedUnits: Math.max(0, (property.occupiedUnits || 0) - 1),
-                        },
-                    }, { session });
-                }
+            const { reversePaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+            yield reversePaymentAccounting(String(payment._id), { reason: 'Payment marked failed' });
+            const agentShare = Number(((_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0);
+            if (agentShare) {
+                yield User_1.User.findByIdAndUpdate(payment.agentId, { $inc: { commission: -agentShare } }, { session });
             }
         }
         yield session.commitTransaction();

@@ -53,6 +53,8 @@ export interface Property {
   // New fields
   rentalType?: 'management' | 'introduction' | 'sale';
   commission?: number;
+  vatOnCommission?: boolean;
+  vatCommissionTreatment?: 'inclusive' | 'exclusive';
   commissionPreaPercent?: number;
   commissionAgencyPercentRemaining?: number;
   commissionAgentPercentRemaining?: number;
@@ -63,6 +65,8 @@ export interface Property {
   isDeleted?: boolean;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  archivedAt?: Date | null;
+  archivedBy?: string | null;
   monthlyIncome?: number;
   monthlyExpenses?: number;
   netProfit?: number;
@@ -79,6 +83,8 @@ export interface PropertyFormData extends Omit<Property, '_id' | 'id' | 'created
   // New fields
   rentalType?: 'management' | 'introduction' | 'sale';
   commission?: number;
+  vatOnCommission?: boolean;
+  vatCommissionTreatment?: 'inclusive' | 'exclusive';
   // New fields for levy/municipal fees
   levyOrMunicipalType?: 'levy' | 'municipal';
   levyOrMunicipalAmount?: number;

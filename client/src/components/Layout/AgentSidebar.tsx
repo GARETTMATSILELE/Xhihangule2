@@ -130,9 +130,11 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
   return (
     <Drawer
       variant="permanent"
+      className="no-print"
       sx={{
         width: drawerWidth,
         flexShrink: 0,
+        '@media print': { display: 'none' },
         '& .MuiDrawer-paper': {
           width: drawerWidth,
           boxSizing: 'border-box',

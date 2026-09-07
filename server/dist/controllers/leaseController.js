@@ -18,6 +18,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Lease_1 = require("../models/Lease");
 const Payment_1 = require("../models/Payment");
 const Property_1 = require("../models/Property");
+const Tenant_1 = require("../models/Tenant");
 const leaseBillingEngine_1 = require("../services/leaseBillingEngine");
 const inspectionAutomationService_1 = require("../services/inspectionAutomationService");
 const LEASE_STATUSES = [
@@ -104,37 +105,35 @@ class LeaseController {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
             try {
-                console.log('Creating lease with data:', JSON.stringify(req.body, null, 2));
-                console.log('User info:', req.user);
                 // Validate required fields - handle both field name variations
                 const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit } = req.body;
                 // Use monthlyRent/securityDeposit if rentAmount/depositAmount are not provided
                 const finalRentAmount = rentAmount !== undefined ? rentAmount : monthlyRent;
                 const finalDepositAmount = depositAmount !== undefined ? depositAmount : securityDeposit;
-                console.log('Extracted required fields:', {
-                    propertyId,
-                    tenantId,
-                    startDate,
-                    endDate,
-                    rentAmount: finalRentAmount,
-                    depositAmount: finalDepositAmount,
-                    originalRentAmount: rentAmount,
-                    originalDepositAmount: depositAmount,
-                    monthlyRent,
-                    securityDeposit
-                });
-                console.log('Field validation results:', {
-                    hasPropertyId: !!propertyId,
-                    hasTenantId: !!tenantId,
-                    hasStartDate: !!startDate,
-                    hasEndDate: !!endDate,
-                    hasRentAmount: finalRentAmount !== undefined && finalRentAmount !== null,
-                    hasDepositAmount: finalDepositAmount !== undefined && finalDepositAmount !== null,
-                    rentAmountType: typeof finalRentAmount,
-                    depositAmountType: typeof finalDepositAmount
-                });
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Extracted required fields:', {
+                        propertyId,
+                        tenantId,
+                        startDate,
+                        endDate,
+                        rentAmount: finalRentAmount,
+                        depositAmount: finalDepositAmount
+                    });
+                }
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Field validation results:', {
+                        hasPropertyId: !!propertyId,
+                        hasTenantId: !!tenantId,
+                        hasStartDate: !!startDate,
+                        hasEndDate: !!endDate,
+                        hasRentAmount: finalRentAmount !== undefined && finalRentAmount !== null,
+                        hasDepositAmount: finalDepositAmount !== undefined && finalDepositAmount !== null
+                    });
+                }
                 if (!propertyId || !tenantId || !startDate || !endDate || finalRentAmount === undefined || finalRentAmount === null || finalDepositAmount === undefined || finalDepositAmount === null) {
-                    console.log('Missing required fields detected');
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log('Missing required fields detected');
+                    }
                     res.status(400).json({
                         error: 'Missing required fields: propertyId, tenantId, startDate, endDate, rentAmount, depositAmount',
                         received: { propertyId, tenantId, startDate, endDate, rentAmount: finalRentAmount, depositAmount: finalDepositAmount }
@@ -143,7 +142,9 @@ class LeaseController {
                 }
                 // Check if amounts are valid numbers (including 0)
                 if (isNaN(Number(finalRentAmount)) || isNaN(Number(finalDepositAmount))) {
-                    console.log('Invalid numeric values detected');
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log('Invalid numeric values detected');
+                    }
                     res.status(400).json({
                         error: 'Rent amount and deposit amount must be valid numbers',
                         received: { rentAmount: finalRentAmount, depositAmount: finalDepositAmount }
@@ -152,7 +153,9 @@ class LeaseController {
                 }
                 // Ensure companyId is available
                 if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) && !req.body.companyId) {
-                    console.log('Missing companyId detected');
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log('Missing companyId detected');
+                    }
                     res.status(400).json({
                         error: 'Company ID is required',
                         received: { userCompanyId: (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId, bodyCompanyId: req.body.companyId }
@@ -216,7 +219,9 @@ class LeaseController {
                     res.status(400).json({ error: 'Rent amount and deposit amount must be non-negative' });
                     return;
                 }
-                console.log('Processed lease data:', leaseData);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Processed lease data for property', leaseData === null || leaseData === void 0 ? void 0 : leaseData.propertyId);
+                }
                 const lease = yield this.leaseRepository.create(leaseData);
                 if (leaseData.previousLeaseId) {
                     yield this.leaseRepository.linkSuccessor(String(leaseData.previousLeaseId), lease._id);
@@ -226,7 +231,9 @@ class LeaseController {
                         console.error('Failed to create lease inspection schedule:', error);
                     });
                 }
-                console.log('Lease created successfully:', lease._id);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Lease created successfully:', lease._id);
+                }
                 res.status(201).json(lease);
             }
             catch (error) {
@@ -254,7 +261,9 @@ class LeaseController {
     updateLease(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                console.log('Updating lease with data:', req.body);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Updating lease', req.params.id);
+                }
                 const { id } = req.params;
                 const updateData = Object.assign({}, req.body);
                 const existingLease = yield this.leaseRepository.findById(id);
@@ -319,7 +328,9 @@ class LeaseController {
                     res.status(400).json({ error: 'Deposit amount must be non-negative' });
                     return;
                 }
-                console.log('Processed update data:', updateData);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Processed lease update', id);
+                }
                 if (updateData.status && updateData.status !== existingLease.status) {
                     updateData.lifecycleStatusChangedAt = new Date();
                 }
@@ -328,7 +339,9 @@ class LeaseController {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
                 }
-                console.log('Lease updated successfully:', lease._id);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Lease updated successfully:', lease._id);
+                }
                 res.json(lease);
             }
             catch (error) {
@@ -526,13 +539,30 @@ class LeaseController {
                     lease.depositSettlement.notes = req.body.notes || lease.depositSettlement.notes;
                 }
                 yield lease.save();
-                const activeSuccessor = yield Lease_1.Lease.findOne({
+                const activePropertyLease = yield Lease_1.Lease.findOne({
                     propertyId: lease.propertyId,
                     status: { $in: ['active', 'expiring_soon', 'pending_approval'] },
                     _id: { $ne: lease._id }
                 });
-                if (!activeSuccessor) {
-                    yield Property_1.Property.findByIdAndUpdate(lease.propertyId, { status: 'vacant' });
+                const activeLeaseForSameTenant = yield Lease_1.Lease.findOne({
+                    propertyId: lease.propertyId,
+                    tenantId: lease.tenantId,
+                    status: { $in: ['active', 'expiring_soon', 'pending_approval'] },
+                    _id: { $ne: lease._id }
+                });
+                if (!activeLeaseForSameTenant) {
+                    yield Promise.all([
+                        Tenant_1.Tenant.updateOne({ _id: lease.tenantId, propertyId: lease.propertyId }, { $unset: { propertyId: '' } }),
+                        Tenant_1.Tenant.updateOne({ _id: lease.tenantId }, { $pull: { propertyIds: lease.propertyId } })
+                    ]);
+                }
+                if (!activePropertyLease) {
+                    yield Property_1.Property.findByIdAndUpdate(lease.propertyId, {
+                        status: 'available',
+                        propertyOperationalStatus: 'Vacant',
+                        occupiedUnits: 0,
+                        nextLeaseExpiry: null
+                    });
                 }
                 res.json(lease);
             }
@@ -557,7 +587,7 @@ class LeaseController {
                 endDate,
                 rentAmount: Number((_b = (_a = body.rentAmount) !== null && _a !== void 0 ? _a : body.monthlyRent) !== null && _b !== void 0 ? _b : previousLease.rentAmount),
                 depositAmount: Number((_d = (_c = body.depositAmount) !== null && _c !== void 0 ? _c : body.securityDeposit) !== null && _d !== void 0 ? _d : previousLease.depositAmount),
-                status: body.status || 'pending_approval',
+                status: body.status || 'active',
                 companyId: previousLease.companyId,
                 ownerId: previousLease.ownerId,
                 previousLeaseId: previousLease._id,
@@ -664,7 +694,9 @@ class LeaseController {
                     });
                     return;
                 }
-                console.log('Found lease:', { id: lease._id, propertyId: lease.propertyId });
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log('Found lease:', { id: lease._id, propertyId: lease.propertyId });
+                }
                 res.json({
                     status: 'success',
                     data: lease

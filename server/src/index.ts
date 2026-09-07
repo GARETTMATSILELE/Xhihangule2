@@ -52,6 +52,7 @@ import accountingRoutes from './routes/accountingRoutes';
 import trustAccountRoutes from './routes/trustAccountRoutes';
 import webhookRoutes from './routes/webhookRoutes';
 import adminRoutes from './routes/adminRoutes';
+import enterpriseReportingRoutes from './reporting/api';
 import { connectDatabase, closeDatabase, getDatabaseHealth, isDatabaseAvailable } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { createServer } from 'http';
@@ -446,6 +447,7 @@ if (exposeDiagnostics) {
 // Reports (public and authenticated)
 app.use('/api/public/reports', publicReportRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/reporting', enterpriseReportingRoutes);
 // System Admin (global)
 app.use('/api/system-admin', systemAdminRoutes);
 app.use('/api/admin', adminRoutes);

@@ -105,6 +105,24 @@ export interface BankMatchSuggestion {
   reasons: string[];
 }
 
+export interface TaxRateRecord {
+  _id: string;
+  companyId: string;
+  taxType: 'VAT';
+  rate: number;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  isActive: boolean;
+}
+
+export interface VatOnCommissionSummary {
+  startDate: string;
+  endDate: string;
+  vatCollected: number;
+  transactions: number;
+  properties: number;
+}
+
 const accountingService = {
   async getDashboardSummary(): Promise<DashboardSummary> {
     const res = await api.get('/accounting/dashboard-summary');
@@ -159,6 +177,22 @@ const accountingService = {
   async getBankTransactionSuggestions(id: string): Promise<BankMatchSuggestion[]> {
     const res = await api.get(`/accounting/bank-transactions/${id}/suggestions`);
     return res.data?.data || [];
+  },
+  async getTaxRates(taxType = 'VAT'): Promise<TaxRateRecord[]> {
+    const res = await api.get('/accounting/tax-rates', { params: { taxType } });
+    return res.data?.data || [];
+  },
+  async getCurrentVatRate(date?: string): Promise<{ rate: number; decimalRate: number; source: string; asOf: string }> {
+    const res = await api.get('/accounting/tax-rates/current', { params: date ? { date } : undefined });
+    return res.data?.data;
+  },
+  async createVatRate(payload: { rate: number; effectiveFrom: string }): Promise<TaxRateRecord> {
+    const res = await api.post('/accounting/tax-rates', payload);
+    return res.data?.data;
+  },
+  async getVatOnCommissionSummary(params?: { startDate?: string; endDate?: string }): Promise<VatOnCommissionSummary> {
+    const res = await api.get('/accounting/vat-on-commission', { params });
+    return res.data?.data;
   }
 };
 

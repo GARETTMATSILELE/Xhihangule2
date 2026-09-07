@@ -3,14 +3,22 @@ import { INDIVIDUAL_THEME } from '../theme';
 
 export type PropertyOccupancyDisplayStatus = 'Vacant' | 'Occupied' | 'Statutory Tenant';
 
-function getPropertyId(lease: any): string {
-  return String(lease?.propertyId?._id || lease?.propertyId || '');
+function getPropertyId(value: any): string {
+  return String(value?._id || value?.$oid || value || '');
+}
+
+export function tenantLinkedPropertyIds(tenant: any): string[] {
+  const ids = [
+    getPropertyId(tenant?.propertyId),
+    ...(Array.isArray(tenant?.propertyIds) ? tenant.propertyIds.map(getPropertyId) : [])
+  ];
+  return ids.filter(Boolean);
 }
 
 export function groupLeasesByProperty(leases: any[]): Map<string, any[]> {
   const map = new Map<string, any[]>();
   for (const lease of leases) {
-    const propertyId = getPropertyId(lease);
+    const propertyId = getPropertyId(lease?.propertyId);
     if (!propertyId) continue;
     const rows = map.get(propertyId) || [];
     rows.push(lease);
@@ -19,20 +27,46 @@ export function groupLeasesByProperty(leases: any[]): Map<string, any[]> {
   return map;
 }
 
-export function getPropertyOccupancyDisplayStatus(leasesForProperty: any[]): PropertyOccupancyDisplayStatus {
-  if (!leasesForProperty.length) return 'Vacant';
+export function groupTenantsByProperty(tenants: any[]): Map<string, any[]> {
+  const map = new Map<string, any[]>();
+  for (const tenant of tenants) {
+    if (String(tenant?.status || 'Active').toLowerCase() === 'inactive') continue;
+    for (const propertyId of tenantLinkedPropertyIds(tenant)) {
+      const rows = map.get(propertyId) || [];
+      rows.push(tenant);
+      map.set(propertyId, rows);
+    }
+  }
+  return map;
+}
 
-  const lifecycleStatuses = leasesForProperty.map((lease) => getLeaseLifecycleStatus(lease));
+function leaseHasTenant(lease: any): boolean {
+  const tenantId = getPropertyId(lease?.tenantId);
+  return Boolean(tenantId);
+}
 
-  if (lifecycleStatuses.some((status) => status === 'active' || status === 'expiring_soon')) {
-    return 'Occupied';
+function isCurrentOccupyingLease(lease: any): boolean {
+  const status = String(lease?.status || '').toLowerCase();
+  if (['terminated', 'closed', 'draft', 'pending_approval'].includes(status)) return false;
+  return leaseHasTenant(lease);
+}
+
+export function getPropertyOccupancyDisplayStatus(
+  leasesForProperty: any[],
+  tenantsForProperty: any[] = []
+): PropertyOccupancyDisplayStatus {
+  const attachedTenants = tenantsForProperty.filter((tenant) => String(tenant?.status || 'Active').toLowerCase() !== 'inactive');
+  const occupyingLeases = (leasesForProperty || []).filter(isCurrentOccupyingLease);
+
+  if (!attachedTenants.length && !occupyingLeases.length) return 'Vacant';
+
+  const lifecycleStatuses = occupyingLeases.map((lease) => getLeaseLifecycleStatus(lease));
+  const hasLiveLease = lifecycleStatuses.some((status) => status === 'active' || status === 'expiring_soon');
+  if (!hasLiveLease && lifecycleStatuses.some((status) => status === 'expired')) {
+    return attachedTenants.length ? 'Statutory Tenant' : 'Vacant';
   }
 
-  if (lifecycleStatuses.some((status) => status === 'expired')) {
-    return 'Statutory Tenant';
-  }
-
-  return 'Vacant';
+  return 'Occupied';
 }
 
 export function getActiveLeaseForProperty(leasesForProperty: any[]): any | undefined {

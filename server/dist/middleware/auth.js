@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireActiveSubscription = exports.requireCompanyContext = exports.requireRole = exports.authorize = exports.authWithCompany = exports.propertyOwnerAuth = exports.auth = void 0;
+exports.resolveCompanyContext = resolveCompanyContext;
 exports.tenantScopeQuery = tenantScopeQuery;
 const authService_1 = require("../services/authService");
 const User_1 = require("../models/User");

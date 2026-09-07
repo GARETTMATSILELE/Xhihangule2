@@ -18,13 +18,20 @@ const propertyAccountService_1 = __importDefault(require("../services/propertyAc
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const SalesOwner_1 = require("../models/SalesOwner");
 const requestSecurity_1 = require("../utils/requestSecurity");
+const debugReport = (...args) => {
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(...args);
+    }
+};
 const router = express_1.default.Router();
 // Debug middleware to log all requests
 router.use((req, res, next) => {
-    console.log(`[Report Routes] ${req.method} ${req.path}`);
-    console.log('Request headers:', (0, requestSecurity_1.redactHeaders)(req.headers));
-    console.log('Request query:', req.query);
-    console.log('Request body:', req.body);
+    if (process.env.NODE_ENV !== 'production') {
+        debugReport(`[Report Routes] ${req.method} ${req.path}`);
+        debugReport('Request headers:', (0, requestSecurity_1.redactHeaders)(req.headers));
+        debugReport('Request query:', req.query);
+        debugReport('Request body:', req.body);
+    }
     next();
 });
 // Health check for report routes
@@ -52,7 +59,7 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
         const period = `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}`;
         const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
         const endDate = new Date(Date.UTC(year, month, 1, 0, 0, 0)); // exclusive
-        console.log('Owner statement report requested', { companyId, period, startDate, endDate });
+        debugReport('Owner statement report requested', { companyId, period });
         const accounts = yield propertyAccountService_1.default.getCompanyPropertyAccounts(companyId);
         // Build propertyId -> owner lookup from owners collections (company-scoped)
         const rentalPropertyIds = accounts
@@ -276,7 +283,7 @@ router.get('/owner-statement', auth_1.auth, (req, res) => __awaiter(void 0, void
 router.get('/income-expense', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Income & expense report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Income & expense report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now - replace with actual database queries
         const mockData = {
             period: '2024-01',
@@ -323,7 +330,7 @@ router.get('/income-expense', auth_1.auth, (req, res) => __awaiter(void 0, void 
 router.get('/rent-roll', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Rent roll report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Rent roll report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now - replace with actual database queries
         const mockData = [
             {
@@ -390,7 +397,7 @@ router.get('/rent-roll', auth_1.auth, (req, res) => __awaiter(void 0, void 0, vo
 router.get('/receivables', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Receivables report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Receivables report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -416,7 +423,7 @@ router.get('/receivables', auth_1.auth, (req, res) => __awaiter(void 0, void 0, 
 router.get('/payables', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Payables report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Payables report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -441,7 +448,7 @@ router.get('/payables', auth_1.auth, (req, res) => __awaiter(void 0, void 0, voi
 router.get('/maintenance', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Maintenance report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Maintenance report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -467,7 +474,7 @@ router.get('/maintenance', auth_1.auth, (req, res) => __awaiter(void 0, void 0, 
 router.get('/vacancy', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Vacancy report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Vacancy report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -493,7 +500,7 @@ router.get('/vacancy', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void
 router.get('/tenant-ledger', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { tenantId } = req.query;
-        console.log('Tenant ledger report requested for tenant:', tenantId);
+        debugReport('Tenant ledger report requested for tenant:', tenantId);
         // Mock data for now
         const mockData = {
             tenantId: tenantId,
@@ -523,7 +530,7 @@ router.get('/tenant-ledger', auth_1.auth, (req, res) => __awaiter(void 0, void 0
 router.get('/delinquency', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Delinquency report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Delinquency report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -549,7 +556,7 @@ router.get('/delinquency', auth_1.auth, (req, res) => __awaiter(void 0, void 0, 
 router.get('/lease-expiry', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Lease expiry report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Lease expiry report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -575,7 +582,7 @@ router.get('/lease-expiry', auth_1.auth, (req, res) => __awaiter(void 0, void 0,
 router.get('/portfolio-summary', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Portfolio summary report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Portfolio summary report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = {
             totalProperties: 2,
@@ -618,7 +625,7 @@ router.get('/portfolio-summary', auth_1.auth, (req, res) => __awaiter(void 0, vo
 router.get('/capital-expenditure', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Capital expenditure report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Capital expenditure report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -643,7 +650,7 @@ router.get('/capital-expenditure', auth_1.auth, (req, res) => __awaiter(void 0, 
 router.get('/eviction', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Eviction report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Eviction report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -669,7 +676,7 @@ router.get('/eviction', auth_1.auth, (req, res) => __awaiter(void 0, void 0, voi
 router.get('/forecast', auth_1.auth, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        console.log('Forecast report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
+        debugReport('Forecast report requested for company:', (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId);
         // Mock data for now
         const mockData = [
             {
@@ -700,12 +707,12 @@ router.get('/forecast', auth_1.auth, (req, res) => __awaiter(void 0, void 0, voi
 }));
 // 404 handler for report routes
 router.use((req, res) => {
-    console.log('Report route not found:', req.method, req.path);
+    debugReport('Report route not found:', req.method, req.path);
     res.status(404).json({
         message: 'Report route not found',
         path: req.path,
         method: req.method
     });
 });
-console.log('Report routes defined');
+debugReport('Report routes defined');
 exports.default = router;

@@ -18,6 +18,12 @@ import {
   postManualTransaction,
   backfillBalances
 } from '../controllers/accountingController';
+import {
+  createCompanyVatRate,
+  getCurrentVatRate,
+  getVatOnCommissionSummary,
+  listCompanyTaxRates
+} from '../controllers/taxRateController';
 import { createPerCompanyRateLimiter } from '../middleware/companyLoadShedding';
 
 const router = express.Router();
@@ -35,6 +41,10 @@ router.get('/revenue-trend', canViewCommissions, getRevenueTrend);
 router.get('/expense-trend', canViewCommissions, getExpenseTrend);
 router.get('/vat-status', canViewCommissions, getVatStatus);
 router.get('/vat-report/export', canViewCommissions, exportVatReport);
+router.get('/vat-on-commission', canViewCommissions, getVatOnCommissionSummary);
+router.get('/tax-rates', canViewCommissions, listCompanyTaxRates);
+router.get('/tax-rates/current', canViewCommissions, getCurrentVatRate);
+router.post('/tax-rates', canViewCommissions, createCompanyVatRate);
 router.get('/commission-liability', canViewCommissions, getCommissionLiability);
 router.get('/profit-loss', canViewCommissions, getProfitAndLoss);
 router.get('/balance-sheet', canViewCommissions, getBalanceSheet);

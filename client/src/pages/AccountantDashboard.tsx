@@ -51,7 +51,7 @@ const AccountantDashboard: React.FC = () => {
     else if (path.includes('/agent-accounts')) setActiveTab(7);
     else if (path.includes('/commissions')) setActiveTab(8);
     else if (path.includes('/tax')) setActiveTab(9);
-    else if (path.includes('/reports')) setActiveTab(10);
+    else if (path.includes('/reports') || path.includes('/property-details-report')) setActiveTab(10);
     else if (path.includes('/trust-account-reports')) setActiveTab(11);
     else if (path.includes('/data-sync')) setActiveTab(12);
     else if (path.includes('/tasks')) setActiveTab(13);

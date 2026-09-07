@@ -29,6 +29,7 @@ import { developmentService } from '../../services/developmentService';
 import { developmentUnitService } from '../../services/developmentUnitService';
 import { salesContractService } from '../../services/accountantService';
 import { buyerService } from '../../services/buyerService';
+import { dispatchPaymentsChanged } from '../../utils/paymentsChanged';
 
 const SalesPaymentsPage: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -206,6 +207,7 @@ const SalesPaymentsPage: React.FC = () => {
       // Ensure next entry starts from a clean form
       resetFormState();
       setShowForm(false);
+      try { dispatchPaymentsChanged({ type: 'created', payment: createdPayment }); } catch {}
     } catch (err: any) {
       const msg = err?.response?.data?.message || '';
       if (typeof msg === 'string' && msg.toLowerCase().includes('owner or collaborator')) {
@@ -235,7 +237,7 @@ const SalesPaymentsPage: React.FC = () => {
       setSelectedPayment(null);
       resetFormState();
       setShowForm(false);
-      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+      try { dispatchPaymentsChanged({ type: 'updated', payment: updated }); } catch {}
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to update payment');
     } finally {
@@ -263,7 +265,7 @@ const SalesPaymentsPage: React.FC = () => {
         ];
         return sortSalesPayments(next);
       });
-      try { window.dispatchEvent(new Event('payments:changed')); } catch {}
+      try { dispatchPaymentsChanged({ type: 'reversed', payment }); } catch {}
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to reverse payment');
     } finally {

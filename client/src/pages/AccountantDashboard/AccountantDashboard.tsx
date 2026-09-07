@@ -17,6 +17,7 @@ const AgentAccountsPage = lazy(() => import('./AgentAccountsPage'));
 const AgentAccountDetailPage = lazy(() => import('./AgentAccountDetailPage'));
 const CommissionsPage = lazy(() => import('./CommissionsPage'));
 const ReportsPage = lazy(() => import('./ReportsPage'));
+const PropertyDetailsReportPage = lazy(() => import('../agent/PropertyDetailsReportPage'));
 const SettingsPage = lazy(() => import('./SettingsPage'));
 const DatabaseSyncDashboard = lazy(() => import('../../components/admin/DatabaseSyncDashboard'));
 const TasksPage = lazy(() => import('./TasksPage'));
@@ -60,7 +61,7 @@ const AccountantDashboard: React.FC = () => {
       setActiveTab(12);
     } else if (path.includes('/data-sync')) {
       setActiveTab(11);
-    } else if (path.includes('/reports')) {
+    } else if (path.includes('/reports') || path.includes('/property-details-report')) {
       setActiveTab(10);
     } else if (path.includes('/commissions')) {
       setActiveTab(9);
@@ -183,6 +184,7 @@ const AccountantDashboard: React.FC = () => {
               <Route path="written-invoices" element={<WrittenInvoicesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="reports" element={<ReportsPage />} />
+              <Route path="property-details-report" element={<PropertyDetailsReportPage scope="company" />} />
               <Route path="data-sync" element={canManageSync ? <DatabaseSyncDashboard /> : <Navigate to="/accountant-dashboard" replace />} />
             </Routes>
           </Suspense>

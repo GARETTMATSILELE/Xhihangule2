@@ -9,6 +9,7 @@ const limits_1 = require("../middleware/limits");
 const roles_1 = require("../middleware/roles");
 const multer_1 = __importDefault(require("multer"));
 const agentController_1 = require("../controllers/agentController");
+const agentPropertyReportController_1 = require("../controllers/agentPropertyReportController");
 const ownerManagementController_1 = require("../controllers/ownerManagementController");
 const router = express_1.default.Router();
 // Configure multer for memory storage (similar to fileRoutes)
@@ -34,18 +35,21 @@ const upload = (0, multer_1.default)({
 });
 // Debug middleware
 router.use((req, res, next) => {
-    console.log('Agent routes middleware - Request path:', req.path);
+    if (process.env.NODE_ENV !== 'production') {
+        console.log('Agent routes middleware - Request path:', req.path);
+    }
     next();
 });
 // Apply auth middleware to all routes
 router.use(auth_1.auth);
+router.get('/reports/property-details', roles_1.canViewPropertyDetailsReport, agentPropertyReportController_1.getAgentPropertyDetailsReport);
 router.use(roles_1.isAgent);
 // Agent dashboard routes
 router.get('/properties', (req, res) => {
-    console.log('Agent properties route hit');
     (0, agentController_1.getAgentProperties)(req, res);
 });
 router.post('/properties', limits_1.enforcePropertyLimit, agentController_1.createAgentProperty);
+router.put('/properties/:id/archive', agentController_1.archiveAgentProperty);
 router.put('/properties/:id', agentController_1.updateAgentProperty);
 router.delete('/properties/:id', agentController_1.deleteAgentProperty);
 router.put('/properties/:id/restore', agentController_1.restoreAgentProperty);

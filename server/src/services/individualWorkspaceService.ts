@@ -86,6 +86,48 @@ function collectionStatus(expected: number, collected: number) {
   return 'red';
 }
 
+function entityId(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    // Mongoose ObjectId exposes `_id` as itself; never recurse into that.
+    if (typeof (value as { toHexString?: () => string }).toHexString === 'function') {
+      return String(value);
+    }
+    const obj = value as { _id?: unknown; $oid?: string };
+    if (obj.$oid) return String(obj.$oid);
+    if (obj._id && obj._id !== value) return entityId(obj._id);
+  }
+  try {
+    return String(value);
+  } catch {
+    return '';
+  }
+}
+
+function collectOccupiedPropertyIds(tenants: any[], leases: any[]): Set<string> {
+  const occupied = new Set<string>();
+  const endedLeaseStatuses = new Set(['terminated', 'closed', 'draft', 'pending_approval']);
+
+  for (const tenant of tenants || []) {
+    if (String(tenant?.status || 'Active').toLowerCase() === 'inactive') continue;
+    const linked = [
+      entityId(tenant?.propertyId),
+      ...((Array.isArray(tenant?.propertyIds) ? tenant.propertyIds : []).map(entityId))
+    ].filter(Boolean);
+    linked.forEach((propertyId) => occupied.add(propertyId));
+  }
+
+  for (const lease of leases || []) {
+    if (endedLeaseStatuses.has(String(lease?.status || '').toLowerCase())) continue;
+    if (!entityId(lease?.tenantId)) continue;
+    const propertyId = entityId(lease?.propertyId);
+    if (propertyId) occupied.add(propertyId);
+  }
+
+  return occupied;
+}
+
 function toCsv(rows: any[]) {
   if (!rows.length) return '';
   const headers = Array.from(rows.reduce((set: Set<string>, row) => {
@@ -172,11 +214,17 @@ export class IndividualWorkspaceService {
     );
   }
 
-  private propertyMetrics(row: { property: any; account: any }, activeLeaseCountByProperty: Map<string, number>, collectedThisMonth: Map<string, number>) {
+  private propertyMetrics(
+    row: { property: any; account: any },
+    activeLeaseCountByProperty: Map<string, number>,
+    collectedThisMonth: Map<string, number>,
+    occupiedPropertyIds: Set<string>
+  ) {
     const { property, account } = row;
     const units = Math.max(1, Number(property.units || 1));
-    const occupiedUnits = Number(property.occupiedUnits ?? (property.status === 'rented' || property.propertyOperationalStatus === 'Occupied' ? units : 0));
-    const occupancyPercent = Math.round((occupiedUnits / units) * 100);
+    const isOccupied = occupiedPropertyIds.has(String(property._id));
+    const occupiedUnits = isOccupied ? units : 0;
+    const occupancyPercent = isOccupied ? 100 : 0;
     const monthlyRent = Number(property.rent || 0);
     const expectedRent = activeLeaseCountByProperty.has(String(property._id)) ? monthlyRent : 0;
     const collectedRent = Number(collectedThisMonth.get(String(property._id)) || 0);
@@ -235,7 +283,8 @@ export class IndividualWorkspaceService {
         collectedThisMonth.set(pid, (collectedThisMonth.get(pid) || 0) + Number((payment as any).amount || 0));
       }
     }
-    const propertyMetrics = rows.map((row) => this.propertyMetrics(row, activeLeaseCountByProperty, collectedThisMonth));
+    const occupiedPropertyIds = collectOccupiedPropertyIds(tenants, leases);
+    const propertyMetrics = rows.map((row) => this.propertyMetrics(row, activeLeaseCountByProperty, collectedThisMonth, occupiedPropertyIds));
     const monthlyIncome = propertyMetrics.reduce((sum, p) => sum + p.monthlyIncome, 0);
     const monthlyExpenses = propertyMetrics.reduce((sum, p) => sum + p.monthlyExpenses, 0);
     const expectedRent = propertyMetrics.reduce((sum, p) => sum + p.expectedRent, 0);
@@ -282,8 +331,8 @@ export class IndividualWorkspaceService {
       summary: {
         totalProperties: properties.length,
         totalTenants: tenants.length,
-        occupiedUnits: propertyMetrics.reduce((sum, p) => sum + p.occupiedUnits, 0),
-        vacantUnits: propertyMetrics.reduce((sum, p) => sum + p.vacantUnits, 0),
+        occupiedUnits: propertyMetrics.filter((p) => p.occupancyStatus === 'Occupied').length,
+        vacantUnits: propertyMetrics.filter((p) => p.occupancyStatus !== 'Occupied').length,
         monthlyIncome,
         monthlyExpenses,
         netProfit: monthlyIncome - monthlyExpenses,

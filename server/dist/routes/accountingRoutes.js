@@ -7,6 +7,7 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const roles_1 = require("../middleware/roles");
 const accountingController_1 = require("../controllers/accountingController");
+const taxRateController_1 = require("../controllers/taxRateController");
 const companyLoadShedding_1 = require("../middleware/companyLoadShedding");
 const router = express_1.default.Router();
 const dashboardSummaryLimiter = (0, companyLoadShedding_1.createPerCompanyRateLimiter)({
@@ -21,6 +22,10 @@ router.get('/revenue-trend', roles_1.canViewCommissions, accountingController_1.
 router.get('/expense-trend', roles_1.canViewCommissions, accountingController_1.getExpenseTrend);
 router.get('/vat-status', roles_1.canViewCommissions, accountingController_1.getVatStatus);
 router.get('/vat-report/export', roles_1.canViewCommissions, accountingController_1.exportVatReport);
+router.get('/vat-on-commission', roles_1.canViewCommissions, taxRateController_1.getVatOnCommissionSummary);
+router.get('/tax-rates', roles_1.canViewCommissions, taxRateController_1.listCompanyTaxRates);
+router.get('/tax-rates/current', roles_1.canViewCommissions, taxRateController_1.getCurrentVatRate);
+router.post('/tax-rates', roles_1.canViewCommissions, taxRateController_1.createCompanyVatRate);
 router.get('/commission-liability', roles_1.canViewCommissions, accountingController_1.getCommissionLiability);
 router.get('/profit-loss', roles_1.canViewCommissions, accountingController_1.getProfitAndLoss);
 router.get('/balance-sheet', roles_1.canViewCommissions, accountingController_1.getBalanceSheet);

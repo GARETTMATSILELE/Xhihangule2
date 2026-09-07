@@ -52,6 +52,11 @@ class TrustAccountService {
 
   private async ensureIndexes(): Promise<void> {
     if (this.indexesEnsured) return;
+    const { isIndexCreationAllowed } = await import('./ledgerMutationPolicy');
+    if (!isIndexCreationAllowed()) {
+      this.indexesEnsured = true;
+      return;
+    }
     await Promise.all([
       TrustAccount.collection.createIndex({ companyId: 1, propertyId: 1, status: 1 }),
       TrustAccount.collection.createIndex({ companyId: 1, buyerId: 1, status: 1 }),
@@ -462,6 +467,18 @@ class TrustAccountService {
         sellerId: input.sellerId,
         createdBy: input.createdBy
       }));
+    const reversalReference =
+      String(input.reference || '').trim() ||
+      (input.paymentId ? `reversal:${input.paymentId}` : undefined);
+    if (reversalReference) {
+      const existingReversal = await TrustTransaction.findOne({
+        companyId: toObjectId(input.companyId),
+        reference: reversalReference
+      });
+      if (existingReversal) {
+        return { account, transaction: existingReversal, duplicate: true };
+      }
+    }
     return this.postTransaction({
       companyId: input.companyId,
       trustAccountId: String(account._id),
@@ -469,7 +486,7 @@ class TrustAccountService {
       type: 'BUYER_PAYMENT',
       paymentId: input.paymentId,
       debit: Math.abs(Number(input.amount || 0)),
-      reference: input.reference,
+      reference: reversalReference,
       sourceEvent: input.sourceEvent || 'payment.reversed',
       createdBy: input.createdBy
     });

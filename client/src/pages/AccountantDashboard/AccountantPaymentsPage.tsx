@@ -28,6 +28,7 @@ import PaymentList from '../../components/payments/PaymentList';
 import PaymentForm from '../../components/payments/PaymentForm';
 import PaymentSummary from '../../components/payments/PaymentSummary';
 import { AuthErrorReport } from '../../components/AuthErrorReport';
+import { dispatchPaymentsChanged } from '../../utils/paymentsChanged';
 
 const AccountantPaymentsPage: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -197,17 +198,15 @@ const AccountantPaymentsPage: React.FC = () => {
       if (initialFetchDone.current) return;
       initialFetchDone.current = true;
       try {
-        setLoading(true);
         setError(null);
-        const [propertiesResult, tenantsResult, paymentsPage] = await Promise.allSettled([
+        const [propertiesResult, tenantsResult] = await Promise.allSettled([
           // Use lightweight, paginated, public-filtered search for speed
           propertyService.searchPublicProperties({
             limit: 200,
             page: 1,
             fields: 'name,address,rent,commission,commissionPreaPercent,commissionAgencyPercentRemaining,commissionAgentPercentRemaining,propertyOwnerId,rentalType'
           }),
-          tenantService.getAll(),
-          paymentService.getPaymentsPage({ page, limit, includeProvisional: 'true', paymentType: 'rental' as any } as any)
+          tenantService.getAll()
         ]);
         if (!isMounted) return;
         let properties: Property[] = [];
@@ -253,24 +252,17 @@ const AccountantPaymentsPage: React.FC = () => {
             tenants = Array.isArray(tpub?.tenants) ? tpub.tenants : [];
           } catch {}
         }
-        const paymentsList = Array.isArray((paymentsPage as any)?.items) ? sortPayments((paymentsPage as any).items) : [];
-        const total = Number((paymentsPage as any)?.total) || paymentsList.length;
         setProperties(properties);
         setTenants(tenants);
-        setPayments(paymentsList as any[]);
-        setTotalCount(total);
-        persistCache({ items: paymentsList as any[], total, page, limit, filters });
       } catch (err: any) {
         if (!isMounted) return;
         // Show partial data if some calls failed
         setError('Some data failed to load. You can retry from the filters.');
-      } finally {
-        if (isMounted) setLoading(false);
       }
     };
     loadData();
     return () => { isMounted = false; };
-  }, [authLoading, filters, limit, page, persistCache, sortPayments]);
+  }, [authLoading]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -343,9 +335,7 @@ const AccountantPaymentsPage: React.FC = () => {
       }
       const created = (response as any)?.data ?? response;
       try {
-        window.dispatchEvent(new CustomEvent('payments:changed', {
-          detail: { type: 'created', payment: created },
-        }));
+        dispatchPaymentsChanged({ type: 'created', payment: created });
       } catch {}
       setShowForm(false);
     } catch (err: any) {
@@ -370,9 +360,7 @@ const AccountantPaymentsPage: React.FC = () => {
       setSelectedPayment(undefined);
       setSuccessMessage('Payment updated and completed successfully');
       try {
-        window.dispatchEvent(new CustomEvent('payments:changed', {
-          detail: { type: 'updated', payment: response },
-        }));
+        dispatchPaymentsChanged({ type: 'updated', payment: response });
       } catch {}
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to update payment');
@@ -403,7 +391,7 @@ const AccountantPaymentsPage: React.FC = () => {
       });
       setSuccessMessage((resp as any)?.message || 'Payment reversed and correction draft created');
       try {
-        window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'reversed' } }));
+        dispatchPaymentsChanged({ type: 'reversed', payment });
       } catch {}
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to reverse payment');
@@ -587,7 +575,7 @@ const AccountantPaymentsPage: React.FC = () => {
                 }
                 setSuccessMessage('Payment finalized successfully');
                 try {
-                  window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'finalized', payment: updated } }));
+                  dispatchPaymentsChanged({ type: 'finalized', payment: updated });
                 } catch {}
                 setFinalizeOpen(false);
                 setFinalizePayment(null);

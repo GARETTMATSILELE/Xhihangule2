@@ -39,8 +39,6 @@ const ConnectionStatus: React.FC = () => {
 
   useEffect(() => {
     checkHealth();
-    const interval = setInterval(checkHealth, 30000); // Check every 30 seconds
-    return () => clearInterval(interval);
   }, []);
 
   if (!status) {

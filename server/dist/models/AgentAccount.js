@@ -45,6 +45,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AgentAccount = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
+const ledgerMutationPolicy_1 = require("../services/ledgerMutationPolicy");
 const transactionSchema = new mongoose_1.Schema({
     type: {
         type: String,
@@ -194,56 +195,14 @@ agentAccountSchema.index({ agentId: 1, 'transactions.type': 1, 'transactions.ref
         'transactions.reference': { $exists: true, $type: 'string', $gt: '' }
     }
 });
-// Prevent duplicate paymentId-backed entries per agent (commission lane)
-agentAccountSchema.index({ agentId: 1, 'transactions.paymentId': 1, 'transactions.type': 1 }, {
-    unique: true,
-    sparse: true,
-    partialFilterExpression: {
-        'transactions.type': 'commission',
-        'transactions.paymentId': { $exists: true }
-    }
-});
-// Immutability guard for update operations
-function isIllegalAgentLedgerMutation(update) {
-    const illegalSetters = ['$set', '$unset', '$inc'];
-    const illegalRemovers = ['$pull', '$pullAll', '$pop'];
-    const allowedAppends = ['$push', '$addToSet'];
-    const rootArrays = ['transactions', 'agentPayouts'];
-    const startsWithAny = (k) => rootArrays.some(p => k === p || k.startsWith(`${p}.`) || k.startsWith(`${p}.$`));
-    for (const op of illegalSetters) {
-        const payload = update[op];
-        if (!payload)
-            continue;
-        for (const path of Object.keys(payload)) {
-            if (startsWithAny(path))
-                return true;
-        }
-    }
-    for (const op of illegalRemovers) {
-        const payload = update[op];
-        if (!payload)
-            continue;
-        for (const path of Object.keys(payload)) {
-            if (startsWithAny(path))
-                return true;
-        }
-    }
-    for (const op of allowedAppends) {
-        const payload = update[op];
-        if (!payload)
-            continue;
-        for (const path of Object.keys(payload)) {
-            if (!rootArrays.includes(path))
-                return true;
-        }
-    }
-    return false;
-}
+// Lookup only. Same agent can hold owner + collaborator lanes for one payment.
+// Uniqueness is (agentId, transactions.type, transactions.reference) above.
+agentAccountSchema.index({ agentId: 1, 'transactions.paymentId': 1, 'transactions.type': 1 }, { unique: false, sparse: true });
 agentAccountSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
     var _a, _b;
     try {
         const update = ((_b = (_a = this).getUpdate) === null || _b === void 0 ? void 0 : _b.call(_a)) || {};
-        if (isIllegalAgentLedgerMutation(update)) {
+        if ((0, ledgerMutationPolicy_1.isIllegalAgentAccountMutation)(update)) {
             return next(new Error('AgentAccount ledger is immutable. Use correction entries; do not mutate or delete history.'));
         }
         return next();

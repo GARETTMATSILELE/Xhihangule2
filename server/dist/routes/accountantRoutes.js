@@ -16,6 +16,7 @@ const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const auth_1 = require("../middleware/auth");
 const roles_1 = require("../middleware/roles");
+const agentPropertyReportController_1 = require("../controllers/agentPropertyReportController");
 const accountantController_1 = require("../controllers/accountantController");
 const paymentController_1 = require("../controllers/paymentController");
 const propertyAccountController_1 = require("../controllers/propertyAccountController");
@@ -86,6 +87,9 @@ router.get('/trust-accounts/:id/ledger', roles_1.canViewCommissions, trustAccoun
 router.get('/trust-accounts/:id/tax-summary', roles_1.canViewCommissions, trustAccountController_1.getTrustTaxSummary);
 router.get('/trust-accounts/:id/audit-logs', roles_1.canViewCommissions, trustAccountController_1.getTrustAuditLogs);
 router.get('/trust-accounts/:id/reconciliation', roles_1.canViewCommissions, trustAccountController_1.getTrustReconciliation);
+router.get('/trust-accounts/:id/matter', roles_1.canViewCommissions, trustAccountController_1.getTrustMatter);
+router.patch('/trust-accounts/:id/matter/custody', roles_1.isAccountant, trustAccountController_1.updateTrustMatterCustody);
+router.patch('/trust-accounts/:id/matter/documents', roles_1.isAccountant, trustAccountController_1.updateTrustMatterDocuments);
 router.post('/trust-accounts/:id/buyer-payments', roles_1.isAccountant, trustAccountController_1.recordBuyerPayment);
 router.post('/trust-accounts/:id/calculate-settlement', roles_1.isAccountant, trustAccountController_1.calculateSettlement);
 router.post('/trust-accounts/:id/apply-tax-deductions', roles_1.isAccountant, trustAccountController_1.applyTaxDeductions);
@@ -181,6 +185,8 @@ router.post('/property-accounts/:propertyId/reconcile-duplicates', roles_1.canVi
 router.post('/property-accounts/:propertyId/merge-duplicates', roles_1.canViewCommissions, propertyAccountController_1.mergePropertyAccountDuplicatesForProperty);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.canViewCommissions, propertyAccountController_1.getAcknowledgementDocument);
+// Company-wide property details report (same builder as the agent report)
+router.get('/reports/property-details', roles_1.canViewAccountantDashboard, agentPropertyReportController_1.getCompanyPropertyDetailsReport);
 // Company account routes
 router.get('/company-account/summary', roles_1.canViewAccountantDashboard, companyAccountController_1.getCompanyAccountSummary);
 router.get('/company-account/transactions', roles_1.canViewAccountantDashboard, companyAccountController_1.getCompanyTransactions);

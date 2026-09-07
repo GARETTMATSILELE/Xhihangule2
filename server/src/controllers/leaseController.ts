@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { Lease, LeaseStatus } from '../models/Lease';
 import { Payment } from '../models/Payment';
 import { Property } from '../models/Property';
+import { Tenant } from '../models/Tenant';
 import { LeaseBillingEngine } from '../services/leaseBillingEngine';
 import { ensureLeaseInspectionSchedule, ensureMoveOutInspection } from '../services/inspectionAutomationService';
 
@@ -93,9 +94,6 @@ export class LeaseController {
 
   async createLease(req: Request, res: Response): Promise<void> {
     try {
-      console.log('Creating lease with data:', JSON.stringify(req.body, null, 2));
-      console.log('User info:', req.user);
-      
       // Validate required fields - handle both field name variations
       const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit } = req.body;
       
@@ -103,32 +101,32 @@ export class LeaseController {
       const finalRentAmount = rentAmount !== undefined ? rentAmount : monthlyRent;
       const finalDepositAmount = depositAmount !== undefined ? depositAmount : securityDeposit;
       
-      console.log('Extracted required fields:', {
-        propertyId,
-        tenantId,
-        startDate,
-        endDate,
-        rentAmount: finalRentAmount,
-        depositAmount: finalDepositAmount,
-        originalRentAmount: rentAmount,
-        originalDepositAmount: depositAmount,
-        monthlyRent,
-        securityDeposit
-      });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Extracted required fields:', {
+          propertyId,
+          tenantId,
+          startDate,
+          endDate,
+          rentAmount: finalRentAmount,
+          depositAmount: finalDepositAmount
+        });
+      }
       
-      console.log('Field validation results:', {
-        hasPropertyId: !!propertyId,
-        hasTenantId: !!tenantId,
-        hasStartDate: !!startDate,
-        hasEndDate: !!endDate,
-        hasRentAmount: finalRentAmount !== undefined && finalRentAmount !== null,
-        hasDepositAmount: finalDepositAmount !== undefined && finalDepositAmount !== null,
-        rentAmountType: typeof finalRentAmount,
-        depositAmountType: typeof finalDepositAmount
-      });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Field validation results:', {
+          hasPropertyId: !!propertyId,
+          hasTenantId: !!tenantId,
+          hasStartDate: !!startDate,
+          hasEndDate: !!endDate,
+          hasRentAmount: finalRentAmount !== undefined && finalRentAmount !== null,
+          hasDepositAmount: finalDepositAmount !== undefined && finalDepositAmount !== null
+        });
+      }
       
       if (!propertyId || !tenantId || !startDate || !endDate || finalRentAmount === undefined || finalRentAmount === null || finalDepositAmount === undefined || finalDepositAmount === null) {
-        console.log('Missing required fields detected');
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('Missing required fields detected');
+        }
         res.status(400).json({ 
           error: 'Missing required fields: propertyId, tenantId, startDate, endDate, rentAmount, depositAmount',
           received: { propertyId, tenantId, startDate, endDate, rentAmount: finalRentAmount, depositAmount: finalDepositAmount }
@@ -138,7 +136,9 @@ export class LeaseController {
 
       // Check if amounts are valid numbers (including 0)
       if (isNaN(Number(finalRentAmount)) || isNaN(Number(finalDepositAmount))) {
-        console.log('Invalid numeric values detected');
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('Invalid numeric values detected');
+        }
         res.status(400).json({ 
           error: 'Rent amount and deposit amount must be valid numbers',
           received: { rentAmount: finalRentAmount, depositAmount: finalDepositAmount }
@@ -148,7 +148,9 @@ export class LeaseController {
 
       // Ensure companyId is available
       if (!req.user?.companyId && !req.body.companyId) {
-        console.log('Missing companyId detected');
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('Missing companyId detected');
+        }
         res.status(400).json({ 
           error: 'Company ID is required',
           received: { userCompanyId: req.user?.companyId, bodyCompanyId: req.body.companyId }
@@ -216,7 +218,9 @@ export class LeaseController {
         return;
       }
 
-      console.log('Processed lease data:', leaseData);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Processed lease data for property', leaseData?.propertyId);
+      }
 
       const lease = await this.leaseRepository.create(leaseData);
       if (leaseData.previousLeaseId) {
@@ -227,7 +231,9 @@ export class LeaseController {
           console.error('Failed to create lease inspection schedule:', error);
         });
       }
-      console.log('Lease created successfully:', lease._id);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Lease created successfully:', lease._id);
+      }
       
       res.status(201).json(lease);
     } catch (error: any) {
@@ -257,7 +263,9 @@ export class LeaseController {
 
   async updateLease(req: Request, res: Response): Promise<void> {
     try {
-      console.log('Updating lease with data:', req.body);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Updating lease', req.params.id);
+      }
       
       const { id } = req.params;
       const updateData = { ...req.body };
@@ -318,7 +326,9 @@ export class LeaseController {
         return;
       }
 
-      console.log('Processed update data:', updateData);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Processed lease update', id);
+      }
 
       if (updateData.status && updateData.status !== existingLease.status) {
         updateData.lifecycleStatusChangedAt = new Date();
@@ -330,7 +340,9 @@ export class LeaseController {
         return;
       }
       
-      console.log('Lease updated successfully:', lease._id);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Lease updated successfully:', lease._id);
+      }
       res.json(lease);
     } catch (error: any) {
       console.error('Error updating lease:', error);
@@ -522,13 +534,39 @@ export class LeaseController {
       }
       await lease.save();
 
-      const activeSuccessor = await Lease.findOne({
+      const activePropertyLease = await Lease.findOne({
         propertyId: lease.propertyId,
         status: { $in: ['active', 'expiring_soon', 'pending_approval'] },
         _id: { $ne: lease._id }
       });
-      if (!activeSuccessor) {
-        await Property.findByIdAndUpdate(lease.propertyId, { status: 'vacant' });
+
+      const activeLeaseForSameTenant = await Lease.findOne({
+        propertyId: lease.propertyId,
+        tenantId: lease.tenantId,
+        status: { $in: ['active', 'expiring_soon', 'pending_approval'] },
+        _id: { $ne: lease._id }
+      });
+
+      if (!activeLeaseForSameTenant) {
+        await Promise.all([
+          Tenant.updateOne(
+            { _id: lease.tenantId, propertyId: lease.propertyId },
+            { $unset: { propertyId: '' } }
+          ),
+          Tenant.updateOne(
+            { _id: lease.tenantId },
+            { $pull: { propertyIds: lease.propertyId } }
+          )
+        ]);
+      }
+
+      if (!activePropertyLease) {
+        await Property.findByIdAndUpdate(lease.propertyId, {
+          status: 'available',
+          propertyOperationalStatus: 'Vacant',
+          occupiedUnits: 0,
+          nextLeaseExpiry: null
+        });
       }
 
       res.json(lease);
@@ -552,7 +590,7 @@ export class LeaseController {
       endDate,
       rentAmount: Number(body.rentAmount ?? body.monthlyRent ?? previousLease.rentAmount),
       depositAmount: Number(body.depositAmount ?? body.securityDeposit ?? previousLease.depositAmount),
-      status: body.status || 'pending_approval',
+      status: body.status || 'active',
       companyId: previousLease.companyId,
       ownerId: previousLease.ownerId,
       previousLeaseId: previousLease._id,
@@ -667,7 +705,9 @@ export class LeaseController {
         return;
       }
 
-      console.log('Found lease:', { id: lease._id, propertyId: lease.propertyId });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Found lease:', { id: lease._id, propertyId: lease.propertyId });
+      }
 
       res.json({
         status: 'success',

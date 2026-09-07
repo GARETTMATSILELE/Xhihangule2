@@ -8,6 +8,12 @@ import {
   Chip,
   Grid,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Typography
 } from '@mui/material';
 import { AttachMoney } from '@mui/icons-material';
@@ -24,13 +30,30 @@ import { Lease } from '../../../types/lease';
 import { CenteredLoader, PageShell } from '../components/shared';
 import { INDIVIDUAL_THEME } from '../theme';
 import { money } from '../utils/formatters';
+import {
+  PortfolioRentStatus,
+  PropertyRentStatus,
+  derivePortfolioRentStatus,
+  getId
+} from '../utils/rentCollectionStatus';
 
-function RentCalendar({ payments }: { payments: Payment[] }) {
+function statusChipColor(label: PropertyRentStatus['statusLabel']): 'success' | 'error' {
+  return label === 'Overdue' ? 'error' : 'success';
+}
+
+function RentCalendar({
+  payments,
+  portfolio
+}: {
+  payments: Payment[];
+  portfolio: PortfolioRentStatus;
+}) {
   const now = new Date();
   const month = now.getMonth();
   const year = now.getFullYear();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const currentMonthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
 
   const paidDays = new Set(
     payments
@@ -41,29 +64,89 @@ function RentCalendar({ payments }: { payments: Payment[] }) {
       .map((p) => new Date(p.paymentDate).getDate())
   );
 
+  const dueDays = new Set(
+    portfolio.properties.flatMap((item) =>
+      item.periods
+        .filter((period) => period.key === currentMonthKey)
+        .map((period) => period.dueDate.getDate())
+    )
+  );
+
+  const monthOutstanding = portfolio.properties.some((item) =>
+    item.overduePeriods.some((period) => period.key === currentMonthKey)
+  );
+  const monthFullyPaid = portfolio.properties.some((item) =>
+    item.periods.some((period) => period.key === currentMonthKey && period.status === 'paid')
+  ) && !monthOutstanding;
+
   return (
     <Card elevation={0} sx={{ border: `1px solid ${INDIVIDUAL_THEME.border}`, borderRadius: 2 }}>
       <CardContent>
         <Typography variant="h6" gutterBottom>Rent Calendar — {now.toLocaleString(undefined, { month: 'long', year: 'numeric' })}</Typography>
         <Grid container spacing={0.5}>
           {days.map((day) => {
-            const isPast = day < now.getDate();
-            const isPaid = paidDays.has(day);
+            const isPaidDay = paidDays.has(day);
+            const isDueDay = dueDays.has(day);
+            const isPastOrToday = day <= now.getDate();
             let color: string = INDIVIDUAL_THEME.neutral;
-            let label = 'Upcoming';
-            if (isPaid) { color = INDIVIDUAL_THEME.success; label = 'Paid'; }
-            else if (isPast) { color = INDIVIDUAL_THEME.danger; label = 'Overdue'; }
-            else if (day === now.getDate()) { color = INDIVIDUAL_THEME.warning; label = 'Pending'; }
+            let label = '';
+            if (isPaidDay || (isDueDay && monthFullyPaid)) {
+              color = INDIVIDUAL_THEME.success;
+              label = 'Paid';
+            } else if (isDueDay && isPastOrToday && monthOutstanding) {
+              color = INDIVIDUAL_THEME.danger;
+              label = 'Overdue';
+            } else if (isDueDay && !isPastOrToday) {
+              color = INDIVIDUAL_THEME.warning;
+              label = 'Due';
+            }
             return (
               <Grid item xs={1.7} sm={1.2} md={0.8} key={day}>
-                <Box sx={{ textAlign: 'center', p: 0.5, borderRadius: 1, bgcolor: `${color}18`, border: `1px solid ${color}40` }}>
+                <Box sx={{ textAlign: 'center', p: 0.5, borderRadius: 1, bgcolor: label ? `${color}18` : 'transparent', border: `1px solid ${label ? `${color}40` : INDIVIDUAL_THEME.border}` }}>
                   <Typography variant="caption" fontWeight={700}>{day}</Typography>
-                  <Typography variant="caption" display="block" sx={{ fontSize: '0.6rem', color }}>{label}</Typography>
+                  {label && (
+                    <Typography variant="caption" display="block" sx={{ fontSize: '0.6rem', color }}>{label}</Typography>
+                  )}
                 </Box>
               </Grid>
             );
           })}
         </Grid>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PropertyRentStatusCard({ item }: { item: PropertyRentStatus }) {
+  return (
+    <Card elevation={0} sx={{ border: `1px solid ${INDIVIDUAL_THEME.border}`, borderRadius: 2, height: '100%' }}>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, alignItems: 'flex-start' }}>
+            <Box>
+              <Typography fontWeight={700}>{item.propertyName}</Typography>
+              <Typography variant="body2" color="text.secondary">{item.tenantName}</Typography>
+            </Box>
+            <Chip size="small" label={item.statusLabel} color={statusChipColor(item.statusLabel)} />
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Lease starts {item.leaseStart.toLocaleDateString()}
+          </Typography>
+          {item.status === 'overdue' ? (
+            <Box>
+              <Typography fontWeight={700} color="error.main">{money(item.outstandingTotal)} overdue</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {item.overduePeriods.map((period) => `${period.label} (${money(period.outstanding)})`).join(', ')}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {item.status === 'not_started'
+                ? 'Lease has not started, so no rent is due yet.'
+                : 'All due months on this lease are paid.'}
+            </Typography>
+          )}
+        </Stack>
       </CardContent>
     </Card>
   );
@@ -85,6 +168,7 @@ export function RentCollectionPage() {
   const [showPaymentForm, setShowPaymentForm] = useState(autoRecord);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -143,27 +227,42 @@ export function RentCollectionPage() {
     }
   };
 
-  const statusSummary = useMemo(() => {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthPayments = payments.filter((p) => new Date(p.paymentDate) >= monthStart);
-    const totalPaid = monthPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    const expected = leases.filter((l: any) => ['active', 'expiring_soon'].includes(String(l.status || '').toLowerCase())).reduce((s, l: any) => s + Number(l.rentAmount || l.monthlyRent || 0), 0);
-    if (totalPaid >= expected && expected > 0) return { label: 'Paid', color: 'success' as const };
-    if (totalPaid > 0) return { label: 'Partially Paid', color: 'warning' as const };
-    if (now.getDate() > 5) return { label: 'Overdue', color: 'error' as const };
-    if (totalPaid > expected) return { label: 'Advance Payment', color: 'info' as const };
-    return { label: 'Pending', color: 'default' as const };
-  }, [payments, leases]);
+  const portfolioStatus = useMemo(
+    () => derivePortfolioRentStatus(leases, payments, properties, tenants),
+    [leases, payments, properties, tenants]
+  );
+
+  const statusDetail = useMemo(() => {
+    if (portfolioStatus.label === 'No overdue payments') {
+      return portfolioStatus.startedLeaseCount === 0
+        ? 'No active lease has reached its start date, so nothing is overdue.'
+        : 'There are no overdue rent amounts on active leases.';
+    }
+    if (portfolioStatus.label === 'Paid up to date') {
+      return 'All due months on active leases have been paid.';
+    }
+    const overdueNames = portfolioStatus.overdueProperties.map((item) => item.propertyName).join(', ');
+    return `${money(portfolioStatus.outstandingTotal)} outstanding across ${overdueNames}.`;
+  }, [portfolioStatus]);
 
   const downloadReceipt = async (payment: Payment) => {
-    const blob = await paymentService.downloadReceipt(payment._id, company?._id);
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `receipt-${payment.referenceNumber || payment._id}.pdf`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+    try {
+      setError(null);
+      setDownloadingReceiptId(payment._id);
+      const blob = await paymentService.downloadReceipt(payment._id, company?._id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `receipt-${payment.referenceNumber || payment._id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to download receipt');
+    } finally {
+      setDownloadingReceiptId(null);
+    }
   };
 
   if (loading) return <CenteredLoader />;
@@ -181,10 +280,64 @@ export function RentCollectionPage() {
       {error && <Alert severity="error">{error}</Alert>}
       {success && <Alert severity="success">{success}</Alert>}
 
-      <Stack direction="row" spacing={1} alignItems="center">
-        <Typography variant="body2" color="text.secondary">Payment Status:</Typography>
-        <Chip label={statusSummary.label} color={statusSummary.color} />
-      </Stack>
+      <Card elevation={0} sx={{ border: `1px solid ${INDIVIDUAL_THEME.border}` }}>
+        <CardContent>
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+              <Typography variant="body2" color="text.secondary">Payment Status:</Typography>
+              <Chip label={portfolioStatus.label} color={portfolioStatus.color} />
+              {portfolioStatus.label === 'Overdue' && (
+                <Typography fontWeight={700} color="error.main">
+                  {money(portfolioStatus.outstandingTotal)} late
+                </Typography>
+              )}
+            </Stack>
+            <Typography variant="body2" color="text.secondary">{statusDetail}</Typography>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      {portfolioStatus.overdueProperties.length > 0 && (
+        <Card elevation={0} sx={{ border: `1px solid ${INDIVIDUAL_THEME.border}` }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>Late properties</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Property</TableCell>
+                    <TableCell>Tenant</TableCell>
+                    <TableCell>Months overdue</TableCell>
+                    <TableCell align="right">Amount late</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {portfolioStatus.overdueProperties.map((item) => (
+                    <TableRow key={item.leaseId || item.propertyId}>
+                      <TableCell>{item.propertyName}</TableCell>
+                      <TableCell>{item.tenantName}</TableCell>
+                      <TableCell>
+                        {item.overduePeriods.map((period) => period.label).join(', ')}
+                      </TableCell>
+                      <TableCell align="right">{money(item.outstandingTotal)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {portfolioStatus.properties.length > 0 && (
+        <Grid container spacing={2}>
+          {portfolioStatus.properties.map((item) => (
+            <Grid item xs={12} md={6} lg={4} key={item.leaseId || item.propertyId}>
+              <PropertyRentStatusCard item={item} />
+            </Grid>
+          ))}
+        </Grid>
+      )}
 
       {showPaymentForm && (
         <PaymentForm
@@ -198,15 +351,15 @@ export function RentCollectionPage() {
         />
       )}
 
-      <RentCalendar payments={payments} />
+      <RentCalendar payments={payments} portfolio={portfolioStatus} />
 
       <Card elevation={0} sx={{ border: `1px solid ${INDIVIDUAL_THEME.border}` }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>Recent Rent Payments</Typography>
           <Stack spacing={1}>
             {payments.slice(0, 15).map((payment) => {
-              const property = properties.find((p) => String(p._id) === String(payment.propertyId));
-              const tenant = tenants.find((t) => String(t._id) === String(payment.tenantId));
+              const property = properties.find((p) => getId(p._id) === getId(payment.propertyId));
+              const tenant = tenants.find((t) => getId(t._id) === getId(payment.tenantId));
               return (
                 <Box key={payment._id} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, py: 1, borderBottom: `1px solid ${INDIVIDUAL_THEME.border}` }}>
                   <Box>
@@ -217,7 +370,13 @@ export function RentCollectionPage() {
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <Typography fontWeight={700}>{money(payment.amount)}</Typography>
-                    <Button size="small" onClick={() => downloadReceipt(payment)}>Receipt</Button>
+                    <Button
+                      size="small"
+                      onClick={() => downloadReceipt(payment)}
+                      disabled={downloadingReceiptId === payment._id}
+                    >
+                      {downloadingReceiptId === payment._id ? 'Downloading...' : 'Receipt'}
+                    </Button>
                   </Stack>
                 </Box>
               );

@@ -41,3 +41,47 @@ html.accountant-dashboard-active {
   margin-left: 0 !important;
   padding-left: 0 !important;
 }
+
+.report-print-only {
+  display: none;
+}
+
+.report-print-surface {
+  background: #fff;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .report-print-only {
+    display: block !important;
+  }
+
+  .report-print-surface {
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  body,
+  #root {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .MuiDrawer-root,
+  .MuiAppBar-root {
+    display: none !important;
+  }
+
+  .MuiCard-root,
+  .MuiCardContent-root,
+  .MuiGrid-root {
+    overflow: visible !important;
+    box-shadow: none !important;
+  }
+}

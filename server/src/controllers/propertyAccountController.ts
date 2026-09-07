@@ -691,11 +691,23 @@ export const syncPropertyAccounts = async (req: Request, res: Response) => {
       });
     }
 
-    await propertyAccountService.syncPropertyAccountsWithPayments();
+    const companyId = req.user?.companyId ? String(req.user.companyId) : '';
+    await propertyAccountService.syncPropertyAccountsWithPayments({
+      companyId: companyId || undefined
+    });
     // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
     try {
-      const result = await propertyAccountService.migrateSalesLedgerForCompany();
-      logger.info('Sales ledger migration completed after property-account sync', result as any);
+      let migrateIds: string[] | undefined;
+      if (companyId) {
+        migrateIds = await propertyAccountService.getLedgerEntityIdsForCompany(companyId);
+        if (!migrateIds.length) {
+          logger.info('Sales ledger migration skipped after property-account sync (no company entities)');
+        }
+      }
+      if (!companyId || (migrateIds && migrateIds.length > 0)) {
+        const result = await propertyAccountService.migrateSalesLedgerForCompany(migrateIds);
+        logger.info('Sales ledger migration completed after property-account sync', result as any);
+      }
     } catch (e) {
       logger.warn('Sales ledger migration skipped/failed after property-account sync', e as any);
     }

@@ -16,6 +16,7 @@ import propertyAccountService from '../services/propertyAccountService';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
 import accountingIntegrationService from '../services/accountingIntegrationService';
+import { postPaymentAccounting, reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import { emitEvent } from '../events/eventBus';
 import trustEventRetryService from '../services/trustEventRetryService';
 import chargeTypeService from '../services/chargeTypeService';
@@ -26,6 +27,10 @@ import {
   sumRentPaidForPeriod,
   type CombinedAllocationResult,
 } from '../services/combinedPaymentService';
+import { buildPaymentReceiptPdf } from '../utils/paymentReceiptPdf';
+import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
+import { getVatRateForDate } from '../services/taxRateService';
+import { roundMoney } from '../utils/money';
 
 const isConfirmedStatus = (status?: string): boolean => {
   const s = String(status || '').toLowerCase();
@@ -154,11 +159,18 @@ const buildSaleCommissionDetails = async (input: {
 
   const computed = await CommissionService.calculate(commissionBaseAmount, commissionPercent, companyObjectId);
   const applyVatOnCommission = Boolean(input.applyVatOnCommission);
-  const company = applyVatOnCommission ? await Company.findById(companyObjectId).lean() : null;
-  const configuredVat = Number(input.vatOnCommissionRate ?? company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
-  const vatOnCommissionRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
+  let vatOnCommissionRate = 0;
+  if (applyVatOnCommission) {
+    const explicit = Number(input.vatOnCommissionRate);
+    if (Number.isFinite(explicit) && explicit >= 0) {
+      vatOnCommissionRate = Math.max(0, Math.min(1, explicit));
+    } else {
+      const lookedUp = await getVatRateForDate(companyObjectId);
+      vatOnCommissionRate = lookedUp.decimal;
+    }
+  }
   const vatOnCommission = applyVatOnCommission
-    ? Number((Number(computed.totalCommission || 0) * vatOnCommissionRate).toFixed(2))
+    ? roundMoney(Number(computed.totalCommission || 0) * vatOnCommissionRate)
     : 0;
   const result: any = {
     totalCommission: Number(Number(computed.totalCommission || 0).toFixed(2)),
@@ -534,8 +546,6 @@ export const getPayment = async (req: Request, res: Response) => {
   }
 };
 
-import { CommissionService } from '../services/commissionService';
-
 // Create a new payment (for lease-based payments)
 export const createPayment = async (req: Request, res: Response) => {
   if (!req.user) {
@@ -671,11 +681,16 @@ export const createPayment = async (req: Request, res: Response) => {
     }
 
     // Calculate commission based on property commission percentage and company config
-    const paymentCommissionDetails = await CommissionService.calculate(
-      amount,
-      property.commission || 0,
-      new mongoose.Types.ObjectId(req.user.companyId)
-    );
+    const paymentCommissionResult = await CommissionService.calculateForProperty({
+      companyId: req.user.companyId,
+      grossRent: amount,
+      levy: 0,
+      commissionPercentage: property.commission || 0,
+      vatOnCommission: Boolean((property as any)?.vatOnCommission),
+      vatTreatment: (property as any)?.vatCommissionTreatment,
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+    });
+    const paymentCommissionDetails = applyLevyPassThroughToSnapshot(paymentCommissionResult, amount, 0);
 
     // Create payment record
     const payment = new Payment({
@@ -699,6 +714,9 @@ export const createPayment = async (req: Request, res: Response) => {
       referenceNumber: '', // Placeholder, will update after save
       notes: '', // Default empty notes
       commissionDetails: paymentCommissionDetails,
+      applyVatOnCommission: paymentCommissionResult.vatOnCommission,
+      vatOnCommissionRate: paymentCommissionResult.vatRate || 0,
+      vatCommissionTreatment: paymentCommissionResult.vatTreatment,
       rentUsed: rent, // Store the rent used for this payment
       idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
     });
@@ -730,40 +748,10 @@ export const createPayment = async (req: Request, res: Response) => {
       });
     }
 
-    // Update company revenue
-    await Company.findByIdAndUpdate(
-      companyId || lease.companyId,
-      {
-        $inc: {
-          revenue: paymentCommissionDetails.agencyShare,
-        },
-      }
-    );
-
-    // Sync commission from saved payment (SSOT)
-    await agentAccountService.syncCommissionForPayment(payment._id.toString());
-
-    // If it's a rental payment, update property owner's balance
-    if (property.ownerId) {
-      await User.findByIdAndUpdate(
-        property.ownerId,
-        {
-          $inc: {
-            balance: paymentCommissionDetails.ownerAmount,
-          },
-        }
-      );
-    }
-
-    // Ensure owner income is recorded in property ledger (enqueue retry on failure)
-    try {
-      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
-    } catch (e) {
-      try {
-        const ledgerEventService = (await import('../services/ledgerEventService')).default;
-        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
-      } catch {}
-      console.warn('Non-fatal: property account record failed (lease-based create), enqueued for retry', (e as any)?.message || e);
+    // Company.revenue / User.balance are not accounting ledgers (Phase 5B).
+    const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
+    if (postResult.status === 'partial' || postResult.status === 'failed') {
+      console.warn('Payment accounting post incomplete (lease-based create)', postResult);
     }
 
     // Update property arrears after payment
@@ -806,12 +794,6 @@ export const createPayment = async (req: Request, res: Response) => {
     // Email agent with payment details (fire-and-forget)
     void sendAgentPaymentNotificationEmail(payment);
 
-    // Non-blocking accounting sync hook.
-    if (payment.status === 'completed') {
-      await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
-    }
-
-    // Primary event-driven trigger for trust posting.
     await emitPaymentConfirmedIfNeeded(payment, 'payment.create');
 
     res.status(201).json({
@@ -1011,6 +993,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     // Calculate commission: apply "single-month" rule only for introduction; management uses full amount (including advance periods)
     let finalCommissionDetails = commissionDetails;
     let resolvedOwnerId: string | undefined = rawOwnerId;
+    let rentalVatOnCommission = false;
+    let rentalVatOnCommissionRate = 0;
+    let rentalVatCommissionTreatment: 'inclusive' | 'exclusive' | undefined;
     try {
       const isRental = resolvedPaymentType !== 'sale';
       const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
@@ -1019,11 +1004,15 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       const depositNum = Number(depositAmount || 0);
       const isDepositOnly = amountNum <= 0 && depositNum > 0;
 
-      // Fetch property to resolve commission percent, rentalType and owner fallback
+      // Fetch property to resolve commission percent, rentalType, VAT settings and owner fallback
       let commissionPercentResolved: number = (propertyType || 'residential') === 'residential' ? 15 : 10;
       let rentalTypeResolved: 'management' | 'introduction' | 'sale' | undefined = undefined;
+      let propertyVatOnCommission = false;
+      let propertyVatTreatment: 'inclusive' | 'exclusive' | undefined;
       if (!manualProperty && rawPropertyId) {
-        const prop = await Property.findById(new mongoose.Types.ObjectId(rawPropertyId)).select('commission rentalType ownerId').lean();
+        const prop = await Property.findById(new mongoose.Types.ObjectId(rawPropertyId))
+          .select('commission rentalType ownerId vatOnCommission vatCommissionTreatment')
+          .lean();
         if (prop) {
           if (typeof (prop as any)?.commission === 'number') {
             commissionPercentResolved = Number((prop as any).commission);
@@ -1031,12 +1020,35 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
           if ((prop as any)?.rentalType) {
             rentalTypeResolved = (prop as any).rentalType as any;
           }
+          propertyVatOnCommission = Boolean((prop as any)?.vatOnCommission);
+          if (propertyVatOnCommission) {
+            propertyVatTreatment = String((prop as any)?.vatCommissionTreatment || '').toLowerCase() === 'inclusive'
+              ? 'inclusive'
+              : 'exclusive';
+          }
           if (!resolvedOwnerId && (prop as any)?.ownerId) {
             resolvedOwnerId = String((prop as any).ownerId);
           }
         }
       }
       const isIntroduction = rentalTypeResolved === 'introduction';
+      const levyAllocated = Number(combinedAllocation?.levyAllocated || 0);
+
+      const buildRentalCommission = async (commissionableRent: number) => {
+        const result = await CommissionService.calculateForProperty({
+          companyId: user.companyId,
+          grossRent: commissionableRent,
+          levy: 0,
+          commissionPercentage: commissionPercentResolved,
+          vatOnCommission: propertyVatOnCommission,
+          vatTreatment: propertyVatTreatment,
+          paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+        });
+        rentalVatOnCommission = result.vatOnCommission;
+        rentalVatOnCommissionRate = Number(result.vatRate || 0);
+        rentalVatCommissionTreatment = result.vatTreatment;
+        return applyLevyPassThroughToSnapshot(result, commissionBaseAmount, levyAllocated);
+      };
 
       // Compute server-enforced commission
       let computed: any = undefined;
@@ -1066,51 +1078,24 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
               ? Math.min(Math.max(0, commissionBaseAmount), oneMonthRent)
               : Math.max(0, commissionBaseAmount);
             if (commissionable > 0) {
-              const tmp = await CommissionService.calculate(
-                commissionable,
-                commissionPercentResolved,
-                new mongoose.Types.ObjectId(user.companyId)
-              ) as any;
-              computed = {
-                totalCommission: tmp.totalCommission,
-                preaFee: tmp.preaFee,
-                agentShare: tmp.agentShare,
-                agencyShare: tmp.agencyShare,
-                ownerAmount: Math.max(0, commissionBaseAmount - tmp.totalCommission)
-              };
+              computed = await buildRentalCommission(commissionable);
             }
           }
           // Not first or zero commissionable → zero commission
           if (!computed) {
-            computed = {
-              totalCommission: 0,
-              preaFee: 0,
-              agentShare: 0,
-              agencyShare: 0,
-              ownerAmount: commissionBaseAmount
-            };
+            computed = await buildRentalCommission(0);
+            computed.ownerAmount = roundMoney(commissionBaseAmount + levyAllocated);
           }
         } else {
           // Management (or unknown): standard commission on rent portion only (advance supported)
-          const tmp = await CommissionService.calculate(
-            Math.max(0, commissionBaseAmount),
-            commissionPercentResolved,
-            new mongoose.Types.ObjectId(user.companyId)
-          ) as any;
-          computed = tmp;
-        }
-        // Levy portion passes through to owner (not commissioned)
-        if (combinedAllocation?.hasLevy && computed) {
-          computed.ownerAmount = Number(computed.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
+          computed = await buildRentalCommission(Math.max(0, commissionBaseAmount));
         }
       } else {
         // Non-rental or insufficient linkage: default to standard on amount (safe)
-        const tmp = await CommissionService.calculate(
-          Math.max(0, amountNum),
-          commissionPercentResolved,
-          new mongoose.Types.ObjectId(user.companyId)
-        ) as any;
-        computed = tmp;
+        computed = await buildRentalCommission(Math.max(0, amountNum));
+        if (!isRental) {
+          computed.ownerAmount = roundMoney(Math.max(0, amountNum - Number(computed.totalCommission || 0) - Number(computed.vatAmount || 0)));
+        }
       }
 
       // Always enforce server rule over client-provided commissionDetails
@@ -1123,6 +1108,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         preaFee: 0,
         agentShare: 0,
         agencyShare: 0,
+        vatOnCommission: 0,
         ownerAmount: amountNum
       } as any;
     }
@@ -1246,6 +1232,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       notes: notes || '',
       processedBy: new mongoose.Types.ObjectId(rawProcessedBy),
       commissionDetails: finalCommissionDetails,
+      applyVatOnCommission: rentalVatOnCommission,
+      vatOnCommissionRate: rentalVatOnCommissionRate,
+      vatCommissionTreatment: rentalVatCommissionTreatment,
       status: 'completed',
       currency: currency || 'USD',
       leaseId: rawLeaseId ? new mongoose.Types.ObjectId(rawLeaseId) : undefined,
@@ -1328,42 +1317,11 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       await deposit.save(session ? { session } : undefined);
     }
 
-    // Post company revenue and sync agent commission only if not provisional
     if (!payment.isProvisional) {
-      await Company.findByIdAndUpdate(
-        new mongoose.Types.ObjectId(user.companyId),
-        { $inc: { revenue: finalCommissionDetails.agencyShare } },
-        session ? { session } : undefined
-      );
-
-      await agentAccountService.syncCommissionForPayment(payment._id.toString());
-    }
-
-    if (!payment.isProvisional) {
-      if ((paymentType === 'rental' || paymentType === 'introduction') && resolvedOwnerId) {
-        const ownerBalanceIncrement = Math.max(
-          0,
-          Number(finalCommissionDetails.ownerAmount || 0) - Number(combinedAllocation?.levyAllocated || configuredNonOwnerTotal || 0)
-        );
-        await User.findByIdAndUpdate(
-          new mongoose.Types.ObjectId(resolvedOwnerId),
-          { $inc: { balance: ownerBalanceIncrement } },
-          session ? { session } : undefined
-        );
+      const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: user.userId });
+      if (postResult.status === 'partial' || postResult.status === 'failed') {
+        console.warn('Payment accounting post incomplete (accountant create)', postResult);
       }
-    }
-
-    try {
-      // Skip recording income in property accounts until finalized if provisional
-      if (!payment.isProvisional) {
-        await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
-      }
-    } catch (error) {
-      try {
-        const ledgerEventService = (await import('../services/ledgerEventService')).default;
-        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
-      } catch {}
-      console.error('Failed to record income in property account, enqueued for retry:', error);
     }
 
     // Notify the primary agent (and split participants) when a completed sale payment is created
@@ -1464,7 +1422,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
 
     if ('payment' in result) {
       if ((result.payment as any)?.status === 'completed' && !(result.payment as any)?.isProvisional) {
-        await accountingIntegrationService.syncPaymentReceived(result.payment as any, { createdBy: currentUser.userId });
+        await postPaymentAccounting(String((result.payment as any)._id), { createdBy: currentUser.userId });
         await emitPaymentConfirmedIfNeeded(result.payment as any, 'payment.create.accountant');
       }
       return res.status(201).json({
@@ -1486,7 +1444,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         }
         if ('payment' in result) {
           if ((result.payment as any)?.status === 'completed' && !(result.payment as any)?.isProvisional) {
-            await accountingIntegrationService.syncPaymentReceived(result.payment as any, { createdBy: currentUser.userId });
+            await postPaymentAccounting(String((result.payment as any)._id), { createdBy: currentUser.userId });
             await emitPaymentConfirmedIfNeeded(result.payment as any, 'payment.create.accountant');
           }
           return res.status(201).json({
@@ -1655,14 +1613,21 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
     let normalizedVatOnCommissionRate = 0;
     // Apply VAT on commission only when selected for this sale.
     {
-      const company = normalizedApplyVatOnCommission ? await Company.findById(new mongoose.Types.ObjectId(user.companyId)).lean() : null;
-      const configuredVat = Number(vatOnCommissionRate ?? company?.commissionConfig?.vatPercentOnCommission ?? 0.155);
-      const vatRate = Math.max(0, Math.min(1, Number.isFinite(configuredVat) ? configuredVat : 0.155));
+      let vatRate = 0;
+      const explicit = Number(vatOnCommissionRate);
+      if (normalizedApplyVatOnCommission) {
+        if (Number.isFinite(explicit) && explicit >= 0) {
+          vatRate = Math.max(0, Math.min(1, explicit));
+        } else {
+          const lookedUp = await getVatRateForDate(user.companyId);
+          vatRate = lookedUp.decimal;
+        }
+      }
       normalizedVatOnCommissionRate = normalizedApplyVatOnCommission ? vatRate : 0;
       const commissionBase = Number(((finalCommissionDetails as any)?.totalCommission) || 0);
-      const vatOnCommission = normalizedApplyVatOnCommission ? Number((commissionBase * vatRate).toFixed(2)) : 0;
+      const vatOnCommission = normalizedApplyVatOnCommission ? roundMoney(commissionBase * vatRate) : 0;
       (finalCommissionDetails as any).vatOnCommission = vatOnCommission;
-      (finalCommissionDetails as any).ownerAmount = Number((taxableAmountForAllocation - commissionBase - vatOnCommission).toFixed(2));
+      (finalCommissionDetails as any).ownerAmount = roundMoney(taxableAmountForAllocation - commissionBase - vatOnCommission);
     }
 
     // If development and agent are provided, and the agent is a collaborator on that development,
@@ -1777,11 +1742,6 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       session.startTransaction();
       usedTransaction = true;
       await payment.save({ session });
-      await Company.findByIdAndUpdate(
-        new mongoose.Types.ObjectId(user.companyId),
-        { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } },
-        { session }
-      );
       await session.commitTransaction();
     } catch (txErr: any) {
       if (usedTransaction && session) {
@@ -1790,10 +1750,6 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       // Some deployments do not support transactions; fallback to non-transactional writes.
       if (txErr?.code === 20 || /Transaction numbers are only allowed/.test(String(txErr?.message || ''))) {
         await payment.save();
-        await Company.findByIdAndUpdate(
-          new mongoose.Types.ObjectId(user.companyId),
-          { $inc: { revenue: (finalCommissionDetails as any).agencyShare || 0 } }
-        );
       } else {
         throw txErr;
       }
@@ -1803,17 +1759,10 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     }
 
-    // Non-transactional downstream syncs (idempotent/retry-safe services).
-    try {
-      await agentAccountService.syncCommissionForPayment(payment._id.toString());
-    } catch (e) {
-      console.warn('Non-fatal: commission posting failed', e);
+    const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: user.userId });
+    if (postResult.status === 'partial' || postResult.status === 'failed') {
+      console.warn('Payment accounting post incomplete (sales create)', postResult);
     }
-
-    // Record income in property accounts
-    try { await propertyAccountService.recordIncomeFromPayment(payment._id.toString()); } catch (e) { try { const ledgerEventService = (await import('../services/ledgerEventService')).default; await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString()); } catch {} console.warn('Non-fatal: property account record failed (sales), enqueued for retry', e); }
-
-    await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: user.userId });
     await emitPaymentConfirmedIfNeeded(payment, 'payment.create.sales');
 
     // Notify the primary agent and split participants for completed sale payment
@@ -1881,7 +1830,7 @@ export const updatePayment = async (req: Request, res: Response) => {
       'paymentDate', 'paymentMethod', 'amount', 'depositAmount', 'referenceNumber', 'notes', 'currency',
       'rentalPeriodMonth', 'rentalPeriodYear', 'advanceMonthsPaid', 'advancePeriodStart', 'advancePeriodEnd',
       'manualPropertyAddress', 'manualTenantName', 'buyerName', 'sellerName', 'status', 'postingStatus',
-      'commissionDetails', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate'
+      'commissionDetails', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate', 'vatCommissionTreatment'
     ]);
     for (const [k, v] of Object.entries(req.body || {})) {
       if (!editableFields.has(k)) continue;
@@ -1912,7 +1861,7 @@ export const updatePayment = async (req: Request, res: Response) => {
         vatIncluded: Boolean((payment as any).vatIncluded),
         vatRate: Number((payment as any).vatRate ?? 0.155),
         applyVatOnCommission: Boolean((payment as any).applyVatOnCommission),
-        vatOnCommissionRate: Number((payment as any).vatOnCommissionRate ?? 0.155),
+        vatOnCommissionRate: Number((payment as any).vatOnCommissionRate ?? 0),
         existingSplit: rawDetails?.agentSplit,
         commissionPercentOverride: explicitCommissionPercent
       });
@@ -1930,15 +1879,9 @@ export const updatePayment = async (req: Request, res: Response) => {
     await payment.save();
 
     if (previousStatus !== 'completed' && nextStatus === 'completed') {
-      await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
-      await agentAccountService.syncCommissionForPayment(String(payment._id));
-      try {
-        await propertyAccountService.recordIncomeFromPayment(String(payment._id));
-      } catch (e) {
-        try {
-          const ledgerEventService = (await import('../services/ledgerEventService')).default;
-          await ledgerEventService.enqueueOwnerIncomeEvent(String(payment._id));
-        } catch {}
+      const postResult = await postPaymentAccounting(String(payment._id), { createdBy: req.user.userId });
+      if (postResult.status === 'partial' || postResult.status === 'failed') {
+        console.warn('Payment accounting post incomplete (update complete)', postResult);
       }
       await emitPaymentConfirmedIfNeeded(payment, 'payment.update');
       await logPaymentAudit({
@@ -2364,7 +2307,10 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
     await payment.save();
 
     if (previousStatus !== 'completed' && status === 'completed') {
-      await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
+      const postResult = await postPaymentAccounting(String(payment._id), { createdBy: req.user.userId });
+      if (postResult.status === 'partial' || postResult.status === 'failed') {
+        console.warn('Payment accounting post incomplete (status update)', postResult);
+      }
       await emitPaymentConfirmedIfNeeded(payment, 'payment.status.updated');
       await logPaymentAudit({
         paymentId: String(payment._id),
@@ -2533,7 +2479,7 @@ export const reversePayment = async (req: Request, res: Response) => {
         vatIncluded: Boolean((lockedOriginal as any).vatIncluded),
         vatRate: Number((lockedOriginal as any).vatRate ?? 0.155),
         applyVatOnCommission: Boolean((lockedOriginal as any).applyVatOnCommission),
-        vatOnCommissionRate: Number((lockedOriginal as any).vatOnCommissionRate ?? 0.155),
+        vatOnCommissionRate: Number((lockedOriginal as any).vatOnCommissionRate ?? 0),
         existingSplit: (lockedOriginal as any)?.commissionDetails?.agentSplit
       });
 
@@ -2654,43 +2600,16 @@ export const reversePayment = async (req: Request, res: Response) => {
     const reversal = resultPayload?.reversal as any;
     const propagationWarnings: string[] = [];
     if (original) {
-      const companyRevenueShare = Number((original as any)?.commissionDetails?.agencyShare || 0);
-      const ownerIncomeAmount = Number((original as any)?.commissionDetails?.ownerAmount || 0);
-      let ownerUserId = String((original as any)?.ownerId || '');
-      if (!ownerUserId && (original.paymentType === 'rental' || original.paymentType === 'introduction')) {
-        try {
-          const property = await Property.findById((original as any).propertyId).select('ownerId').lean();
-          ownerUserId = String((property as any)?.ownerId || '');
-        } catch {}
-      }
-      const propagationResults = await Promise.allSettled([
-        accountingIntegrationService.syncPaymentReversed(original, { createdBy: req.user.userId, reason }),
-        propertyAccountService.reverseIncomeFromPayment(String(original._id), { processedBy: req.user.userId, reason }),
-        agentAccountService.reverseCommissionForPayment(String(original._id), reason),
-        companyRevenueShare > 0
-          ? Company.findByIdAndUpdate(
-              new mongoose.Types.ObjectId(String(original.companyId)),
-              { $inc: { revenue: -companyRevenueShare } }
-            )
-          : Promise.resolve(),
-        ownerUserId && ownerIncomeAmount > 0 && (original.paymentType === 'rental' || original.paymentType === 'introduction')
-          ? User.findByIdAndUpdate(
-              new mongoose.Types.ObjectId(ownerUserId),
-              { $inc: { balance: -ownerIncomeAmount } }
-            )
-          : Promise.resolve()
-      ]);
-      for (const [idx, result] of propagationResults.entries()) {
-        if (result.status === 'fulfilled') continue;
-        const subsystem =
-          idx === 0 ? 'accounting'
-            : idx === 1 ? 'property_account'
-              : idx === 2 ? 'agent_account'
-                : idx === 3 ? 'company_revenue'
-                  : 'owner_balance';
-        const message = result.reason?.message || `failed to sync ${subsystem}`;
-        propagationWarnings.push(`${subsystem}: ${message}`);
-        console.error(`Non-fatal reversal propagation failure [${subsystem}]`, result.reason);
+      const reversalResult = await reversePaymentAccounting(String(original._id), {
+        processedBy: req.user.userId,
+        reason,
+        reversalPaymentId: reversal?._id ? String(reversal._id) : undefined
+      });
+      if (reversalResult.status === 'partial' || reversalResult.status === 'failed') {
+        for (const err of reversalResult.errors) {
+          propagationWarnings.push(err);
+        }
+        console.error('Payment reversal accounting incomplete', reversalResult);
       }
       try {
         await emitEvent('payment.reversed', {
@@ -2944,11 +2863,16 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
     }
 
     // Calculate commission based on property commission percentage
-    const publicCommissionDetails = await CommissionService.calculate(
-      amount,
-      property.commission || 0,
-      new mongoose.Types.ObjectId(lease.companyId)
-    );
+    const publicCommissionResult = await CommissionService.calculateForProperty({
+      companyId: lease.companyId,
+      grossRent: amount,
+      levy: 0,
+      commissionPercentage: property.commission || 0,
+      vatOnCommission: Boolean((property as any)?.vatOnCommission),
+      vatTreatment: (property as any)?.vatCommissionTreatment,
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+    });
+    const publicCommissionDetails = applyLevyPassThroughToSnapshot(publicCommissionResult, amount, 0);
 
     // Create payment record
     const payment = new Payment({
@@ -2972,6 +2896,9 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       referenceNumber: '', // Placeholder, will update after save
       notes: '', // Default empty notes
       commissionDetails: publicCommissionDetails,
+      applyVatOnCommission: publicCommissionResult.vatOnCommission,
+      vatOnCommissionRate: publicCommissionResult.vatRate || 0,
+      vatCommissionTreatment: publicCommissionResult.vatTreatment,
       rentUsed: rent, // Store the rent used for this payment
       idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
     });
@@ -2994,7 +2921,9 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       });
     }
 
-    console.log('Payment created successfully:', { id: payment._id, amount: payment.amount });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Payment created successfully:', { id: payment._id });
+    }
 
     res.status(201).json({
       status: 'success',
@@ -3192,26 +3121,47 @@ export const getPaymentReceiptDownload = async (req: Request, res: Response) => 
       </html>
     `;
 
-    console.log('Generated HTML receipt for payment:', { id: payment._id, amount: payment.amount });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Generated HTML receipt for payment:', { id: payment._id });
+    }
 
-    // If PDF format requested, attempt PDF generation via puppeteer; fallback to HTML on failure
     if (format === 'pdf') {
-      try {
-        const puppeteer = (await import('puppeteer')).default;
-        const browser = await puppeteer.launch({
-          // improve compatibility in containerized environments
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        const page = await browser.newPage();
-        await page.setContent(htmlReceipt, { waitUntil: 'networkidle0' });
-        const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', left: '15mm', right: '15mm', bottom: '20mm' } });
-        await browser.close();
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.referenceNumber || payment._id}.pdf"`);
-        return res.send(pdfBuffer);
-      } catch (pdfErr) {
-        console.warn('PDF generation failed, falling back to HTML download:', (pdfErr as any)?.message || pdfErr);
-      }
+      const totalPaid = Number(payment.amount || 0) + Number(payment.depositAmount || 0);
+      const tenant = payment.tenantId as any;
+      const agent = payment.agentId as any;
+      const processedBy = payment.processedBy as any;
+      const pdfBuffer = await buildPaymentReceiptPdf({
+        companyName: company?.name || 'Property Management',
+        companyAddress: company?.address,
+        companyPhone: company?.phone,
+        companyEmail: company?.email,
+        companyWebsite: company?.website,
+        registrationNumber: company?.registrationNumber,
+        tinNumber: company?.tinNumber,
+        logoBase64: company?.logo,
+        receiptNumber: String(payment.referenceNumber || payment._id),
+        amountLabel: `$${totalPaid.toFixed(2)}`,
+        lines: [
+          { label: 'Payment Date', value: new Date(payment.paymentDate).toLocaleDateString() },
+          { label: 'Payment Method', value: payment.paymentMethod?.replace('_', ' ').toUpperCase() || 'N/A' },
+          { label: 'Status', value: payment.status?.toUpperCase() || 'N/A' },
+          { label: 'Property', value: (payment.propertyId as any)?.name || 'N/A' },
+          { label: 'Tenant', value: [tenant?.firstName, tenant?.lastName].filter(Boolean).join(' ') || 'N/A' },
+          { label: 'Agent', value: [agent?.firstName, agent?.lastName].filter(Boolean).join(' ') || 'N/A' },
+          { label: 'Processed By', value: [processedBy?.firstName, processedBy?.lastName].filter(Boolean).join(' ') || 'N/A' },
+          { label: 'Rent Amount', value: `$${Number(rentAmountForDisplay || 0).toFixed(2)}` },
+          ...(payment.depositAmount && Number(payment.depositAmount) > 0
+            ? [{ label: 'Deposit Amount', value: `$${Number(payment.depositAmount).toFixed(2)}` }]
+            : []),
+          { label: 'Outstanding', value: `$${Number(rentalOutstanding || 0).toFixed(2)}` },
+          ...(Number(rentalOutstanding || 0) === 0 ? [{ label: 'Balance Status', value: 'Cleared' }] : []),
+          { label: 'Total Paid', value: `$${totalPaid.toFixed(2)}` },
+          ...(payment.notes ? [{ label: 'Notes', value: String(payment.notes) }] : [])
+        ]
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="receipt-${payment.referenceNumber || payment._id}.pdf"`);
+      return res.send(pdfBuffer);
     }
 
     // Default: HTML file download
@@ -3455,7 +3405,9 @@ export const getPaymentReceipt = async (req: Request, res: Response) => {
       console.warn('Failed to compute sale totals for receipt', (calcErr as any)?.message);
     }
 
-    console.log('Generated receipt for payment:', { id: payment._id, amount: payment.amount });
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Generated receipt for payment:', { id: payment._id });
+    }
 
     res.json({
       status: 'success',
@@ -3560,28 +3512,34 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
             ? Math.min(rentPortion, oneMonthRent)
             : rentPortion;
           if (commissionable > 0) {
-            const tmp = await CommissionService.calculate(
-              commissionable,
-              Number(commissionPercent),
-              new mongoose.Types.ObjectId(req.user.companyId)
-            );
-            finalCommission = {
-              totalCommission: tmp.totalCommission,
-              preaFee: tmp.preaFee,
-              agentShare: tmp.agentShare,
-              agencyShare: tmp.agencyShare,
-              ownerAmount: Math.max(0, Number(payment.amount || 0) - Number(tmp.totalCommission || 0))
-            };
+            const tmp = await CommissionService.calculateForProperty({
+              companyId: req.user.companyId,
+              grossRent: commissionable,
+              levy: 0,
+              commissionPercentage: Number(commissionPercent),
+              vatOnCommission: Boolean((property as any)?.vatOnCommission),
+              vatTreatment: (property as any)?.vatCommissionTreatment,
+              paymentDate: payment.paymentDate
+            });
+            finalCommission = applyLevyPassThroughToSnapshot(tmp, Number(payment.amount || 0), Number((payment as any).levyAllocated || 0));
           }
         }
       } else {
         // Management or other: standard commission on full amount (advance supported)
-        const tmp = await CommissionService.calculate(
-          Math.max(0, Number(payment.amount || 0)),
-          Number(commissionPercent),
-          new mongoose.Types.ObjectId(req.user.companyId)
+        const tmp = await CommissionService.calculateForProperty({
+          companyId: req.user.companyId,
+          grossRent: Math.max(0, Number((payment as any).rentAllocated || payment.amount || 0)),
+          levy: 0,
+          commissionPercentage: Number(commissionPercent),
+          vatOnCommission: Boolean((property as any)?.vatOnCommission),
+          vatTreatment: (property as any)?.vatCommissionTreatment,
+          paymentDate: payment.paymentDate
+        });
+        finalCommission = applyLevyPassThroughToSnapshot(
+          tmp,
+          Math.max(0, Number((payment as any).rentAllocated || payment.amount || 0)),
+          Number((payment as any).levyAllocated || 0)
         );
-        finalCommission = tmp;
       }
     } catch {
       finalCommission = {
@@ -3599,6 +3557,9 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
       (payment as any).ownerId = new mongoose.Types.ObjectId(ownerId);
     }
     payment.commissionDetails = finalCommission as any;
+    (payment as any).applyVatOnCommission = Boolean((finalCommission as any)?.vatAmount > 0 || (property as any)?.vatOnCommission);
+    (payment as any).vatOnCommissionRate = Number((finalCommission as any)?.vatRate || 0);
+    (payment as any).vatCommissionTreatment = (finalCommission as any)?.vatTreatment;
     payment.isProvisional = false;
     payment.isInSuspense = false;
     payment.commissionFinalized = true;
@@ -3608,34 +3569,11 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
 
     await payment.save();
 
-    await Company.findByIdAndUpdate(
-      new mongoose.Types.ObjectId(req.user.companyId),
-      { $inc: { revenue: finalCommission.agencyShare } },
-      {}
-    );
-
-    await agentAccountService.syncCommissionForPayment(payment._id.toString());
-
-    if ((payment.paymentType === 'rental' || payment.paymentType === 'introduction') && (ownerId || (property as any).ownerId)) {
-      await User.findByIdAndUpdate(
-        new mongoose.Types.ObjectId(ownerId || ((property as any).ownerId)),
-        { $inc: { balance: finalCommission.ownerAmount } },
-        {}
-      );
+    const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
+    if (postResult.status === 'partial' || postResult.status === 'failed') {
+      console.warn('Payment accounting post incomplete (finalize)', postResult);
     }
 
-    try {
-      await propertyAccountService.recordIncomeFromPayment(payment._id.toString());
-    } catch (err) {
-      try {
-        const ledgerEventService = (await import('../services/ledgerEventService')).default;
-        await ledgerEventService.enqueueOwnerIncomeEvent(payment._id.toString());
-      } catch {}
-      console.error('Failed to record income in property account during finalize; enqueued for retry:', err);
-    }
-
-    // Return populated payment so the UI can immediately show property/tenant details
-    await accountingIntegrationService.syncPaymentReceived(payment, { createdBy: req.user.userId });
     await emitPaymentConfirmedIfNeeded(payment, 'payment.finalized');
 
     const populated = await Payment.findById(payment._id)

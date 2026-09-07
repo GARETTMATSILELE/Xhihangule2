@@ -93,6 +93,14 @@ export interface PaymentFormData {
     agencyShare: number;
     vatOnCommission?: number;
     ownerAmount: number;
+    levy?: number;
+    commissionBase?: number;
+    commissionRate?: number;
+    commissionGross?: number;
+    commissionNet?: number;
+    vatTreatment?: 'inclusive' | 'exclusive';
+    vatRate?: number;
+    vatAmount?: number;
   };
   processedBy?: string;
   ownerId?: string;
@@ -113,6 +121,7 @@ export interface PaymentFormData {
   vatAmount?: number;
   applyVatOnCommission?: boolean;
   vatOnCommissionRate?: number;
+  vatCommissionTreatment?: 'inclusive' | 'exclusive';
 }
 
 export interface Payment {
@@ -138,6 +147,14 @@ export interface Payment {
     agencyShare: number;
     vatOnCommission?: number;
     ownerAmount: number;
+    levy?: number;
+    commissionBase?: number;
+    commissionRate?: number;
+    commissionGross?: number;
+    commissionNet?: number;
+    vatTreatment?: 'inclusive' | 'exclusive';
+    vatRate?: number;
+    vatAmount?: number;
   };
   status: PaymentStatus;
   postingStatus?: PostingStatus;
@@ -178,6 +195,7 @@ export interface Payment {
   vatAmount?: number;
   applyVatOnCommission?: boolean;
   vatOnCommissionRate?: number;
+  vatCommissionTreatment?: 'inclusive' | 'exclusive';
   reversalOfPaymentId?: string;
   reversalPaymentId?: string;
   correctedPaymentId?: string;

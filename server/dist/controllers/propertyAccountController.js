@@ -578,7 +578,7 @@ exports.reconcilePropertyDuplicates = reconcilePropertyDuplicates;
  * Sync property accounts with payments
  */
 const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     try {
         const allowBusinessHoursSync = String(process.env.ALLOW_SYNC_DURING_BUSINESS_HOURS || '').toLowerCase() === 'true' ||
             String(req.query.force || '').toLowerCase() === 'true';
@@ -624,11 +624,23 @@ const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 }
             });
         }
-        yield propertyAccountService_1.default.syncPropertyAccountsWithPayments();
+        const companyId = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.companyId) ? String(req.user.companyId) : '';
+        yield propertyAccountService_1.default.syncPropertyAccountsWithPayments({
+            companyId: companyId || undefined
+        });
         // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
         try {
-            const result = yield propertyAccountService_1.default.migrateSalesLedgerForCompany();
-            logger_1.logger.info('Sales ledger migration completed after property-account sync', result);
+            let migrateIds;
+            if (companyId) {
+                migrateIds = yield propertyAccountService_1.default.getLedgerEntityIdsForCompany(companyId);
+                if (!migrateIds.length) {
+                    logger_1.logger.info('Sales ledger migration skipped after property-account sync (no company entities)');
+                }
+            }
+            if (!companyId || (migrateIds && migrateIds.length > 0)) {
+                const result = yield propertyAccountService_1.default.migrateSalesLedgerForCompany(migrateIds);
+                logger_1.logger.info('Sales ledger migration completed after property-account sync', result);
+            }
         }
         catch (e) {
             logger_1.logger.warn('Sales ledger migration skipped/failed after property-account sync', e);

@@ -47,6 +47,8 @@ export const getSocket = () => {
   return socket;
 };
 
+export const tryGetSocket = (): Socket | null => socket;
+
 export const disconnectSocket = () => {
   if (socket) {
     socket.disconnect();

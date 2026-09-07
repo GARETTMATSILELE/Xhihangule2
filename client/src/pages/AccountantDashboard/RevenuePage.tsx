@@ -34,6 +34,28 @@ import accountingService, { DashboardSummary, LedgerRow, TrendPoint, VatStatusPo
 
 type Period = 'month_range' | 'year';
 
+function getRevenueDateRange(
+  period: Period,
+  startMonth: string,
+  endMonth: string,
+  selectedYear: number
+): { start: Date; end: Date } {
+  if (period === 'month_range' && startMonth && endMonth) {
+    const [sy, sm] = startMonth.split('-').map(Number);
+    const [ey, em] = endMonth.split('-').map(Number);
+    const start = new Date(Math.min(new Date(sy, (sm || 1) - 1, 1).getTime(), new Date(ey, (em || 1) - 1, 1).getTime()));
+    const end = new Date(Math.max(
+      new Date(ey, (em || 1), 0, 23, 59, 59, 999).getTime(),
+      new Date(sy, (sm || 1), 0, 23, 59, 59, 999).getTime()
+    ));
+    return { start, end };
+  }
+  return {
+    start: new Date(selectedYear, 0, 1),
+    end: new Date(selectedYear, 11, 31, 23, 59, 59, 999)
+  };
+}
+
 const RevenuePage: React.FC = () => {
   const navigate = useNavigate();
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -58,6 +80,7 @@ const RevenuePage: React.FC = () => {
     startDate: new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0, 10),
     endDate: new Date().toISOString().slice(0, 10)
   });
+  const [vatOnCommissionSummary, setVatOnCommissionSummary] = useState<{ vatCollected: number; transactions: number; properties: number } | null>(null);
   const [addExpenseOpen, setAddExpenseOpen] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -82,23 +105,40 @@ const RevenuePage: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const [paymentsData, summary, tx] = await Promise.all([
-          paymentService.getPayments(),
+        const [summary, tx] = await Promise.all([
           companyAccountService.getSummary().catch(() => null),
           companyAccountService.getTransactions().catch(() => null)
         ]);
-
-        setPayments(Array.isArray(paymentsData) ? paymentsData : []);
         setCompanySummary(summary);
         setCompanyTransactions(Array.isArray((tx as any)?.transactions) ? (tx as any).transactions : (Array.isArray(tx) ? tx : []));
-      } catch (err) {
-        setPayments([]);
+      } catch {
         setCompanySummary(null);
         setCompanyTransactions([]);
       }
     };
     load();
   }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { start, end } = getRevenueDateRange(period, startMonth, endMonth, selectedYear);
+        const [paymentsData, vatSummary] = await Promise.all([
+          paymentService.getPayments({ startDate: start, endDate: end }),
+          accountingService.getVatOnCommissionSummary({
+            startDate: start.toISOString(),
+            endDate: end.toISOString()
+          }).catch(() => null)
+        ]);
+        setPayments(Array.isArray(paymentsData) ? paymentsData : []);
+        setVatOnCommissionSummary(vatSummary);
+      } catch {
+        setPayments([]);
+        setVatOnCommissionSummary(null);
+      }
+    };
+    load();
+  }, [period, startMonth, endMonth, selectedYear]);
 
   useEffect(() => {
     const loadAccounting = async () => {
@@ -360,6 +400,25 @@ const RevenuePage: React.FC = () => {
           </Grid>
         ))}
       </Grid>
+
+      <Paper elevation={2} sx={{ p: 2, mt: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1 }}>VAT on Commission</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Current Period</Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={4}>
+            <Typography variant="subtitle2">VAT collected</Typography>
+            <Typography variant="h6">${Number(vatOnCommissionSummary?.vatCollected ?? totalVatCollected).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Typography variant="subtitle2">Transactions</Typography>
+            <Typography variant="h6">{vatOnCommissionSummary?.transactions ?? filtered.filter(p => Number(p?.commissionDetails?.vatOnCommission || 0) > 0).length}</Typography>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Typography variant="subtitle2">Properties</Typography>
+            <Typography variant="h6">{vatOnCommissionSummary?.properties ?? new Set(filtered.filter(p => Number(p?.commissionDetails?.vatOnCommission || 0) > 0).map(p => String(p.propertyId))).size}</Typography>
+          </Grid>
+        </Grid>
+      </Paper>
 
       <Grid container spacing={3} sx={{ mt: 1 }}>
         <Grid item xs={12}>

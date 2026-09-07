@@ -51,6 +51,12 @@ export const agentService = {
     return response.data?.property ?? response.data;
   },
 
+  // Archive an agent-owned property without moving it to deleted properties
+  archiveProperty: async (id: string): Promise<Property> => {
+    const response = await api.put(`/agents/properties/${id}/archive`);
+    return response.data?.property ?? response.data;
+  },
+
   // Get tenants managed by the agent
   getTenants: async () => {
     const response = await api.get('/agents/tenants');

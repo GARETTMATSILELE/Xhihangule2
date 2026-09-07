@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { reportService, OwnerStatementData } from '../../../services/public/reportService';
+import { OwnerStatementDTO, OwnerStatementPreview, reportingService } from '../../../reporting';
 
 interface OwnerStatementReportProps {
   isAuthenticated?: boolean;
@@ -9,6 +10,8 @@ const OwnerStatementReport: React.FC<OwnerStatementReportProps> = ({ isAuthentic
   const [data, setData] = useState<OwnerStatementData[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [enterpriseStatement, setEnterpriseStatement] = useState<OwnerStatementDTO | null>(null);
+  const [enterpriseLoadingKey, setEnterpriseLoadingKey] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -42,6 +45,37 @@ const OwnerStatementReport: React.FC<OwnerStatementReportProps> = ({ isAuthentic
     URL.revokeObjectURL(url);
   };
 
+  const loadEnterpriseStatement = async (propertyId: string, period?: string) => {
+    setEnterpriseLoadingKey(propertyId);
+    setError(null);
+    try {
+      const statement = await reportingService.getOwnerStatement(propertyId, period);
+      setEnterpriseStatement(statement);
+    } catch {
+      setError('Failed to load enterprise owner statement preview.');
+    } finally {
+      setEnterpriseLoadingKey(null);
+    }
+  };
+
+  const downloadEnterprisePdf = async (propertyId: string, period?: string) => {
+    setEnterpriseLoadingKey(propertyId);
+    setError(null);
+    try {
+      const blob = await reportingService.downloadOwnerStatement(propertyId, 'pdf', period);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `owner-statement-${propertyId}-${period || 'current'}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Failed to download enterprise owner statement PDF.');
+    } finally {
+      setEnterpriseLoadingKey(null);
+    }
+  };
+
   if (loading) return <div className="flex justify-center items-center h-40"><span className="loader" /> Loading...</div>;
   if (error) return <div className="text-red-500 p-4">{error}</div>;
   if (!data || data.length === 0) return <div className="p-4">No data available.</div>;
@@ -63,6 +97,7 @@ const OwnerStatementReport: React.FC<OwnerStatementReportProps> = ({ isAuthentic
               <th className="p-2 border">Expenses</th>
               <th className="p-2 border">Net Income</th>
               <th className="p-2 border">Period</th>
+              <th className="p-2 border">Enterprise Statement</th>
             </tr>
           </thead>
           <tbody>
@@ -75,11 +110,34 @@ const OwnerStatementReport: React.FC<OwnerStatementReportProps> = ({ isAuthentic
                 <td className="p-2 border">{prop.expenses}</td>
                 <td className="p-2 border">{prop.netIncome}</td>
                 <td className="p-2 border">{prop.period}</td>
+                <td className="p-2 border">
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => loadEnterpriseStatement(prop.propertyId, prop.period)}
+                      className="px-2 py-1 bg-slate-800 text-white rounded hover:bg-slate-700"
+                      disabled={enterpriseLoadingKey === prop.propertyId}
+                    >
+                      {enterpriseLoadingKey === prop.propertyId ? 'Loading...' : 'Preview'}
+                    </button>
+                    <button
+                      onClick={() => downloadEnterprisePdf(prop.propertyId, prop.period)}
+                      className="px-2 py-1 border rounded hover:bg-slate-50"
+                      disabled={enterpriseLoadingKey === prop.propertyId}
+                    >
+                      PDF
+                    </button>
+                  </div>
+                </td>
               </tr>
             )))}
           </tbody>
         </table>
       </div>
+      {enterpriseStatement && (
+        <div className="mt-6">
+          <OwnerStatementPreview statement={enterpriseStatement} />
+        </div>
+      )}
     </div>
   );
 };

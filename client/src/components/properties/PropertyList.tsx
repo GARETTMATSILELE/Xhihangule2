@@ -23,6 +23,7 @@ import {
   Stack,
 } from '@mui/material';
 import {
+  Archive as ArchiveIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Add as AddIcon,
@@ -37,6 +38,7 @@ interface PropertyListProps {
   properties: Property[];
   onPropertyClick: (property: Property) => void;
   onDeleteProperty: (propertyId: string) => void;
+  onArchiveProperty?: (propertyId: string) => void;
   onAddProperty: () => void;
   // Optional, for admin dashboard customizations
   isAdminRoute?: boolean;
@@ -49,6 +51,7 @@ const PropertyList: React.FC<PropertyListProps> = ({
   properties,
   onPropertyClick,
   onDeleteProperty,
+  onArchiveProperty,
   onAddProperty,
   isAdminRoute,
   agentNamesById,
@@ -195,6 +198,18 @@ const PropertyList: React.FC<PropertyListProps> = ({
                       }}>
                         <EditIcon />
                       </IconButton>
+                      {isAgentRoute && onArchiveProperty && (
+                        <IconButton
+                          aria-label={`Archive ${property.name}`}
+                          title="Archive property"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onArchiveProperty(property._id);
+                          }}
+                        >
+                          <ArchiveIcon />
+                        </IconButton>
+                      )}
                       <IconButton onClick={(e) => {
                         e.stopPropagation();
                         onDeleteProperty(property._id);

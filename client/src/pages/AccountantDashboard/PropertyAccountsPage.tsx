@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, Typography, Grid, CircularProgress, Box, Button, TextField, Chip, Alert, InputAdornment, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { propertyAccountService, PropertyAccount } from '../../services/propertyAccountService';
+import { usePropertyAccountLiveRefresh } from '../../hooks/usePropertyAccountLiveRefresh';
 
 const PropertyAccountsPage: React.FC = () => {
   const { user } = useAuth();
@@ -15,6 +16,11 @@ const PropertyAccountsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [ledgerFilter, setLedgerFilter] = useState<'all' | 'rental' | 'sale'>('all');
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listStateRef = useRef({ page, accountsLength: 0, debouncedSearch, ledgerFilter });
+  listStateRef.current = { page, accountsLength: accounts.length, debouncedSearch, ledgerFilter };
 
   const loadFirstPage = async (q: string) => {
     try {
@@ -67,6 +73,68 @@ const PropertyAccountsPage: React.FC = () => {
     loadFirstPage(debouncedSearch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, ledgerFilter]);
+
+  const silentRefreshList = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
+    const { page: nextPageToLoad, debouncedSearch: q, ledgerFilter: ledger } = listStateRef.current;
+    const pagesLoaded = Math.max(1, nextPageToLoad - 1);
+    try {
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('Property account refresh triggered');
+      }
+      const allItems: PropertyAccount[] = [];
+      let hasMoreResult = false;
+      let nextPageResult = 1;
+      for (let p = 1; p <= pagesLoaded; p++) {
+        const { items, hasMore, nextPage } = await propertyAccountService.getCompanyPropertyAccountsPaged({
+          page: p,
+          limit: 24,
+          search: q,
+          ledger: ledger === 'all' ? undefined : ledger
+        });
+        allItems.push(...items);
+        hasMoreResult = Boolean(hasMore);
+        nextPageResult = nextPage || (p + 1);
+        if (!hasMore) break;
+      }
+      setAccounts(allItems);
+      setHasMore(hasMoreResult);
+      setPage(nextPageResult);
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('Property account refreshed successfully');
+      }
+    } catch (err) {
+      console.error('Property account list refresh failed (keeping current data)', err);
+    } finally {
+      refreshInFlightRef.current = false;
+      if (refreshPendingRef.current) {
+        refreshPendingRef.current = false;
+        void silentRefreshList();
+      }
+    }
+  }, []);
+
+  const scheduleListRefresh = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void silentRefreshList();
+    }, 400);
+  }, [silentRefreshList]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  usePropertyAccountLiveRefresh(() => {
+    scheduleListRefresh();
+  });
 
   const normalizeLedgerType = (type?: string): 'rental' | 'sale' =>
     (String(type || '').toLowerCase() === 'sale' ? 'sale' : 'rental');

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Tooltip, XAxis, YAxis, Legend } from 'recharts';
 import paymentService from '../../services/paymentService';
 import { Payment } from '../../types/payment';
@@ -33,6 +34,7 @@ type BuyerPropertyGroup = { saleKey: string; propertyId?: string; propertyName: 
 type BuyerPartyStatement = PartyStatement & { properties: BuyerPropertyGroup[]; outstandingTotal: number };
 
 const ReportsPage: React.FC = () => {
+  const navigate = useNavigate();
   // Filters (default to current month)
   const now = new Date();
   const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -140,7 +142,7 @@ const ReportsPage: React.FC = () => {
       }
     };
     load();
-  }, [from, to]);
+  }, []);
 
   // Load sale payments for the selected month/year (independent of the global from/to filters)
   useEffect(() => {
@@ -1005,6 +1007,18 @@ const ReportsPage: React.FC = () => {
             <h3 className="text-sm text-slate-500">Average Monthly</h3>
             <div className="text-2xl font-bold">{currency(Math.round(netTotal / Math.max(filteredRevenue.length, 1)))}</div>
             <div className="text-sm text-slate-600 mt-2">Calculated over {filteredRevenue.length} months</div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl shadow w-full md:w-1/3 flex flex-col justify-between">
+            <h3 className="text-sm text-slate-500">Property Details</h3>
+            <button
+              type="button"
+              onClick={() => navigate('/accountant-dashboard/property-details-report')}
+              className="btn-primary print:hidden inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg shadow hover:shadow-md mt-2"
+            >
+              Print Property Details
+            </button>
+            <div className="text-sm text-slate-600 mt-2">All company properties</div>
           </div>
         </div>
       </section>

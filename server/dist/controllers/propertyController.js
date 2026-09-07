@@ -24,6 +24,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const access_1 = require("../utils/access");
 const Buyer_1 = require("../models/Buyer");
 const trustAccountService_1 = __importDefault(require("../services/trustAccountService"));
+const propertyCommissionCalculator_1 = require("../services/propertyCommissionCalculator");
 // Helper function to extract user context from request
 const getUserContext = (req) => {
     // Try to get user context from query parameters first
@@ -405,7 +406,10 @@ const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, rentalType: req.body.rentalType, commission: req.body.commission });
+        const vatSettings = (0, propertyCommissionCalculator_1.sanitizePropertyVatSettings)(req.body || {});
+        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, rentalType: req.body.rentalType, commission: req.body.commission, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
+        delete propertyData.vatRate;
+        delete propertyData.vatPercentOnCommission;
         console.log('Processed property data:', propertyData);
         console.log('User context:', {
             userId: req.user.userId,
@@ -637,7 +641,10 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 nextBuyerId = new mongoose_1.default.Types.ObjectId(rawId);
             }
         }
-        const updateDoc = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId });
+        const vatSettings = (0, propertyCommissionCalculator_1.sanitizePropertyVatSettings)(req.body || {});
+        const updateDoc = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
+        delete updateDoc.vatRate;
+        delete updateDoc.vatPercentOnCommission;
         // Ensure we only ever write a validated buyerId
         if (Object.prototype.hasOwnProperty.call(updateDoc, 'buyerId')) {
             delete updateDoc.buyerId;

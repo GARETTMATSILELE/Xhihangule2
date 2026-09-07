@@ -37,7 +37,8 @@ export const compareAgentCommissionTotals = async (req: Request, res: Response) 
 
     for (const u of agents) {
       try {
-        const account = await agentAccountService.getOrCreateAgentAccount(String(u._id));
+        const account = await AgentAccount.findOne({ agentId: u._id });
+        if (!account) continue;
         const userCommission = Number((u as any).commission || 0);
         const ledgerTotal = Number(account.totalCommissions || 0);
         const delta = Number((ledgerTotal - userCommission).toFixed(2));

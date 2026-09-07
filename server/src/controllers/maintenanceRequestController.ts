@@ -420,7 +420,9 @@ export const deleteMaintenanceRequest = async (req: Request, res: Response) => {
 // Public function for getting maintenance requests (no authentication required)
 export const getMaintenanceRequestsPublic = async (req: Request, res: Response) => {
   try {
-    console.log('getMaintenanceRequestsPublic called with query:', req.query);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('getMaintenanceRequestsPublic called');
+    }
     const { propertyId, companyId } = req.query;
 
     const query: any = {};
@@ -441,7 +443,9 @@ export const getMaintenanceRequestsPublic = async (req: Request, res: Response) 
       query.companyId = companyId;
     }
 
-    console.log('Query to execute:', query);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Maintenance query to execute:', { propertyId: query.propertyId, companyId: query.companyId });
+    }
 
     const maintenanceRequests = await MaintenanceRequest.find(query)
       .populate('requestedBy', 'firstName lastName')
@@ -450,7 +454,9 @@ export const getMaintenanceRequestsPublic = async (req: Request, res: Response) 
       .populate('contractorId', 'companyName trade')
       .sort({ lastActivityAt: -1, createdAt: -1 });
 
-    console.log('Found maintenance requests:', maintenanceRequests.length);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Found maintenance requests:', maintenanceRequests.length);
+    }
 
     // Return empty array if no requests found instead of error
     if (!maintenanceRequests || maintenanceRequests.length === 0) {

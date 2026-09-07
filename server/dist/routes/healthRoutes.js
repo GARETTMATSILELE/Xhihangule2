@@ -75,12 +75,6 @@ router.get('/', (req, res) => {
         const dbHealth = (0, database_1.getDatabaseHealth)();
         const accountingDbHealth = (0, database_1.getAccountingDatabaseHealth)();
         const uptime = process.uptime();
-        console.log('Health check response:', {
-            status: 'ok',
-            database: dbHealth,
-            accountingDatabase: accountingDbHealth,
-            uptime
-        });
         // Only fail if main DB is unhealthy; accounting DB is informational here
         if (!dbHealth.isConnected || !dbHealth.isHealthy) {
             return res.status(503).json({

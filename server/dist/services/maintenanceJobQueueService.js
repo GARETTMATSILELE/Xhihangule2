@@ -139,14 +139,38 @@ class MaintenanceJobQueueService {
             });
         });
     }
+    renewClaimedLease(job) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield MaintenanceJob_1.MaintenanceJob.updateOne({ _id: job._id, status: 'running', workerId: this.workerId }, { $set: { leaseExpiresAt: new Date(Date.now() + LEASE_MS) } });
+        });
+    }
     executeJob(job) {
         return __awaiter(this, void 0, void 0, function* () {
+            const heartbeatMs = Math.max(15000, Math.floor(LEASE_MS / 3));
+            const heartbeat = setInterval(() => {
+                void this.renewClaimedLease(job).catch((error) => {
+                    logger_1.logger.warn(`Maintenance lease renewal failed for ${String(job._id)}:`, error);
+                });
+            }, heartbeatMs);
             try {
                 let result = {};
                 if (job.operation === 'sync_property_accounts') {
-                    yield propertyAccountService_1.default.syncPropertyAccountsWithPayments();
-                    const migrated = yield propertyAccountService_1.default.migrateSalesLedgerForCompany();
-                    result = { migrated };
+                    const companyId = job.companyId ? String(job.companyId).trim() : '';
+                    const syncStats = yield propertyAccountService_1.default.syncPropertyAccountsWithPayments({
+                        companyId: companyId || undefined,
+                        onProgress: () => this.renewClaimedLease(job)
+                    });
+                    let migrated = { moved: 0, propertiesAffected: 0 };
+                    if (companyId) {
+                        const entityIds = yield propertyAccountService_1.default.getLedgerEntityIdsForCompany(companyId);
+                        if (entityIds.length > 0) {
+                            migrated = yield propertyAccountService_1.default.migrateSalesLedgerForCompany(entityIds);
+                        }
+                    }
+                    else {
+                        migrated = yield propertyAccountService_1.default.migrateSalesLedgerForCompany();
+                    }
+                    result = { migrated, syncStats, companyScoped: Boolean(companyId) };
                 }
                 else if (job.operation === 'ensure_development_ledgers') {
                     result = yield propertyAccountService_1.default.ensureDevelopmentLedgersAndBackfillPayments({
@@ -182,6 +206,9 @@ class MaintenanceJobQueueService {
                     }
                 });
                 logger_1.logger.error(`Maintenance job ${String(job._id)} failed (${job.operation}):`, error);
+            }
+            finally {
+                clearInterval(heartbeat);
             }
         });
     }

@@ -10,7 +10,8 @@ import {
   getActiveLeaseForProperty,
   getLatestExpiredLeaseForProperty,
   getPropertyOccupancyDisplayStatus,
-  groupLeasesByProperty
+  groupLeasesByProperty,
+  groupTenantsByProperty
 } from '../utils/propertyOccupancy';
 import useIndividualDashboard from './useIndividualDashboard';
 
@@ -26,6 +27,7 @@ function unwrapList(raw: any): any[] {
 export function usePortfolioContext() {
   const { data, loading, error, reload } = useIndividualDashboard();
   const [leases, setLeases] = useState<any[]>([]);
+  const [tenants, setTenants] = useState<any[]>([]);
   const [maintenance, setMaintenance] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [bills, setBills] = useState<any[]>([]);
@@ -34,13 +36,15 @@ export function usePortfolioContext() {
   const reloadAux = useCallback(async () => {
     try {
       setAuxLoading(true);
-      const [leaseRes, maintRes, inspRes, expenseRows] = await Promise.all([
+      const [leaseRes, tenantRes, maintRes, inspRes, expenseRows] = await Promise.all([
         api.get('/leases').catch(() => ({ data: [] })),
+        api.get('/tenants', { params: { page: 1, limit: 10000 } }).catch(() => ({ data: [] })),
         apiService.getMaintenanceRequests().catch(() => ({ data: [] })),
         inspectionService.getInspections().catch(() => []),
         individualWorkspaceService.getExpenses().catch(() => [])
       ]);
       setLeases(unwrapList(leaseRes.data));
+      setTenants(unwrapList(tenantRes.data));
       const maintList = Array.isArray(maintRes.data) ? maintRes.data : maintRes.data?.data || [];
       setMaintenance(maintList);
       setInspections(Array.isArray(inspRes) ? inspRes : []);
@@ -62,6 +66,7 @@ export function usePortfolioContext() {
   }, [reload, reloadAux]);
 
   const leasesByProperty = useMemo(() => groupLeasesByProperty(leases), [leases]);
+  const tenantsByProperty = useMemo(() => groupTenantsByProperty(tenants), [tenants]);
 
   const leaseByProperty = useMemo(() => {
     const map = new Map<string, any>();
@@ -122,22 +127,26 @@ export function usePortfolioContext() {
   const enrichedProperties = useMemo(
     () => (data?.properties || []).map((p) => {
       const propertyLeases = leasesByProperty.get(p.propertyId) || [];
+      const propertyTenants = tenantsByProperty.get(p.propertyId) || [];
       const activeLease = getActiveLeaseForProperty(propertyLeases);
       const expiredLease = getLatestExpiredLeaseForProperty(propertyLeases);
-      const occupancyDisplayStatus = getPropertyOccupancyDisplayStatus(propertyLeases);
+      const occupancyDisplayStatus = getPropertyOccupancyDisplayStatus(propertyLeases, propertyTenants);
       const leaseForDates = activeLease || expiredLease;
 
+      const occupancyStatus = occupancyDisplayStatus === 'Vacant' ? 'Vacant' as const : 'Occupied' as const;
+      const occupancyAdjusted = { ...p, occupancyStatus };
+
       return {
-        ...p,
+        ...occupancyAdjusted,
         occupancyDisplayStatus,
         displayLease: leaseForDates,
-        healthScore: propertyHealthScore(p, propertyExtras[p.propertyId]),
+        healthScore: propertyHealthScore(occupancyAdjusted, propertyExtras[p.propertyId]),
         leaseEndDate: leaseForDates?.endDate,
         openMaintenance: maintenanceByProperty.get(p.propertyId) || 0,
         outstandingBills: outstandingBillsByProperty.get(p.propertyId) || 0
       };
     }),
-    [data?.properties, propertyExtras, leasesByProperty, maintenanceByProperty, outstandingBillsByProperty]
+    [data?.properties, propertyExtras, leasesByProperty, tenantsByProperty, maintenanceByProperty, outstandingBillsByProperty]
   );
 
   const outstandingBillsTotal = useMemo(
@@ -175,6 +184,14 @@ export function usePortfolioContext() {
     [leases]
   );
 
+  const occupancyCounts = useMemo(() => {
+    const occupied = enrichedProperties.filter((p) => p.occupancyDisplayStatus !== 'Vacant').length;
+    return {
+      occupied,
+      vacant: Math.max(0, enrichedProperties.length - occupied)
+    };
+  }, [enrichedProperties]);
+
   const actionItems = useMemo(() => buildActionItems({
     outstandingRent: data?.summary.outstandingRent || 0,
     leases,
@@ -204,6 +221,7 @@ export function usePortfolioContext() {
     bills,
     portfolioScore,
     enrichedProperties,
+    occupancyCounts,
     actionItems,
     ownerBriefChecks,
     outstandingBillsTotal,

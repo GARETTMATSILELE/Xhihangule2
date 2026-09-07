@@ -41,6 +41,7 @@ import PaymentRequestForm from '../components/payments/PaymentRequestForm';
 // Removed Header/AuthErrorReport; layout is provided by parent wrapper
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
+import { dispatchPaymentsChanged } from '../utils/paymentsChanged';
 
 const PaymentsPage: React.FC = () => {
   const theme = useTheme();
@@ -63,6 +64,9 @@ const PaymentsPage: React.FC = () => {
   const [selectedPayment, setSelectedPayment] = useState<Payment | undefined>(undefined);
   const [filters, setFilters] = useState<PaymentFilter>({});
   const [debouncedFilters, setDebouncedFilters] = useState<PaymentFilter>({});
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
   // Auth error dialog no longer used; we redirect instead
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -140,26 +144,18 @@ const PaymentsPage: React.FC = () => {
       }
       
       try {
-        setLoading(true);
         setError(null);
-
-        // Fetch all in parallel but tolerate partial failures
         const isAgent = user?.role === 'agent';
-        const includeParams: any = user?.role === 'admin' ? { includeProvisional: 'true' } : {};
         const tasks = isAgent
           ? [
               agentService.getProperties(),
-              agentService.getTenants(),
-              api.get('/agents/payments').then((r: any) => r.data),
-              api.get('/agents/levy-payments').then((r: any) => (Array.isArray(r.data) ? r.data : []))
+              agentService.getTenants()
             ]
           : [
               propertyService.getProperties(),
-              tenantService.getAll(),
-              paymentService.getPayments(includeParams),
-              paymentService.getLevyPayments(user.companyId)
+              tenantService.getAll()
             ];
-        const [propRes, tenRes, payRes, levyRes] = await Promise.allSettled(tasks as any);
+        const [propRes, tenRes] = await Promise.allSettled(tasks as any);
 
         // Load owners data
         let ownersData;
@@ -176,27 +172,14 @@ const PaymentsPage: React.FC = () => {
         const nextProperties = propRes.status === 'fulfilled' ? (Array.isArray(propRes.value) ? propRes.value : []) : properties;
         const tenantsRawResult = tenRes.status === 'fulfilled' ? tenRes.value : tenants;
         const nextTenants = Array.isArray(tenantsRawResult) ? tenantsRawResult : (tenantsRawResult?.tenants || []);
-        const basePayments = payRes.status === 'fulfilled' ? (Array.isArray(payRes.value) ? payRes.value : []) : payments;
-        const levyPayments = levyRes.status === 'fulfilled' ? (Array.isArray(levyRes.value) ? levyRes.value : []) : [];
         const owners = Array.isArray(ownersData) ? ownersData : [];
 
-        // If all four failed, surface a single error but do not hard-clear UI
-        const allFailed = [propRes, tenRes, payRes, levyRes].every(r => r.status === 'rejected');
+        const allFailed = [propRes, tenRes].every(r => r.status === 'rejected');
         if (allFailed) setError('Some data failed to load. Please try again.');
 
         setProperties(nextProperties);
         setTenants(nextTenants);
-        // Merge levy payments into main list
-        setPayments([...(basePayments as any[]), ...(levyPayments as any[])]);
         setOwners(owners);
-        
-        // Debug logging
-        console.log('Loaded properties:', nextProperties);
-        console.log('Loaded payments:', basePayments);
-        if (basePayments && basePayments.length > 0) {
-          console.log('First payment propertyId:', basePayments[0].propertyId);
-          console.log('First payment propertyId type:', typeof basePayments[0].propertyId);
-        }
       } catch (err: any) {
         if (!isMounted) return;
         
@@ -207,10 +190,6 @@ const PaymentsPage: React.FC = () => {
           setError('Failed to load data. Please try again later.');
         }
         // Do not clear existing UI state on transient errors
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
       }
     };
 
@@ -262,9 +241,7 @@ const PaymentsPage: React.FC = () => {
 
   // Debounce filter changes
   useEffect(() => {
-    console.log('Filter effect running with filters:', filters);
     const timer = setTimeout(() => {
-      console.log('Setting debounced filters:', filters);
       setDebouncedFilters(filters);
     }, 500);
 
@@ -278,7 +255,7 @@ const PaymentsPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const filterParams: any = {};
+      const filterParams: any = { page, limit };
       if (debouncedFilters.startDate) {
         filterParams.startDate = debouncedFilters.startDate.toISOString();
       }
@@ -295,9 +272,20 @@ const PaymentsPage: React.FC = () => {
         filterParams.propertyId = debouncedFilters.propertyId;
       }
 
-      const basePayments: any[] = user?.role === 'agent'
-        ? await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data)
-        : await paymentService.getPayments({ ...filterParams, ...(user?.role === 'admin' ? { includeProvisional: 'true' } : {}) });
+      const isAgent = user?.role === 'agent';
+      let basePayments: any[] = [];
+      if (isAgent) {
+        basePayments = await api.get('/agents/payments', { params: filterParams }).then((r: any) => r.data);
+        basePayments = Array.isArray(basePayments) ? basePayments : [];
+        setTotalCount(basePayments.length);
+      } else {
+        const { items, total } = await paymentService.getPaymentsPage({
+          ...filterParams,
+          ...(user?.role === 'admin' ? { includeProvisional: 'true' } : {})
+        });
+        basePayments = Array.isArray(items) ? items : [];
+        setTotalCount(total);
+      }
 
       let levy: any[] = [];
       try {
@@ -325,9 +313,10 @@ const PaymentsPage: React.FC = () => {
 
       const filteredLevy = applyClientFilters(levy);
       const normalizeType = (p: any) => ({ ...p, paymentType: p.paymentType || p.type || (p.isLevy ? 'levy' : undefined) });
+      const levyRows = (filteredLevy || []).map((p) => ({ ...p, paymentType: 'levy', type: 'levy' }));
       const combined = sortPayments([
         ...((basePayments || []).map(normalizeType)),
-        ...((filteredLevy || []).map((p) => ({ ...p, paymentType: 'levy', type: 'levy' })))
+        ...(isAgent || page === 1 ? levyRows : [])
       ]);
       setPayments(combined);
     } catch (err: any) {
@@ -340,7 +329,7 @@ const PaymentsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [debouncedFilters, redirectToLogin, sortPayments, user?.companyId, user?.role]);
+  }, [debouncedFilters, page, limit, redirectToLogin, sortPayments, user?.companyId, user?.role]);
 
   useEffect(() => {
     fetchPayments();
@@ -378,7 +367,7 @@ const PaymentsPage: React.FC = () => {
         const created = (response && (response.data ?? response)) as any;
         if (created) {
           setPayments(prev => [...prev, created]);
-          try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'created', payment: created } })); } catch {}
+          try { dispatchPaymentsChanged({ type: 'created', payment: created }); } catch {}
         }
       }
       setShowCreateDialog(false);
@@ -410,7 +399,7 @@ const PaymentsPage: React.FC = () => {
       
       const updated = (response.data || response);
       setPayments(prev => prev.map(p => p._id === id ? updated : p));
-      try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'updated', payment: updated } })); } catch {}
+      try { dispatchPaymentsChanged({ type: 'updated', payment: updated }); } catch {}
       setShowEditDialog(false);
       setSuccessMessage('Payment updated successfully');
     } catch (err: any) {
@@ -432,7 +421,7 @@ const PaymentsPage: React.FC = () => {
       setError(null);
       await paymentService.deletePayment(id);
       setPayments(prev => prev.filter(p => p._id !== id));
-      try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'deleted', id } })); } catch {}
+      try { dispatchPaymentsChanged({ type: 'deleted', paymentId: id }); } catch {}
       setSuccessMessage('Payment deleted successfully');
     } catch (err: any) {
       console.error('Error deleting payment:', err);
@@ -480,9 +469,12 @@ const PaymentsPage: React.FC = () => {
         }
       }
       try {
-        window.dispatchEvent(new CustomEvent('payments:changed', {
-          detail: { type: selectedPayment ? 'updated' : 'created' },
-        }));
+        dispatchPaymentsChanged({
+          type: selectedPayment ? 'updated' : 'created',
+          payment: paymentData,
+          propertyId: (paymentData as any)?.propertyId,
+          paymentId: selectedPayment?._id
+        });
       } catch {}
       setShowForm(false);
       setSelectedPayment(undefined);
@@ -559,7 +551,7 @@ const PaymentsPage: React.FC = () => {
       });
       const updated = (resp as any).payment || (resp as any).data || resp;
       setPayments(prev => prev.map(p => p._id === (updated._id || finalizePaymentTarget._id) ? updated : p));
-      try { window.dispatchEvent(new CustomEvent('payments:changed', { detail: { type: 'finalized', payment: updated } })); } catch {}
+      try { dispatchPaymentsChanged({ type: 'finalized', payment: updated }); } catch {}
       setSuccessMessage('Payment finalized successfully');
       setFinalizeOpen(false);
       setFinalizePaymentTarget(null);
@@ -620,8 +612,11 @@ const PaymentsPage: React.FC = () => {
   }, [user?.companyId]);
 
   const handleFilterChange = useCallback((newFilters: PaymentFilter) => {
-    console.log('PaymentsPage handleFilterChange called with:', newFilters);
-    setFilters(newFilters);
+    const n = newFilters as any;
+    if (typeof n.page === 'number') setPage(n.page);
+    if (typeof n.limit === 'number') setLimit(n.limit);
+    const { page: _p, limit: _l, ...rest } = n;
+    setFilters(rest);
   }, []);
 
   // Handle authentication errors locally without triggering global auth error events
@@ -774,6 +769,8 @@ const PaymentsPage: React.FC = () => {
             ) : (
               <PaymentList
                 payments={payments}
+                totalCount={user?.role === 'agent' ? payments.length : totalCount}
+                disableOutstandingFetch={user?.role !== 'agent'}
                 onEdit={handlePaymentClick}
                 onFinalize={(payment) => {
                   if (user?.role === 'agent') {
