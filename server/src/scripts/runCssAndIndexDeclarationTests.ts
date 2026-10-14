@@ -14,15 +14,17 @@ function record(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
-function singleIdempotencyIndex(model: { schema: { indexes: () => Array<[Record<string, number>, { unique?: boolean }]> }; modelName: string }) {
-  const matches = model.schema.indexes().filter(([keys]) => keys.idempotencyKey === 1 && Object.keys(keys).length === 1);
+type IndexSpec = [Record<string, unknown>, { unique?: boolean }?];
+
+function singleIdempotencyIndex(modelName: string, specs: IndexSpec[]) {
+  const matches = specs.filter(([keys]) => keys.idempotencyKey === 1 && Object.keys(keys).length === 1);
   record(
-    `${model.modelName} declares one idempotencyKey index`,
+    `${modelName} declares one idempotencyKey index`,
     matches.length === 1,
     `count ${matches.length}`
   );
   record(
-    `${model.modelName} idempotencyKey index is unique`,
+    `${modelName} idempotencyKey index is unique`,
     matches.length === 1 && matches[0][1]?.unique === true,
     JSON.stringify(matches.map(([, options]) => options))
   );
@@ -42,8 +44,8 @@ function main() {
   record('Production style policy allows the Inter stylesheet', serverIndex.includes('"https://fonts.googleapis.com"'));
   record('Production font policy allows the Inter font files', serverIndex.includes('"https://fonts.gstatic.com"'));
 
-  singleIdempotencyIndex(OnboardingSession);
-  singleIdempotencyIndex(PaymentSession);
+  singleIdempotencyIndex(OnboardingSession.modelName, OnboardingSession.schema.indexes() as IndexSpec[]);
+  singleIdempotencyIndex(PaymentSession.modelName, PaymentSession.schema.indexes() as IndexSpec[]);
 
   const failed = checks.filter((check) => !check.ok);
   console.log(`CSS and index declaration checks: ${checks.length - failed.length}/${checks.length} passed`);
