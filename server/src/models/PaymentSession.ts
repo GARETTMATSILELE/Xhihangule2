@@ -40,7 +40,7 @@ const PaymentSessionSchema = new Schema<IPaymentSession>(
     subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', required: false, index: true },
     onboardingSessionId: { type: Schema.Types.ObjectId, ref: 'OnboardingSession', required: false, index: true },
     billingPaymentId: { type: Schema.Types.ObjectId, ref: 'BillingPayment', required: false, index: true },
-    idempotencyKey: { type: String, required: true, trim: true, index: true },
+    idempotencyKey: { type: String, required: true, trim: true },
     provider: { type: String, enum: ['paynow', 'cash', 'manual'], required: true, index: true },
     providerRef: { type: String, trim: true, index: true },
     pollUrl: { type: String, trim: true },

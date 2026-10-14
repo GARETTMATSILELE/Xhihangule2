@@ -36,7 +36,7 @@ const OnboardingSessionSchema = new Schema<IOnboardingSession>(
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
     subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', required: false, index: true },
     paymentSessionId: { type: Schema.Types.ObjectId, ref: 'PaymentSession', required: false, index: true },
-    idempotencyKey: { type: String, required: true, trim: true, index: true },
+    idempotencyKey: { type: String, required: true, trim: true },
     status: {
       type: String,
       enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED', 'EXPIRED'],

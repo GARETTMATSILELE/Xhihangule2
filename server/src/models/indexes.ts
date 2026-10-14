@@ -208,6 +208,11 @@ export async function createIndexes() {
 
         if (isNonFatalIndexConflict) {
           console.warn(`Non-fatal index creation issue for ${name}:`, message);
+          if ((name === 'OnboardingSession' || name === 'PaymentSession') && (code === 85 || code === 86) && message.includes('idempotencyKey')) {
+            console.warn(
+              `${name} idempotencyKey uniqueness is not active. The existing index uses the same name without the requested unique option. Startup will not drop or recreate it.`
+            );
+          }
         } else {
           console.error(`Error creating indexes for ${name}:`, indexCreateErr);
         }

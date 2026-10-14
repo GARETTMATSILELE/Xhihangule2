@@ -54,7 +54,9 @@
     "test:individual-accounting-i": "npm run build && node dist/scripts/runIndividualAccountingPhaseITests.js",
     "test:ecosystem": "ts-node --transpile-only src/scripts/runEcosystemTests.ts",
     "test:first-adoption": "ts-node --transpile-only src/scripts/runFirstAdoptionReadinessTests.ts",
-    "test:registration-payment": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runRegistrationPaymentTests.ts"
+    "test:registration-payment": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runRegistrationPaymentTests.ts",
+    "test:css-index-declarations": "ts-node --transpile-only src/scripts/runCssAndIndexDeclarationTests.ts",
+    "audit:onboarding-index": "ts-node --transpile-only src/scripts/auditOnboardingIdempotencyIndex.ts"
   },
   "keywords": [],
   "author": "",
