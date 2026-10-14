@@ -32,10 +32,14 @@ const getWeekOfYear = (date) => {
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
     return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 };
-const TAX_TYPES = ['VAT', 'VAT_ON_COMMISSION', 'CGT'];
+const TAX_TYPES = ['VAT', 'VAT_ON_COMMISSION', 'CGT', 'CGWT'];
 const formatTaxTypeLabel = (taxType) => {
     if (taxType === 'VAT_ON_COMMISSION')
         return 'VAT on Commission';
+    if (taxType === 'CGWT')
+        return 'Capital Gains Withholding Tax';
+    if (taxType === 'CGT')
+        return 'Capital Gains Tax';
     return taxType;
 };
 const escapeHtml = (value) => String(value || '')
@@ -966,7 +970,7 @@ const getTaxLedgers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             .map((item) => String((item === null || item === void 0 ? void 0 : item.trustAccountId) || ''))
             .filter(Boolean)));
         if (trustAccountIds.length === 0) {
-            const emptyPayload = { VAT: [], VAT_ON_COMMISSION: [], CGT: [] };
+            const emptyPayload = { VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] };
             return res.json(emptyPayload);
         }
         const trustAccounts = yield TrustAccount_1.TrustAccount.find({
@@ -1033,7 +1037,7 @@ const getTaxLedgers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             groupedEntries.set(key, existing);
             creditTotals.set(key, Number((creditTotals.get(key) || 0) + amount));
         }
-        const response = { VAT: [], VAT_ON_COMMISSION: [], CGT: [] };
+        const response = { VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] };
         for (const [key, entries] of groupedEntries.entries()) {
             const [trustAccountId, taxTypeRaw] = key.split(':');
             const taxType = taxTypeRaw;
@@ -1074,6 +1078,7 @@ const getTaxLedgers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         response.VAT.sort((a, b) => b.closingBalance - a.closingBalance);
         response.VAT_ON_COMMISSION.sort((a, b) => b.closingBalance - a.closingBalance);
         response.CGT.sort((a, b) => b.closingBalance - a.closingBalance);
+        response.CGWT.sort((a, b) => b.closingBalance - a.closingBalance);
         return res.json(response);
     }
     catch (error) {

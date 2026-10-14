@@ -17,6 +17,7 @@ import {
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import { billingPlanFromOnboarding, readOnboardingState, writeOnboardingState } from '../../utils/onboardingState';
 
 const steps = ['Account Details'];
 
@@ -25,6 +26,8 @@ export interface AdminSignupProps {}
 const AdminSignup: React.FC<AdminSignupProps> = () => {
   const navigate = useNavigate();
   const { signup } = useAuth();
+  const savedOnboarding = readOnboardingState();
+  const planLocked = Boolean(savedOnboarding.selectedPlan || savedOnboarding.role);
   const [activeStep, setActiveStep] = useState(0);
   const [formData, setFormData] = useState({
     // Account Details
@@ -32,7 +35,7 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
     password: '',
     confirmPassword: '',
     name: '',
-    plan: 'INDIVIDUAL' as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
+    plan: billingPlanFromOnboarding(savedOnboarding) as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
     // Company Details removed for initial signup
   });
   const [error, setError] = useState('');
@@ -179,7 +182,12 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
               name="plan"
               label="Plan"
               value={formData.plan}
-              onChange={handleChange}
+              onChange={(e) => {
+                handleChange(e as React.ChangeEvent<HTMLInputElement>);
+                writeOnboardingState({ selectedPlan: e.target.value as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE' });
+              }}
+              disabled={planLocked}
+              helperText={planLocked ? 'Plan selected from the Mantis site. You will not need to choose it again.' : undefined}
               SelectProps={{ native: true }}
             >
               <option value="INDIVIDUAL">Individual (up to 10 properties)</option>
@@ -208,7 +216,9 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
             Create Your Workspace
           </Typography>
           <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
-            Start with your admin account. We will guide you through workspace setup after registration.
+            {savedOnboarding.role
+              ? `We'll keep your ${savedOnboarding.role} setup and take you into workspace setup after this account is created.`
+              : 'Start with your admin account. We will guide you through workspace setup after registration.'}
           </Typography>
           <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
             {steps.map((label) => (

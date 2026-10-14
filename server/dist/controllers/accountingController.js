@@ -15,6 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.backfillBalances = exports.postManualTransaction = exports.getBankTransactionSuggestions = exports.reconcileBankTransaction = exports.getBankReconciliation = exports.getLedger = exports.getBalanceSheet = exports.getProfitAndLoss = exports.getCommissionLiability = exports.exportVatReport = exports.getVatStatus = exports.getExpenseTrend = exports.getRevenueTrend = exports.getDashboardOutstanding = exports.getDashboardSummary = void 0;
 const accountingService_1 = __importDefault(require("../services/accountingService"));
 const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
+const financialMigrationGuard_1 = require("../services/financialMigrationGuard");
+const errorHandler_1 = require("../middleware/errorHandler");
 const parseDate = (value) => {
     if (!value || typeof value !== 'string')
         return undefined;
@@ -258,7 +260,7 @@ const getBankTransactionSuggestions = (req, res) => __awaiter(void 0, void 0, vo
 });
 exports.getBankTransactionSuggestions = getBankTransactionSuggestions;
 const postManualTransaction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     try {
         const companyId = getCompanyId(req);
         if (!companyId)
@@ -272,9 +274,10 @@ const postManualTransaction = (req, res) => __awaiter(void 0, void 0, void 0, fu
             reference,
             description,
             sourceModule: 'manual',
-            sourceId: `${reference}:${Date.now()}`,
+            sourceId: `manual:${reference}`,
             transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
             createdBy: (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId,
+            periodOverrideReason: ((_b = req.body) === null || _b === void 0 ? void 0 : _b.periodOverrideReason) || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.reason),
             lines
         });
         return res.status(201).json(Object.assign({ message: 'Transaction posted' }, result));
@@ -285,21 +288,34 @@ const postManualTransaction = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.postManualTransaction = postManualTransaction;
 const backfillBalances = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
+    let audit = null;
     try {
-        const companyId = getCompanyId(req);
+        if (!(0, financialMigrationGuard_1.isSystemAdminUser)(req)) {
+            throw new errorHandler_1.AppError('Journal/VAT historical backfill requires system_admin', 403);
+        }
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
+        const companyId = getCompanyId(req) || String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.companyId) || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.companyId) || '').trim();
         if (!companyId)
             return res.status(400).json({ message: 'companyId is required' });
-        const replayExisting = String(req.query.replayExisting || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.replayExisting) || '').toLowerCase() === 'true';
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'migration:accounting_backfill_balances', {
+            companyId,
+            reason,
+            replayExisting: String(req.query.replayExisting || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.replayExisting) || '').toLowerCase() === 'true'
+        });
+        const replayExisting = String(req.query.replayExisting || ((_d = req.body) === null || _d === void 0 ? void 0 : _d.replayExisting) || '').toLowerCase() === 'true';
         let replay = { paymentsSynced: 0, expensesSynced: 0 };
         if (replayExisting) {
             replay = yield accountingIntegrationService_1.default.backfillFromExistingData(companyId);
         }
         yield accountingService_1.default.backfillCompanyBalances(companyId);
-        return res.json(Object.assign({ message: 'Backfill complete', replayExisting }, replay));
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, Object.assign(Object.assign({ replayExisting }, replay), { reason }));
+        return res.json(Object.assign({ message: 'Historical accounting backfill complete', historicalBackfill: true, replayExisting }, replay));
     }
     catch (error) {
-        return res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to backfill balances' });
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, (error === null || error === void 0 ? void 0 : error.message) || String(error));
+        const status = error instanceof errorHandler_1.AppError ? error.statusCode : 500;
+        return res.status(status).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to backfill balances' });
     }
 });
 exports.backfillBalances = backfillBalances;

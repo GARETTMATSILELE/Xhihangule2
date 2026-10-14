@@ -4,19 +4,34 @@ import { AppError } from '../middleware/errorHandler';
 import { OnboardingService } from '../services/onboardingService';
 import { AuthService } from '../services/authService';
 import { recordAuditEvent } from '../services/auditService';
+import { isPublicSignupAllowed } from '../utils/publicSignupCompany';
 
 const onboardingService = OnboardingService.getInstance();
 const authService = AuthService.getInstance();
 
-const isOnboardingV2Enabled = () => String(process.env.SAAS_ONBOARDING_V2 || '').toLowerCase() === 'true';
+function cookieDomain(): string | undefined {
+  const explicit = (process.env.COOKIE_DOMAIN || '').trim();
+  if (explicit) return explicit;
+  const fromUrl = (process.env.CLIENT_URL || process.env.APP_BASE_URL || '').trim();
+  if (!fromUrl) return undefined;
+  try {
+    const hostname = new URL(fromUrl).hostname;
+    return hostname.startsWith('www.') ? `.${hostname.slice(4)}` : `.${hostname}`;
+  } catch {
+    return undefined;
+  }
+}
 
 function setAuthCookies(res: Response, token: string, refreshToken: string) {
   const prod = process.env.NODE_ENV === 'production';
+  const domain = cookieDomain();
+  const scoped = prod && domain ? { domain } : {};
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: prod,
     sameSite: prod ? 'strict' : 'lax',
     path: '/',
+    ...scoped,
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
   res.cookie('accessToken', token, {
@@ -24,6 +39,7 @@ function setAuthCookies(res: Response, token: string, refreshToken: string) {
     secure: prod,
     sameSite: prod ? 'strict' : 'lax',
     path: '/',
+    ...scoped,
     maxAge: 24 * 60 * 60 * 1000
   });
   res.cookie('refreshCsrf', crypto.randomBytes(32).toString('hex'), {
@@ -31,14 +47,15 @@ function setAuthCookies(res: Response, token: string, refreshToken: string) {
     secure: prod,
     sameSite: prod ? 'strict' : 'lax',
     path: '/',
+    ...scoped,
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
 }
 
 export const startOnboarding = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isOnboardingV2Enabled()) {
-      throw new AppError('New SaaS onboarding is not enabled', 404, 'ONBOARDING_DISABLED');
+    if (!isPublicSignupAllowed(process.env)) {
+      throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
     }
 
     const idempotencyKey = req.get('idempotency-key') || req.body?.idempotencyKey;
@@ -65,6 +82,9 @@ export const startOnboarding = async (req: Request, res: Response, next: NextFun
       metadata: { plan: result.onboardingSession.plan, alreadyProcessed: result.alreadyProcessed }
     });
 
+    const resume = (result as { resume?: { nextStep?: 'payment' | 'dashboard'; code?: string; message?: string } }).resume;
+    const nextStep = resume?.nextStep || ((result.company as any)?.onboardingStatus === 'PENDING_PAYMENT' ? 'payment' : 'dashboard');
+
     res.status(result.alreadyProcessed ? 200 : 201).json({
       onboardingSession: {
         _id: result.onboardingSession._id,
@@ -80,16 +100,21 @@ export const startOnboarding = async (req: Request, res: Response, next: NextFun
       company: result.company ? {
         _id: result.company._id,
         name: result.company.name,
+        plan: (result.company as any).plan,
+        workspaceType: (result.company as any).workspaceType,
         tenantStatus: (result.company as any).tenantStatus,
-        onboardingStatus: (result.company as any).onboardingStatus
+        onboardingStatus: (result.company as any).onboardingStatus,
+        onboardingCompleted: (result.company as any).onboardingCompleted
       } : null,
       subscription: result.subscription ? {
         _id: result.subscription._id,
         plan: result.subscription.plan,
         cycle: result.subscription.cycle,
-        status: result.subscription.status
+        status: result.subscription.status,
+        trialStartDate: result.subscription.trialStartDate,
+        trialEndDate: result.subscription.trialEndDate
       } : null,
-      paymentSession: result.paymentSession ? {
+      paymentSession: nextStep === 'payment' && result.paymentSession ? {
         _id: result.paymentSession._id,
         provider: result.paymentSession.provider,
         providerRef: result.paymentSession.providerRef,
@@ -106,6 +131,13 @@ export const startOnboarding = async (req: Request, res: Response, next: NextFun
           onboardingSessionId: result.paymentSession.onboardingSessionId
         }
       } : null,
+      registration: {
+        status: (result.company as any)?.onboardingStatus || result.onboardingSession.status,
+        nextStep,
+        paymentRequired: nextStep === 'payment',
+        code: resume?.code,
+        message: resume?.message
+      },
       token
     });
   } catch (error) {

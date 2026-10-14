@@ -97,6 +97,10 @@ const Login = () => {
             >
               Forgot your password?
             </button>
+            <div className="mt-3 text-sm text-gray-600">
+              <button type="button" className="text-indigo-600 hover:text-indigo-700 mr-3" onClick={() => navigate('/tenant-register')}>Tenant sign up</button>
+              <button type="button" className="text-indigo-600 hover:text-indigo-700" onClick={() => navigate('/contractor-register')}>Contractor sign up</button>
+            </div>
           </div>
         </form>
       </div>

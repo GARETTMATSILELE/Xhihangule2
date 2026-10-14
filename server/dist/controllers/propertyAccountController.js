@@ -24,6 +24,15 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
 const propertyAccountService_2 = require("../services/propertyAccountService");
 const maintenanceJobQueueService_1 = __importDefault(require("../services/maintenanceJobQueueService"));
+const financialMigrationGuard_1 = require("../services/financialMigrationGuard");
+function requestedLedger(req) {
+    const raw = String(req.query.ledger || req.query.ledgerType || '').trim().toLowerCase();
+    if (!raw)
+        return undefined;
+    if (raw === 'rental' || raw === 'sale')
+        return raw;
+    throw new errorHandler_1.AppError('ledger must be rental or sale', 400);
+}
 /**
  * Get property account with summary
  */
@@ -33,8 +42,8 @@ const getPropertyAccount = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
-        // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
-        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
+        // Read-only: load the named ledger. Never posts income or repairs accounting.
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, requestedLedger(req));
         res.json({
             success: true,
             data: account
@@ -225,14 +234,15 @@ const getPropertyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, 
             filters.category = category;
         if (status)
             filters.status = status;
-        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters);
+        const ledger = requestedLedger(req);
+        const transactions = yield propertyAccountService_1.default.getTransactionHistory(propertyId, filters, ledger);
         if (!includePayouts) {
             return res.json({
                 success: true,
                 data: transactions
             });
         }
-        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId);
+        const account = yield propertyAccountService_1.default.getPropertyAccount(propertyId, ledger);
         const payoutTransactions = (account.ownerPayouts || []).map((payout) => ({
             _id: String((payout === null || payout === void 0 ? void 0 : payout._id) || ''),
             type: 'owner_payout',
@@ -554,19 +564,31 @@ const getPayoutHistory = (req, res) => __awaiter(void 0, void 0, void 0, functio
 });
 exports.getPayoutHistory = getPayoutHistory;
 /**
- * Reconcile and remove duplicate income transactions for a property ledger
+ * Reconcile and remove duplicate income transactions for a property ledger.
+ * Explicit maintenance: requires confirm=true and a non-empty reason.
  */
 const reconcilePropertyDuplicates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    let audit = null;
     try {
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
         const { propertyId } = req.params;
         if (!propertyId) {
             return res.status(400).json({ message: 'Property ID is required' });
         }
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'maintenance:property_reconcile_duplicates', {
+            propertyId,
+            companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId,
+            reason,
+            confirm: true
+        });
         const result = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, { propertyId, reason, result });
         return res.json({ success: true, message: 'Reconciliation completed', data: result });
     }
     catch (error) {
         logger_1.logger.error('Error in reconcilePropertyDuplicates:', error);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, (error === null || error === void 0 ? void 0 : error.message) || String(error));
         if (error instanceof errorHandler_1.AppError) {
             return res.status(error.statusCode).json({ success: false, message: error.message });
         }
@@ -575,11 +597,17 @@ const reconcilePropertyDuplicates = (req, res) => __awaiter(void 0, void 0, void
 });
 exports.reconcilePropertyDuplicates = reconcilePropertyDuplicates;
 /**
- * Sync property accounts with payments
+ * EXPLICIT historical property-account backfill. Not a reconciliation action.
  */
 const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
+    let audit = null;
     try {
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'migration:property_accounts_sync', {
+            companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId,
+            reason
+        });
         const allowBusinessHoursSync = String(process.env.ALLOW_SYNC_DURING_BUSINESS_HOURS || '').toLowerCase() === 'true' ||
             String(req.query.force || '').toLowerCase() === 'true';
         if (!allowBusinessHoursSync) {
@@ -594,6 +622,7 @@ const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 timeZone
             }).format(now));
             if (Number.isFinite(localHour) && localHour >= businessStartHour && localHour < businessEndHour) {
+                yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, 'SYNC_BLOCKED_BUSINESS_HOURS');
                 return res.status(409).json({
                     success: false,
                     code: 'SYNC_BLOCKED_BUSINESS_HOURS',
@@ -601,21 +630,23 @@ const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 });
             }
         }
-        const waitForCompletion = String(req.query.wait || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.wait) || '').toLowerCase() === 'true';
+        const waitForCompletion = String(req.query.wait || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.wait) || '').toLowerCase() === 'true';
         if (!waitForCompletion) {
-            const companyId = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) ? String(req.user.companyId) : '';
-            const requestedBy = ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? String(req.user.userId) : '';
+            const companyId = ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) ? String(req.user.companyId) : '';
+            const requestedBy = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.userId) ? String(req.user.userId) : '';
             const queued = yield maintenanceJobQueueService_1.default.enqueue('sync_property_accounts', {
                 companyId,
                 requestedBy
             });
+            yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, { queued: true, jobId: String(queued.job._id), reason });
             return res.status(202).json({
                 success: true,
                 queued: true,
+                historicalBackfill: true,
                 deduplicated: queued.deduplicated,
                 message: queued.deduplicated
-                    ? 'A property account sync job is already pending/running for this company.'
-                    : 'Property account sync has been queued.',
+                    ? 'A property account integrity check is already pending for this company.'
+                    : 'Property account integrity check queued. It does not replay payments or move historical income.',
                 job: {
                     id: String(queued.job._id),
                     status: queued.job.status,
@@ -624,34 +655,16 @@ const syncPropertyAccounts = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 }
             });
         }
-        const companyId = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.companyId) ? String(req.user.companyId) : '';
-        yield propertyAccountService_1.default.syncPropertyAccountsWithPayments({
-            companyId: companyId || undefined
-        });
-        // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
-        try {
-            let migrateIds;
-            if (companyId) {
-                migrateIds = yield propertyAccountService_1.default.getLedgerEntityIdsForCompany(companyId);
-                if (!migrateIds.length) {
-                    logger_1.logger.info('Sales ledger migration skipped after property-account sync (no company entities)');
-                }
-            }
-            if (!companyId || (migrateIds && migrateIds.length > 0)) {
-                const result = yield propertyAccountService_1.default.migrateSalesLedgerForCompany(migrateIds);
-                logger_1.logger.info('Sales ledger migration completed after property-account sync', result);
-            }
-        }
-        catch (e) {
-            logger_1.logger.warn('Sales ledger migration skipped/failed after property-account sync', e);
-        }
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, { waitForCompletion: true, historicalReplay: false, reason });
         res.json({
             success: true,
-            message: 'Property accounts synced successfully'
+            historicalBackfill: false,
+            message: 'Historical payment replay is disabled. Use accounting integrity to detect gaps and repair one payment at a time.'
         });
     }
     catch (error) {
         logger_1.logger.error('Error in syncPropertyAccounts:', error);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, error instanceof Error ? error.message : String(error));
         if (error instanceof errorHandler_1.AppError) {
             return res.status(error.statusCode).json({
                 success: false,
@@ -781,23 +794,31 @@ exports.getAcknowledgementDocument = getAcknowledgementDocument;
  * Scoped to the current user's company if available.
  */
 const ensureDevelopmentLedgers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
+    let audit = null;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : undefined;
-        const waitForCompletion = String(req.query.wait || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.wait) || '').toLowerCase() === 'true';
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'migration:ensure_development_ledgers', {
+            companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId,
+            reason
+        });
+        const companyId = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId) ? String(req.user.companyId) : undefined;
+        const waitForCompletion = String(req.query.wait || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.wait) || '').toLowerCase() === 'true';
         if (!waitForCompletion) {
-            const requestedBy = ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? String(req.user.userId) : '';
+            const requestedBy = ((_d = req.user) === null || _d === void 0 ? void 0 : _d.userId) ? String(req.user.userId) : '';
             const queued = yield maintenanceJobQueueService_1.default.enqueue('ensure_development_ledgers', {
                 companyId: companyId || '',
                 requestedBy
             });
+            yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, { queued: true, jobId: String(queued.job._id), reason });
             return res.status(202).json({
                 success: true,
                 queued: true,
+                historicalBackfill: true,
                 deduplicated: queued.deduplicated,
                 message: queued.deduplicated
-                    ? 'An ensure-ledgers job is already pending/running for this company.'
-                    : 'Ensure-ledgers job has been queued.',
+                    ? 'An ensure-ledgers historical backfill job is already pending/running for this company.'
+                    : 'Ensure-ledgers historical backfill has been queued.',
                 job: {
                     id: String(queued.job._id),
                     status: queued.job.status,
@@ -809,10 +830,17 @@ const ensureDevelopmentLedgers = (req, res) => __awaiter(void 0, void 0, void 0,
         const result = yield propertyAccountService_1.default.ensureDevelopmentLedgersAndBackfillPayments({
             companyId
         });
-        return res.json({ success: true, message: 'Development ledgers ensured and payments backfilled', data: result });
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, Object.assign(Object.assign({}, result), { reason }));
+        return res.json({
+            success: true,
+            historicalBackfill: true,
+            message: 'Development ledgers ensured and payments backfilled (explicit migration)',
+            data: result
+        });
     }
     catch (error) {
         logger_1.logger.error('Error in ensureDevelopmentLedgers:', error);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, error instanceof Error ? error.message : String(error));
         if (error instanceof errorHandler_1.AppError) {
             return res.status(error.statusCode).json({ success: false, message: error.message });
         }
@@ -867,35 +895,47 @@ exports.listPropertyMaintenanceJobs = listPropertyMaintenanceJobs;
  * archives the rest to preserve history.
  */
 const mergePropertyAccountDuplicatesForProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    let audit = null;
     try {
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
         const { propertyId } = req.params;
         if (!propertyId) {
             return res.status(400).json({ success: false, message: 'Property ID is required' });
         }
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'maintenance:property_merge_duplicates', {
+            propertyId,
+            companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId,
+            reason,
+            confirm: true
+        });
         const pid = new mongoose_1.default.Types.ObjectId(propertyId);
         // Load all non-archived ledgers for this property (covers legacy/null, rental, sale)
         const accounts = yield PropertyAccount_1.default.find({ propertyId: pid, isArchived: { $ne: true } });
         const service = propertyAccountService_1.default;
         if (typeof service.mergeDuplicateAccounts !== 'function') {
+            yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, 'Merge operation not available');
             return res.status(500).json({ success: false, message: 'Merge operation not available' });
         }
         const groupsChanged = yield service.mergeDuplicateAccounts(accounts);
-        let reconciliation = null;
-        try {
-            reconciliation = yield (0, propertyAccountService_2.reconcilePropertyLedgerDuplicates)(propertyId);
-        }
-        catch (_a) { }
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, {
+            propertyId,
+            reason,
+            merged: groupsChanged,
+            reconciled: null
+        });
         return res.json({
             success: true,
-            message: 'Property ledgers merged and reconciled (if applicable)',
+            message: 'Property ledgers merged where the classifier proved it was safe. Income rows were not cancelled.',
             data: {
                 merged: groupsChanged,
-                reconciled: reconciliation
+                reconciled: null
             }
         });
     }
     catch (error) {
         logger_1.logger.error('Error in mergePropertyAccountDuplicatesForProperty:', error);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, (error === null || error === void 0 ? void 0 : error.message) || String(error));
         if (error instanceof errorHandler_1.AppError) {
             return res.status(error.statusCode).json({ success: false, message: error.message });
         }

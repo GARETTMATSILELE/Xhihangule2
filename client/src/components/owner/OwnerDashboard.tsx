@@ -62,6 +62,7 @@ import { AuthErrorReport } from '../AuthErrorReport';
 import { getChartData } from '../../services/chartService';
 import ErrorBoundary from '../common/ErrorBoundary';
 import PropertyDetails from './PropertyDetails';
+import { OwnerQuotesPage } from '../../pages/ecosystem/AgencyEcosystemPages';
 import { buildUnifiedTransactions, calculateOwnerFinancialSummary, daysUntil } from './ownerDashboardUtils';
 
 // ---------- Interfaces ----------
@@ -1212,6 +1213,8 @@ export default function OwnerDashboard() {
           }
         />
         <Route path="property/:propertyId" element={<PropertyDetails />} />
+        <Route path="maintenance" element={<OwnerQuotesPage />} />
+        <Route path="quotes" element={<OwnerQuotesPage />} />
       </Routes>
     </ErrorBoundary>
   );

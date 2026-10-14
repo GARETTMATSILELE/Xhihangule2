@@ -14,6 +14,8 @@ export interface ITenant extends Document {
   status: string;
   idNumber?: string;
   emergencyContact?: string;
+  userId?: mongoose.Types.ObjectId;
+  address?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -63,6 +65,16 @@ const tenantSchema = new Schema({
   },
   emergencyContact: {
     type: String
+  },
+  userId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+    index: true
+  },
+  address: {
+    type: String,
+    required: false
   }
 }, {
   timestamps: true
@@ -72,5 +84,6 @@ const tenantSchema = new Schema({
 tenantSchema.index({ email: 1, companyId: 1 }, { unique: true });
 // Add index for ownerId for faster filtering
 tenantSchema.index({ ownerId: 1 });
+tenantSchema.index({ userId: 1 }, { sparse: true });
 
 export const Tenant = mongoose.model<ITenant>('Tenant', tenantSchema, COLLECTIONS.TENANTS); 

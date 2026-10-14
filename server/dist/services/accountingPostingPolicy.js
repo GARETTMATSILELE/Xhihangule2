@@ -32,10 +32,15 @@ function isReversalRow(payment) {
 function isProvisionalPayment(payment) {
     return (payment === null || payment === void 0 ? void 0 : payment.isProvisional) === true;
 }
+/**
+ * Deposit-only means there is a deposit and no rental/sale cash (`amount`).
+ * `amount` is the rent (or sale) portion, not the receipt total.
+ * Combined payments (amount > 0 and depositAmount > 0) are not deposit-only.
+ */
 function isDepositOnlyPayment(payment) {
     const deposit = Number((payment === null || payment === void 0 ? void 0 : payment.depositAmount) || 0);
     const amount = Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0);
-    return deposit > 0 && amount <= deposit;
+    return deposit > 0 && amount <= 0;
 }
 /**
  * Provisional payments must not create permanent accounting artifacts

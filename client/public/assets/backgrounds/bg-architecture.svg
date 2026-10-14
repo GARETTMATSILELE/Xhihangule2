@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 240" fill="none">
+  <g stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+    <path d="M20 210V90l50-36 50 36v120"/>
+    <path d="M120 210V70l70-48 70 48v140"/>
+    <path d="M260 210V110h80v100"/>
+    <path d="M360 210V50h140v160"/>
+    <path d="M520 210V96l50-30 50 30v114"/>
+    <path d="M40 210h580"/>
+  </g>
+</svg>

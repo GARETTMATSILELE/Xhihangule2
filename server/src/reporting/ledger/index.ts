@@ -38,6 +38,7 @@ export interface CanonicalLedgerEntry {
 export interface LedgerQuery {
   companyId: string;
   propertyId?: string;
+  ledgerType?: 'rental' | 'sale';
   ownerId?: string;
   tenantId?: string;
   trustAccountId?: string;

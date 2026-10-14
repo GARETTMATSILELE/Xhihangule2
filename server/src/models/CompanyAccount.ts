@@ -21,6 +21,7 @@ export interface CompanyTransaction {
   currency?: 'USD' | 'ZWL' | string;
   paymentMethod?: CompanyPaymentMethod;
   paymentId?: Types.ObjectId;
+  reversesPaymentId?: Types.ObjectId;
   referenceNumber?: string;
   description?: string;
   processedBy?: Types.ObjectId;
@@ -50,6 +51,7 @@ const CompanyTransactionSchema = new Schema<CompanyTransaction>({
   currency: { type: String, required: false, default: 'USD' },
   paymentMethod: { type: String, required: false },
   paymentId: { type: Schema.Types.ObjectId, required: false },
+  reversesPaymentId: { type: Schema.Types.ObjectId, required: false },
   referenceNumber: { type: String },
   description: { type: String },
   processedBy: { type: Schema.Types.ObjectId, required: false },

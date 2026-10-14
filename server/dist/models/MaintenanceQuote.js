@@ -45,5 +45,35 @@ const MaintenanceQuoteSchema = new mongoose_1.Schema({
     fileName: { type: String },
     submittedDate: { type: Date, default: Date.now },
     createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    propertyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Property', index: true },
+    submittedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    lineItems: [{
+            description: { type: String, required: true },
+            quantity: { type: Number, required: true, min: 0 },
+            unitCost: { type: Number, required: true, min: 0 },
+            total: { type: Number, required: true, min: 0 },
+            _id: false
+        }],
+    subtotal: { type: Number, min: 0 },
+    tax: { type: Number, min: 0, default: 0 },
+    total: { type: Number, min: 0 },
+    currency: { type: String, default: 'USD' },
+    estimatedDuration: { type: String },
+    estimatedStartDate: { type: Date },
+    validUntil: { type: Date },
+    attachments: [{ name: { type: String }, url: { type: String }, _id: false }],
+    notes: { type: String },
+    status: {
+        type: String,
+        enum: ['DRAFT', 'INVITED', 'SUBMITTED', 'UNDER_REVIEW', 'SHORTLISTED', 'SELECTED', 'SENT_TO_OWNER', 'OWNER_APPROVED', 'OWNER_DECLINED', 'EXPIRED', 'WITHDRAWN'],
+        default: 'SUBMITTED',
+        index: true
+    },
+    version: { type: Number, default: 1, min: 1 },
+    parentQuoteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'MaintenanceQuote' },
+    submittedAt: { type: Date },
+    reviewedAt: { type: Date },
+    approvedAt: { type: Date },
+    declinedAt: { type: Date },
 }, { timestamps: true, collection: 'maintenance_quotes' });
 exports.MaintenanceQuote = mongoose_1.default.model('MaintenanceQuote', MaintenanceQuoteSchema);

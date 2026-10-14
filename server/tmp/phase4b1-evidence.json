@@ -1,0 +1,3387 @@
+{
+  "startedAt": "2026-10-11T09:17:04.234Z",
+  "stamp": "10224233",
+  "setupVersusAcceptance": {
+    "setup": "signup, users, property settings, VAT rate, tax profile, tenant, lease, owner link, maintenance fixture records",
+    "acceptance": "POST /api/accountants/payments then read payment, accounts, journals, statement, csv, financial trace"
+  },
+  "http": [
+    {
+      "label": "signup PHASE4B1_TEST_COMPANY",
+      "method": "POST",
+      "path": "/api/auth/signup",
+      "status": 201,
+      "body": {
+        "user": {
+          "_id": "6acb5413271b8f101123fd68",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "name": "PHASE4B1_TEST_COMPANY Admin",
+          "role": "admin",
+          "companyId": "6acb5413271b8f101123fd6a"
+        },
+        "company": {
+          "name": "PHASE4B1_TEST_COMPANY",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-PANY",
+          "tinNumber": "T4B1-10224233-PANY",
+          "taxProfile": {
+            "vatRegistered": false,
+            "fiscalisationEnabled": false
+          },
+          "ownerId": "6acb5413271b8f101123fd68",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "tenantStatus": "active",
+          "onboardingStatus": "ACTIVE",
+          "onboardingCompleted": true,
+          "workspacePreferences": {
+            "currency": "USD",
+            "timezone": "Africa/Harare",
+            "measurementUnits": "metric",
+            "invoicePrefix": "INV"
+          },
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "fiscalConfig": {
+            "enabled": false
+          },
+          "rentReceivableOpeningBalance": 0,
+          "levyReceivableOpeningBalance": 0,
+          "revenue": 0,
+          "_id": "6acb5413271b8f101123fd6a",
+          "country": "Zimbabwe",
+          "defaultCurrency": "USD",
+          "storageUsedBytes": 0,
+          "subscriptionOverride": {
+            "enabled": false
+          },
+          "bankAccounts": [],
+          "normalizedEmail": "phase4b1_test_company.10224233@phase4b1.test",
+          "normalizedRegistrationNumber": "P4B1-10224233-PANY",
+          "normalizedTinNumber": "T4B1-10224233-PANY",
+          "createdAt": "2026-10-11T09:17:07.504Z",
+          "updatedAt": "2026-10-11T09:17:07.504Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "signup PHASE4B1_COMPANY_A",
+      "method": "POST",
+      "path": "/api/auth/signup",
+      "status": 201,
+      "body": {
+        "user": {
+          "_id": "6acb5413271b8f101123fd77",
+          "email": "phase4b1_company_a.10224233@phase4b1.test",
+          "name": "PHASE4B1_COMPANY_A Admin",
+          "role": "admin",
+          "companyId": "6acb5413271b8f101123fd79"
+        },
+        "company": {
+          "name": "PHASE4B1_COMPANY_A",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_company_a.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-NY_A",
+          "tinNumber": "T4B1-10224233-NY_A",
+          "taxProfile": {
+            "vatRegistered": false,
+            "fiscalisationEnabled": false
+          },
+          "ownerId": "6acb5413271b8f101123fd77",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "tenantStatus": "active",
+          "onboardingStatus": "ACTIVE",
+          "onboardingCompleted": true,
+          "workspacePreferences": {
+            "currency": "USD",
+            "timezone": "Africa/Harare",
+            "measurementUnits": "metric",
+            "invoicePrefix": "INV"
+          },
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "fiscalConfig": {
+            "enabled": false
+          },
+          "rentReceivableOpeningBalance": 0,
+          "levyReceivableOpeningBalance": 0,
+          "revenue": 0,
+          "_id": "6acb5413271b8f101123fd79",
+          "country": "Zimbabwe",
+          "defaultCurrency": "USD",
+          "storageUsedBytes": 0,
+          "subscriptionOverride": {
+            "enabled": false
+          },
+          "bankAccounts": [],
+          "normalizedEmail": "phase4b1_company_a.10224233@phase4b1.test",
+          "normalizedRegistrationNumber": "P4B1-10224233-NY_A",
+          "normalizedTinNumber": "T4B1-10224233-NY_A",
+          "createdAt": "2026-10-11T09:17:07.999Z",
+          "updatedAt": "2026-10-11T09:17:07.999Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "signup PHASE4B1_COMPANY_B",
+      "method": "POST",
+      "path": "/api/auth/signup",
+      "status": 201,
+      "body": {
+        "user": {
+          "_id": "6acb5414271b8f101123fd86",
+          "email": "phase4b1_company_b.10224233@phase4b1.test",
+          "name": "PHASE4B1_COMPANY_B Admin",
+          "role": "admin",
+          "companyId": "6acb5414271b8f101123fd88"
+        },
+        "company": {
+          "name": "PHASE4B1_COMPANY_B",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_company_b.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-NY_B",
+          "tinNumber": "T4B1-10224233-NY_B",
+          "taxProfile": {
+            "vatRegistered": false,
+            "fiscalisationEnabled": false
+          },
+          "ownerId": "6acb5414271b8f101123fd86",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "tenantStatus": "active",
+          "onboardingStatus": "ACTIVE",
+          "onboardingCompleted": true,
+          "workspacePreferences": {
+            "currency": "USD",
+            "timezone": "Africa/Harare",
+            "measurementUnits": "metric",
+            "invoicePrefix": "INV"
+          },
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "fiscalConfig": {
+            "enabled": false
+          },
+          "rentReceivableOpeningBalance": 0,
+          "levyReceivableOpeningBalance": 0,
+          "revenue": 0,
+          "_id": "6acb5414271b8f101123fd88",
+          "country": "Zimbabwe",
+          "defaultCurrency": "USD",
+          "storageUsedBytes": 0,
+          "subscriptionOverride": {
+            "enabled": false
+          },
+          "bankAccounts": [],
+          "normalizedEmail": "phase4b1_company_b.10224233@phase4b1.test",
+          "normalizedRegistrationNumber": "P4B1-10224233-NY_B",
+          "normalizedTinNumber": "T4B1-10224233-NY_B",
+          "createdAt": "2026-10-11T09:17:08.556Z",
+          "updatedAt": "2026-10-11T09:17:08.556Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "signup PHASE4B1_INDIVIDUAL",
+      "method": "POST",
+      "path": "/api/auth/signup",
+      "status": 201,
+      "body": {
+        "user": {
+          "_id": "6acb5414271b8f101123fd9e",
+          "email": "phase4b1_individual.10224233@phase4b1.test",
+          "name": "PHASE4B1_INDIVIDUAL Admin",
+          "role": "admin",
+          "companyId": "6acb5415271b8f101123fda0"
+        },
+        "company": {
+          "name": "PHASE4B1_INDIVIDUAL",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_individual.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-DUAL",
+          "tinNumber": "T4B1-10224233-DUAL",
+          "taxProfile": {
+            "vatRegistered": false,
+            "fiscalisationEnabled": false
+          },
+          "ownerId": "6acb5414271b8f101123fd9e",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "individual",
+          "tenantStatus": "active",
+          "onboardingStatus": "ACTIVE",
+          "onboardingCompleted": true,
+          "workspacePreferences": {
+            "currency": "USD",
+            "timezone": "Africa/Harare",
+            "measurementUnits": "metric",
+            "invoicePrefix": "INV"
+          },
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "INDIVIDUAL",
+          "propertyLimit": 10,
+          "featureFlags": {
+            "commissionEnabled": false,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": false,
+            "commissions": false,
+            "trustAccounting": false,
+            "maintenanceApprovals": false,
+            "accounting": true,
+            "agents": false,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "fiscalConfig": {
+            "enabled": false
+          },
+          "rentReceivableOpeningBalance": 0,
+          "levyReceivableOpeningBalance": 0,
+          "revenue": 0,
+          "_id": "6acb5415271b8f101123fda0",
+          "country": "Zimbabwe",
+          "defaultCurrency": "USD",
+          "storageUsedBytes": 0,
+          "subscriptionOverride": {
+            "enabled": false
+          },
+          "bankAccounts": [],
+          "normalizedEmail": "phase4b1_individual.10224233@phase4b1.test",
+          "normalizedRegistrationNumber": "P4B1-10224233-DUAL",
+          "normalizedTinNumber": "T4B1-10224233-DUAL",
+          "createdAt": "2026-10-11T09:17:09.047Z",
+          "updatedAt": "2026-10-11T09:17:09.047Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "create PHASE4B1_TEST_AGENT",
+      "method": "POST",
+      "path": "/api/users",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "email": "phase4b1_test_agent.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_AGENT",
+          "lastName": "PHASE4B1",
+          "role": "agent",
+          "roles": [
+            "agent",
+            "principal"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "sessionVersion": 1,
+          "isActive": true,
+          "isArchived": false,
+          "archivedDetails": {
+            "roles": []
+          },
+          "_id": "6acb5415271b8f101123fdb7",
+          "commission": 0,
+          "balance": 0,
+          "createdAt": "2026-10-11T09:17:09.252Z",
+          "updatedAt": "2026-10-11T09:17:09.252Z",
+          "normalizedEmail": "phase4b1_test_agent.10224233@phase4b1.test",
+          "__v": 0
+        },
+        "meta": {
+          "accountCreatedEmailSent": true
+        }
+      }
+    },
+    {
+      "label": "login PHASE4B1_TEST_AGENT",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200,
+      "body": {
+        "user": {
+          "_id": "6acb5415271b8f101123fdb7",
+          "email": "phase4b1_test_agent.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_AGENT",
+          "lastName": "PHASE4B1",
+          "role": "agent",
+          "roles": [
+            "agent",
+            "principal"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "isActive": true,
+          "lastLogin": "2026-10-11T09:17:13.363Z",
+          "createdAt": "2026-10-11T09:17:09.252Z",
+          "updatedAt": "2026-10-11T09:17:09.252Z"
+        },
+        "company": {
+          "_id": "6acb5413271b8f101123fd6a",
+          "name": "PHASE4B1_TEST_COMPANY",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-PANY",
+          "tinNumber": "T4B1-10224233-PANY",
+          "ownerId": "6acb5413271b8f101123fd68",
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "bankAccounts": [],
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "createdAt": "2026-10-11T09:17:07.504Z",
+          "updatedAt": "2026-10-11T09:17:07.504Z"
+        }
+      }
+    },
+    {
+      "label": "create PHASE4B1_TEST_AGENT_JUNIOR",
+      "method": "POST",
+      "path": "/api/users",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "email": "phase4b1_test_agent_junior.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_AGENT_JUNIOR",
+          "lastName": "PHASE4B1",
+          "role": "agent",
+          "roles": [
+            "agent"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "sessionVersion": 1,
+          "isActive": true,
+          "isArchived": false,
+          "archivedDetails": {
+            "roles": []
+          },
+          "_id": "6acb5419271b8f101123fdd3",
+          "commission": 0,
+          "balance": 0,
+          "createdAt": "2026-10-11T09:17:13.389Z",
+          "updatedAt": "2026-10-11T09:17:13.389Z",
+          "normalizedEmail": "phase4b1_test_agent_junior.10224233@phase4b1.test",
+          "__v": 0
+        },
+        "meta": {
+          "accountCreatedEmailSent": true
+        }
+      }
+    },
+    {
+      "label": "login PHASE4B1_TEST_AGENT_JUNIOR",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200,
+      "body": {
+        "user": {
+          "_id": "6acb5419271b8f101123fdd3",
+          "email": "phase4b1_test_agent_junior.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_AGENT_JUNIOR",
+          "lastName": "PHASE4B1",
+          "role": "agent",
+          "roles": [
+            "agent"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "isActive": true,
+          "lastLogin": "2026-10-11T09:17:17.630Z",
+          "createdAt": "2026-10-11T09:17:13.389Z",
+          "updatedAt": "2026-10-11T09:17:13.389Z"
+        },
+        "company": {
+          "_id": "6acb5413271b8f101123fd6a",
+          "name": "PHASE4B1_TEST_COMPANY",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-PANY",
+          "tinNumber": "T4B1-10224233-PANY",
+          "ownerId": "6acb5413271b8f101123fd68",
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "bankAccounts": [],
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "createdAt": "2026-10-11T09:17:07.504Z",
+          "updatedAt": "2026-10-11T09:17:07.504Z"
+        }
+      }
+    },
+    {
+      "label": "create PHASE4B1_TEST_ACCOUNTANT",
+      "method": "POST",
+      "path": "/api/users",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "email": "phase4b1_test_accountant.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_ACCOUNTANT",
+          "lastName": "PHASE4B1",
+          "role": "accountant",
+          "roles": [
+            "accountant"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "sessionVersion": 1,
+          "isActive": true,
+          "isArchived": false,
+          "archivedDetails": {
+            "roles": []
+          },
+          "_id": "6acb541d271b8f101123fddd",
+          "commission": 0,
+          "balance": 0,
+          "createdAt": "2026-10-11T09:17:17.697Z",
+          "updatedAt": "2026-10-11T09:17:17.697Z",
+          "normalizedEmail": "phase4b1_test_accountant.10224233@phase4b1.test",
+          "__v": 0
+        },
+        "meta": {
+          "accountCreatedEmailSent": true
+        }
+      }
+    },
+    {
+      "label": "login PHASE4B1_TEST_ACCOUNTANT",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200,
+      "body": {
+        "user": {
+          "_id": "6acb541d271b8f101123fddd",
+          "email": "phase4b1_test_accountant.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_ACCOUNTANT",
+          "lastName": "PHASE4B1",
+          "role": "accountant",
+          "roles": [
+            "accountant"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "isActive": true,
+          "lastLogin": "2026-10-11T09:17:22.012Z",
+          "createdAt": "2026-10-11T09:17:17.697Z",
+          "updatedAt": "2026-10-11T09:17:17.697Z"
+        },
+        "company": {
+          "_id": "6acb5413271b8f101123fd6a",
+          "name": "PHASE4B1_TEST_COMPANY",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-PANY",
+          "tinNumber": "T4B1-10224233-PANY",
+          "ownerId": "6acb5413271b8f101123fd68",
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "bankAccounts": [],
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "createdAt": "2026-10-11T09:17:07.504Z",
+          "updatedAt": "2026-10-11T09:17:07.504Z"
+        }
+      }
+    },
+    {
+      "label": "create PHASE4B1_TEST_OWNER_USER",
+      "method": "POST",
+      "path": "/api/users",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "email": "phase4b1_test_owner_user.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_OWNER_USER",
+          "lastName": "PHASE4B1",
+          "role": "owner",
+          "roles": [
+            "owner"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "sessionVersion": 1,
+          "isActive": true,
+          "isArchived": false,
+          "archivedDetails": {
+            "roles": []
+          },
+          "_id": "6acb5422271b8f101123fde7",
+          "commission": 0,
+          "balance": 0,
+          "createdAt": "2026-10-11T09:17:22.057Z",
+          "updatedAt": "2026-10-11T09:17:22.057Z",
+          "normalizedEmail": "phase4b1_test_owner_user.10224233@phase4b1.test",
+          "__v": 0
+        },
+        "meta": {
+          "accountCreatedEmailSent": true
+        }
+      }
+    },
+    {
+      "label": "login PHASE4B1_TEST_OWNER_USER",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200,
+      "body": {
+        "user": {
+          "_id": "6acb5422271b8f101123fde7",
+          "email": "phase4b1_test_owner_user.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_OWNER_USER",
+          "lastName": "PHASE4B1",
+          "role": "owner",
+          "roles": [
+            "owner"
+          ],
+          "companyId": "6acb5413271b8f101123fd6a",
+          "isActive": true,
+          "lastLogin": "2026-10-11T09:17:26.301Z",
+          "createdAt": "2026-10-11T09:17:22.057Z",
+          "updatedAt": "2026-10-11T09:17:22.057Z"
+        },
+        "company": {
+          "_id": "6acb5413271b8f101123fd6a",
+          "name": "PHASE4B1_TEST_COMPANY",
+          "address": "1 Test Close, Harare",
+          "phone": "0772000000",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "registrationNumber": "P4B1-10224233-PANY",
+          "tinNumber": "T4B1-10224233-PANY",
+          "ownerId": "6acb5413271b8f101123fd68",
+          "isActive": true,
+          "subscriptionStatus": "trial",
+          "companyType": "REGISTERED_BUSINESS",
+          "workspaceType": "agency",
+          "bankAccounts": [],
+          "commissionConfig": {
+            "preaPercentOfTotal": 0.03,
+            "agentPercentOfRemaining": 0.6,
+            "agencyPercentOfRemaining": 0.4,
+            "vatPercentOnCommission": 0.155
+          },
+          "plan": "ENTERPRISE",
+          "propertyLimit": null,
+          "featureFlags": {
+            "commissionEnabled": true,
+            "agentAccounts": true,
+            "propertyAccounts": true,
+            "propertyOwners": true,
+            "commissions": true,
+            "trustAccounting": true,
+            "maintenanceApprovals": true,
+            "accounting": true,
+            "agents": true,
+            "tenantPortalEnabled": false,
+            "contractorPortalEnabled": false,
+            "propertyMarketplaceEnabled": false,
+            "maintenanceQuotesEnabled": false,
+            "onlinePaymentsEnabled": false,
+            "multichannelNotificationsEnabled": false,
+            "tenantReferencesEnabled": false,
+            "contractorRatingsEnabled": false
+          },
+          "createdAt": "2026-10-11T09:17:07.504Z",
+          "updatedAt": "2026-10-11T09:17:07.504Z"
+        }
+      }
+    },
+    {
+      "label": "set vat profile",
+      "method": "PUT",
+      "path": "/api/companies/6acb5413271b8f101123fd6a",
+      "status": 200,
+      "body": {
+        "taxProfile": {
+          "fiscalisationEnabled": false,
+          "vatRegistered": true,
+          "vatRegistrationEffectiveDate": "2020-01-01T00:00:00.000Z"
+        },
+        "workspacePreferences": {
+          "currency": "USD",
+          "timezone": "Africa/Harare",
+          "measurementUnits": "metric",
+          "invoicePrefix": "INV"
+        },
+        "commissionConfig": {
+          "preaPercentOfTotal": 0.03,
+          "agentPercentOfRemaining": 0.6,
+          "agencyPercentOfRemaining": 0.4,
+          "vatPercentOnCommission": 0.155
+        },
+        "featureFlags": {
+          "commissionEnabled": true,
+          "agentAccounts": true,
+          "propertyAccounts": true,
+          "propertyOwners": true,
+          "commissions": true,
+          "trustAccounting": true,
+          "maintenanceApprovals": true,
+          "accounting": true,
+          "agents": true,
+          "tenantPortalEnabled": false,
+          "contractorPortalEnabled": false,
+          "propertyMarketplaceEnabled": false,
+          "maintenanceQuotesEnabled": false,
+          "onlinePaymentsEnabled": false,
+          "multichannelNotificationsEnabled": false,
+          "tenantReferencesEnabled": false,
+          "contractorRatingsEnabled": false
+        },
+        "fiscalConfig": {
+          "enabled": false
+        },
+        "subscriptionOverride": {
+          "enabled": false
+        },
+        "_id": "6acb5413271b8f101123fd6a",
+        "name": "PHASE4B1_TEST_COMPANY",
+        "address": "1 Test Close, Harare",
+        "phone": "0772000000",
+        "email": "phase4b1_test_company.10224233@phase4b1.test",
+        "registrationNumber": "P4B1-10224233-PANY",
+        "tinNumber": "T4B1-10224233-PANY",
+        "ownerId": "6acb5413271b8f101123fd68",
+        "companyType": "REGISTERED_BUSINESS",
+        "workspaceType": "agency",
+        "tenantStatus": "active",
+        "onboardingStatus": "ACTIVE",
+        "onboardingCompleted": true,
+        "isActive": true,
+        "subscriptionStatus": "trial",
+        "plan": "ENTERPRISE",
+        "propertyLimit": null,
+        "rentReceivableOpeningBalance": 0,
+        "levyReceivableOpeningBalance": 0,
+        "revenue": 0,
+        "country": "Zimbabwe",
+        "defaultCurrency": "USD",
+        "storageUsedBytes": 0,
+        "bankAccounts": [],
+        "normalizedEmail": "phase4b1_test_company.10224233@phase4b1.test",
+        "normalizedRegistrationNumber": "P4B1-10224233-PANY",
+        "normalizedTinNumber": "T4B1-10224233-PANY",
+        "createdAt": "2026-10-11T09:17:07.504Z",
+        "updatedAt": "2026-10-11T09:17:26.341Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "set vat rate",
+      "method": "POST",
+      "path": "/api/accounting/tax-rates",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "_id": "6acb5426271b8f101123fdf5",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "taxType": "VAT",
+          "rate": 15.5,
+          "effectiveFrom": "2020-01-01T00:00:00.000Z",
+          "effectiveTo": null,
+          "isActive": true
+        }
+      }
+    },
+    {
+      "label": "create property",
+      "method": "POST",
+      "path": "/api/properties",
+      "status": 201,
+      "body": {
+        "name": "PHASE4B1_TEST_PROPERTY",
+        "address": "1 Borrowdale Test Close, Harare",
+        "type": "house",
+        "propertyOperationalStatus": "Vacant",
+        "propertyUse": "Rental",
+        "status": "rented",
+        "rent": 1000,
+        "price": 0,
+        "bedrooms": 0,
+        "bathrooms": 0,
+        "area": 0,
+        "builtArea": 0,
+        "landArea": 0,
+        "pricePerSqm": 0,
+        "description": "N/A",
+        "images": [],
+        "amenities": [],
+        "companyId": "6acb5413271b8f101123fd6a",
+        "ownerId": "6acb5413271b8f101123fd68",
+        "rentalType": "management",
+        "commission": 10,
+        "vatOnCommission": true,
+        "vatCommissionTreatment": "exclusive",
+        "ownershipPercentage": 100,
+        "commissionPreaPercent": 3,
+        "commissionAgencyPercentRemaining": 50,
+        "commissionAgentPercentRemaining": 50,
+        "levyOrMunicipalType": "levy",
+        "levyOrMunicipalAmount": 100,
+        "isDeleted": false,
+        "deletedAt": null,
+        "deletedBy": null,
+        "archivedAt": null,
+        "archivedBy": null,
+        "publicListingEnabled": false,
+        "videos": [],
+        "_id": "6acb5426271b8f101123fdfb",
+        "createdAt": "2026-10-11T09:17:26.656Z",
+        "updatedAt": "2026-10-11T09:17:26.656Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "create property owner",
+      "method": "POST",
+      "path": "/api/property-owners",
+      "status": 201,
+      "body": {
+        "email": "phase4b1_test_owner.10224233@phase4b1.test",
+        "firstName": "PHASE4B1_TEST_OWNER",
+        "lastName": "Disposable",
+        "phone": "0772000001",
+        "companyId": "6acb5413271b8f101123fd6a",
+        "properties": [],
+        "active": true,
+        "_id": "6acb5428271b8f101123fe12",
+        "createdAt": "2026-10-11T09:17:28.077Z",
+        "updatedAt": "2026-10-11T09:17:28.077Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "link property owner",
+      "method": "PUT",
+      "path": "/api/properties/6acb5426271b8f101123fdfb",
+      "status": 200,
+      "body": {
+        "_id": "6acb5426271b8f101123fdfb",
+        "name": "PHASE4B1_TEST_PROPERTY",
+        "address": "1 Borrowdale Test Close, Harare",
+        "type": "house",
+        "propertyOperationalStatus": "Vacant",
+        "propertyUse": "Rental",
+        "status": "rented",
+        "rent": 1000,
+        "price": 0,
+        "bedrooms": 0,
+        "bathrooms": 0,
+        "area": 0,
+        "builtArea": 0,
+        "landArea": 0,
+        "pricePerSqm": 0,
+        "description": "N/A",
+        "images": [],
+        "amenities": [],
+        "companyId": "6acb5413271b8f101123fd6a",
+        "ownerId": "6acb5413271b8f101123fd68",
+        "rentalType": "management",
+        "commission": 10,
+        "vatOnCommission": true,
+        "vatCommissionTreatment": "exclusive",
+        "ownershipPercentage": 100,
+        "commissionPreaPercent": 3,
+        "commissionAgencyPercentRemaining": 50,
+        "commissionAgentPercentRemaining": 50,
+        "levyOrMunicipalType": "levy",
+        "levyOrMunicipalAmount": 100,
+        "isDeleted": false,
+        "deletedAt": null,
+        "deletedBy": null,
+        "archivedAt": null,
+        "archivedBy": null,
+        "publicListingEnabled": false,
+        "videos": [],
+        "createdAt": "2026-10-11T09:17:26.656Z",
+        "updatedAt": "2026-10-11T09:17:28.173Z",
+        "__v": 0,
+        "propertyOwnerId": "6acb5428271b8f101123fe12"
+      }
+    },
+    {
+      "label": "create tenant",
+      "method": "POST",
+      "path": "/api/tenants",
+      "status": 201,
+      "body": {
+        "firstName": "PHASE4B1_TEST_TENANT",
+        "lastName": "Disposable",
+        "email": "phase4b1_test_tenant.10224233@phase4b1.test",
+        "phone": "0772000002",
+        "companyId": "6acb5413271b8f101123fd6a",
+        "propertyId": "6acb5426271b8f101123fdfb",
+        "propertyIds": [],
+        "ownerId": "6acb5413271b8f101123fd68",
+        "status": "Active",
+        "_id": "6acb5428271b8f101123fe19",
+        "createdAt": "2026-10-11T09:17:28.224Z",
+        "updatedAt": "2026-10-11T09:17:28.224Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "create lease",
+      "method": "POST",
+      "path": "/api/leases",
+      "status": 201,
+      "body": {
+        "propertyId": "6acb5426271b8f101123fdfb",
+        "tenantId": "6acb5428271b8f101123fe19",
+        "startDate": "2026-01-01T00:00:00.000Z",
+        "endDate": "2026-12-31T00:00:00.000Z",
+        "rentAmount": 1000,
+        "depositAmount": 0,
+        "status": "active",
+        "companyId": "6acb5413271b8f101123fd6a",
+        "ownerId": "6acb5413271b8f101123fd68",
+        "previousLeaseId": null,
+        "successorLeaseId": null,
+        "terminationReason": "",
+        "billingStatus": "current",
+        "billingRules": {
+          "frequency": "monthly",
+          "rentDueDay": 1,
+          "escalationPercent": 0,
+          "escalationFrequencyMonths": 12,
+          "recurringLevies": 0,
+          "recurringServiceCharges": 0,
+          "prorateMoveIn": true
+        },
+        "financialSummary": {
+          "totalBilled": 0,
+          "totalPaid": 0,
+          "outstandingBalance": 0,
+          "depositHeld": 0,
+          "penalties": 0,
+          "moveOutSettlement": 0
+        },
+        "depositSettlement": {
+          "depositHeld": 0,
+          "deductions": 0,
+          "refundDue": 0,
+          "notes": ""
+        },
+        "monthlyRent": 1000,
+        "securityDeposit": 0,
+        "petDeposit": 0,
+        "isPetAllowed": false,
+        "maxOccupants": 1,
+        "isUtilitiesIncluded": false,
+        "utilitiesDetails": "",
+        "rentDueDay": 1,
+        "lateFee": 0,
+        "gracePeriod": 0,
+        "agencyWorkflow": false,
+        "_id": "6acb5428271b8f101123fe1c",
+        "lifecycleStatusChangedAt": "2026-10-11T09:17:28.375Z",
+        "documentVersions": [],
+        "createdAt": "2026-10-11T09:17:28.377Z",
+        "updatedAt": "2026-10-11T09:17:28.377Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "payment 2026-10",
+      "method": "POST",
+      "path": "/api/accountants/payments",
+      "status": 201,
+      "body": {
+        "message": "Payment processed successfully",
+        "payment": {
+          "paymentType": "rental",
+          "transactionDomain": "RENTAL",
+          "saleMode": "quick",
+          "propertyType": "residential",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "tenantId": "6acb5428271b8f101123fe19",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "paymentDate": "2026-10-11T00:00:00.000Z",
+          "paymentMethod": "cash",
+          "amount": 1000,
+          "depositAmount": 0,
+          "referenceNumber": "PHASE4B1-2026-10-10224233",
+          "rentalPeriodMonth": 10,
+          "rentalPeriodYear": 2026,
+          "advanceMonthsPaid": 1,
+          "rentUsed": 1000,
+          "rentAllocated": 900,
+          "levyAllocated": 100,
+          "levyUsed": 100,
+          "paymentLines": [],
+          "notes": "",
+          "processedBy": "6acb5413271b8f101123fd68",
+          "commissionDetails": {
+            "totalCommission": 90,
+            "preaFee": 2.7,
+            "agentShare": 52.38,
+            "agencyShare": 34.92,
+            "vatOnCommission": 13.95,
+            "ownerAmount": 896.05,
+            "levy": 100,
+            "commissionBase": 900,
+            "commissionRate": 10,
+            "commissionGross": 90,
+            "commissionNet": 90,
+            "vatTreatment": "exclusive",
+            "vatRate": 0.155,
+            "vatAmount": 13.95,
+            "agentSplit": {
+              "ownerAgentShare": 0,
+              "collaboratorAgentShare": 0
+            }
+          },
+          "vatIncluded": false,
+          "vatRate": 0,
+          "vatAmount": 0,
+          "applyVatOnCommission": true,
+          "vatOnCommissionRate": 0.155,
+          "vatCommissionTreatment": "exclusive",
+          "status": "completed",
+          "postingStatus": "posted",
+          "accountingComplete": false,
+          "accountingStatus": "pending",
+          "accountingMissing": [],
+          "accountingMismatched": [],
+          "currency": "USD",
+          "leaseId": "6acb5428271b8f101123fe1c",
+          "isProvisional": false,
+          "isInSuspense": false,
+          "commissionFinalized": true,
+          "provisionalRelationshipType": "unknown",
+          "isCorrectionEntry": false,
+          "_id": "6acb542a271b8f101124040b",
+          "createdAt": "2026-10-11T09:17:30.202Z",
+          "updatedAt": "2026-10-11T09:17:30.620Z",
+          "__v": 0,
+          "linkedLevyPaymentId": "6acb542a271b8f101124040d"
+        },
+        "receiptStatus": "PAYMENT_RECEIVED",
+        "accountingComplete": true,
+        "accountingStatus": "posted",
+        "accountingState": "ACCOUNTING_COMPLETE"
+      }
+    },
+    {
+      "label": "read payment",
+      "method": "GET",
+      "path": "/api/accountants/payments/6acb542a271b8f101124040b",
+      "status": 200,
+      "body": {
+        "commissionDetails": {
+          "agentSplit": {
+            "ownerAgentShare": 0,
+            "collaboratorAgentShare": 0
+          },
+          "totalCommission": 90,
+          "preaFee": 2.7,
+          "agentShare": 52.38,
+          "agencyShare": 34.92,
+          "vatOnCommission": 13.95,
+          "ownerAmount": 896.05,
+          "levy": 100,
+          "commissionBase": 900,
+          "commissionRate": 10,
+          "commissionGross": 90,
+          "commissionNet": 90,
+          "vatTreatment": "exclusive",
+          "vatRate": 0.155,
+          "vatAmount": 13.95
+        },
+        "_id": "6acb542a271b8f101124040b",
+        "paymentType": "rental",
+        "transactionDomain": "RENTAL",
+        "saleMode": "quick",
+        "propertyType": "residential",
+        "propertyId": {
+          "_id": "6acb5426271b8f101123fdfb",
+          "name": "PHASE4B1_TEST_PROPERTY"
+        },
+        "tenantId": {
+          "_id": "6acb5428271b8f101123fe19",
+          "firstName": "PHASE4B1_TEST_TENANT",
+          "lastName": "Disposable"
+        },
+        "agentId": {
+          "_id": "6acb5415271b8f101123fdb7"
+        },
+        "companyId": "6acb5413271b8f101123fd6a",
+        "paymentDate": "2026-10-11T00:00:00.000Z",
+        "paymentMethod": "cash",
+        "amount": 1000,
+        "depositAmount": 0,
+        "referenceNumber": "PHASE4B1-2026-10-10224233",
+        "rentalPeriodMonth": 10,
+        "rentalPeriodYear": 2026,
+        "advanceMonthsPaid": 1,
+        "rentUsed": 1000,
+        "rentAllocated": 900,
+        "levyAllocated": 100,
+        "levyUsed": 100,
+        "paymentLines": [],
+        "notes": "",
+        "processedBy": {
+          "_id": "6acb5413271b8f101123fd68"
+        },
+        "vatIncluded": false,
+        "vatRate": 0,
+        "vatAmount": 0,
+        "applyVatOnCommission": true,
+        "vatOnCommissionRate": 0.155,
+        "vatCommissionTreatment": "exclusive",
+        "status": "completed",
+        "postingStatus": "posted",
+        "accountingComplete": true,
+        "accountingStatus": "posted",
+        "accountingMissing": [],
+        "accountingMismatched": [],
+        "currency": "USD",
+        "leaseId": "6acb5428271b8f101123fe1c",
+        "isProvisional": false,
+        "isInSuspense": false,
+        "commissionFinalized": true,
+        "provisionalRelationshipType": "unknown",
+        "isCorrectionEntry": false,
+        "createdAt": "2026-10-11T09:17:30.202Z",
+        "updatedAt": "2026-10-11T09:17:33.402Z",
+        "__v": 0,
+        "linkedLevyPaymentId": "6acb542a271b8f101124040d",
+        "accountingLastAttemptAt": "2026-10-11T09:17:33.401Z",
+        "accountingPostedAt": "2026-10-11T09:17:33.401Z"
+      }
+    },
+    {
+      "label": "owner statement",
+      "method": "GET",
+      "path": "/api/reporting/owner/6acb5426271b8f101123fdfb",
+      "status": 200,
+      "body": {
+        "dtoVersion": "owner-statement.v1",
+        "status": "reconciled",
+        "audit": {
+          "reportId": "b0a94b8c-7fc8-4172-a58f-f2804515388f",
+          "reportType": "owner-statement",
+          "generatedBy": "6acb5413271b8f101123fd68",
+          "generatedAt": "2026-10-11T09:17:33.729Z",
+          "softwareVersion": "1.0.0",
+          "dtoVersion": "owner-statement.v1",
+          "templateVersion": "owner-statement-template.v2",
+          "sourceLedgerVersion": "canonical-ledger-projection.v1",
+          "hash": "c73a5ad34ea6a8a27603ed3406eb244fffd9f720bc4907cb5dd72d942fbc388e",
+          "correlationId": "1d8faa85-7e98-48a6-9d36-6629ff7158f8"
+        },
+        "company": {
+          "displayName": "PHASE4B1_TEST_COMPANY",
+          "type": "company"
+        },
+        "owner": {
+          "id": "6acb5413271b8f101123fd68",
+          "displayName": "Unknown Owner",
+          "type": "owner"
+        },
+        "property": {
+          "id": "6acb5426271b8f101123fdfb",
+          "name": "PHASE4B1_TEST_PROPERTY",
+          "address": "1 Borrowdale Test Close, Harare"
+        },
+        "statementNumber": "OWNER-All Transactions",
+        "ledger": "rental",
+        "currency": "USD",
+        "period": {
+          "startDate": "1900-01-01",
+          "endDate": "9999-12-31",
+          "label": "All Transactions"
+        },
+        "executiveSummary": {
+          "openingBalance": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "rentalIncome": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "otherIncome": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "totalFundsReceived": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "totalDeductions": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "netAvailable": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "ownerPaid": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "closingTrustBalance": {
+            "amount": 796.05,
+            "currency": "USD"
+          }
+        },
+        "cashFlow": {
+          "openingBalance": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "totalInflows": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "totalOutflows": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "ownerPayments": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "closingBalance": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "steps": [
+            {
+              "id": "funds-received",
+              "label": "Funds Received",
+              "amount": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "direction": "inflow",
+              "sourceReferences": [
+                {
+                  "sourceSystem": "property_account",
+                  "sourceModel": "PropertyAccount.transactions",
+                  "sourceId": "6acb542b271b8f1011240443",
+                  "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                  "description": "RENT"
+                }
+              ]
+            },
+            {
+              "id": "deductions",
+              "label": "Deductions",
+              "amount": {
+                "amount": 0,
+                "currency": "USD"
+              },
+              "direction": "outflow",
+              "sourceReferences": []
+            },
+            {
+              "id": "owner-payments",
+              "label": "Owner Payments",
+              "amount": {
+                "amount": 0,
+                "currency": "USD"
+              },
+              "direction": "outflow",
+              "sourceReferences": []
+            },
+            {
+              "id": "balance-held",
+              "label": "Balance Held",
+              "amount": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "direction": "balance",
+              "sourceReferences": [
+                {
+                  "sourceSystem": "property_account",
+                  "sourceModel": "PropertyAccount.transactions",
+                  "sourceId": "6acb542b271b8f1011240443",
+                  "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                  "description": "RENT"
+                }
+              ]
+            }
+          ],
+          "reconciliation": {
+            "status": "passed",
+            "checks": [
+              {
+                "id": "cash-flow-balance",
+                "label": "Cash flow closing balance equals inflows less outflows",
+                "expected": {
+                  "amount": 796.05,
+                  "currency": "USD"
+                },
+                "actual": {
+                  "amount": 796.05,
+                  "currency": "USD"
+                },
+                "variance": {
+                  "amount": 0,
+                  "currency": "USD"
+                },
+                "passed": true,
+                "sourceReferences": [
+                  {
+                    "sourceSystem": "property_account",
+                    "sourceModel": "PropertyAccount.transactions",
+                    "sourceId": "6acb542b271b8f1011240443",
+                    "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                    "description": "RENT"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "trustLedger": [
+          {
+            "id": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+            "date": "2026-10-11T00:00:00.000Z",
+            "reference": "PHASE4B1-2026-10-10224233",
+            "description": "October 2026 Rent",
+            "debit": {
+              "amount": 0,
+              "currency": "USD"
+            },
+            "credit": {
+              "amount": 796.05,
+              "currency": "USD"
+            },
+            "runningBalance": {
+              "amount": 796.05,
+              "currency": "USD"
+            },
+            "status": "completed",
+            "sourceReferences": [
+              {
+                "sourceSystem": "property_account",
+                "sourceModel": "PropertyAccount.transactions",
+                "sourceId": "6acb542b271b8f1011240443",
+                "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                "description": "RENT"
+              }
+            ],
+            "rowType": "Income",
+            "rentAmount": {
+              "amount": 1000,
+              "currency": "USD"
+            },
+            "commission": {
+              "amount": 90,
+              "currency": "USD"
+            },
+            "vatOnCommission": {
+              "amount": 13.95,
+              "currency": "USD"
+            },
+            "levies": {
+              "amount": 100,
+              "currency": "USD"
+            },
+            "ownerAmount": {
+              "amount": 796.05,
+              "currency": "USD"
+            },
+            "vatRate": 0.155,
+            "paymentId": "6acb542a271b8f101124040b",
+            "ownerWaterfall": {
+              "grossAmount": {
+                "amount": 1000,
+                "currency": "USD"
+              },
+              "commissionAmount": {
+                "amount": 90,
+                "currency": "USD"
+              },
+              "levyAmount": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "vatOnCommission": {
+                "amount": 13.95,
+                "currency": "USD"
+              },
+              "vatRate": 0.155,
+              "netOwnerAmount": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "recordedOwnerAmount": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "difference": {
+                "amount": 0,
+                "currency": "USD"
+              },
+              "reviewRequired": false,
+              "formula": "Amount received − commission − levy − VAT on commission = net owner amount"
+            }
+          }
+        ],
+        "incomeBreakdown": [
+          {
+            "id": "rental-income",
+            "label": "Rental Income",
+            "amount": {
+              "amount": 796.05,
+              "currency": "USD"
+            },
+            "direction": "inflow",
+            "sourceReferences": [
+              {
+                "sourceSystem": "property_account",
+                "sourceModel": "PropertyAccount.transactions",
+                "sourceId": "6acb542b271b8f1011240443",
+                "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                "description": "RENT"
+              }
+            ]
+          },
+          {
+            "id": "other-income",
+            "label": "Other Income",
+            "amount": {
+              "amount": 0,
+              "currency": "USD"
+            },
+            "direction": "inflow",
+            "sourceReferences": []
+          }
+        ],
+        "expenseBreakdown": [
+          {
+            "id": "expenses",
+            "label": "Expenses",
+            "amount": {
+              "amount": 0,
+              "currency": "USD"
+            },
+            "direction": "outflow",
+            "sourceReferences": []
+          },
+          {
+            "id": "levy",
+            "label": "Levy",
+            "amount": {
+              "amount": 100,
+              "currency": "USD"
+            },
+            "direction": "outflow",
+            "sourceReferences": [
+              {
+                "sourceSystem": "payment",
+                "sourceModel": "Payment",
+                "sourceId": "6acb542a271b8f101124040b"
+              }
+            ]
+          },
+          {
+            "id": "management-commission",
+            "label": "Management Commission",
+            "amount": {
+              "amount": 90,
+              "currency": "USD"
+            },
+            "direction": "outflow",
+            "sourceReferences": [
+              {
+                "sourceSystem": "payment",
+                "sourceModel": "Payment",
+                "sourceId": "6acb542a271b8f101124040b"
+              }
+            ]
+          },
+          {
+            "id": "vat-on-commission",
+            "label": "VAT on Commission",
+            "amount": {
+              "amount": 13.95,
+              "currency": "USD"
+            },
+            "direction": "outflow",
+            "sourceReferences": [
+              {
+                "sourceSystem": "payment",
+                "sourceModel": "Payment",
+                "sourceId": "6acb542a271b8f101124040b"
+              }
+            ]
+          }
+        ],
+        "ownerPayments": [],
+        "trustPosition": {
+          "openingBalance": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "moneyReceived": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "expenses": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "ownerPayments": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "closingBalanceHeld": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "reconciliation": {
+            "status": "passed",
+            "checks": [
+              {
+                "id": "owner-statement-closing-balance",
+                "label": "Closing balance equals opening plus funds received less deductions and owner payments",
+                "expected": {
+                  "amount": 796.05,
+                  "currency": "USD"
+                },
+                "actual": {
+                  "amount": 796.05,
+                  "currency": "USD"
+                },
+                "variance": {
+                  "amount": 0,
+                  "currency": "USD"
+                },
+                "passed": true,
+                "sourceReferences": [
+                  {
+                    "sourceSystem": "property_account",
+                    "sourceModel": "PropertyAccount.transactions",
+                    "sourceId": "6acb542b271b8f1011240443",
+                    "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                    "description": "RENT"
+                  }
+                ]
+              },
+              {
+                "id": "owner-statement-running-balance",
+                "label": "Final ledger running balance equals closing balance held",
+                "expected": {
+                  "amount": 796.05,
+                  "currency": "USD"
+                },
+                "actual": {
+                  "amount": 796.05,
+                  "currency": "USD"
+                },
+                "variance": {
+                  "amount": 0,
+                  "currency": "USD"
+                },
+                "passed": true,
+                "sourceReferences": [
+                  {
+                    "sourceSystem": "property_account",
+                    "sourceModel": "PropertyAccount.transactions",
+                    "sourceId": "6acb542b271b8f1011240443",
+                    "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                    "description": "RENT"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "tenantStatus": {
+          "tenant": {
+            "id": "6acb5428271b8f101123fe19",
+            "displayName": "PHASE4B1_TEST_TENANT Disposable",
+            "email": "phase4b1_test_tenant.10224233@phase4b1.test",
+            "phone": "0772000002",
+            "type": "tenant"
+          },
+          "lease": {
+            "id": "6acb5428271b8f101123fe1c",
+            "status": "active",
+            "startDate": "2026-01-01T00:00:00.000Z",
+            "endDate": "2026-12-31T00:00:00.000Z"
+          },
+          "monthlyRent": {
+            "amount": 1000,
+            "currency": "USD"
+          },
+          "rentStatus": "current",
+          "arrears": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "nextDueDate": "2026-11-01T00:00:00.000Z",
+          "occupancy": "occupied"
+        },
+        "propertyPerformance": {
+          "rentCollectionRate": 100,
+          "outstandingRent": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "openMaintenance": 0,
+          "closedMaintenance": 0,
+          "nextInspection": "2026-12-31T00:00:00.000Z"
+        },
+        "notes": {
+          "managementNotes": [],
+          "maintenanceNotes": [],
+          "inspectionNotes": [],
+          "latePaymentNotes": [],
+          "generalComments": []
+        },
+        "preparedBy": {
+          "id": "6acb5413271b8f101123fd68",
+          "displayName": "6acb5413271b8f101123fd68",
+          "type": "agent"
+        },
+        "dataQuality": {
+          "hasLedgerData": true,
+          "ledgerEntryCount": 1,
+          "sourceSystems": [
+            "property_account"
+          ],
+          "warnings": []
+        },
+        "propertyKpis": {
+          "collectionRate": 100,
+          "outstandingRent": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "openMaintenanceCount": 0,
+          "closedMaintenanceCount": 0,
+          "financialKpis": {
+            "totalIncome": {
+              "amount": 796.05,
+              "currency": "USD"
+            },
+            "totalExpenses": {
+              "amount": 0,
+              "currency": "USD"
+            },
+            "netPosition": {
+              "amount": 796.05,
+              "currency": "USD"
+            }
+          }
+        },
+        "charts": [
+          {
+            "id": "cash-flow",
+            "title": "Cash Flow",
+            "kind": "waterfall",
+            "series": [
+              {
+                "id": "cash-flow-series",
+                "label": "Cash Flow",
+                "currency": "USD",
+                "points": [
+                  {
+                    "label": "Funds Received",
+                    "value": 796.05
+                  },
+                  {
+                    "label": "Deductions",
+                    "value": 0
+                  },
+                  {
+                    "label": "Owner Payments",
+                    "value": 0
+                  },
+                  {
+                    "label": "Balance Held",
+                    "value": 796.05
+                  }
+                ]
+              }
+            ],
+            "sourceReferences": [
+              {
+                "sourceSystem": "property_account",
+                "sourceModel": "PropertyAccount.transactions",
+                "sourceId": "6acb542b271b8f1011240443",
+                "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                "description": "RENT"
+              },
+              {
+                "sourceSystem": "property_account",
+                "sourceModel": "PropertyAccount.transactions",
+                "sourceId": "6acb542b271b8f1011240443",
+                "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                "description": "RENT"
+              }
+            ]
+          }
+        ],
+        "timeline": {
+          "id": "financial-timeline",
+          "title": "Financial Timeline",
+          "events": [
+            {
+              "id": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+              "label": "Rental income - PHASE4B1-2026-10-10224233",
+              "occurredAt": "2026-10-11T00:00:00.000Z",
+              "amount": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "status": "completed",
+              "sourceReferences": [
+                {
+                  "sourceSystem": "property_account",
+                  "sourceModel": "PropertyAccount.transactions",
+                  "sourceId": "6acb542b271b8f1011240443",
+                  "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                  "description": "RENT"
+                }
+              ]
+            }
+          ]
+        },
+        "pluginSections": [],
+        "statementSummary": {
+          "openingBalance": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "totalRent": {
+            "amount": 1000,
+            "currency": "USD"
+          },
+          "totalCommission": {
+            "amount": 90,
+            "currency": "USD"
+          },
+          "totalVat": {
+            "amount": 13.95,
+            "currency": "USD"
+          },
+          "totalLevies": {
+            "amount": 100,
+            "currency": "USD"
+          },
+          "totalOwnerAmount": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "totalPayouts": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "closingBalance": {
+            "amount": 796.05,
+            "currency": "USD"
+          }
+        },
+        "ownerMoneyWaterfall": {
+          "grossAmount": {
+            "amount": 1000,
+            "currency": "USD"
+          },
+          "commissionAmount": {
+            "amount": 90,
+            "currency": "USD"
+          },
+          "levyAmount": {
+            "amount": 100,
+            "currency": "USD"
+          },
+          "vatOnCommission": {
+            "amount": 13.95,
+            "currency": "USD"
+          },
+          "netOwnerAmount": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "recordedOwnerAmount": {
+            "amount": 796.05,
+            "currency": "USD"
+          },
+          "difference": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "reviewRequired": false,
+          "formula": "Amount received − commission − levy − VAT on commission = net owner amount"
+        },
+        "rentalSettlement": {
+          "grossRent": {
+            "amount": 1000,
+            "currency": "USD"
+          },
+          "levy": {
+            "amount": 100,
+            "currency": "USD"
+          },
+          "commission": {
+            "amount": 90,
+            "currency": "USD"
+          },
+          "vatOnCommission": {
+            "amount": 13.95,
+            "currency": "USD"
+          },
+          "ownerPayable": {
+            "amount": 796.05,
+            "currency": "USD"
+          }
+        },
+        "reconciliation": {
+          "status": "passed",
+          "checks": [
+            {
+              "id": "owner-statement-closing-balance",
+              "label": "Closing balance equals opening plus funds received less deductions and owner payments",
+              "expected": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "actual": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "variance": {
+                "amount": 0,
+                "currency": "USD"
+              },
+              "passed": true,
+              "sourceReferences": [
+                {
+                  "sourceSystem": "property_account",
+                  "sourceModel": "PropertyAccount.transactions",
+                  "sourceId": "6acb542b271b8f1011240443",
+                  "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                  "description": "RENT"
+                }
+              ]
+            },
+            {
+              "id": "owner-statement-running-balance",
+              "label": "Final ledger running balance equals closing balance held",
+              "expected": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "actual": {
+                "amount": 796.05,
+                "currency": "USD"
+              },
+              "variance": {
+                "amount": 0,
+                "currency": "USD"
+              },
+              "passed": true,
+              "sourceReferences": [
+                {
+                  "sourceSystem": "property_account",
+                  "sourceModel": "PropertyAccount.transactions",
+                  "sourceId": "6acb542b271b8f1011240443",
+                  "ledgerEntryId": "property:6acb5427271b8f101123fe0f:6acb542b271b8f1011240443",
+                  "description": "RENT"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "label": "owner csv",
+      "method": "GET",
+      "path": "/api/reporting/owner/6acb5426271b8f101123fdfb/csv",
+      "status": 200,
+      "body": "Date,Type,Description,Rent Amount,Less Commission,Less VAT on Commission,Less Levies,Owner Amount,Balance\n2026-10-11T00:00:00.000Z,Income,October 2026 Rent,1000,90,13.95,100,796.05,796.05"
+    },
+    {
+      "label": "financial trace",
+      "method": "GET",
+      "path": "/api/accountants/payments/6acb542a271b8f101124040b/financial-trace",
+      "status": 200,
+      "body": {
+        "payment": {
+          "id": "6acb542a271b8f101124040b",
+          "date": "2026-10-11T00:00:00.000Z",
+          "amount": 1000,
+          "method": "cash",
+          "type": "rental",
+          "domain": "RENTAL",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "tenantId": "6acb5428271b8f101123fe19",
+          "leaseId": "6acb5428271b8f101123fe1c",
+          "reference": "PHASE4B1-2026-10-10224233",
+          "currency": "USD",
+          "status": "completed",
+          "accountingState": "posted",
+          "accountingComplete": true
+        },
+        "allocation": {
+          "grossAmount": 1000,
+          "commissionAmount": 90,
+          "levyAmount": 100,
+          "vatOnCommission": 13.95,
+          "vatRate": 0.155,
+          "netOwnerAmount": 796.05,
+          "recordedOwnerAmount": 796.05,
+          "difference": 0,
+          "reviewRequired": false,
+          "formula": "Amount received − commission − levy − VAT on commission = net owner amount"
+        },
+        "posting": {
+          "ownerIncome": "Complete",
+          "agentCommission": "Complete",
+          "companyCommission": "Complete",
+          "journal": "Complete",
+          "trust": "Not Applicable",
+          "tax": "Complete"
+        },
+        "reversal": {
+          "state": null,
+          "reversalPaymentId": null,
+          "reversalOfPaymentId": null
+        },
+        "retry": {
+          "safe": true,
+          "effect": "Retry posts only missing accounting artifacts for this payment. It does not create a second income line, commission line, journal, tax obligation, or reversal."
+        }
+      }
+    },
+    {
+      "label": "payment 2027-1",
+      "method": "POST",
+      "path": "/api/accountants/payments",
+      "status": 201,
+      "body": {
+        "message": "Payment processed successfully",
+        "payment": {
+          "paymentType": "rental",
+          "transactionDomain": "RENTAL",
+          "saleMode": "quick",
+          "propertyType": "residential",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "tenantId": "6acb5428271b8f101123fe19",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "paymentDate": "2027-01-11T00:00:00.000Z",
+          "paymentMethod": "cash",
+          "amount": 1000,
+          "depositAmount": 0,
+          "referenceNumber": "PHASE4B1-2027-1-10224233",
+          "rentalPeriodMonth": 1,
+          "rentalPeriodYear": 2027,
+          "advanceMonthsPaid": 1,
+          "rentUsed": 1000,
+          "rentAllocated": 900,
+          "levyAllocated": 100,
+          "levyUsed": 100,
+          "paymentLines": [],
+          "notes": "PHASE4B1_FAIL_MAIL controlled adapter failure",
+          "processedBy": "6acb5413271b8f101123fd68",
+          "commissionDetails": {
+            "totalCommission": 90,
+            "preaFee": 2.7,
+            "agentShare": 52.38,
+            "agencyShare": 34.92,
+            "vatOnCommission": 13.95,
+            "ownerAmount": 896.05,
+            "levy": 100,
+            "commissionBase": 900,
+            "commissionRate": 10,
+            "commissionGross": 90,
+            "commissionNet": 90,
+            "vatTreatment": "exclusive",
+            "vatRate": 0.155,
+            "vatAmount": 13.95,
+            "agentSplit": {
+              "ownerAgentShare": 0,
+              "collaboratorAgentShare": 0
+            }
+          },
+          "vatIncluded": false,
+          "vatRate": 0,
+          "vatAmount": 0,
+          "applyVatOnCommission": true,
+          "vatOnCommissionRate": 0.155,
+          "vatCommissionTreatment": "exclusive",
+          "status": "completed",
+          "postingStatus": "posted",
+          "accountingComplete": false,
+          "accountingStatus": "pending",
+          "accountingMissing": [],
+          "accountingMismatched": [],
+          "currency": "USD",
+          "leaseId": "6acb5428271b8f101123fe1c",
+          "isProvisional": false,
+          "isInSuspense": false,
+          "commissionFinalized": true,
+          "provisionalRelationshipType": "unknown",
+          "isCorrectionEntry": false,
+          "_id": "6acb5432271b8f1011240536",
+          "createdAt": "2026-10-11T09:17:38.218Z",
+          "updatedAt": "2026-10-11T09:17:38.233Z",
+          "__v": 0,
+          "linkedLevyPaymentId": "6acb5432271b8f1011240538"
+        },
+        "receiptStatus": "PAYMENT_RECEIVED",
+        "accountingComplete": true,
+        "accountingStatus": "posted",
+        "accountingState": "ACCOUNTING_COMPLETE"
+      }
+    },
+    {
+      "label": "opt out",
+      "method": "POST",
+      "path": "/api/property-owners/6acb5428271b8f101123fe12/preferences",
+      "status": 200,
+      "body": {
+        "_id": "6acb5437ec441bd33d47eb72",
+        "companyId": "6acb5413271b8f101123fd6a",
+        "ownerId": "6acb5428271b8f101123fe12",
+        "__v": 0,
+        "createdAt": "2026-10-11T09:17:43.343Z",
+        "emailStatements": true,
+        "leaseExpiryAlerts": true,
+        "maintenanceAlerts": true,
+        "monthlyReports": true,
+        "rentPaymentEmails": false,
+        "smsNotifications": false,
+        "updatedAt": "2026-10-11T09:17:43.343Z"
+      }
+    },
+    {
+      "label": "payment 2026-11",
+      "method": "POST",
+      "path": "/api/accountants/payments",
+      "status": 201,
+      "body": {
+        "message": "Payment processed successfully",
+        "payment": {
+          "paymentType": "rental",
+          "transactionDomain": "RENTAL",
+          "saleMode": "quick",
+          "propertyType": "residential",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "tenantId": "6acb5428271b8f101123fe19",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "paymentDate": "2026-11-11T00:00:00.000Z",
+          "paymentMethod": "cash",
+          "amount": 1000,
+          "depositAmount": 0,
+          "referenceNumber": "PHASE4B1-2026-11-10224233",
+          "rentalPeriodMonth": 11,
+          "rentalPeriodYear": 2026,
+          "advanceMonthsPaid": 1,
+          "rentUsed": 1000,
+          "rentAllocated": 900,
+          "levyAllocated": 100,
+          "levyUsed": 100,
+          "paymentLines": [],
+          "notes": "",
+          "processedBy": "6acb5413271b8f101123fd68",
+          "commissionDetails": {
+            "totalCommission": 90,
+            "preaFee": 2.7,
+            "agentShare": 52.38,
+            "agencyShare": 34.92,
+            "vatOnCommission": 13.95,
+            "ownerAmount": 896.05,
+            "levy": 100,
+            "commissionBase": 900,
+            "commissionRate": 10,
+            "commissionGross": 90,
+            "commissionNet": 90,
+            "vatTreatment": "exclusive",
+            "vatRate": 0.155,
+            "vatAmount": 13.95,
+            "agentSplit": {
+              "ownerAgentShare": 0,
+              "collaboratorAgentShare": 0
+            }
+          },
+          "vatIncluded": false,
+          "vatRate": 0,
+          "vatAmount": 0,
+          "applyVatOnCommission": true,
+          "vatOnCommissionRate": 0.155,
+          "vatCommissionTreatment": "exclusive",
+          "status": "completed",
+          "postingStatus": "posted",
+          "accountingComplete": false,
+          "accountingStatus": "pending",
+          "accountingMissing": [],
+          "accountingMismatched": [],
+          "currency": "USD",
+          "leaseId": "6acb5428271b8f101123fe1c",
+          "isProvisional": false,
+          "isInSuspense": false,
+          "commissionFinalized": true,
+          "provisionalRelationshipType": "unknown",
+          "isCorrectionEntry": false,
+          "_id": "6acb5437271b8f101124062b",
+          "createdAt": "2026-10-11T09:17:43.652Z",
+          "updatedAt": "2026-10-11T09:17:43.666Z",
+          "__v": 0,
+          "linkedLevyPaymentId": "6acb5437271b8f101124062d"
+        },
+        "receiptStatus": "PAYMENT_RECEIVED",
+        "accountingComplete": true,
+        "accountingStatus": "posted",
+        "accountingState": "ACCOUNTING_COMPLETE"
+      }
+    },
+    {
+      "label": "payment 2026-12",
+      "method": "POST",
+      "path": "/api/accountants/payments",
+      "status": 201,
+      "body": {
+        "message": "Payment processed successfully",
+        "payment": {
+          "paymentType": "rental",
+          "transactionDomain": "RENTAL",
+          "saleMode": "quick",
+          "propertyType": "residential",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "tenantId": "6acb5428271b8f101123fe19",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "paymentDate": "2026-12-11T00:00:00.000Z",
+          "paymentMethod": "cash",
+          "amount": 1000,
+          "depositAmount": 0,
+          "referenceNumber": "PHASE4B1-2026-12-10224233",
+          "rentalPeriodMonth": 12,
+          "rentalPeriodYear": 2026,
+          "advanceMonthsPaid": 1,
+          "rentUsed": 1000,
+          "rentAllocated": 900,
+          "levyAllocated": 100,
+          "levyUsed": 100,
+          "paymentLines": [],
+          "notes": "PHASE26_FAIL_JOURNAL",
+          "processedBy": "6acb5413271b8f101123fd68",
+          "commissionDetails": {
+            "totalCommission": 90,
+            "preaFee": 2.7,
+            "agentShare": 52.38,
+            "agencyShare": 34.92,
+            "vatOnCommission": 13.95,
+            "ownerAmount": 896.05,
+            "levy": 100,
+            "commissionBase": 900,
+            "commissionRate": 10,
+            "commissionGross": 90,
+            "commissionNet": 90,
+            "vatTreatment": "exclusive",
+            "vatRate": 0.155,
+            "vatAmount": 13.95,
+            "agentSplit": {
+              "ownerAgentShare": 0,
+              "collaboratorAgentShare": 0
+            }
+          },
+          "vatIncluded": false,
+          "vatRate": 0,
+          "vatAmount": 0,
+          "applyVatOnCommission": true,
+          "vatOnCommissionRate": 0.155,
+          "vatCommissionTreatment": "exclusive",
+          "status": "completed",
+          "postingStatus": "posted",
+          "accountingComplete": false,
+          "accountingStatus": "pending",
+          "accountingMissing": [],
+          "accountingMismatched": [],
+          "currency": "USD",
+          "leaseId": "6acb5428271b8f101123fe1c",
+          "isProvisional": false,
+          "isInSuspense": false,
+          "commissionFinalized": true,
+          "provisionalRelationshipType": "unknown",
+          "isCorrectionEntry": false,
+          "_id": "6acb5438271b8f101124072b",
+          "createdAt": "2026-10-11T09:17:44.934Z",
+          "updatedAt": "2026-10-11T09:17:44.948Z",
+          "__v": 0,
+          "linkedLevyPaymentId": "6acb5438271b8f101124072d"
+        },
+        "receiptStatus": "PAYMENT_RECEIVED",
+        "accountingComplete": false,
+        "accountingStatus": "incomplete",
+        "accountingState": "ACCOUNTING_INCOMPLETE"
+      }
+    },
+    {
+      "label": "maintenance over approved",
+      "method": "POST",
+      "path": "/api/agents/letting/maintenance-payment-requests",
+      "status": 409,
+      "body": {
+        "message": "Requested amount exceeds the approved quote",
+        "blockers": [
+          "Requested amount exceeds the approved quote"
+        ],
+        "financialPosting": false
+      }
+    },
+    {
+      "label": "maintenance within approved",
+      "method": "POST",
+      "path": "/api/agents/letting/maintenance-payment-requests",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "companyId": "6acb5413271b8f101123fd6a",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "amount": 80,
+          "currency": "USD",
+          "reason": "Maintenance quote 6acb543c13ab7deddc3ef2e7",
+          "requestDate": "2026-10-11T09:17:48.724Z",
+          "dueDate": "2026-10-11T09:17:48.724Z",
+          "status": "pending",
+          "requestedBy": "6acb5415271b8f101123fdb7",
+          "requestedByUser": "6acb5415271b8f101123fdb7",
+          "payTo": {
+            "name": "PHASE4B1",
+            "surname": "Contractor"
+          },
+          "approval": {
+            "status": "pending"
+          },
+          "readyForAccounting": true,
+          "maintenanceRequestId": "6acb543b13ab7deddc3ef2e5",
+          "_id": "6acb543c271b8f10112407d5",
+          "createdAt": "2026-10-11T09:17:48.726Z",
+          "updatedAt": "2026-10-11T09:17:48.726Z",
+          "__v": 0
+        },
+        "financialPosting": false
+      }
+    },
+    {
+      "label": "accountant queue",
+      "method": "GET",
+      "path": "/api/accountants/letting/work-queue",
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "maintenancePaymentRequests": [
+            {
+              "_id": "6acb543c271b8f10112407d5",
+              "propertyId": "6acb5426271b8f101123fdfb",
+              "amount": 80,
+              "reason": "Maintenance quote 6acb543c13ab7deddc3ef2e7",
+              "status": "pending",
+              "createdAt": "2026-10-11T09:17:48.726Z"
+            }
+          ]
+        },
+        "note": "A request is not a financial posting."
+      }
+    },
+    {
+      "label": "create levy",
+      "method": "POST",
+      "path": "/api/levy-payments",
+      "status": 201,
+      "body": {
+        "payout": {
+          "paidOut": false
+        },
+        "_id": "6acb543c271b8f10112407df",
+        "paymentType": "levy",
+        "propertyId": {
+          "_id": "6acb5426271b8f101123fdfb",
+          "name": "PHASE4B1_TEST_PROPERTY",
+          "address": "1 Borrowdale Test Close, Harare"
+        },
+        "companyId": "6acb5413271b8f101123fd6a",
+        "paymentDate": "2026-10-11T00:00:00.000Z",
+        "paymentMethod": "cash",
+        "amount": 10,
+        "referenceNumber": "",
+        "receiptNumber": "",
+        "processedBy": {
+          "_id": "6acb5413271b8f101123fd68",
+          "email": "phase4b1_test_company.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_TEST_COMPANY",
+          "lastName": "Admin"
+        },
+        "status": "completed",
+        "currency": "USD",
+        "levyPeriodMonth": 9,
+        "levyPeriodYear": 2026,
+        "advanceMonthsPaid": 1,
+        "createdAt": "2026-10-11T09:17:48.884Z",
+        "updatedAt": "2026-10-11T09:17:48.884Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "file levy receipt",
+      "method": "POST",
+      "path": "/api/agents/letting/levies/6acb543c271b8f10112407df/receipt",
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "payout": {
+            "paidOut": false
+          },
+          "_id": "6acb543c271b8f10112407df",
+          "paymentType": "levy",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "paymentDate": "2026-10-11T00:00:00.000Z",
+          "paymentMethod": "cash",
+          "amount": 10,
+          "referenceNumber": "",
+          "receiptNumber": "PHASE4B1-10224233",
+          "processedBy": "6acb5413271b8f101123fd68",
+          "status": "completed",
+          "currency": "USD",
+          "levyPeriodMonth": 9,
+          "levyPeriodYear": 2026,
+          "advanceMonthsPaid": 1,
+          "createdAt": "2026-10-11T09:17:48.884Z",
+          "updatedAt": "2026-10-11T09:17:48.997Z",
+          "__v": 0,
+          "receiptFileUrl": "phase4b1://10224233/receipt.pdf",
+          "levyAuthority": "PHASE4B1 Authority",
+          "receiptUploadedBy": "6acb5415271b8f101123fdb7",
+          "receiptUploadedAt": "2026-10-11T09:17:48.996Z"
+        },
+        "financialPosting": false
+      }
+    },
+    {
+      "label": "company B property",
+      "method": "POST",
+      "path": "/api/properties",
+      "status": 201,
+      "body": {
+        "name": "PHASE4B1_COMPANY_B_PROPERTY",
+        "address": "2 Other Company Close",
+        "type": "house",
+        "propertyOperationalStatus": "Vacant",
+        "propertyUse": "Rental",
+        "status": "available",
+        "rent": 50,
+        "price": 0,
+        "bedrooms": 0,
+        "bathrooms": 0,
+        "area": 0,
+        "builtArea": 0,
+        "landArea": 0,
+        "pricePerSqm": 0,
+        "description": "N/A",
+        "images": [],
+        "amenities": [],
+        "companyId": "6acb5414271b8f101123fd88",
+        "ownerId": "6acb5414271b8f101123fd86",
+        "rentalType": "management",
+        "commission": 15,
+        "vatOnCommission": false,
+        "ownershipPercentage": 100,
+        "commissionPreaPercent": 3,
+        "commissionAgencyPercentRemaining": 50,
+        "commissionAgentPercentRemaining": 50,
+        "isDeleted": false,
+        "deletedAt": null,
+        "deletedBy": null,
+        "archivedAt": null,
+        "archivedBy": null,
+        "publicListingEnabled": false,
+        "videos": [],
+        "_id": "6acb543d271b8f101124081b",
+        "createdAt": "2026-10-11T09:17:49.042Z",
+        "updatedAt": "2026-10-11T09:17:49.042Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "company B owner",
+      "method": "POST",
+      "path": "/api/property-owners",
+      "status": 201,
+      "body": {
+        "email": "phase4b1.b.owner.10224233@phase4b1.test",
+        "firstName": "CompanyB",
+        "lastName": "Owner",
+        "phone": "0772000004",
+        "companyId": "6acb5414271b8f101123fd88",
+        "properties": [],
+        "active": true,
+        "_id": "6acb543d271b8f1011240829",
+        "createdAt": "2026-10-11T09:17:49.102Z",
+        "updatedAt": "2026-10-11T09:17:49.102Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "company B tenant",
+      "method": "POST",
+      "path": "/api/tenants",
+      "status": 201,
+      "body": {
+        "firstName": "CompanyB",
+        "lastName": "Tenant",
+        "email": "phase4b1.b.tenant.10224233@phase4b1.test",
+        "phone": "0772000005",
+        "companyId": "6acb5414271b8f101123fd88",
+        "propertyIds": [],
+        "ownerId": "6acb5414271b8f101123fd86",
+        "status": "Active",
+        "_id": "6acb543d271b8f101124082c",
+        "createdAt": "2026-10-11T09:17:49.157Z",
+        "updatedAt": "2026-10-11T09:17:49.157Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "company B lease",
+      "method": "POST",
+      "path": "/api/leases",
+      "status": 201,
+      "body": {
+        "propertyId": "6acb543d271b8f101124081b",
+        "tenantId": "6acb543d271b8f101124082c",
+        "startDate": "2026-01-01T00:00:00.000Z",
+        "endDate": "2026-12-31T00:00:00.000Z",
+        "rentAmount": 50,
+        "depositAmount": 0,
+        "status": "active",
+        "companyId": "6acb5414271b8f101123fd88",
+        "ownerId": "6acb5414271b8f101123fd86",
+        "previousLeaseId": null,
+        "successorLeaseId": null,
+        "terminationReason": "",
+        "billingStatus": "current",
+        "billingRules": {
+          "frequency": "monthly",
+          "rentDueDay": 1,
+          "escalationPercent": 0,
+          "escalationFrequencyMonths": 12,
+          "recurringLevies": 0,
+          "recurringServiceCharges": 0,
+          "prorateMoveIn": true
+        },
+        "financialSummary": {
+          "totalBilled": 0,
+          "totalPaid": 0,
+          "outstandingBalance": 0,
+          "depositHeld": 0,
+          "penalties": 0,
+          "moveOutSettlement": 0
+        },
+        "depositSettlement": {
+          "depositHeld": 0,
+          "deductions": 0,
+          "refundDue": 0,
+          "notes": ""
+        },
+        "monthlyRent": 50,
+        "securityDeposit": 0,
+        "petDeposit": 0,
+        "isPetAllowed": false,
+        "maxOccupants": 1,
+        "isUtilitiesIncluded": false,
+        "utilitiesDetails": "",
+        "rentDueDay": 1,
+        "lateFee": 0,
+        "gracePeriod": 0,
+        "agencyWorkflow": false,
+        "_id": "6acb543d271b8f101124082e",
+        "lifecycleStatusChangedAt": "2026-10-11T09:17:49.172Z",
+        "documentVersions": [],
+        "createdAt": "2026-10-11T09:17:49.173Z",
+        "updatedAt": "2026-10-11T09:17:49.173Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "company B levy",
+      "method": "POST",
+      "path": "/api/levy-payments",
+      "status": 201,
+      "body": {
+        "payout": {
+          "paidOut": false
+        },
+        "_id": "6acb543d271b8f1011240bac",
+        "paymentType": "levy",
+        "propertyId": {
+          "_id": "6acb543d271b8f101124081b",
+          "name": "PHASE4B1_COMPANY_B_PROPERTY",
+          "address": "2 Other Company Close"
+        },
+        "companyId": "6acb5414271b8f101123fd88",
+        "paymentDate": "2026-10-11T00:00:00.000Z",
+        "paymentMethod": "cash",
+        "amount": 5,
+        "referenceNumber": "",
+        "receiptNumber": "",
+        "processedBy": {
+          "_id": "6acb5414271b8f101123fd86",
+          "email": "phase4b1_company_b.10224233@phase4b1.test",
+          "firstName": "PHASE4B1_COMPANY_B",
+          "lastName": "Admin"
+        },
+        "status": "completed",
+        "currency": "USD",
+        "levyPeriodMonth": 10,
+        "levyPeriodYear": 2026,
+        "advanceMonthsPaid": 1,
+        "createdAt": "2026-10-11T09:17:49.752Z",
+        "updatedAt": "2026-10-11T09:17:49.752Z",
+        "__v": 0
+      }
+    },
+    {
+      "label": "owner collection",
+      "method": "POST",
+      "path": "/api/accountants/owner-collections",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "companyId": "6acb5413271b8f101123fd6a",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "ownerId": "6acb5413271b8f101123fd68",
+          "operationalAmount": 796.05,
+          "authoritativeAmount": 796.05,
+          "amountSource": "OWNER_WATERFALL",
+          "currency": "USD",
+          "status": "OWNER_REQUESTED",
+          "requestedBy": "6acb541d271b8f101123fddd",
+          "_id": "6acb543f271b8f1011240ef6",
+          "createdAt": "2026-10-11T09:17:51.037Z",
+          "updatedAt": "2026-10-11T09:17:51.037Z",
+          "__v": 0
+        },
+        "financialPosting": false
+      }
+    },
+    {
+      "label": "workspace",
+      "method": "GET",
+      "path": "/api/agents/letting/properties/6acb5426271b8f101123fdfb/workspace",
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "property": {
+            "_id": "6acb5426271b8f101123fdfb",
+            "name": "PHASE4B1_TEST_PROPERTY",
+            "status": "rented",
+            "rent": 1000,
+            "companyId": "6acb5413271b8f101123fd6a",
+            "ownerId": "6acb5413271b8f101123fd68"
+          },
+          "assessment": null,
+          "mandate": null,
+          "listings": [],
+          "applications": [],
+          "viewings": [],
+          "lease": {
+            "_id": "6acb5428271b8f101123fe1c",
+            "propertyId": "6acb5426271b8f101123fdfb",
+            "tenantId": "6acb5428271b8f101123fe19",
+            "startDate": "2026-01-01T00:00:00.000Z",
+            "endDate": "2026-12-31T00:00:00.000Z",
+            "rentAmount": 1000,
+            "depositAmount": 0,
+            "status": "active",
+            "companyId": "6acb5413271b8f101123fd6a",
+            "ownerId": "6acb5413271b8f101123fd68",
+            "previousLeaseId": null,
+            "successorLeaseId": null,
+            "terminationReason": "",
+            "billingStatus": "current",
+            "billingRules": {
+              "frequency": "monthly",
+              "rentDueDay": 1,
+              "escalationPercent": 0,
+              "escalationFrequencyMonths": 12,
+              "recurringLevies": 0,
+              "recurringServiceCharges": 0,
+              "prorateMoveIn": true
+            },
+            "financialSummary": {
+              "totalBilled": 0,
+              "totalPaid": 0,
+              "outstandingBalance": 0,
+              "depositHeld": 0,
+              "penalties": 0,
+              "moveOutSettlement": 0
+            },
+            "depositSettlement": {
+              "depositHeld": 0,
+              "deductions": 0,
+              "refundDue": 0,
+              "notes": ""
+            },
+            "monthlyRent": 1000,
+            "securityDeposit": 0,
+            "petDeposit": 0,
+            "isPetAllowed": false,
+            "maxOccupants": 1,
+            "isUtilitiesIncluded": false,
+            "utilitiesDetails": "",
+            "rentDueDay": 1,
+            "lateFee": 0,
+            "gracePeriod": 0,
+            "agencyWorkflow": false,
+            "lifecycleStatusChangedAt": "2026-10-11T09:17:28.375Z",
+            "documentVersions": [],
+            "createdAt": "2026-10-11T09:17:28.377Z",
+            "updatedAt": "2026-10-11T09:17:28.377Z",
+            "__v": 0
+          },
+          "events": [
+            {
+              "_id": "6acb543d271b8f1011240815",
+              "companyId": "6acb5413271b8f101123fd6a",
+              "propertyId": "6acb5426271b8f101123fdfb",
+              "actorId": "6acb5415271b8f101123fdb7",
+              "action": "LEVY_RECEIPT_FILED",
+              "entityType": "LevyPayment",
+              "entityId": "6acb543c271b8f10112407df",
+              "createdAt": "2026-10-11T09:17:49.002Z",
+              "__v": 0
+            },
+            {
+              "_id": "6acb543c271b8f10112407d7",
+              "companyId": "6acb5413271b8f101123fd6a",
+              "propertyId": "6acb5426271b8f101123fdfb",
+              "actorId": "6acb5415271b8f101123fdb7",
+              "action": "MAINTENANCE_PAYMENT_REQUESTED",
+              "entityType": "PaymentRequest",
+              "entityId": "6acb543c271b8f10112407d5",
+              "newState": "pending",
+              "createdAt": "2026-10-11T09:17:48.779Z",
+              "__v": 0
+            }
+          ],
+          "nextAction": "Complete assessment"
+        }
+      }
+    },
+    {
+      "label": "assessment",
+      "method": "POST",
+      "path": "/api/agents/letting/assessments",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "companyId": "6acb5413271b8f101123fd6a",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "assessmentDate": "2026-10-11T09:17:51.162Z",
+          "recommendedRent": 1000,
+          "condition": "good",
+          "status": "ASSESSMENT_DRAFT",
+          "_id": "6acb543f271b8f1011240f01",
+          "createdAt": "2026-10-11T09:17:51.163Z",
+          "updatedAt": "2026-10-11T09:17:51.163Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "submit assessment",
+      "method": "POST",
+      "path": "/api/agents/letting/assessments/6acb543f271b8f1011240f01/status",
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "_id": "6acb543f271b8f1011240f01",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "assessmentDate": "2026-10-11T09:17:51.162Z",
+          "recommendedRent": 1000,
+          "condition": "good",
+          "status": "ASSESSMENT_SUBMITTED",
+          "createdAt": "2026-10-11T09:17:51.163Z",
+          "updatedAt": "2026-10-11T09:17:51.202Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "junior owner decision denied",
+      "method": "POST",
+      "path": "/api/agents/letting/assessments/6acb543f271b8f1011240f01/status",
+      "status": 403,
+      "body": {
+        "message": "Owner approval is a separate gate"
+      }
+    },
+    {
+      "label": "senior owner decision",
+      "method": "POST",
+      "path": "/api/agents/letting/assessments/6acb543f271b8f1011240f01/status",
+      "status": 200,
+      "body": {
+        "status": "success",
+        "data": {
+          "_id": "6acb543f271b8f1011240f01",
+          "companyId": "6acb5413271b8f101123fd6a",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "agentId": "6acb5415271b8f101123fdb7",
+          "assessmentDate": "2026-10-11T09:17:51.162Z",
+          "recommendedRent": 1000,
+          "condition": "good",
+          "status": "OWNER_APPROVED",
+          "createdAt": "2026-10-11T09:17:51.163Z",
+          "updatedAt": "2026-10-11T09:17:51.239Z",
+          "__v": 0,
+          "approvedRent": 1000,
+          "decidedAt": "2026-10-11T09:17:51.239Z",
+          "decidedBy": "6acb5415271b8f101123fdb7"
+        }
+      }
+    },
+    {
+      "label": "mandate",
+      "method": "POST",
+      "path": "/api/agents/letting/mandates",
+      "status": 201,
+      "body": {
+        "status": "success",
+        "data": {
+          "companyId": "6acb5413271b8f101123fd6a",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "ownerId": "6acb5413271b8f101123fd68",
+          "status": "DRAFT",
+          "agreedRent": 1000,
+          "_id": "6acb543f271b8f1011240f13",
+          "createdAt": "2026-10-11T09:17:51.258Z",
+          "updatedAt": "2026-10-11T09:17:51.258Z",
+          "__v": 0
+        }
+      }
+    },
+    {
+      "label": "listing before mandate",
+      "method": "POST",
+      "path": "/api/agents/letting/listings",
+      "status": 409,
+      "body": {
+        "message": "Signed rental mandate required",
+        "blockers": [
+          "Signed rental mandate required"
+        ]
+      }
+    }
+  ],
+  "health": {
+    "status": 200
+  },
+  "database": {
+    "nodeEnv": "development",
+    "mainName": "property-management",
+    "mainHostIsLocal": true,
+    "accountingName": "accounting",
+    "accountingHostIsLocal": true
+  },
+  "historicalSentinel": {
+    "id": "687e370b1a13203601cb3d91",
+    "status": "completed",
+    "amount": 4500,
+    "updatedAt": "2025-07-21T12:48:11.981Z"
+  },
+  "paymentCountBefore": 180,
+  "identities": {
+    "testCompanyId": "6acb5413271b8f101123fd6a",
+    "companyAId": "6acb5413271b8f101123fd79",
+    "companyBId": "6acb5414271b8f101123fd88",
+    "individualCompanyId": "6acb5415271b8f101123fda0",
+    "testAdminEmail": "phase4b1_test_company.10224233@phase4b1.test",
+    "companyAAdminEmail": "phase4b1_company_a.10224233@phase4b1.test",
+    "companyBAdminEmail": "phase4b1_company_b.10224233@phase4b1.test",
+    "individualEmail": "phase4b1_individual.10224233@phase4b1.test",
+    "agentEmail": "phase4b1_test_agent.10224233@phase4b1.test",
+    "juniorEmail": "phase4b1_test_agent_junior.10224233@phase4b1.test",
+    "accountantEmail": "phase4b1_test_accountant.10224233@phase4b1.test",
+    "ownerUserEmail": "phase4b1_test_owner_user.10224233@phase4b1.test"
+  },
+  "vatSetup": {
+    "profileStatus": 200,
+    "rateStatus": 201,
+    "rate": {
+      "status": "success",
+      "data": {
+        "_id": "6acb5426271b8f101123fdf5",
+        "companyId": "6acb5413271b8f101123fd6a",
+        "taxType": "VAT",
+        "rate": 15.5,
+        "effectiveFrom": "2020-01-01T00:00:00.000Z",
+        "effectiveTo": null,
+        "isActive": true
+      }
+    },
+    "storedRate": {
+      "_id": "6acb5426271b8f101123fdf5",
+      "rate": 15.5,
+      "effectiveFrom": "2020-01-01T00:00:00.000Z",
+      "isActive": true
+    }
+  },
+  "propertyLink": {
+    "status": 200,
+    "propertyOwnerId": "6acb5428271b8f101123fe12"
+  },
+  "records": {
+    "propertyId": "6acb5426271b8f101123fdfb",
+    "ownerId": "6acb5428271b8f101123fe12",
+    "tenantId": "6acb5428271b8f101123fe19",
+    "leaseId": "6acb5428271b8f101123fe1c",
+    "agentId": "6acb5415271b8f101123fdb7"
+  },
+  "borrowdale": {
+    "createStatus": 201,
+    "paymentId": "6acb542a271b8f101124040b",
+    "persisted": {
+      "status": "completed",
+      "currency": "USD",
+      "transactionDomain": "RENTAL",
+      "paymentType": "rental",
+      "amount": 1000,
+      "rentAllocated": 900,
+      "levyAllocated": 100,
+      "accountingComplete": true,
+      "accountingStatus": "posted",
+      "commissionNet": 90,
+      "levy": 100,
+      "vatOnCommission": 13.95,
+      "ownerAmount": 896.05,
+      "waterfall": {
+        "grossAmount": 1000,
+        "commissionAmount": 90,
+        "levyAmount": 100,
+        "vatOnCommission": 13.95,
+        "netOwnerAmount": 796.05,
+        "difference": 0,
+        "reviewRequired": false,
+        "formula": "Amount received − commission − levy − VAT on commission = net owner amount"
+      },
+      "activePropertyAccountCount": 1,
+      "accountLedgerTypes": [
+        "rental"
+      ],
+      "journalCount": 1,
+      "journalModules": [
+        "payment"
+      ],
+      "statementStatus": 200,
+      "csvStatus": 200,
+      "csvHasPaymentId": false,
+      "csvExcerpt": "Date,Type,Description,Rent Amount,Less Commission,Less VAT on Commission,Less Levies,Owner Amount,Balance\n2026-10-11T00:00:00.000Z,Income,October 2026 Rent,1000,90,13.95,100,796.05,796.05",
+      "traceStatus": 200,
+      "traceExcerpt": {
+        "payment": {
+          "id": "6acb542a271b8f101124040b",
+          "date": "2026-10-11T00:00:00.000Z",
+          "amount": 1000,
+          "method": "cash",
+          "type": "rental",
+          "domain": "RENTAL",
+          "propertyId": "6acb5426271b8f101123fdfb",
+          "tenantId": "6acb5428271b8f101123fe19",
+          "leaseId": "6acb5428271b8f101123fe1c",
+          "reference": "PHASE4B1-2026-10-10224233",
+          "currency": "USD",
+          "status": "completed",
+          "accountingState": "posted",
+          "accountingComplete": true
+        },
+        "allocation": {
+          "grossAmount": 1000,
+          "commissionAmount": 90,
+          "levyAmount": 100,
+          "vatOnCommission": 13.95,
+          "vatRate": 0.155,
+          "netOwnerAmount": 796.05,
+          "recordedOwnerAmount": 796.05,
+          "difference": 0,
+          "reviewRequired": false,
+          "formula": "Amount received − commission − levy − VAT on commission = net owner amount"
+        },
+        "posting": {
+          "ownerIncome": "Complete",
+          "agentCommission": "Complete",
+          "companyCommission": "Complete",
+          "journal": "Complete",
+          "trust": "Not Applicable",
+          "tax": "Complete"
+        },
+        "reversal": {
+          "state": null,
+          "reversalPaymentId": null,
+          "reversalOfPaymentId": null
+        },
+        "retry": {
+          "safe": true,
+          "effect": "Retry posts only missing accounting artifacts for this payment. It does not create a second income line, commission line, journal, tax obligation, or reversal."
+        }
+      }
+    }
+  },
+  "notification": {
+    "provider": "Mailtrap SMTP is configured on the API process. Inbox delivery was not read back, so provider delivery is NOT VERIFIED.",
+    "scenario1": {
+      "status": "PENDING",
+      "updatedAt": "2026-10-11T09:17:33.711Z"
+    },
+    "scenario2": {
+      "count": 1,
+      "statuses": [
+        "SENT"
+      ],
+      "updatedAtUnchanged": false
+    },
+    "emailTextCheckedForTenantId": false,
+    "scenario5": {
+      "mode": "Development seam PHASE4B1_FAIL_MAIL on the API process, then the same notifyOwnerOfRentPayment retry. First send throws; retry uses the same owner-rent-payment key.",
+      "paymentId": "6acb5432271b8f1011240536",
+      "createStatus": 201,
+      "before": {
+        "_id": "6acb5432271b8f1011240536",
+        "status": "completed",
+        "accountingComplete": true
+      },
+      "after": {
+        "_id": "6acb5432271b8f1011240536",
+        "status": "completed",
+        "accountingComplete": true
+      },
+      "notice": {
+        "status": "SENT",
+        "failureReason": "PHASE4B1_FAIL_MAIL",
+        "key": "owner-rent-payment:6acb5432271b8f1011240536"
+      },
+      "noticeCount": 1,
+      "accountingUnchanged": true
+    },
+    "scenario3": {
+      "paymentId": "6acb5437271b8f101124062b",
+      "noticeStatus": "SKIPPED_OPT_OUT",
+      "accountingComplete": true,
+      "paymentStatus": "completed"
+    },
+    "scenario4": {
+      "paymentId": "6acb5438271b8f101124072b",
+      "createStatus": 201,
+      "paymentStatus": "completed",
+      "accountingComplete": false,
+      "noticeCreated": false
+    }
+  },
+  "maintenanceSetup": "Fixture records only. The payment request is the HTTP acceptance step.",
+  "maintenance": {
+    "overStatus": 409,
+    "overBody": {
+      "message": "Requested amount exceeds the approved quote",
+      "blockers": [
+        "Requested amount exceeds the approved quote"
+      ],
+      "financialPosting": false
+    },
+    "requestStatus": 201,
+    "quoteVersion": 3,
+    "journalsBefore": 6,
+    "journalsAfter": 6,
+    "journalsUnchanged": true,
+    "queueStatus": 200,
+    "queueContainsRequest": true
+  },
+  "levy": {
+    "createStatus": 201,
+    "levyId": "6acb543c271b8f10112407df",
+    "receiptStatus": 200,
+    "journalsUnchangedByReceipt": true,
+    "levyCountUnchangedByReceipt": true
+  },
+  "securityMatrix": [
+    {
+      "endpoint": "/api/properties/6acb543d271b8f101124081b",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/properties/6acb5426271b8f101123fdfb",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/properties/6acb543d271b8f101124081b",
+      "method": "GET",
+      "caller": "B admin",
+      "target": "B",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/property-owners/6acb543d271b8f1011240829",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/property-owners/6acb5428271b8f101123fe12",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/ecosystem/agency/applications/6acb543d13ab7deddc3ef2f0/status",
+      "method": "POST",
+      "caller": "A agent",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/ecosystem/agency/applications",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "A list",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/leases/6acb543d271b8f101124082e",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "B",
+      "status": 200,
+      "dataExposed": true,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/leases/6acb5428271b8f101123fe1c",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/accountants/payments",
+      "method": "POST",
+      "caller": "A admin",
+      "target": "B",
+      "status": 201,
+      "dataExposed": true,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/accountants/payments/6acb542a271b8f101124040b",
+      "method": "GET",
+      "caller": "B admin",
+      "target": "A",
+      "status": 403,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/accountants/payments/6acb542a271b8f101124040b",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/agents/letting/maintenance-payment-requests",
+      "method": "POST",
+      "caller": "A agent",
+      "target": "B",
+      "status": 409,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/levy-payments/6acb543d271b8f1011240bac/receipt",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/agents/letting/levies/6acb543d271b8f1011240bac/receipt",
+      "method": "POST",
+      "caller": "A agent",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/levy-payments/6acb543c271b8f10112407df/receipt",
+      "method": "GET",
+      "caller": "A admin",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/accountants/owner-collections",
+      "method": "POST",
+      "caller": "A accountant",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/accountants/owner-collections",
+      "method": "GET",
+      "caller": "A accountant",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/properties",
+      "method": "GET",
+      "caller": "unauthenticated",
+      "target": "any",
+      "status": 401,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/accountants/payments/6acb542a271b8f101124040b",
+      "method": "GET",
+      "caller": "A owner role",
+      "target": "A",
+      "status": 403,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/properties/6acb543d271b8f101124081b",
+      "method": "GET",
+      "caller": "A owner role",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/agents/letting/properties/6acb543d271b8f101124081b/workspace",
+      "method": "GET",
+      "caller": "A agent",
+      "target": "B",
+      "status": 404,
+      "dataExposed": false,
+      "mutation": false
+    },
+    {
+      "endpoint": "/api/agents/letting/properties/6acb5426271b8f101123fdfb/workspace",
+      "method": "GET",
+      "caller": "A agent",
+      "target": "A",
+      "status": 200,
+      "dataExposed": false,
+      "mutation": false
+    }
+  ],
+  "viewingFixtureId": "6acb543d13ab7deddc3ef2f2",
+  "ownerCollection": {
+    "status": 201,
+    "body": {
+      "status": "success",
+      "data": {
+        "companyId": "6acb5413271b8f101123fd6a",
+        "propertyId": "6acb5426271b8f101123fdfb",
+        "ownerId": "6acb5413271b8f101123fd68",
+        "operationalAmount": 796.05,
+        "authoritativeAmount": 796.05,
+        "amountSource": "OWNER_WATERFALL",
+        "currency": "USD",
+        "status": "OWNER_REQUESTED",
+        "requestedBy": "6acb541d271b8f101123fddd",
+        "_id": "6acb543f271b8f1011240ef6",
+        "createdAt": "2026-10-11T09:17:51.037Z",
+        "updatedAt": "2026-10-11T09:17:51.037Z",
+        "__v": 0
+      },
+      "financialPosting": false
+    }
+  },
+  "agencyApi": {
+    "workspace": 200,
+    "assessment": 201,
+    "submitted": 200,
+    "juniorDenied": 403,
+    "approved": 200,
+    "mandate": 201,
+    "mandateId": "6acb543f271b8f1011240f13",
+    "listingBlocked": 409
+  },
+  "historicalAfter": {
+    "id": "687e370b1a13203601cb3d91",
+    "status": "completed",
+    "amount": 4500,
+    "updatedAt": "2025-07-21T12:48:11.981Z",
+    "unchanged": true
+  },
+  "paymentCountAfter": 185,
+  "finishedAt": "2026-10-11T09:17:51.333Z",
+  "cleanup": "Retained. Journal entries are immutable, so disposable PHASE4B1 companies were not deleted.",
+  "securityRetest": {
+    "strayCrossPayments": [
+      {
+        "id": "6acb543e271b8f1011240e3f",
+        "status": "completed",
+        "amount": 10,
+        "accountingComplete": true
+      }
+    ],
+    "leaseDenied": 404,
+    "leaseDeniedExposesProperty": false,
+    "leaseAllowed": 200,
+    "paymentDenied": 404,
+    "paymentDeniedBody": "{\"status\":\"error\",\"success\":false,\"message\":\"Property was not found in this company\"}",
+    "companyBPaymentCountUnchanged": true,
+    "testCompanyPaymentCountUnchanged": true,
+    "companyAListStatus": 200,
+    "companyAListContainsBProperty": false,
+    "companyBListStatus": 200,
+    "companyBListContainsOwnProperty": true,
+    "idempotency": {
+      "beforeStatus": "SENT",
+      "beforeUpdatedAt": "2026-10-11T09:17:38.114Z",
+      "afterCount": 1,
+      "afterStatus": "SENT",
+      "afterUpdatedAt": "2026-10-11T09:17:38.114Z",
+      "unchanged": true
+    },
+    "emailExposesTenantId": false,
+    "emailExposesBank": false,
+    "emailExcerpt": "Dear PHASE4B1_TEST_OWNER Disposable,\n\nWe confirm that rental payment for PHASE4B1_TEST_PROPERTY has been received.\n\nAmount received: USD 1000.00\nPayment date: 11 October 2026\n\nYour property account has been updated in Mantis.\n\nRegards,\nPHASE4B1_TEST_COMPANY"
+  }
+}

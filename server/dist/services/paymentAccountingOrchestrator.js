@@ -21,7 +21,48 @@ const propertyAccountService_1 = __importDefault(require("./propertyAccountServi
 const agentAccountService_1 = __importDefault(require("./agentAccountService"));
 const accountingIntegrationService_1 = __importDefault(require("./accountingIntegrationService"));
 const Payment_1 = require("../models/Payment");
+const Company_1 = require("../models/Company");
+const individualTaxMetadataService_1 = __importDefault(require("./individualTaxMetadataService"));
+const individualVatService_1 = __importDefault(require("./individualVatService"));
+const individualRentalTaxService_1 = __importDefault(require("./individualRentalTaxService"));
+const individualIncomeTaxService_1 = __importDefault(require("./individualIncomeTaxService"));
 const ledgerEventStateMachine_1 = require("./ledgerEventStateMachine");
+const AccountingException_1 = require("../models/AccountingException");
+const transactionDomain_1 = require("./transactionDomain");
+const taxObligationService_1 = require("./taxObligationService");
+const trustPaymentPostingService_1 = __importDefault(require("./trustPaymentPostingService"));
+function recordOwnerIncomeException(payment, message) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const now = new Date();
+            yield AccountingException_1.AccountingException.updateOne({
+                paymentId: payment._id,
+                kind: 'incomplete_projection',
+                component: 'ownerIncome',
+                status: 'open'
+            }, {
+                $set: {
+                    issueType: 'missing',
+                    ledger: 'property',
+                    error: message,
+                    companyId: payment.companyId,
+                    propertyId: payment.propertyId,
+                    lastCheckedAt: now,
+                    detectedAt: now
+                },
+                $setOnInsert: {
+                    kind: 'incomplete_projection',
+                    status: 'open',
+                    component: 'ownerIncome',
+                    paymentId: payment._id
+                }
+            }, { upsert: true });
+        }
+        catch (error) {
+            logger_1.logger.warn('Failed to record owner-income accounting exception', error);
+        }
+    });
+}
 function asState(value) {
     if (value === 'failed')
         return 'failed';
@@ -46,6 +87,9 @@ function postPaymentAccounting(paymentId, opts) {
         }
         const policy = (0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)(payment);
         if (!policy.allowed) {
+            if (policy.reason === 'deposit_only') {
+                yield individualTaxMetadataService_1.default.safeAttachForPayment(paymentId);
+            }
             return {
                 paymentId,
                 status: 'skipped',
@@ -68,11 +112,16 @@ function postPaymentAccounting(paymentId, opts) {
             catch (e) {
                 artifacts.ownerIncome = 'failed';
                 errors.push(`ownerIncome: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
-                try {
-                    yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(paymentId);
+                if (e instanceof transactionDomain_1.OwnerIncomeAmountMissingError || (e === null || e === void 0 ? void 0 : e.code) === 'OWNER_INCOME_AMOUNT_MISSING') {
+                    yield recordOwnerIncomeException(payment, (e === null || e === void 0 ? void 0 : e.message) || String(e));
                 }
-                catch (enqueueErr) {
-                    errors.push(`ownerIncome.enqueue: ${(enqueueErr === null || enqueueErr === void 0 ? void 0 : enqueueErr.message) || enqueueErr}`);
+                if (!(0, transactionDomain_1.isPermanentAccountingFailure)(e)) {
+                    try {
+                        yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(paymentId);
+                    }
+                    catch (enqueueErr) {
+                        errors.push(`ownerIncome.enqueue: ${(enqueueErr === null || enqueueErr === void 0 ? void 0 : enqueueErr.message) || enqueueErr}`);
+                    }
                 }
             }
         }
@@ -119,12 +168,29 @@ function postPaymentAccounting(paymentId, opts) {
         }
         if (!policy.skipJournal) {
             try {
+                const journalSeamKey = String(paymentId);
+                const journalSeams = global.__phase26JournalSeam || (global.__phase26JournalSeam = new Set());
+                if (process.env.NODE_ENV !== 'production' &&
+                    process.env.MANTIS_TEST_SEAM === '1' &&
+                    String(payment.notes || '').includes('PHASE26_FAIL_JOURNAL') &&
+                    !journalSeams.has(journalSeamKey)) {
+                    journalSeams.add(journalSeamKey);
+                    throw new Error('PHASE26_FAIL_JOURNAL');
+                }
                 yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy });
                 artifacts.journal = 'posted';
             }
             catch (e) {
                 artifacts.journal = 'failed';
                 errors.push(`journal: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+                if (!(0, transactionDomain_1.isPermanentAccountingFailure)(e)) {
+                    try {
+                        yield ledgerEventService_1.default.enqueueEvent('journal', paymentId);
+                    }
+                    catch (enqueueErr) {
+                        errors.push(`journal.enqueue: ${(enqueueErr === null || enqueueErr === void 0 ? void 0 : enqueueErr.message) || enqueueErr}`);
+                    }
+                }
             }
         }
         else {
@@ -135,6 +201,10 @@ function postPaymentAccounting(paymentId, opts) {
         const status = failed ? (posted ? 'partial' : 'failed') : 'posted';
         if (failed) {
             logger_1.logger.warn('Payment accounting post incomplete', { paymentId, artifacts, errors });
+        }
+        const company = yield Company_1.Company.findById(payment.companyId).select('workspaceType plan').lean();
+        if ((company === null || company === void 0 ? void 0 : company.workspaceType) === 'individual' || (company === null || company === void 0 ? void 0 : company.plan) === 'INDIVIDUAL') {
+            yield individualTaxMetadataService_1.default.safeAttachForPayment(paymentId);
         }
         return { paymentId, status, artifacts, errors, reason: policy.reason };
     });
@@ -158,11 +228,11 @@ function reversePaymentAccounting(paymentId, opts) {
             }
         }
         try {
-            yield propertyAccountService_1.default.reverseIncomeFromPayment(paymentId, {
+            const income = yield propertyAccountService_1.default.reverseIncomeFromPayment(paymentId, {
                 processedBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
                 reason: opts === null || opts === void 0 ? void 0 : opts.reason
             });
-            artifacts.ownerIncome = 'reversed';
+            artifacts.ownerIncome = income.countered ? 'reversed' : 'skipped';
             artifacts.configuredExpense = 'reversed';
             artifacts.passThrough = 'reversed';
         }
@@ -181,27 +251,70 @@ function reversePaymentAccounting(paymentId, opts) {
             errors.push(`agentCommission: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
         }
         try {
-            yield accountingIntegrationService_1.default.syncPaymentReversed(payment, {
+            artifacts.companyCommission = yield accountingIntegrationService_1.default.postCompanyCommissionReversal(payment, {
+                createdBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
+                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
+                reversalPaymentId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId
+            });
+        }
+        catch (e) {
+            artifacts.companyCommission = 'failed';
+            errors.push(`companyCommission: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+        }
+        try {
+            artifacts.journal = yield accountingIntegrationService_1.default.postReversalJournal(payment, {
                 createdBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
                 reason: opts === null || opts === void 0 ? void 0 : opts.reason
             });
-            artifacts.journal = 'reversed';
-            artifacts.companyCommission = 'reversed';
         }
         catch (e) {
             artifacts.journal = 'failed';
-            artifacts.companyCommission = 'failed';
-            errors.push(`journal/company: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+            errors.push(`journal: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+        }
+        try {
+            artifacts.tax = yield (0, taxObligationService_1.reversePaymentTaxObligations)({
+                companyId: String(payment.companyId),
+                paymentId,
+                createdBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
+                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
+                notes: String(payment.notes || '')
+            });
+        }
+        catch (e) {
+            artifacts.tax = 'failed';
+            errors.push(`tax: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+        }
+        if ((0, transactionDomain_1.mayPostSaleTrust)(payment)) {
+            try {
+                const trustResult = yield trustPaymentPostingService_1.default.reverseBuyerPaymentInTrust({
+                    paymentId,
+                    reversalPaymentId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
+                    companyId: String(payment.companyId),
+                    performedBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
+                    reason: opts === null || opts === void 0 ? void 0 : opts.reason,
+                    sourceEvent: 'payment.reversed'
+                });
+                artifacts.trust = (trustResult === null || trustResult === void 0 ? void 0 : trustResult.skipped) ? 'skipped' : 'reversed';
+            }
+            catch (e) {
+                artifacts.trust = 'failed';
+                errors.push(`trust: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+            }
+        }
+        else {
+            artifacts.trust = 'skipped';
         }
         const progress = {
             ownerIncome: asState(artifacts.ownerIncome || 'absent'),
             configuredExpense: asState(artifacts.configuredExpense || 'absent'),
             companyCommission: asState(artifacts.companyCommission || 'absent'),
             agentCommission: asState(artifacts.agentCommission || 'absent'),
-            trust: 'absent',
+            trust: asState(artifacts.trust || 'absent'),
             journal: asState(artifacts.journal || 'absent')
         };
         let status = (0, ledgerEventStateMachine_1.classifyReversalOutcome)(progress);
+        if (artifacts.tax === 'failed')
+            status = status === 'failed' ? 'failed' : 'partial';
         if (errors.length && status === 'reversed')
             status = 'partial';
         if (errors.length && status === 'already_reversed')
@@ -217,6 +330,40 @@ function reversePaymentAccounting(paymentId, opts) {
                 errors.push(`reversal.enqueue: ${(enqueueErr === null || enqueueErr === void 0 ? void 0 : enqueueErr.message) || enqueueErr}`);
             }
             logger_1.logger.warn('Payment accounting reversal incomplete', { paymentId, artifacts, errors });
+        }
+        const company = yield Company_1.Company.findById(payment.companyId).select('workspaceType plan').lean();
+        if ((company === null || company === void 0 ? void 0 : company.workspaceType) === 'individual' || (company === null || company === void 0 ? void 0 : company.plan) === 'INDIVIDUAL') {
+            yield individualVatService_1.default.safeReverseForSource({
+                companyId: String(payment.companyId),
+                sourceType: 'Payment',
+                sourceId: paymentId,
+                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
+                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
+                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
+            });
+            yield individualRentalTaxService_1.default.safeReverseForSource({
+                companyId: String(payment.companyId),
+                sourceType: 'Payment',
+                sourceId: paymentId,
+                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
+                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
+                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
+            });
+            yield individualIncomeTaxService_1.default.safeReverseForSource({
+                companyId: String(payment.companyId),
+                sourceType: 'Payment',
+                sourceId: paymentId,
+                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
+                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
+                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
+            });
+        }
+        const reversalComplete = status === 'reversed' || status === 'already_reversed';
+        const reversalState = reversalComplete ? 'reversed' : 'reversal_incomplete';
+        const reversalPaymentId = (opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId) || payment.reversalPaymentId;
+        yield Payment_1.Payment.updateOne({ _id: payment._id }, { $set: { reversalState } });
+        if (reversalPaymentId) {
+            yield Payment_1.Payment.updateOne({ _id: reversalPaymentId }, { $set: { reversalState, accountingComplete: reversalComplete, status: 'completed' } });
         }
         return { paymentId, status, artifacts, errors };
     });

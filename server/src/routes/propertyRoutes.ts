@@ -12,6 +12,7 @@ import {
   getPublicProperties
 } from '../controllers/propertyController';
 import { authWithCompany, requireActiveSubscription } from '../middleware/auth';
+import { propertyIdsForCaller } from '../utils/propertyAccess';
 import { isAdmin, isAgent, canCreateProperty } from '../middleware/roles';
 import { enforcePropertyLimit } from '../middleware/limits';
 import { logger } from '../utils/logger';
@@ -31,12 +32,15 @@ router.use((req, res, next) => {
 });
 
 // Debug route to list all properties (disabled in production)
-router.get('/debug/all', async (req, res) => {
+router.get('/debug/all', authWithCompany, async (req, res) => {
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).json({ message: 'Not found' });
   }
   try {
-    const properties = await Property.find({}).populate('ownerId', 'firstName lastName email');
+    const ids = await propertyIdsForCaller(req);
+    const query: any = { companyId: req.user?.companyId };
+    if (ids !== 'company') query._id = { $in: ids };
+    const properties = await Property.find(query).populate('ownerId', 'firstName lastName email');
     console.log('All properties in database:', {
       count: properties.length,
       properties: properties.map((p: IProperty) => ({
@@ -75,12 +79,15 @@ router.post('/public', authWithCompany, canCreateProperty, enforcePropertyLimit,
 router.get('/public-filtered', authWithCompany, getPublicProperties);
 
 // MVP: Comprehensive public endpoints for all property operations (disabled in production)
-router.get('/public/all', async (req, res) => {
+router.get('/public/all', authWithCompany, async (req, res) => {
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).json({ message: 'Not found' });
   }
   try {
-    const properties = await Property.find({})
+    const ids = await propertyIdsForCaller(req);
+    const scoped: any = { companyId: req.user?.companyId };
+    if (ids !== 'company') scoped._id = { $in: ids };
+    const properties = await Property.find(scoped)
       .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status rentAmount bedrooms bathrooms amenities propertySpecifications')
       .limit(50);
     res.json(properties);
@@ -90,9 +97,12 @@ router.get('/public/all', async (req, res) => {
   }
 });
 
-router.get('/public/:id', async (req, res) => {
+router.get('/public/:id', authWithCompany, async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id)
+    const ids = await propertyIdsForCaller(req);
+    const query: any = { _id: req.params.id, companyId: req.user?.companyId };
+    if (ids !== 'company') query._id = { $in: ids.filter((id) => String(id) === String(req.params.id)) };
+    const property = await Property.findOne(query)
       .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status rentAmount bedrooms bathrooms amenities description propertySpecifications');
     if (!property) {
       return res.status(404).json({ message: 'Property not found' });
@@ -105,7 +115,7 @@ router.get('/public/:id', async (req, res) => {
 });
 
 // Admin dashboard route (disabled in production)
-router.get('/admin-dashboard', (req, res, next) => {
+router.get('/admin-dashboard', authWithCompany, (req, res, next) => {
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).json({ message: 'Not found' });
   }

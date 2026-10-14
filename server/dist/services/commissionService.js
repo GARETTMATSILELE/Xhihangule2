@@ -16,6 +16,7 @@ Object.defineProperty(exports, "calculatePropertyCommission", { enumerable: true
 Object.defineProperty(exports, "toPaymentCommissionSnapshot", { enumerable: true, get: function () { return propertyCommissionCalculator_1.toPaymentCommissionSnapshot; } });
 Object.defineProperty(exports, "applyLevyPassThroughToSnapshot", { enumerable: true, get: function () { return propertyCommissionCalculator_1.applyLevyPassThroughToSnapshot; } });
 const taxRateService_1 = require("./taxRateService");
+const errorHandler_1 = require("../middleware/errorHandler");
 class CommissionService {
     static calculate(amount, commissionPercentage, companyId) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -46,13 +47,20 @@ class CommissionService {
             const company = input.companyId ? yield Company_1.Company.findById(input.companyId).lean() : null;
             const vatOnCommission = Boolean(input.vatOnCommission);
             let vatRate = Number(input.vatRate);
-            if (vatOnCommission && !Number.isFinite(vatRate) && input.companyId) {
+            let vatRuleId;
+            let vatJurisdiction;
+            if (vatOnCommission && input.companyId) {
                 const lookedUp = yield (0, taxRateService_1.getVatRateForDate)(input.companyId, input.paymentDate || new Date());
+                if (lookedUp.source === 'none' || !(lookedUp.decimal > 0)) {
+                    throw new errorHandler_1.AppError('No centrally managed VAT rate applies on the payment date. The payment was not saved.', 400);
+                }
                 vatRate = lookedUp.decimal;
+                vatRuleId = lookedUp.taxRateId;
+                vatJurisdiction = lookedUp.jurisdiction;
             }
             if (!Number.isFinite(vatRate) || vatRate < 0)
                 vatRate = 0;
-            return (0, propertyCommissionCalculator_1.calculatePropertyCommission)({
+            const result = (0, propertyCommissionCalculator_1.calculatePropertyCommission)({
                 grossRent: input.grossRent,
                 levy: input.levy,
                 commissionPercentage: input.commissionPercentage,
@@ -62,8 +70,16 @@ class CommissionService {
                 commissionEnabled: ((_a = company === null || company === void 0 ? void 0 : company.featureFlags) === null || _a === void 0 ? void 0 : _a.commissionEnabled) !== false,
                 preaPercentOfTotal: (_b = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _b === void 0 ? void 0 : _b.preaPercentOfTotal,
                 agentPercentOfRemaining: (_c = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _c === void 0 ? void 0 : _c.agentPercentOfRemaining,
-                agencyPercentOfRemaining: (_d = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _d === void 0 ? void 0 : _d.agencyPercentOfRemaining
+                agencyPercentOfRemaining: (_d = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _d === void 0 ? void 0 : _d.agencyPercentOfRemaining,
+                commissionType: input.commissionType
             });
+            if (vatRuleId)
+                result.vatRuleId = vatRuleId;
+            if (vatJurisdiction)
+                result.vatJurisdiction = vatJurisdiction;
+            if (input.paymentDate)
+                result.vatTaxPoint = input.paymentDate;
+            return result;
         });
     }
 }

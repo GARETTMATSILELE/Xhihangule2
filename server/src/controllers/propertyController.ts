@@ -10,28 +10,29 @@ import { Valuation } from '../models/Valuation';
 import { Deal } from '../models/Deal';
 import mongoose from 'mongoose';
 import { hasAnyRole, hasRole } from '../utils/access';
+import { callerCanAccessProperty, hasCompanyWidePropertyAccess, propertyIdsForCaller } from '../utils/propertyAccess';
+import { User } from '../models/User';
 import { Buyer } from '../models/Buyer';
 import trustAccountService from '../services/trustAccountService';
 import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
 
-// Helper function to extract user context from request
+// Authenticated server context only. Client query and header company claims are not authorization.
 const getUserContext = (req: Request) => {
-  // Try to get user context from query parameters first
-  const userId = req.query.userId as string;
-  const companyId = req.query.companyId as string;
-  const userRole = req.query.userRole as string;
-  
-  // Fallback to headers if query params not available
-  const headerUserId = req.headers['x-user-id'] as string;
-  const headerCompanyId = req.headers['x-company-id'] as string;
-  const headerUserRole = req.headers['x-user-role'] as string;
-  
   return {
-    userId: userId || headerUserId,
-    companyId: companyId || headerCompanyId,
-    userRole: userRole || headerUserRole
+    userId: req.user?.userId,
+    companyId: req.user?.companyId,
+    userRole: req.user?.role
   };
 };
+
+async function rejectForeignAgentAssignment(agentId: unknown, companyId: string): Promise<string | null> {
+  if (agentId == null || String(agentId).trim() === '') return null;
+  const raw = String(agentId);
+  if (!mongoose.Types.ObjectId.isValid(raw)) return 'Invalid agentId';
+  const assigned = await User.findOne({ _id: raw, companyId }).select('_id').lean();
+  if (!assigned) return 'Assigned agent was not found in this company';
+  return null;
+}
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const PROPERTY_LIST_MAX_TIME_MS = Math.max(3000, Number(process.env.PROPERTY_LIST_QUERY_MAX_TIME_MS || 12000));
@@ -137,10 +138,11 @@ export const getPublicProperties = async (req: Request, res: Response) => {
       isDeleted: includeDeleted ? true : { $ne: true }
     };
     
-    // If user is not in a company-wide visibility role, only show their own properties
-    const companyWideRoles = ['admin', 'accountant', 'principal', 'prea'];
-    if (!companyWideRoles.includes(String(userContext.userRole || ''))) {
-      query.ownerId = new mongoose.Types.ObjectId(userContext.userId);
+    // Company-wide roles keep the existing search permission. Everyone else is limited
+    // to properties they saved (ownerId) or are assigned (agentId).
+    if (!hasCompanyWidePropertyAccess(req)) {
+      const ids = await propertyIdsForCaller(req);
+      query._id = { $in: ids === 'company' ? [] : ids };
     }
     
     // Optional lightweight search and projection for fast autocomplete
@@ -291,19 +293,17 @@ export const getProperties = async (req: Request, res: Response) => {
       query.rentalType = req.query.rentalType;
     }
 
-    // Restrict visibility based on role (multi-role aware)
-    const isAdminOrAccountant = hasAnyRole(req, ['admin', 'accountant']);
+    // Company-wide roles see every property in their company. Sales users stay on
+    // sale stock inside their portfolio. Other users see properties they saved or
+    // are assigned to. A pure owner sees landlord-linked properties.
+    const companyWide = hasCompanyWidePropertyAccess(req);
     const isSales = hasRole(req, 'sales');
-    if (isSales && !isAdminOrAccountant) {
-      // Pure sales users should only see their own sales properties
-      query.rentalType = 'sale';
-      query.agentId = new mongoose.Types.ObjectId(req.user.userId);
-    } else if (!isAdminOrAccountant && hasRole(req, 'owner')) {
-      // Property owners should see properties they own (unless they are also admin/accountant)
-      query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
-    } else if (!isAdminOrAccountant) {
-      // Other non-admin/accountant users only see properties assigned to them as agent
-      query.agentId = new mongoose.Types.ObjectId(req.user.userId);
+    if (!companyWide) {
+      const ids = await propertyIdsForCaller(req);
+      query._id = { $in: ids === 'company' ? [] : ids };
+      if (isSales && !hasAnyRole(req, ['agent', 'owner'])) {
+        query.rentalType = query.rentalType || 'sale';
+      }
     }
     
     // Get properties with populated owner information.
@@ -399,9 +399,8 @@ export const getProperty = async (req: Request, res: Response) => {
       isDeleted: { $ne: true }
     };
     
-    // If user is not an admin or accountant, only allow access to their properties
-    if (!hasAnyRole(req, ['admin', 'accountant'])) {
-      query.ownerId = req.user.userId;
+    if (!(await callerCanAccessProperty(req, String(req.params.id)))) {
+      throw new AppError('Property not found', 404);
     }
 
     const property = await Property.findOne(query)
@@ -435,10 +434,16 @@ export const createProperty = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
+    const assignmentError = await rejectForeignAgentAssignment(req.body?.agentId, req.user.companyId);
+    if (assignmentError) {
+      throw new AppError(assignmentError, 400);
+    }
+
     const vatSettings = sanitizePropertyVatSettings(req.body || {});
     const propertyData = {
       ...req.body,
       ownerId: req.user.userId,
+      agentId: req.body?.agentId || req.user.userId,
       companyId: req.user.companyId,
       rentalType: req.body.rentalType,
       commission: req.body.commission,
@@ -573,6 +578,10 @@ export const createSalesProperty = async (req: Request, res: Response) => {
 
     if (!name || !address) {
       throw new AppError('Missing required fields: name and address', 400);
+    }
+    const assignmentError = await rejectForeignAgentAssignment(agentId, req.user.companyId);
+    if (assignmentError) {
+      throw new AppError(assignmentError, 400);
     }
 
     // Optional: link a valuation permanently to the created listing (hot-load conversion)
@@ -724,8 +733,9 @@ export const updateProperty = async (req: Request, res: Response) => {
       companyId: req.user.companyId,
       isDeleted: { $ne: true }
     } as any;
-    if (!hasAnyRole(req, ['admin', 'accountant'])) {
-      match.ownerId = req.user.userId;
+    if (!hasCompanyWidePropertyAccess(req)) {
+      const id = new mongoose.Types.ObjectId(req.user.userId);
+      match.$or = [{ ownerId: id }, { agentId: id }];
     }
 
     const before = await Property.findOne(match).select('status price buyerId').lean();
@@ -757,14 +767,19 @@ export const updateProperty = async (req: Request, res: Response) => {
       }
     }
 
+    const assignmentError = await rejectForeignAgentAssignment(req.body?.agentId, req.user.companyId);
+    if (assignmentError) {
+      throw new AppError(assignmentError, 400);
+    }
+
     const vatSettings = sanitizePropertyVatSettings(req.body || {});
     const updateDoc: any = {
       ...req.body,
-      ownerId: req.user.userId,
-      companyId: req.user.companyId,
       vatOnCommission: vatSettings.vatOnCommission,
       vatCommissionTreatment: vatSettings.vatCommissionTreatment
     };
+    delete updateDoc.ownerId;
+    delete updateDoc.companyId;
     delete updateDoc.vatRate;
     delete updateDoc.vatPercentOnCommission;
     // Ensure we only ever write a validated buyerId
@@ -919,8 +934,9 @@ export const deleteProperty = async (req: Request, res: Response) => {
       companyId: req.user.companyId,
       isDeleted: { $ne: true }
     };
-    if (!hasAnyRole(req, ['admin', 'accountant'])) {
-      match.ownerId = req.user.userId;
+    if (!hasCompanyWidePropertyAccess(req)) {
+      const id = new mongoose.Types.ObjectId(req.user.userId);
+      match.$or = [{ ownerId: id }, { agentId: id }];
     }
 
     const property = await Property.findOneAndUpdate(
@@ -961,8 +977,9 @@ export const restoreProperty = async (req: Request, res: Response) => {
       companyId: req.user.companyId,
       isDeleted: true
     };
-    if (!hasAnyRole(req, ['admin', 'accountant'])) {
-      match.ownerId = req.user.userId;
+    if (!hasCompanyWidePropertyAccess(req)) {
+      const id = new mongoose.Types.ObjectId(req.user.userId);
+      match.$or = [{ ownerId: id }, { agentId: id }];
     }
 
     const property = await Property.findOneAndUpdate(
@@ -1003,12 +1020,15 @@ export const getVacantProperties = async (req: Request, res: Response) => {
       companyId: req.user.companyId
     });
 
-    const query = { 
+    const query: any = { 
       companyId: req.user.companyId,
-      ownerId: req.user.userId,
       status: 'available',
       isDeleted: { $ne: true }
     };
+    if (!hasCompanyWidePropertyAccess(req)) {
+      const ids = await propertyIdsForCaller(req);
+      query._id = { $in: ids === 'company' ? [] : ids };
+    }
 
     console.log('Query:', JSON.stringify(query, null, 2));
 
@@ -1036,11 +1056,18 @@ export const getVacantProperties = async (req: Request, res: Response) => {
 
 export const getAdminDashboardProperties = async (req: Request, res: Response) => {
   try {
-    console.log('getAdminDashboardProperties request received');
+    if (!req.user?.companyId) {
+      return res.status(401).json({ status: 'error', message: 'Authentication required', code: 'AUTH_REQUIRED' });
+    }
     const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
+    const query: any = { companyId: req.user.companyId };
+    if (!includeDeleted) query.isDeleted = { $ne: true };
+    if (!hasCompanyWidePropertyAccess(req)) {
+      const ids = await propertyIdsForCaller(req);
+      query._id = { $in: ids === 'company' ? [] : ids };
+    }
 
-    // Get all properties without authentication requirements
-    const properties = await Property.find(includeDeleted ? {} : { isDeleted: { $ne: true } })
+    const properties = await Property.find(query)
       .populate('ownerId', 'firstName lastName email')
       .sort({ createdAt: -1 });
 
@@ -1101,16 +1128,16 @@ export const getAdminDashboardProperties = async (req: Request, res: Response) =
   }
 };
 
-// Public endpoint for creating property - no authentication required
+// Legacy creator. Company and user come from the authenticated session, never from the client.
 export const createPropertyPublic = async (req: Request, res: Response) => {
   try {
-    console.log('Public property creation request received:', {
-      headers: req.headers,
-      body: req.body,
-      query: req.query
-    });
-
-    // Extract user context from query parameters or headers
+    if (!req.user?.userId || !req.user?.companyId) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Authentication required',
+        code: 'AUTH_REQUIRED'
+      });
+    }
     const userContext = getUserContext(req);
     
     console.log('User context for public property creation:', userContext);

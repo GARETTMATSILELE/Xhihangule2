@@ -135,6 +135,21 @@ const MaintenanceRequestSchema = new mongoose_1.Schema({
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Company',
         required: true
+    },
+    ecosystemWorkflow: {
+        enabled: { type: Boolean, default: false },
+        status: { type: String, index: true },
+        selectedQuoteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'MaintenanceQuote' },
+        approvedQuoteId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'MaintenanceQuote' },
+        ownerApprovalId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'OwnerQuoteDecision' },
+        authorisedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+        authorisedAt: { type: Date },
+        contractorJobId: { type: mongoose_1.Schema.Types.ObjectId },
+        tenantConfirmedAt: { type: Date },
+        category: { type: String },
+        urgency: { type: String },
+        preferredAccessTime: { type: String },
+        reportedByTenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant' }
     }
 }, {
     timestamps: true

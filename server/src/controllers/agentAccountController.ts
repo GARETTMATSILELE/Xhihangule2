@@ -5,6 +5,11 @@ import { AgentAccount } from '../models/AgentAccount';
 import agentAccountService from '../services/agentAccountService';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import {
+  requireExplicitMigrationConfirmation,
+  startMigrationAudit,
+  finishMigrationAudit
+} from '../services/financialMigrationGuard';
 
 /**
  * Compare User.commission vs AgentAccount totals for the current company
@@ -454,24 +459,30 @@ export const updatePayoutStatus = async (req: Request, res: Response) => {
 };
 
 /**
- * Sync agent accounts from payments
+ * Historical catch-up of agent commission projections from Payments.
+ * Not a live payment-posting path. Requires confirm=true and a non-empty reason.
  */
 export const syncAgentAccounts = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
     const companyId = req.user?.companyId;
     if (!companyId) {
       throw new AppError('Company ID not found', 404);
     }
 
+    const { reason } = requireExplicitMigrationConfirmation(req);
+    audit = await startMigrationAudit(req, 'migration:agent_accounts_sync', { companyId, reason });
     await agentAccountService.syncFromPayments(companyId);
-    
+    await finishMigrationAudit(audit, true, { companyId });
+
     res.json({
       success: true,
       message: 'Agent accounts synced successfully from payments'
     });
   } catch (error) {
     logger.error('Error in syncAgentAccounts:', error);
-    
+    await finishMigrationAudit(audit, false, undefined, (error as any)?.message || String(error));
+
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({
         success: false,
@@ -487,9 +498,11 @@ export const syncAgentAccounts = async (req: Request, res: Response) => {
 };
 
 /**
- * Sync commission transactions for a specific agent
+ * Historical catch-up of commission transactions for a specific agent.
+ * Uses the orchestrator writer (syncCommissionForPayment). Requires confirm+reason.
  */
 export const syncAgentCommissions = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
     const { agentId } = req.params;
     
@@ -502,13 +515,15 @@ export const syncAgentCommissions = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid agent ID format' });
     }
 
+    const { reason } = requireExplicitMigrationConfirmation(req);
+    audit = await startMigrationAudit(req, 'migration:agent_commissions_sync', { agentId, reason });
     await agentAccountService.syncCommissionTransactions(agentId);
-    // Ensure any payment visible in summary is projected to the ledger (idempotent)
     try {
       await agentAccountService.backfillMissingForAgent(agentId);
     } catch (e) {
-      // swallow; core sync already done
+      logger.warn('Agent commission backfill after sync failed:', (e as any)?.message || e);
     }
+    await finishMigrationAudit(audit, true, { agentId });
     
     res.json({
       success: true,
@@ -516,7 +531,8 @@ export const syncAgentCommissions = async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error in syncAgentCommissions:', error);
-    
+    await finishMigrationAudit(audit, false, undefined, (error as any)?.message || String(error));
+
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({
         success: false,

@@ -1,8 +1,10 @@
 import express from 'express';
 import { authWithCompany } from '../middleware/auth';
-import { isAdmin, isAgent } from '../middleware/roles';
 import multer from 'multer';
 import { getFiles, uploadFile, downloadFile, deleteFile } from '../controllers/fileController';
+import { hasAllowedUploadExtension } from '../utils/contentDisposition';
+
+const DOCUMENT_EXTENSIONS = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'];
 
 const router = express.Router();
 
@@ -23,7 +25,7 @@ const upload = multer({
       'text/plain'
     ];
     
-    if (allowedTypes.includes(file.mimetype)) {
+    if (allowedTypes.includes(file.mimetype) && hasAllowedUploadExtension(file.originalname, DOCUMENT_EXTENSIONS)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type. Only PDF, Word, images, and text files are allowed.'));
@@ -34,8 +36,16 @@ const upload = multer({
 // Get all files (company-scoped)
 router.get('/', authWithCompany, getFiles);
 
-// Upload a file
-router.post('/upload', authWithCompany, upload.single('file'), uploadFile);
+// Upload a file. A rejected type is a client error and must not be stored.
+router.post('/upload', authWithCompany, (req, res, next) => {
+  upload.single('file')(req, res, (err: unknown) => {
+    if (err) {
+      res.status(400).json({ message: 'Invalid file type. Only PDF, Word, images, and text files are allowed.' });
+      return;
+    }
+    next();
+  });
+}, uploadFile);
 
 // Download a file (company-scoped)
 router.get('/download/:id', authWithCompany, downloadFile);

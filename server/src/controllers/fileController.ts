@@ -3,6 +3,8 @@ import File, { IFile } from '../models/File';
 import { Property } from '../models/Property';
 import { AuthRequest } from '../middleware/auth';
 import { Types } from 'mongoose';
+import { callerCanAccessProperty, propertyIdsForCaller } from '../utils/propertyAccess';
+import { attachmentContentDisposition, safeAttachmentFilename } from '../utils/contentDisposition';
 
 interface PopulatedProperty {
   _id: Types.ObjectId;
@@ -26,9 +28,10 @@ export const getFiles = async (req: AuthRequest, res: Response) => {
     if (!req.user?.companyId) {
       return res.status(401).json({ message: 'Authentication required' });
     }
-    console.log('getFiles called: returning files for company', req.user.companyId);
-    
-    const files = await File.find({ companyId: req.user.companyId })
+    const scope = await propertyIdsForCaller(req);
+    const query: Record<string, unknown> = { companyId: req.user.companyId };
+    if (scope !== 'company') query.propertyId = { $in: scope };
+    const files = await File.find(query)
       .populate<{ propertyId: PopulatedProperty }>('propertyId', 'name')
       .populate<{ uploadedBy: PopulatedUser }>('uploadedBy', 'firstName lastName');
     
@@ -73,7 +76,7 @@ export const uploadFile = async (req: AuthRequest, res: Response) => {
 
     // Check if property exists
     const property = await Property.findOne({ _id: propertyId, companyId });
-    if (!property) {
+    if (!property || !(await callerCanAccessProperty(req, String(propertyId)))) {
       return res.status(404).json({ message: 'Property not found' });
     }
 
@@ -81,7 +84,7 @@ export const uploadFile = async (req: AuthRequest, res: Response) => {
     const file = new File({
       propertyId,
       companyId,
-      fileName: req.file.originalname,
+      fileName: safeAttachmentFilename(req.file.originalname),
       fileType,
       fileUrl: req.file.buffer.toString('base64'),
       uploadedBy: userId
@@ -102,10 +105,7 @@ export const uploadFile = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error uploading file:', error);
-    res.status(500).json({ 
-      message: 'Error uploading file',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    res.status(500).json({ message: 'Error uploading file' });
   }
 };
 
@@ -117,7 +117,7 @@ export const downloadFile = async (req: AuthRequest, res: Response) => {
     }
 
     const file = await File.findOne({ _id: req.params.id, companyId: req.user.companyId });
-    if (!file) {
+    if (!file || !(await callerCanAccessProperty(req, String(file.propertyId)))) {
       return res.status(404).json({ message: 'File not found' });
     }
 
@@ -125,7 +125,7 @@ export const downloadFile = async (req: AuthRequest, res: Response) => {
     const buffer = Buffer.from(file.fileUrl, 'base64');
 
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+    res.setHeader('Content-Disposition', attachmentContentDisposition(file.fileName));
     res.send(buffer);
   } catch (error) {
     console.error('Error downloading file:', error);
@@ -141,7 +141,7 @@ export const deleteFile = async (req: AuthRequest, res: Response) => {
     }
 
     const file = await File.findOne({ _id: req.params.id, companyId: req.user.companyId });
-    if (!file) {
+    if (!file || !(await callerCanAccessProperty(req, String(file.propertyId)))) {
       return res.status(404).json({ message: 'File not found' });
     }
 

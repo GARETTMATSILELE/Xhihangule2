@@ -9,8 +9,20 @@ import { updateChartMetrics } from './chartController';
 import { User } from '../models/User';
 import { SubscriptionService } from '../services/subscriptionService';
 import { escapeRegex, normalizeCompanyType, normalizeEmail, normalizeLegalIdentifier, normalizeWorkspaceType } from '../utils/normalization';
+import { registrationCreatesPaymentHold } from '../services/registrationPaymentPolicy';
+import { chargeForPlan } from '../services/systemPlanService';
+import { Subscription } from '../models/Subscription';
+import { PaymentSession } from '../models/PaymentSession';
+import { BillingPayment } from '../models/BillingPayment';
 
 const subscriptionService = SubscriptionService.getInstance();
+
+function assertCallerCompany(req: Request, companyId: string) {
+  if (isSuperAdmin(req)) return;
+  if (!req.user?.companyId || String(req.user.companyId) !== String(companyId)) {
+    throw new AppError('Company not found', 404);
+  }
+}
 
 function isSuperAdmin(req: Request): boolean {
   const roles: string[] = Array.isArray((req.user as any)?.roles)
@@ -150,14 +162,67 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
     await updateChartMetrics(company._id.toString());
     console.log('Chart data initialized successfully');
 
-    // Create trial subscription for the new company
-    console.log('Creating trial subscription for company:', company._id);
-    await subscriptionService.createTrialSubscription(
-      company._id.toString(), 
-      plan, 
-      14 // 14-day trial
-    );
-    console.log('Trial subscription created successfully');
+    const holdForPayment = registrationCreatesPaymentHold(process.env) && !isSuperAdmin(req);
+    if (holdForPayment) {
+      const amount = await chargeForPlan(plan, 'monthly');
+      if (amount == null) {
+        await Company.deleteOne({ _id: company._id });
+        await User.updateOne({ _id: currentUserId, companyId: company._id }, { $unset: { companyId: '' } });
+        throw new AppError('This plan does not have a configured price', 503, 'REGISTRATION_PRICE_NOT_CONFIGURED');
+      }
+      company.tenantStatus = 'pending';
+      company.onboardingStatus = 'PENDING_PAYMENT';
+      company.onboardingCompleted = false;
+      company.isActive = false;
+      company.subscriptionStatus = 'inactive';
+      await company.save();
+      const subscription = await Subscription.create({
+        companyId: company._id,
+        userId: currentUserId,
+        plan,
+        cycle: 'monthly',
+        status: 'past_due'
+      });
+      const paymentSession = await PaymentSession.create({
+        companyId: company._id,
+        userId: currentUserId,
+        subscriptionId: subscription._id,
+        idempotencyKey: `company-create:${company._id.toString()}`,
+        provider: 'paynow',
+        providerRef: `SUBS-${company._id.toString()}`,
+        plan,
+        billingCycle: 'monthly',
+        amount,
+        currency: 'USD',
+        status: 'pending',
+        metadata: { source: 'company_create' }
+      });
+      const billingPayment = await BillingPayment.create({
+        companyId: company._id,
+        userId: currentUserId,
+        subscriptionId: subscription._id,
+        paymentSessionId: paymentSession._id,
+        plan,
+        cycle: 'monthly',
+        amount,
+        currency: 'USD',
+        method: 'card',
+        provider: 'paynow',
+        providerRef: `SUBS-${company._id.toString()}`,
+        idempotencyKey: `company-create:${company._id.toString()}:billing`,
+        status: 'pending'
+      });
+      paymentSession.billingPaymentId = billingPayment._id as any;
+      await paymentSession.save();
+    } else {
+      console.log('Creating trial subscription for company:', company._id);
+      await subscriptionService.createTrialSubscription(
+        company._id.toString(),
+        plan,
+        14
+      );
+      console.log('Trial subscription created successfully');
+    }
 
     // Verify the company was saved
     const savedCompany = await Company.findById(company._id);
@@ -190,14 +255,29 @@ export const createCompany = async (req: Request, res: Response, next: NextFunct
   }
 };
 
-function pickWorkspaceFields(body: any) {
+function pickWorkspaceFields(body: any, currentTenantStatus?: string, currentOnboardingStatus?: string) {
   const updateData: any = {};
+  const locked = currentTenantStatus === 'suspended' || currentTenantStatus === 'archived';
+  const onboardingStatus = String(currentOnboardingStatus || 'ACTIVE');
+  const awaitingPayment = onboardingStatus === 'PENDING_PAYMENT' || onboardingStatus === 'PENDING_SETUP' || onboardingStatus === 'FAILED_SETUP';
+  const paidEnoughToFinishSetup = onboardingStatus === 'INITIALIZING_WORKSPACE' || onboardingStatus === 'PAYMENT_RECEIVED' || onboardingStatus === 'ACTIVE';
   if (body.workspacePreferences !== undefined) updateData.workspacePreferences = body.workspacePreferences;
-  if (body.onboardingStatus !== undefined) updateData.onboardingStatus = body.onboardingStatus;
-  if (body.onboardingCompleted !== undefined) updateData.onboardingCompleted = Boolean(body.onboardingCompleted);
+  if (!locked && !awaitingPayment && body.onboardingStatus !== undefined && paidEnoughToFinishSetup && String(body.onboardingStatus) === 'ACTIVE') {
+    updateData.onboardingStatus = 'ACTIVE';
+  }
+  if (!locked && !awaitingPayment && body.onboardingCompleted !== undefined && paidEnoughToFinishSetup) {
+    updateData.onboardingCompleted = Boolean(body.onboardingCompleted);
+  }
   if (body.companyType !== undefined) updateData.companyType = normalizeCompanyType(body.companyType);
   if (body.workspaceType !== undefined) updateData.workspaceType = normalizeWorkspaceType(body.workspaceType);
-  if (body.tenantStatus !== undefined && isSafeTenantStatus(body.tenantStatus)) updateData.tenantStatus = body.tenantStatus;
+  if (!locked && !awaitingPayment && body.tenantStatus !== undefined && isSafeTenantStatus(body.tenantStatus)) {
+    if (body.tenantStatus !== 'suspended' && body.tenantStatus !== 'archived' && body.tenantStatus !== 'active') {
+      updateData.tenantStatus = body.tenantStatus;
+    }
+    if (body.tenantStatus === 'active' && paidEnoughToFinishSetup) {
+      updateData.tenantStatus = 'active';
+    }
+  }
   return updateData;
 }
 
@@ -205,9 +285,34 @@ function isSafeTenantStatus(value: unknown): value is 'active' | 'suspended' | '
   return ['active', 'suspended', 'pending', 'archived'].includes(String(value));
 }
 
+/** Profile edits must not grant or rewrite the billed subscription. */
+function stripSubscriptionAuthority(updateData: Partial<ICompany>) {
+  const blocked = updateData as Partial<ICompany> & Record<string, unknown>;
+  delete blocked.plan;
+  delete blocked.propertyLimit;
+  delete blocked.featureFlags;
+  delete blocked.subscriptionStatus;
+  delete blocked.subscriptionEndDate;
+}
+
+export const rejectCompanyPlanChange = async (_req: Request, res: Response) => {
+  res.status(403).json({
+    status: 'error',
+    message: 'Plan changes require a verified billing event',
+    code: 'PLAN_CHANGE_REQUIRES_BILLING',
+  });
+};
+
 export const updateCompany = async (req: Request, res: Response) => {
   try {
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
+    assertCallerCompany(req, String(req.params.id || ''));
+    const existing = await Company.findById(req.params.id).select('tenantStatus onboardingStatus');
+    if (!existing) {
+      throw new AppError('Company not found', 404);
+    }
+    const currentTenantStatus = String((existing as any).tenantStatus || '');
+    const currentOnboardingStatus = String((existing as any).onboardingStatus || 'ACTIVE');
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -222,20 +327,17 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
-    if (commissionConfig !== undefined) (updateData as any).commissionConfig = commissionConfig;
-    Object.assign(updateData as any, pickWorkspaceFields(req.body));
+    if ((req.body as any).taxProfile !== undefined) (updateData as any).taxProfile = (req.body as any).taxProfile;
+    if (commissionConfig !== undefined) {
+      const nextCommission = { ...(commissionConfig as any) };
+      delete nextCommission.vatPercentOnCommission;
+      (updateData as any).commissionConfig = nextCommission;
+    }
+    Object.assign(updateData as any, pickWorkspaceFields(req.body, currentTenantStatus, currentOnboardingStatus));
     if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
-    if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
-      const cfg = PLAN_CONFIG[plan as Plan];
-      (updateData as any).plan = plan as Plan;
-      (updateData as any).propertyLimit = cfg.propertyLimit;
-      (updateData as any).featureFlags = cfg.featureFlags;
-      if ((req.body as any).workspaceType === undefined) {
-        (updateData as any).workspaceType = cfg.workspaceType;
-      }
-    }
+    stripSubscriptionAuthority(updateData);
 
     const company = await Company.findByIdAndUpdate(
       req.params.id,
@@ -258,6 +360,7 @@ export const updateCompany = async (req: Request, res: Response) => {
 
 export const deleteCompany = async (req: Request, res: Response) => {
   try {
+    assertCallerCompany(req, String(req.params.id || ''));
     const company = await Company.findByIdAndDelete(req.params.id);
     if (!company) {
       throw new AppError('Company not found', 404);
@@ -411,7 +514,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     }
 
     // Update the company
-    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
+    const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
     const updateData: Partial<ICompany> = {};
 
     if (name !== undefined) updateData.name = name;
@@ -426,20 +529,17 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     if (logo !== undefined) updateData.logo = logo;
     if (bankAccounts !== undefined) updateData.bankAccounts = bankAccounts;
     if (fiscalConfig !== undefined) (updateData as any).fiscalConfig = fiscalConfig;
-    if (commissionConfig !== undefined) (updateData as any).commissionConfig = commissionConfig;
-    Object.assign(updateData as any, pickWorkspaceFields(req.body));
+    if ((req.body as any).taxProfile !== undefined) (updateData as any).taxProfile = (req.body as any).taxProfile;
+    if (commissionConfig !== undefined) {
+      const nextCommission = { ...(commissionConfig as any) };
+      delete nextCommission.vatPercentOnCommission;
+      (updateData as any).commissionConfig = nextCommission;
+    }
+    Object.assign(updateData as any, pickWorkspaceFields(req.body, String((company as any).tenantStatus || ''), String((company as any).onboardingStatus || 'ACTIVE')));
     if (receivablesCutover !== undefined) (updateData as any).receivablesCutover = receivablesCutover;
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
-    if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
-      const cfg = PLAN_CONFIG[plan as Plan];
-      (updateData as any).plan = plan as Plan;
-      (updateData as any).propertyLimit = cfg.propertyLimit;
-      (updateData as any).featureFlags = cfg.featureFlags;
-      if ((req.body as any).workspaceType === undefined) {
-        (updateData as any).workspaceType = cfg.workspaceType;
-      }
-    }
+    stripSubscriptionAuthority(updateData);
 
     const updatedCompany = await Company.findByIdAndUpdate(
       company._id,

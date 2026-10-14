@@ -14,6 +14,7 @@ import PropertyForm from '../../../components/properties/PropertyForm';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useCompany } from '../../../contexts/CompanyContext';
 import { usePropertyLimit } from '../../../contexts/FeatureFlags';
+import { isDemoMode, notifyDemoBlocked, workspacePath } from '../../../demo/demoMode';
 import { useAdminDashboardService } from '../../../services/adminDashboardService';
 import { Property, PropertyFormData } from '../../../types/property';
 import IndividualPropertyCreationSuccess from '../components/IndividualPropertyCreationSuccess';
@@ -21,6 +22,7 @@ import PropertyCard from '../components/PropertyCard';
 import { CenteredLoader, PageShell } from '../components/shared';
 import usePortfolioContext from '../hooks/usePortfolioContext';
 import { INDIVIDUAL_THEME } from '../theme';
+import { OperationalEmptyState } from '../../../components/rentalWorkflow';
 
 export function PropertiesPage() {
   const navigate = useNavigate();
@@ -39,6 +41,11 @@ export function PropertiesPage() {
   const limitReached = propertyLimit != null && propertiesCount >= propertyLimit;
 
   const handleAddProperty = async (propertyData: PropertyFormData) => {
+    if (isDemoMode()) {
+      setFormError('Demo mode — this action is disabled.');
+      notifyDemoBlocked();
+      return;
+    }
     if (!user?._id) {
       setFormError('You must be logged in to add a property.');
       return;
@@ -75,6 +82,10 @@ export function PropertiesPage() {
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => {
+            if (isDemoMode()) {
+              notifyDemoBlocked();
+              return;
+            }
             setFormError(null);
             setShowForm(true);
           }}
@@ -104,15 +115,25 @@ export function PropertiesPage() {
           <Grid item xs={12} md={6} lg={4} key={property.propertyId}>
             <PropertyCard
               property={property}
-              onView={() => navigate(`/individual-dashboard/properties/${property.propertyId}`)}
+              onView={() => navigate(workspacePath(`/individual-dashboard/properties/${property.propertyId}`))}
             />
           </Grid>
         ))}
         {!enrichedProperties.length && !lastCreatedProperty && (
           <Grid item xs={12}>
-            <Alert severity="info">
-              Add your first property to start tracking rent, expenses, and portfolio performance.
-            </Alert>
+            <OperationalEmptyState
+              title="No properties yet."
+              description="Add your first property to start tracking tenants, leases, rent and property finances."
+              actionLabel="Add property"
+              onAction={() => {
+                setFormError(null);
+                setShowForm(true);
+              }}
+              secondaryLabel="Import properties"
+              onSecondary={() => navigate('/onboarding/import')}
+              tertiaryLabel="Explore sample data"
+              onTertiary={() => navigate('/demo')}
+            />
           </Grid>
         )}
       </Grid>

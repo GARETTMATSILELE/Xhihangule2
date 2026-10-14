@@ -7,6 +7,7 @@ exports.PAYMENT_RECONCILIATION_BATCH_SIZE = void 0;
 exports.buildOwnerIncomeReconciliationPaymentFilter = buildOwnerIncomeReconciliationPaymentFilter;
 exports.isRecordIncomeEarlyExit = isRecordIncomeEarlyExit;
 const mongoose_1 = __importDefault(require("mongoose"));
+const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 /**
  * Matches existing poll/failure-reprocessor conventions (100).
  * Caps prevent accidental unbounded in-memory batches.
@@ -55,8 +56,7 @@ function isRecordIncomeEarlyExit(payment) {
         return true;
     if (payment.isInSuspense === true)
         return true;
-    const deposit = Number(payment.depositAmount || 0);
-    if (deposit > 0 && Number(payment.amount || 0) <= deposit)
+    if ((0, accountingPostingPolicy_1.isDepositOnlyPayment)(payment))
         return true;
     return false;
 }

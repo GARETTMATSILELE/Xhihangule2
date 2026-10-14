@@ -2,15 +2,9 @@ import { CronJob } from 'cron';
 import DatabaseSyncService from './databaseSyncService';
 import SyncFailure from '../models/SyncFailure';
 import { logger } from '../utils/logger';
-import { Payment } from '../models/Payment';
 import PropertyAccount from '../models/PropertyAccount';
-import propertyAccountService, { reconcilePropertyLedgerDuplicates } from './propertyAccountService';
+import propertyAccountService from './propertyAccountService';
 import { runWithJobLease } from './jobLeaseService';
-import {
-  PAYMENT_RECONCILIATION_BATCH_SIZE,
-  buildOwnerIncomeReconciliationPaymentFilter,
-  isRecordIncomeEarlyExit
-} from './paymentReconciliationQuery';
 
 export interface SyncSchedule {
   name: string;
@@ -49,7 +43,7 @@ export class ScheduledSyncService {
     this.addSyncSchedule({
       name: 'daily_sync',
       cronExpression: '0 2 * * *',
-      description: 'Daily full synchronization at 2 AM',
+      description: 'Daily operational sync. Payment accounting is detection-only.',
       enabled: true,
       runCount: 0,
       averageDuration: 0
@@ -69,7 +63,16 @@ export class ScheduledSyncService {
     this.addSyncSchedule({
       name: 'ledger_reconciliation',
       cronExpression: '*/5 * * * *',
-      description: 'Re-post recent payments and dedupe property ledgers',
+      description: 'Detect duplicate ledger rows. Detection-only: does not archive, delete, or rewrite financial records.',
+      enabled: true,
+      runCount: 0,
+      averageDuration: 0
+    });
+
+    this.addSyncSchedule({
+      name: 'payment_accounting_integrity',
+      cronExpression: '*/2 * * * *',
+      description: 'Detect incomplete accounting for tracked payments. Read-only: never repairs or backfills.',
       enabled: true,
       runCount: 0,
       averageDuration: 0
@@ -79,7 +82,7 @@ export class ScheduledSyncService {
     this.addSyncSchedule({
       name: 'weekly_consistency_check',
       cronExpression: '0 3 * * 0',
-      description: 'Weekly data consistency validation',
+      description: 'Weekly data consistency validation (detection-only)',
       enabled: true,
       runCount: 0,
       averageDuration: 0
@@ -89,7 +92,7 @@ export class ScheduledSyncService {
     this.addSyncSchedule({
       name: 'monthly_deep_sync',
       cronExpression: '0 4 1 * *',
-      description: 'Monthly deep synchronization and cleanup',
+      description: 'Monthly operational sync. Payment accounting is detection-only.',
       enabled: true,
       runCount: 0,
       averageDuration: 0
@@ -225,6 +228,9 @@ export class ScheduledSyncService {
           case 'ledger_reconciliation':
             await this.executeLedgerReconciliation();
             break;
+          case 'payment_accounting_integrity':
+            await this.executePaymentAccountingIntegrity();
+            break;
           case 'weekly_consistency_check':
             await this.executeWeeklyConsistencyCheck();
             break;
@@ -353,129 +359,21 @@ export class ScheduledSyncService {
   }
 
   /**
+   * Tracked payments only: accountingComplete=false or diagnostic incomplete statuses.
+   * Historical payments without those fields are never selected.
+   * This pass DETECTS and FLAGS. It does not create accounting records.
+   */
+  private async executePaymentAccountingIntegrity(): Promise<void> {
+    const { runPaymentAccountingIntegrityPass } = await import('./paymentAccountingIntegrity');
+    await runPaymentAccountingIntegrityPass(50);
+  }
+
+  /**
    * Execute ledger reconciliation
    */
   private async executeLedgerReconciliation(): Promise<void> {
-    const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
     try {
-      const filter = buildOwnerIncomeReconciliationPaymentFilter({ paymentDateFrom: since });
-      const cursor = Payment.find(filter)
-        .select('_id status amount depositAmount reversalOfPaymentId isProvisional isInSuspense')
-        .sort({ _id: 1 })
-        .batchSize(PAYMENT_RECONCILIATION_BATCH_SIZE)
-        .cursor();
-
-      let selected = 0;
-      let attempted = 0;
-      let skippedEarlyExit = 0;
-      let failures = 0;
-      for await (const p of cursor as AsyncIterable<any>) {
-        selected += 1;
-        if (isRecordIncomeEarlyExit(p)) {
-          skippedEarlyExit += 1;
-          continue;
-        }
-        try {
-          await propertyAccountService.recordIncomeFromPayment(String((p as any)._id));
-          attempted += 1;
-        } catch (e) {
-          failures += 1;
-          try { await (await import('./ledgerEventService')).default.enqueueOwnerIncomeEvent(String((p as any)._id)); } catch {}
-          logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e as any)?.message || e);
-        }
-      }
-      logger.info('Ledger reconciliation owner-income pass completed', {
-        windowHours: 48,
-        selected,
-        attempted,
-        skippedEarlyExit,
-        failures
-      });
-
-      // 2) Ensure company commissions via the policy-gated writer (idempotent; skips provisional)
-      try {
-        const accountingIntegrationService = (await import('./accountingIntegrationService')).default;
-        const { shouldPostCompanyCommission } = await import('./accountingPostingPolicy');
-        const payList = await Payment.find({
-          status: 'completed',
-          paymentDate: { $gte: since },
-          'commissionDetails.agencyShare': { $gt: 0 }
-        }).select('_id companyId paymentType commissionDetails paymentDate isProvisional isInSuspense reversalOfPaymentId amount commissionFinalized');
-        for (const p of payList as any[]) {
-          if (!p.companyId) continue;
-          if (!shouldPostCompanyCommission(p)) continue;
-          await accountingIntegrationService.postCompanyCommission(p);
-        }
-      } catch (ensureErr) {
-        logger.warn('Reconciliation: ensuring company commissions skipped:', (ensureErr as any)?.message || ensureErr);
-      }
-
-      // 3) Dedupe any property accounts updated recently
-      const recentAccounts = await PropertyAccount.find({
-        lastUpdated: { $gte: since },
-        isArchived: false,
-        isActive: { $ne: false }
-      }).select('_id propertyId ledgerType');
-      for (const acct of recentAccounts) {
-        try {
-          await reconcilePropertyLedgerDuplicates(String((acct as any).propertyId));
-        } catch (e) {
-          logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String((acct as any)._id), err: (e as any)?.message || e });
-        }
-      }
-
-      // 4) Dedupe company accounts updated recently (keep earliest for each paymentId, archive the rest)
-      try {
-        const { CompanyAccount } = await import('../models/CompanyAccount');
-        const cursor = CompanyAccount.find(
-          { lastUpdated: { $gte: since } },
-        )
-          .select('_id companyId transactions.paymentId transactions.date transactions._id transactions.type transactions.amount')
-          .lean()
-          .cursor();
-
-        for await (const ca of cursor as any as AsyncIterable<any>) {
-          try {
-            const grouped: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
-            const txs = Array.isArray(ca.transactions) ? ca.transactions : [];
-            for (const t of txs) {
-              const pid = t?.paymentId ? String(t.paymentId) : '';
-              if (!pid) continue;
-              (grouped[pid] ||= []).push({ _id: (t as any)._id, date: new Date(t.date) });
-            }
-            const toArchive: any[] = [];
-            for (const pid of Object.keys(grouped)) {
-              const list = grouped[pid];
-              if (list.length <= 1) continue;
-              const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-              toArchive.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
-            }
-            if (toArchive.length > 0) {
-              // Soft-archive duplicates via native update to bypass immutability
-              await (CompanyAccount as any).collection.updateOne(
-                { _id: ca._id },
-                { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } },
-                { arrayFilters: [{ 't._id': { $in: toArchive } }] } as any
-              );
-              // Recalculate totals using only active transactions
-              const fresh = await CompanyAccount.findById(ca._id).select('_id transactions').lean() as any;
-              if (fresh) {
-                const active = (Array.isArray(fresh.transactions) ? fresh.transactions : []).filter((t: any) => t?.isArchived !== true);
-                const income = active.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
-                const expenses = active.filter((t: any) => t.type !== 'income').reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
-                await CompanyAccount.updateOne(
-                  { _id: fresh._id },
-                  { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } }
-                );
-              }
-            }
-          } catch (docErr) {
-            logger.warn('Reconciliation: company ledger dedupe failed for account', { accountId: String(ca?._id || ''), err: (docErr as any)?.message || docErr });
-          }
-        }
-      } catch (dedupeErr) {
-        logger.warn('Reconciliation: company ledger dedupe skipped:', (dedupeErr as any)?.message || dedupeErr);
-      }
+      logger.info('Ledger reconciliation is detection-only; automatic duplicate archive/delete is disabled');
     } catch (err) {
       logger.error('Ledger reconciliation job failed:', err);
       throw err;
@@ -493,14 +391,10 @@ export class ScheduledSyncService {
     
     if (!consistency.isConsistent) {
       logger.warn(`Data consistency issues found: ${consistency.inconsistencies.length}`);
-      
-      // Log inconsistencies
       for (const issue of consistency.inconsistencies) {
         logger.warn(`Consistency issue: ${issue.type} - ${issue.description}`);
       }
-      
-      // Attempt to fix common issues
-      await this.attemptConsistencyFixes(consistency.inconsistencies);
+      logger.info('Weekly consistency check is detection-only; automatic account create/archive is disabled');
     } else {
       logger.info('Data consistency check passed');
     }

@@ -8,55 +8,26 @@ import { Lease } from '../models/Lease';
 import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
 import Company from '../models/Company';
+import { introductionConsumedFromPayments } from './introductionCommissionService';
+import {
+  computeOutstandingForLease,
+  formatOutstandingMonthLabel,
+  getOutstandingRangeForLease,
+  iterateOutstandingMonths,
+  outstandingMonthKey
+} from './outstandingLeaseCalculation';
+
+export {
+  computeOutstandingForLease,
+  getOutstandingRangeForLease
+};
 
 const toObjectId = (id: string): mongoose.Types.ObjectId => new mongoose.Types.ObjectId(id);
 const toMoney = (value: number): number => Number(Number(value || 0).toFixed(2));
 
-const monthKey = (year: number, month: number): string => `${year}-${month}`;
-const monthLabelFormatter = new Intl.DateTimeFormat('en', { month: 'short', year: 'numeric' });
-const formatMonthLabel = (year: number, month: number): string =>
-  monthLabelFormatter.format(new Date(year, month - 1, 1));
-
-const iterateMonths = (start: Date, end: Date, cb: (year: number, month: number) => void, hardCapMonths = 240): void => {
-  let year = start.getFullYear();
-  let month = start.getMonth() + 1;
-  let count = 0;
-  while ((year < end.getFullYear() || (year === end.getFullYear() && month <= end.getMonth() + 1)) && count < hardCapMonths) {
-    cb(year, month);
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-    count += 1;
-  }
-};
-
-const getOutstandingRangeForLease = (
-  lease: any,
-  property: any,
-  currentMonthStart: Date,
-  cutoverDate: Date | null
-): { start: Date; end: Date } | null => {
-  const start = lease?.startDate ? new Date(lease.startDate) : null;
-  const end = lease?.endDate ? new Date(lease.endDate) : currentMonthStart;
-  if (!start || Number.isNaN(start.getTime()) || !end || Number.isNaN(end.getTime())) return null;
-
-  const leaseStartMonth = new Date(start.getFullYear(), start.getMonth(), 1);
-  const leaseEndMonth = new Date(Math.min(end.getTime(), currentMonthStart.getTime()));
-  if (leaseStartMonth.getTime() > leaseEndMonth.getTime()) return null;
-
-  const rentalType = String(property?.rentalType || '').toLowerCase();
-  if (rentalType === 'introduction') {
-    if (cutoverDate && leaseStartMonth.getTime() < cutoverDate.getTime()) return null;
-    return { start: leaseStartMonth, end: leaseStartMonth };
-  }
-
-  let normalizedStart = leaseStartMonth;
-  if (cutoverDate && normalizedStart.getTime() < cutoverDate.getTime()) normalizedStart = cutoverDate;
-  if (normalizedStart.getTime() > leaseEndMonth.getTime()) return null;
-  return { start: normalizedStart, end: leaseEndMonth };
-};
+const monthKey = outstandingMonthKey;
+const formatMonthLabel = formatOutstandingMonthLabel;
+const iterateMonths = iterateOutstandingMonths;
 
 export interface OutstandingTenantBreakdown {
   tenantId: string;
@@ -137,6 +108,8 @@ class DashboardKpiService {
     cutoverDate: Date | null;
     getMonthlyAmount: (property: any) => number;
     includeProperty?: (property: any) => boolean;
+    introductionRemainingByKey?: Map<string, number>;
+    mode?: 'rent' | 'levy';
   }): OutstandingPropertyBreakdown[] {
     const {
       properties,
@@ -146,7 +119,9 @@ class DashboardKpiService {
       currentMonthStart,
       cutoverDate,
       getMonthlyAmount,
-      includeProperty = () => true
+      includeProperty = () => true,
+      introductionRemainingByKey,
+      mode = 'rent'
     } = params;
 
     return properties
@@ -162,23 +137,34 @@ class DashboardKpiService {
         const leases = leasesByProperty.get(propertyId) || [];
         const propertyMissingMonths = new Set<string>();
         const tenants: OutstandingTenantBreakdown[] = [];
+        let totalAmount = 0;
 
         for (const lease of leases) {
-          const range = getOutstandingRangeForLease(lease, property, currentMonthStart, cutoverDate);
-          if (!range) continue;
-
-          const labels: string[] = [];
-          iterateMonths(range.start, range.end, (year, month) => {
-            const key = monthKey(year, month);
-            if (!paidKeys.has(key)) {
-              propertyMissingMonths.add(key);
-              labels.push(formatMonthLabel(year, month));
-            }
-          });
-
-          if (!labels.length) continue;
-
           const tenantId = lease?.tenantId ? String(lease.tenantId) : '';
+          const leaseId = lease?._id ? String(lease._id) : '';
+          const introKey = `${propertyId}:${tenantId}:${leaseId}`;
+          const rentalType = String(property?.rentalType || '').toLowerCase();
+          const defaultIntro = Number(lease?.rentAmount || lease?.monthlyRent || property?.rent || 0);
+          const introductionRemaining = rentalType === 'introduction'
+            ? (introductionRemainingByKey?.has(introKey)
+              ? Number(introductionRemainingByKey.get(introKey) || 0)
+              : defaultIntro)
+            : 0;
+          const computed = computeOutstandingForLease({
+            rentalType,
+            leaseStart: lease?.startDate,
+            leaseEnd: lease?.endDate,
+            currentMonthStart,
+            cutoverDate,
+            paidKeys,
+            monthlyAmount,
+            introductionRemaining,
+            mode
+          });
+          if (!computed.labels.length) continue;
+          computed.labels.forEach((label) => propertyMissingMonths.add(label));
+          totalAmount = toMoney(totalAmount + computed.totalAmount);
+
           const tenant = tenantById.get(tenantId);
           const tenantName =
             tenant
@@ -191,7 +177,7 @@ class DashboardKpiService {
           tenants.push({
             tenantId,
             tenantName,
-            labels
+            labels: computed.labels
           });
         }
 
@@ -202,7 +188,7 @@ class DashboardKpiService {
           propertyName: property?.name || 'Unnamed Property',
           propertyAddress: property?.address || '',
           totalOwedMonths: propertyMissingMonths.size,
-          totalAmount: toMoney(propertyMissingMonths.size * monthlyAmount),
+          totalAmount,
           tenants
         } satisfies OutstandingPropertyBreakdown;
       })
@@ -230,14 +216,14 @@ class DashboardKpiService {
           .select('_id name address rent levyOrMunicipalType levyOrMunicipalAmount rentalType')
           .lean(),
         Lease.find({ companyId: companyObjectId, status: 'active' })
-          .select('propertyId tenantId startDate endDate status')
+          .select('propertyId tenantId startDate endDate status rentAmount monthlyRent')
           .lean(),
         Payment.find({
           companyId: companyObjectId,
           status: { $in: ['completed'] },
           paymentType: { $nin: ['sale'] }
         })
-          .select('propertyId paymentDate paymentType status rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
+          .select('propertyId tenantId leaseId paymentDate paymentType status rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd amount depositAmount reversalOfPaymentId commissionDetails.commissionBase commissionDetails.totalCommission')
           .lean(),
         LevyPayment.find({
           companyId: companyObjectId,
@@ -284,6 +270,32 @@ class DashboardKpiService {
       }
     );
 
+    const rentalTypeByProperty = new Map<string, string>(
+      (rentalProperties as any[]).map((property) => [String(property._id), String(property?.rentalType || '').toLowerCase()])
+    );
+    for (const payment of completedRentalPayments as any[]) {
+      const propertyId = payment?.propertyId ? String(payment.propertyId) : '';
+      if (!propertyId || rentalTypeByProperty.get(propertyId) !== 'introduction') continue;
+      const monthsPaid = Number(payment?.advanceMonthsPaid || 1);
+      if (monthsPaid <= 1) continue;
+      const hasPeriod = Number(payment?.advancePeriodStart?.year) && Number(payment?.advancePeriodStart?.month);
+      if (hasPeriod) continue;
+      const month = Number(payment?.rentalPeriodMonth || (payment?.paymentDate ? new Date(payment.paymentDate).getMonth() + 1 : 0));
+      const year = Number(payment?.rentalPeriodYear || (payment?.paymentDate ? new Date(payment.paymentDate).getFullYear() : 0));
+      if (!year || !month) continue;
+      if (!rentalPaidByProperty.has(propertyId)) rentalPaidByProperty.set(propertyId, new Set<string>());
+      let y = year;
+      let m = month;
+      for (let i = 0; i < monthsPaid; i += 1) {
+        rentalPaidByProperty.get(propertyId)!.add(monthKey(y, m));
+        m += 1;
+        if (m > 12) {
+          m = 1;
+          y += 1;
+        }
+      }
+    }
+
     const levyPaidByProperty = this.markCoveredMonths(
       completedLevyPayments as any[],
       (payment) => (payment?.propertyId ? String(payment.propertyId) : ''),
@@ -294,6 +306,40 @@ class DashboardKpiService {
       }
     );
 
+    const introductionRemainingByKey = new Map<string, number>();
+    const introPaymentsByKey = new Map<string, any[]>();
+    for (const payment of completedRentalPayments as any[]) {
+      const paymentType = String(payment?.paymentType || '').toLowerCase();
+      if (paymentType === 'levy' || paymentType === 'municipal' || paymentType === 'sale') continue;
+      const propertyId = payment?.propertyId ? String(payment.propertyId) : '';
+      const tenantId = payment?.tenantId ? String(payment.tenantId) : '';
+      const leaseId = payment?.leaseId ? String(payment.leaseId) : '';
+      if (!propertyId || !tenantId || !leaseId) continue;
+      const key = `${propertyId}:${tenantId}:${leaseId}`;
+      if (!introPaymentsByKey.has(key)) introPaymentsByKey.set(key, []);
+      introPaymentsByKey.get(key)!.push(payment);
+    }
+    const rentByLease = new Map<string, number>();
+    for (const lease of activeLeases as any[]) {
+      const propertyId = lease?.propertyId ? String(lease.propertyId) : '';
+      const tenantId = lease?.tenantId ? String(lease.tenantId) : '';
+      const leaseId = lease?._id ? String(lease._id) : '';
+      if (!propertyId || !tenantId || !leaseId) continue;
+      rentByLease.set(
+        `${propertyId}:${tenantId}:${leaseId}`,
+        Number(lease?.rentAmount || lease?.monthlyRent || 0)
+      );
+    }
+    const rentByProperty = new Map<string, number>(
+      (rentalProperties as any[]).map((property) => [String(property._id), Number(property?.rent || 0)])
+    );
+    for (const [key, payments] of introPaymentsByKey.entries()) {
+      const propertyId = key.split(':')[0];
+      const oneMonth = Number(rentByLease.get(key) || rentByProperty.get(propertyId) || 0);
+      const consumed = introductionConsumedFromPayments(payments);
+      introductionRemainingByKey.set(key, toMoney(Math.max(0, oneMonth - consumed)));
+    }
+
     const rentals = this.buildOutstandingBreakdown({
       properties: rentalProperties as any[],
       leasesByProperty,
@@ -301,7 +347,9 @@ class DashboardKpiService {
       tenantById,
       currentMonthStart,
       cutoverDate,
-      getMonthlyAmount: (property) => Number(property?.rent || 0)
+      getMonthlyAmount: (property) => Number(property?.rent || 0),
+      introductionRemainingByKey,
+      mode: 'rent'
     });
 
     const levies = this.buildOutstandingBreakdown({
@@ -312,7 +360,9 @@ class DashboardKpiService {
       currentMonthStart,
       cutoverDate,
       getMonthlyAmount: (property) => Number(property?.levyOrMunicipalAmount || 0),
-      includeProperty: (property) => String(property?.levyOrMunicipalType || '').toLowerCase() === 'levy'
+      includeProperty: (property) => String(property?.levyOrMunicipalType || '').toLowerCase() === 'levy',
+      introductionRemainingByKey,
+      mode: 'levy'
     });
 
     const outstandingRentals = toMoney(rentals.reduce((sum, row) => sum + row.totalAmount, 0));

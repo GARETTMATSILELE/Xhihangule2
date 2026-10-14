@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Grid,
@@ -69,6 +69,9 @@ import PropertyDetailsPage from './agent/PropertyDetailsPage';
 import PropertyDetailsReportPage from './agent/PropertyDetailsReportPage';
 import { User } from '../types/auth';
 import { RentalWorkflowCenter, WorkflowStatusChip } from '../components/rentalWorkflow';
+import { OwnerCollectionsPage } from './agency/OwnerCollectionsPage';
+import { AgencySearchPage, RentCollectionPage, SeniorPortfolioPage } from './agency/AgencyOperationsPages';
+import { AgentViewingsPage, AgentApplicationsPage, AgentQuotesPage, AgentBroadcastPage } from './ecosystem/AgencyEcosystemPages';
 import { buildPortfolioWorkflowSummary } from '../utils/rentalWorkflow';
 import notificationService from '../services/notificationService';
 import { getDashboardPath } from '../utils/registrationUtils';
@@ -2049,15 +2052,21 @@ const AgentDashboard: React.FC = () => {
                 </Box>
               }
             />
-            <Route
-              path="maintenance-vendors"
-              element={
-                <Box sx={{ ml: -3, p: 0 }}>
-                  <MaintenanceVendorsPage />
-                </Box>
-              }
-            />
+            <Route path="maintenance-vendors" element={<Navigate to="/agent-dashboard/contractors" replace />} />
             <Route path="inspections" element={<Inspections />} />
+            <Route path="quotes" element={<AgentQuotesPage />} />
+            <Route path="contractors" element={
+              <Box sx={{ ml: -3, p: 0 }}>
+                <MaintenanceVendorsPage />
+              </Box>
+            } />
+            <Route path="viewings" element={<AgentViewingsPage />} />
+            <Route path="applications" element={<AgentApplicationsPage />} />
+            <Route path="owner-collections" element={<OwnerCollectionsPage apiBase="/agents" />} />
+            <Route path="rent-collection" element={<RentCollectionPage />} />
+            <Route path="search" element={<AgencySearchPage />} />
+            <Route path="portfolio" element={<SeniorPortfolioPage />} />
+            <Route path="broadcasts" element={<AgentBroadcastPage />} />
             <Route path="property-details-report" element={<PropertyDetailsReportPage />} />
             <Route path="tasks" element={<AgentLeadsPage />} />
             <Route path="schedule" element={<SchedulePage />} />

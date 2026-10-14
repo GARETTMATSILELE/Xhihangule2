@@ -8,8 +8,11 @@ const auth_1 = require("../middleware/auth");
 const limits_1 = require("../middleware/limits");
 const roles_1 = require("../middleware/roles");
 const multer_1 = __importDefault(require("multer"));
+const contentDisposition_1 = require("../utils/contentDisposition");
 const agentController_1 = require("../controllers/agentController");
 const agentPropertyReportController_1 = require("../controllers/agentPropertyReportController");
+const ownerCollectionController_1 = require("../controllers/ownerCollectionController");
+const lettingController_1 = require("../agency/lettingController");
 const ownerManagementController_1 = require("../controllers/ownerManagementController");
 const router = express_1.default.Router();
 // Configure multer for memory storage (similar to fileRoutes)
@@ -25,7 +28,8 @@ const upload = (0, multer_1.default)({
             'image/png',
             'text/plain'
         ];
-        if (allowedTypes.includes(file.mimetype)) {
+        const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'];
+        if (allowedTypes.includes(file.mimetype) && (0, contentDisposition_1.hasAllowedUploadExtension)(file.originalname, allowedExtensions)) {
             cb(null, true);
         }
         else {
@@ -87,4 +91,24 @@ router.get('/property-owners/:id', agentController_1.getAgentPropertyOwnerById);
 router.post('/property-owners', agentController_1.createAgentPropertyOwner);
 router.put('/property-owners/:id', agentController_1.updateAgentPropertyOwner);
 router.delete('/property-owners/:id', agentController_1.deleteAgentPropertyOwner);
+router.post('/letting/assessments', lettingController_1.saveAssessment);
+router.post('/letting/assessments/:id/status', lettingController_1.advanceAssessment);
+router.post('/letting/mandates', lettingController_1.saveMandate);
+router.post('/letting/mandates/:id/status', lettingController_1.advanceMandate);
+router.post('/letting/listings', lettingController_1.saveListing);
+router.post('/letting/listings/:id/status', lettingController_1.updateListing);
+router.post('/letting/applications/:id/status', lettingController_1.shortlistApplication);
+router.post('/letting/applications/:id/owner-decision', lettingController_1.ownerApplicationDecision);
+router.post('/letting/leases', lettingController_1.prepareAgencyLease);
+router.post('/letting/leases/:id/signature', lettingController_1.signAgencyLease);
+router.post('/letting/leases/:id/activate', lettingController_1.activateAgencyLease);
+router.get('/letting/rent-board', lettingController_1.rentCollectionBoard);
+router.post('/letting/maintenance-payment-requests', lettingController_1.requestMaintenancePayment);
+router.post('/letting/levies/:id/receipt', lettingController_1.fileLevyReceipt);
+router.get('/letting/properties/:propertyId/workspace', lettingController_1.propertyWorkspace);
+router.get('/letting/search', lettingController_1.agencySearch);
+router.get('/letting/portfolio', lettingController_1.seniorPortfolio);
+router.get('/owner-collections', ownerCollectionController_1.listOwnerCollections);
+router.post('/owner-collections', ownerCollectionController_1.createOwnerCollection);
+router.post('/owner-collections/:id/advance', ownerCollectionController_1.advanceOwnerCollection);
 exports.default = router;

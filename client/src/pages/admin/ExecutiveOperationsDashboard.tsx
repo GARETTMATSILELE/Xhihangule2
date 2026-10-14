@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getDemoExecutiveDashboard } from '../../demo/demoData';
+import { isDemoMode, notifyDemoBlocked } from '../../demo/demoMode';
 import {
   Alert,
   Box,
@@ -42,6 +44,13 @@ const formatCurrency = (n: number) => `$${Number(n || 0).toLocaleString()}`;
 const ExecutiveOperationsDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { company } = useCompany();
+  const go = (path: string) => {
+    if (isDemoMode()) {
+      notifyDemoBlocked();
+      return;
+    }
+    navigate(path);
+  };
   const [data, setData] = useState<ExecutiveDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +61,10 @@ const ExecutiveOperationsDashboard: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
+      if (isDemoMode()) {
+        setData(getDemoExecutiveDashboard());
+        return;
+      }
       const result = await agencyOperationsService.getExecutiveDashboard({
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -137,7 +150,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
               color="#5E72E4"
               trend={kpi.trend as any}
               severity={kpi.severity}
-              onClick={() => navigate(kpi.link)}
+              onClick={() => go(kpi.link)}
             />
           </Grid>
         ))}
@@ -151,7 +164,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
             {alerts.map((alert) => (
               <Box
                 key={alert.id}
-                onClick={() => navigate(alert.link)}
+                onClick={() => go(alert.link)}
                 sx={{
                   p: 1.5,
                   borderRadius: 2,
@@ -182,7 +195,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
             title="Agent Performance Centre"
             subtitle="Leaderboard and highlights"
             action={
-              <Button size="small" onClick={() => navigate('/admin-dashboard/agents')}>View all agents</Button>
+              <Button size="small" onClick={() => go('/admin-dashboard/agents')}>View all agents</Button>
             }
           >
             <Grid container spacing={1} sx={{ mb: 2 }}>
@@ -207,7 +220,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
               </TableHead>
               <TableBody>
                 {agentPerformance.leaderboard.slice(0, 8).map((row) => (
-                  <TableRow key={row.agentId} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/admin-dashboard/agents/${row.agentId}`)}>
+                  <TableRow key={row.agentId} hover sx={{ cursor: 'pointer' }} onClick={() => go(`/admin-dashboard/agents/${row.agentId}`)}>
                     <TableCell>{row.agentName}</TableCell>
                     <TableCell align="right">{row.propertiesManaged}</TableCell>
                     <TableCell align="right">{row.viewingsConducted}</TableCell>
@@ -221,7 +234,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
         </Grid>
 
         <Grid item xs={12} lg={5}>
-          <SectionCard title="Vacancy Tracker" subtitle="Aging vacancies and revenue impact" action={<Button size="small" onClick={() => navigate('/admin-dashboard/vacancies')}>Open centre</Button>}>
+          <SectionCard title="Vacancy Tracker" subtitle="Aging vacancies and revenue impact" action={<Button size="small" onClick={() => go('/admin-dashboard/vacancies')}>Open centre</Button>}>
             {vacancies.length === 0 ? (
               <Typography color="text.secondary">No vacant properties.</Typography>
             ) : (
@@ -257,7 +270,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
                 </TableHead>
                 <TableBody>
                   {leaseExpiries.map((l) => (
-                    <TableRow key={l.leaseId} hover sx={{ cursor: 'pointer' }} onClick={() => navigate('/admin-dashboard/leases')}>
+                    <TableRow key={l.leaseId} hover sx={{ cursor: 'pointer' }} onClick={() => go('/admin-dashboard/leases')}>
                       <TableCell>{l.propertyName}</TableCell>
                       <TableCell>{l.daysUntil}</TableCell>
                       <TableCell><Chip size="small" label={l.severity} color={severityChipColor(l.severity)} /></TableCell>
@@ -270,7 +283,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
         </Grid>
 
         <Grid item xs={12} md={6}>
-          <SectionCard title="Maintenance Overview" action={<Button size="small" onClick={() => navigate('/admin-dashboard/maintenance')}>Open workspace</Button>}>
+          <SectionCard title="Maintenance Overview" action={<Button size="small" onClick={() => go('/admin-dashboard/maintenance')}>Open workspace</Button>}>
             <Stack direction="row" spacing={2}>
               <Box sx={{ flex: 1, p: 2, borderRadius: 2, bgcolor: 'action.hover' }}>
                 <Typography variant="h4" color="warning.main">{maintenanceOverview.open}</Typography>
@@ -287,7 +300,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={4}>
-          <SectionCard title="Inspection Schedule" action={<Button size="small" onClick={() => navigate('/admin-dashboard/inspections')}>Inspections centre</Button>}>
+          <SectionCard title="Inspection Schedule" action={<Button size="small" onClick={() => go('/admin-dashboard/inspections')}>Inspections centre</Button>}>
             {inspectionSchedule.length === 0 ? (
               <Typography color="text.secondary">No upcoming inspections.</Typography>
             ) : (
@@ -302,7 +315,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
         </Grid>
 
         <Grid item xs={12} md={4}>
-          <SectionCard title="Lead Pipeline" action={<Button size="small" onClick={() => navigate('/admin-dashboard/leads')}>CRM</Button>}>
+          <SectionCard title="Lead Pipeline" action={<Button size="small" onClick={() => go('/admin-dashboard/leads')}>CRM</Button>}>
             <Typography variant="h4" sx={{ mb: 1 }}>{leadPipeline.conversionRate}%</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Conversion rate · {leadPipeline.total} active leads</Typography>
             <Stack direction="row" flexWrap="wrap" gap={0.5}>
@@ -314,7 +327,7 @@ const ExecutiveOperationsDashboard: React.FC = () => {
         </Grid>
 
         <Grid item xs={12} md={4}>
-          <SectionCard title="Duty Roster Summary" action={<Button size="small" onClick={() => navigate('/admin-dashboard/duty-rosters')}>Manage rosters</Button>}>
+          <SectionCard title="Duty Roster Summary" action={<Button size="small" onClick={() => go('/admin-dashboard/duty-rosters')}>Manage rosters</Button>}>
             {rosterSummary.length === 0 ? (
               <Typography color="text.secondary">No shifts scheduled this week.</Typography>
             ) : (

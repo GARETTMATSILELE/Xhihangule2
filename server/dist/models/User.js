@@ -79,12 +79,12 @@ const userSchema = new mongoose_1.Schema({
     },
     role: {
         type: String,
-        enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'],
+        enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'],
         default: 'agent'
     },
     roles: {
         type: [String],
-        enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'],
+        enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'],
         required: false,
         default: undefined
     },
@@ -122,12 +122,12 @@ const userSchema = new mongoose_1.Schema({
         lastName: { type: String, required: false },
         role: {
             type: String,
-            enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'],
+            enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'],
             required: false
         },
         roles: {
             type: [String],
-            enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'],
+            enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'],
             required: false
         }
     },

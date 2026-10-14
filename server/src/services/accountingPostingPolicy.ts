@@ -58,10 +58,15 @@ export function isProvisionalPayment(payment: any): boolean {
   return payment?.isProvisional === true;
 }
 
+/**
+ * Deposit-only means there is a deposit and no rental/sale cash (`amount`).
+ * `amount` is the rent (or sale) portion, not the receipt total.
+ * Combined payments (amount > 0 and depositAmount > 0) are not deposit-only.
+ */
 export function isDepositOnlyPayment(payment: any): boolean {
   const deposit = Number(payment?.depositAmount || 0);
   const amount = Number(payment?.amount || 0);
-  return deposit > 0 && amount <= deposit;
+  return deposit > 0 && amount <= 0;
 }
 
 /**

@@ -8,6 +8,7 @@ import { Company } from '../models/Company';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
+import { propertyIdsForCaller } from '../utils/propertyAccess';
 import {
   asId,
   classifyPropertyCategory,
@@ -35,9 +36,10 @@ function userRoles(req: Request): string[] {
 }
 
 function reportScopeForUser(req: Request, explicit?: 'agent' | 'company'): 'agent' | 'company' {
+  const wide = userRoles(req).some((role) => COMPANY_WIDE_REPORT_ROLES.includes(role));
+  if (!wide) return 'agent';
   if (explicit === 'company') return 'company';
-  if (userRoles(req).some((role) => COMPANY_WIDE_REPORT_ROLES.includes(role))) return 'company';
-  return explicit || 'agent';
+  return 'company';
 }
 
 function parseIdList(value: unknown): string[] {
@@ -67,9 +69,13 @@ async function sendPropertyDetailsReport(req: Request, res: Response, scope: 'ag
       ...activePropertyVisibilityFilter,
     };
     if (scope === 'agent') {
-      query.ownerId = new mongoose.Types.ObjectId(req.user.userId);
-    }
-    if (requestedIds.length) {
+      const visible = await propertyIdsForCaller(req);
+      const allowed = visible === 'company' ? null : visible.map((id) => String(id));
+      const chosen = requestedIds.length
+        ? requestedIds.filter((id) => !allowed || allowed.includes(id))
+        : allowed;
+      query._id = { $in: (chosen || []).map((id) => new mongoose.Types.ObjectId(id)) };
+    } else if (requestedIds.length) {
       query._id = { $in: requestedIds.map((id) => new mongoose.Types.ObjectId(id)) };
     }
 

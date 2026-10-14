@@ -7,6 +7,7 @@ import PropertyAccount, { IPropertyAccount } from '../../models/PropertyAccount'
 import { Payment } from '../../models/Payment';
 import { Property } from '../../models/Property';
 import { PropertyOwner } from '../../models/PropertyOwner';
+import { SalesOwner } from '../../models/SalesOwner';
 import { Tenant } from '../../models/Tenant';
 import { CanonicalLedgerEntry, LedgerQuery } from '../ledger';
 import { resolveStatementRentAmount } from '../statementRent';
@@ -16,6 +17,7 @@ export interface OwnerReadModel {
   displayName: string;
   email?: string;
   phone?: string;
+  unresolvedReason?: string;
 }
 
 export interface PropertyReadModel {
@@ -28,11 +30,11 @@ export interface PropertyReadModel {
 }
 
 export interface OwnerReadService {
-  getOwnerForProperty(companyId: string, propertyId: string): Promise<OwnerReadModel | undefined>;
+  getOwnerForProperty(companyId: string, propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<OwnerReadModel | undefined>;
 }
 
 export interface PropertyReadService {
-  getProperty(companyId: string, propertyId: string): Promise<PropertyReadModel | undefined>;
+  getProperty(companyId: string, propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<PropertyReadModel | undefined>;
 }
 
 export interface LedgerReadService {
@@ -228,44 +230,156 @@ const propertyAccountToLedgerEntries = (
   return entries;
 };
 
+const OWNER_NAME_FIELDS = '_id firstName lastName email phone properties companyId';
+
+const placeholderOwnerName = (value?: string): boolean => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return !normalized || normalized === 'unknown' || normalized === 'unknown owner' || normalized === 'owner not assigned' || normalized === 'n/a';
+};
+
+type RegisteredOwner = {
+  _id?: unknown;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+};
+
+const ownerDisplayName = (owner?: { firstName?: string; lastName?: string } | null): string => {
+  if (!owner) return '';
+  return `${owner.firstName || ''} ${owner.lastName || ''}`.replace(/\s+/g, ' ').trim();
+};
+
+const samePropertyReference = (value: unknown, propertyId: string, propertyObjectId: mongoose.Types.ObjectId): boolean => {
+  if (!value) return false;
+  if (value instanceof mongoose.Types.ObjectId) return value.equals(propertyObjectId);
+  if (typeof value === 'string') return value === propertyId || value === String(propertyObjectId);
+  if (typeof value === 'object') {
+    const record = value as { $oid?: unknown; _id?: unknown; id?: unknown };
+    return samePropertyReference(record.$oid || record._id || record.id, propertyId, propertyObjectId);
+  }
+  return false;
+};
+
 export class PropertyAccountReportingReadService implements OwnerReadService, PropertyReadService, LedgerReadService {
-  async getOwnerForProperty(companyId: string, propertyId: string): Promise<OwnerReadModel | undefined> {
-    const [account, property] = await Promise.all([
-      this.getAccount(companyId, propertyId),
-      this.getPropertyDocument(companyId, propertyId)
-    ]);
-    const ownerId = toId(account?.ownerId) || toId((property as any)?.ownerId) || toId((property as any)?.propertyOwnerId);
-    const owner = ownerId && mongoose.isValidObjectId(ownerId)
-      ? await PropertyOwner.findById(ownerId).select('_id firstName lastName email phone').lean()
-      : await PropertyOwner.findOne({ companyId, properties: { $in: [propertyId] } }).select('_id firstName lastName email phone').lean();
+  async getOwnerForProperty(
+    companyId: string,
+    propertyId: string,
+    ledgerType?: 'rental' | 'sale'
+  ): Promise<OwnerReadModel | undefined> {
+    if (!mongoose.isValidObjectId(companyId) || !mongoose.isValidObjectId(propertyId)) return undefined;
+    const property = await this.getPropertyDocument(companyId, propertyId);
+    if (!property) return undefined;
+
+    const owner = await this.findRegisteredOwner(companyId, propertyId, property, ledgerType);
+    const resolvedName = ownerDisplayName(owner);
+    if (owner && resolvedName) {
+      return {
+        id: toId((owner as any)._id),
+        displayName: resolvedName,
+        email: (owner as any).email,
+        phone: (owner as any).phone
+      };
+    }
+
+    const storedName = await this.storedAccountOwnerName(propertyId);
+    if (storedName) return { displayName: storedName };
+
+    const linkedOwnerId = toId((property as any).propertyOwnerId);
     return {
-      id: owner ? toId((owner as any)._id) : ownerId,
-      displayName: account?.ownerName
-        || (owner ? `${(owner as any).firstName || ''} ${(owner as any).lastName || ''}`.trim() : '')
-        || 'Unknown Owner',
-      email: (owner as any)?.email,
-      phone: (owner as any)?.phone
+      displayName: 'Owner not assigned',
+      unresolvedReason: linkedOwnerId
+        ? 'The property owner link does not match a landlord in this company.'
+        : 'No landlord is assigned to this property.'
     };
   }
 
-  async getProperty(companyId: string, propertyId: string): Promise<PropertyReadModel | undefined> {
+  private async findRegisteredOwner(
+    companyId: string,
+    propertyId: string,
+    property: { propertyOwnerId?: unknown },
+    ledgerType?: 'rental' | 'sale'
+  ): Promise<RegisteredOwner | null> {
+    const companyObjectId = new mongoose.Types.ObjectId(companyId);
+    const propertyObjectId = new mongoose.Types.ObjectId(propertyId);
+    const linkedOwnerId = toId(property.propertyOwnerId);
+
+    if (ledgerType === 'sale') {
+      const salesMember = await this.ownerByMembership(SalesOwner, companyObjectId, propertyId, propertyObjectId);
+      if (salesMember) return salesMember;
+    }
+
+    const propertyMember = await this.ownerByMembership(PropertyOwner, companyObjectId, propertyId, propertyObjectId);
+    if (propertyMember) return propertyMember;
+
+    const linkedLandlord = await this.ownerByCompanyId(PropertyOwner, companyObjectId, linkedOwnerId);
+    if (linkedLandlord) return linkedLandlord;
+
+    if (ledgerType === 'sale') {
+      return this.ownerByCompanyId(SalesOwner, companyObjectId, linkedOwnerId);
+    }
+    return null;
+  }
+
+  private async ownerByMembership(
+    model: mongoose.Model<any>,
+    companyId: mongoose.Types.ObjectId,
+    propertyId: string,
+    propertyObjectId: mongoose.Types.ObjectId
+  ): Promise<RegisteredOwner | null> {
+    const owners = await model.find({ companyId }).select(OWNER_NAME_FIELDS).lean();
+    const member = (owners as RegisteredOwner[]).find((owner: any) =>
+      Array.isArray(owner.properties) && owner.properties.some((value: unknown) => samePropertyReference(value, propertyId, propertyObjectId))
+    );
+    return member || null;
+  }
+
+  private async ownerByCompanyId(
+    model: mongoose.Model<any>,
+    companyId: mongoose.Types.ObjectId,
+    ownerId?: string
+  ): Promise<RegisteredOwner | null> {
+    if (!ownerId || !mongoose.isValidObjectId(ownerId)) return null;
+    return model.findOne({ _id: ownerId, companyId }).select(OWNER_NAME_FIELDS).lean<RegisteredOwner | null>();
+  }
+
+  private async storedAccountOwnerName(propertyId: string): Promise<string> {
+    const accounts = await PropertyAccount.find({
+      propertyId: new mongoose.Types.ObjectId(propertyId),
+      isArchived: { $ne: true },
+      isActive: { $ne: false }
+    }).select('ownerName').lean();
+    for (const account of accounts) {
+      const name = String((account as any).ownerName || '').trim();
+      if (!placeholderOwnerName(name)) return name;
+    }
+    return '';
+  }
+
+  async getProperty(companyId: string, propertyId: string, ledgerType?: 'rental' | 'sale'): Promise<PropertyReadModel | undefined> {
     const [account, property] = await Promise.all([
-      this.getAccount(companyId, propertyId),
+      this.getAccount(companyId, propertyId, ledgerType),
       this.getPropertyDocument(companyId, propertyId)
     ]);
     if (!account && !property) return undefined;
+    const resolvedLedger = ledgerType || account?.ledgerType;
     return {
       id: propertyId,
       name: account?.propertyName || (property as any)?.name || 'Property',
       address: account?.propertyAddress || (property as any)?.address,
-      ledgerType: account?.ledgerType || ((property as any)?.rentalType === 'sale' ? 'sale' : 'rental'),
+      ledgerType: resolvedLedger,
       ownerId: toId(account?.ownerId) || toId((property as any)?.ownerId) || toId((property as any)?.propertyOwnerId),
       ownerName: account?.ownerName
     };
   }
 
   async getLedgerEntries(query: LedgerQuery): Promise<CanonicalLedgerEntry[]> {
-    const account = query.propertyId ? await this.getAccount(query.companyId, query.propertyId) : undefined;
+    if (query.propertyId && query.ledgerType !== 'rental' && query.ledgerType !== 'sale') {
+      return [];
+    }
+    const account = query.propertyId
+      ? await this.getAccount(query.companyId, query.propertyId, query.ledgerType)
+      : undefined;
     if (!account) return [];
     const companyContext = await new CompanyReportingReadService().getCompanyContext(query.companyId);
     const entries = propertyAccountToLedgerEntries(account, {
@@ -279,13 +393,19 @@ export class PropertyAccountReportingReadService implements OwnerReadService, Pr
     return entries.filter((entry) => allowed.has(entry.eventType.toUpperCase()));
   }
 
-  private async getAccount(companyId: string, propertyId: string): Promise<IPropertyAccount | undefined> {
+  private async getAccount(
+    companyId: string,
+    propertyId: string,
+    ledgerType?: 'rental' | 'sale'
+  ): Promise<IPropertyAccount | undefined> {
     if (!mongoose.isValidObjectId(propertyId)) return undefined;
+    if (ledgerType !== 'rental' && ledgerType !== 'sale') return undefined;
     const account = await PropertyAccount.findOne({
       propertyId: new mongoose.Types.ObjectId(propertyId),
+      ledgerType,
       isArchived: { $ne: true },
       isActive: { $ne: false }
-    }).sort({ updatedAt: -1 });
+    });
     return account || undefined;
   }
 
@@ -372,7 +492,11 @@ class PaymentReportingReadService implements PaymentReadService {
         vatOnCommission: Number(cd.vatOnCommission ?? cd.vatAmount ?? 0),
         vatRate: Number.isFinite(Number(vatRate)) ? Number(vatRate) : undefined,
         vatTreatment: vatTreatment === 'inclusive' || vatTreatment === 'exclusive' ? vatTreatment : undefined,
-        ownerPayable: Number(cd.ownerAmount != null ? Number(cd.ownerAmount) - levy : 0),
+        ownerPayable: Number(
+          cd.paymentAllocation?.ownerPayable != null
+            ? cd.paymentAllocation.ownerPayable
+            : (cd.ownerAmount != null ? Number(cd.ownerAmount) - levy : 0)
+        ),
         rentalPeriodMonth: Number.isFinite(Number(row.rentalPeriodMonth)) ? Number(row.rentalPeriodMonth) : undefined,
         rentalPeriodYear: Number.isFinite(Number(row.rentalPeriodYear)) ? Number(row.rentalPeriodYear) : undefined,
         advanceMonthsPaid: Number.isFinite(Number(row.advanceMonthsPaid)) ? Number(row.advanceMonthsPaid) : undefined,

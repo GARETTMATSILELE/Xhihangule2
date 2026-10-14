@@ -30,7 +30,8 @@ const toDateLabel = (value?: string): string => {
 const readableType = (rawType: string): string => {
   const map: Record<string, string> = {
     BUYER_PAYMENT: 'Buyer Payment',
-    CGT_DEDUCTION: 'CGT Deduction',
+    CGT_DEDUCTION: 'LEGACY CGT DEDUCTION',
+    CGWT_DEDUCTION: 'Capital Gains Withholding Tax',
     COMMISSION_DEDUCTION: 'Commission Deduction',
     VAT_DEDUCTION: 'VAT Deduction',
     VAT_ON_COMMISSION: 'VAT on Commission',
@@ -48,6 +49,7 @@ const SellerSettlementPanel: React.FC<{ settlement?: Settlement | null; ledgerRo
       [
         'BUYER_PAYMENT',
         'CGT_DEDUCTION',
+        'CGWT_DEDUCTION',
         'COMMISSION_DEDUCTION',
         'VAT_DEDUCTION',
         'VAT_ON_COMMISSION',

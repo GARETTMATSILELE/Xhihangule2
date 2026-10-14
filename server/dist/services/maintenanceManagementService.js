@@ -224,11 +224,7 @@ function createWorkOrder(input) {
 }
 function assignContractor(input) {
     return __awaiter(this, void 0, void 0, function* () {
-        const contractor = yield MaintenanceContractor_1.MaintenanceContractor.findOne({
-            _id: input.contractorId,
-            companyId: input.companyId,
-            active: true,
-        });
+        const contractor = yield MaintenanceContractor_1.MaintenanceContractor.findOne(Object.assign(Object.assign({ _id: input.contractorId }, (0, MaintenanceContractor_1.contractorDirectoryFilter)(input.companyId)), { active: true }));
         if (!contractor)
             throw new errorHandler_1.AppError('Contractor not found or inactive', 404);
         const request = yield MaintenanceRequest_1.MaintenanceRequest.findOne({

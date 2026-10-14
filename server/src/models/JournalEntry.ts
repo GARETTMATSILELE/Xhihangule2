@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
-export type JournalSourceModule = 'payment' | 'expense' | 'sale' | 'commission' | 'manual';
+export type JournalSourceModule = 'payment' | 'expense' | 'sale' | 'commission' | 'manual' | 'tax' | 'trust';
 
 export interface IJournalEntry extends Document {
   companyId: Types.ObjectId;
@@ -22,7 +22,7 @@ const JournalEntrySchema = new Schema<IJournalEntry>(
     description: { type: String, required: false },
     sourceModule: {
       type: String,
-      enum: ['payment', 'expense', 'sale', 'commission', 'manual'],
+      enum: ['payment', 'expense', 'sale', 'commission', 'manual', 'tax', 'trust'],
       required: true
     },
     sourceId: { type: String, required: false },
@@ -53,6 +53,15 @@ JournalEntrySchema.pre('deleteMany', { document: false, query: true }, function(
 });
 JournalEntrySchema.pre('findOneAndDelete', function(next) {
   next(new Error('Hard delete is disabled for journal entries.'));
+});
+JournalEntrySchema.pre('findOneAndUpdate', function(next) {
+  next(new Error('Journal entries are immutable after posting.'));
+});
+JournalEntrySchema.pre('updateOne', { document: false, query: true }, function(next) {
+  next(new Error('Journal entries are immutable after posting.'));
+});
+JournalEntrySchema.pre('updateMany', { document: false, query: true }, function(next) {
+  next(new Error('Journal entries are immutable after posting.'));
 });
 
 export const JournalEntry = mongoose.model<IJournalEntry>(

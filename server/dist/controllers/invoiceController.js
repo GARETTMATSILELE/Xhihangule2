@@ -30,6 +30,7 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const database_1 = require("../config/database");
 const fiscalizationService_1 = require("../services/fiscalizationService");
 const money_1 = require("../utils/money");
+const taxRateService_1 = require("../services/taxRateService");
 // Function to generate unique item code
 const generateItemCode = () => __awaiter(void 0, void 0, void 0, function* () {
     const timestamp = Date.now().toString(36);
@@ -64,7 +65,14 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
-        const _d = req.body, { items, discount = 0, taxPercentage = 15, client, currency = 'USD', fiscalize = true } = _d, otherData = __rest(_d, ["items", "discount", "taxPercentage", "client", "currency", "fiscalize"]);
+        const _d = req.body, { items, discount = 0, client, currency = 'USD', fiscalize = true } = _d, otherData = __rest(_d, ["items", "discount", "client", "currency", "fiscalize"]);
+        delete otherData.taxPercentage;
+        const invoiceDate = new Date();
+        const centralVat = yield (0, taxRateService_1.getVatRateForDate)(req.user.companyId, invoiceDate);
+        if (centralVat.source === 'none' || !(centralVat.percent > 0)) {
+            throw new errorHandler_1.AppError('No centrally managed VAT rate applies on the invoice date. The invoice was not saved.', 400);
+        }
+        const taxPercentage = centralVat.percent;
         // Validate client details
         const validatedClient = validateClientDetails(client);
         // Generate codes for items if not provided
@@ -73,14 +81,18 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             const quantity = Number((_a = item.quantity) !== null && _a !== void 0 ? _a : 1) || 1;
             const unitPrice = Number((_c = (_b = item.unitPrice) !== null && _b !== void 0 ? _b : item.netPrice) !== null && _c !== void 0 ? _c : 0) || 0;
             const netPrice = Number((_d = item.netPrice) !== null && _d !== void 0 ? _d : (quantity * unitPrice));
-            return (Object.assign(Object.assign({}, item), { quantity,
+            const exempt = (item === null || item === void 0 ? void 0 : item.taxable) === false;
+            const itemFields = Object.assign({}, item);
+            delete itemFields.taxable;
+            delete itemFields.taxPercentage;
+            return (Object.assign(Object.assign({}, itemFields), { quantity,
                 unitPrice,
-                netPrice, code: item.code || (yield generateItemCode()), taxPercentage: item.taxPercentage || taxPercentage }));
+                netPrice, code: item.code || (yield generateItemCode()), taxPercentage: exempt ? 0 : taxPercentage }));
         })));
         // Calculate tax breakdown
         const breakdown = (0, money_1.calculateTaxBreakdown)(processedItems, discount, taxPercentage);
         const invoiceData = Object.assign(Object.assign(Object.assign(Object.assign({}, otherData), { client: validatedClient, currency, items: processedItems, discount,
-            taxPercentage }), breakdown), { fiscalize: fiscalize !== false, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+            taxPercentage, vatJurisdiction: centralVat.jurisdiction, vatRuleId: centralVat.taxRateId, vatTaxPoint: invoiceDate }), breakdown), { fiscalize: fiscalize !== false, companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
         const invoice = new Invoice_1.Invoice(invoiceData);
         // Try to fiscalize only when requested; fail-open on device/service errors.
         if (invoice.fiscalize) {
@@ -95,6 +107,10 @@ const createInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 });
                 if (fiscal) {
                     invoice.fiscalData = fiscal;
+                    invoice.fiscalisationStatus = fiscal.status || 'NOT_FISCALISED';
+                }
+                else {
+                    invoice.fiscalisationStatus = 'NOT_FISCALISED';
                 }
             }
             catch (_e) { }

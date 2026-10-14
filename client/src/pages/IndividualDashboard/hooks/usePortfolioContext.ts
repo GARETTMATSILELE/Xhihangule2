@@ -4,6 +4,8 @@ import { apiService } from '../../../api';
 import { inspectionService } from '../../../services/inspectionService';
 import individualWorkspaceService from '../../../services/individualWorkspaceService';
 import { billCategories } from '../constants';
+import { DEMO_EXPENSES, DEMO_INSPECTIONS, DEMO_LEASES, DEMO_MAINTENANCE, DEMO_TENANTS } from '../../../demo/demoData';
+import { isDemoMode } from '../../../demo/demoMode';
 import { portfolioHealthScore, propertyHealthScore } from '../utils/healthScore';
 import { buildActionItems, buildOwnerBriefChecks } from '../utils/actionCenter';
 import {
@@ -36,6 +38,16 @@ export function usePortfolioContext() {
   const reloadAux = useCallback(async () => {
     try {
       setAuxLoading(true);
+      if (isDemoMode()) {
+        setLeases(DEMO_LEASES);
+        setTenants(DEMO_TENANTS);
+        setMaintenance(DEMO_MAINTENANCE);
+        setInspections(DEMO_INSPECTIONS);
+        setBills(DEMO_EXPENSES.filter((e) =>
+          billCategories.includes(e.category as any) || ['Municipal', 'Levies', 'Insurance', 'Utilities'].includes(String(e.category))
+        ));
+        return;
+      }
       const [leaseRes, tenantRes, maintRes, inspRes, expenseRows] = await Promise.all([
         api.get('/leases').catch(() => ({ data: [] })),
         api.get('/tenants', { params: { page: 1, limit: 10000 } }).catch(() => ({ data: [] })),

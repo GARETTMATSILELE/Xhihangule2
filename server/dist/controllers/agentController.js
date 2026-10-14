@@ -54,12 +54,36 @@ const LevyPayment_1 = require("../models/LevyPayment");
 const File_1 = __importDefault(require("../models/File"));
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const User_1 = require("../models/User");
-const Company_1 = require("../models/Company");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const agentPaymentNotificationService_1 = require("../services/agentPaymentNotificationService");
 const inspectionAutomationService_1 = require("../services/inspectionAutomationService");
 const propertyCommissionCalculator_1 = require("../services/propertyCommissionCalculator");
+const commissionService_1 = require("../services/commissionService");
+const vatPolicyService_1 = require("../services/vatPolicyService");
+const taxObligationService_1 = require("../services/taxObligationService");
+const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
+const paymentFinancialImmutability_1 = require("../services/paymentFinancialImmutability");
+const introductionCommissionService_1 = require("../services/introductionCommissionService");
+const introductionLeaseContext_1 = require("../services/introductionLeaseContext");
+const salePaymentCompleteness_1 = require("../services/salePaymentCompleteness");
+const propertyAccess_1 = require("../utils/propertyAccess");
+const contentDisposition_1 = require("../utils/contentDisposition");
+function visiblePropertyIdList(req) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        return ids === 'company' ? null : ids;
+    });
+}
+function propertiesAreVisible(req, propertyIds) {
+    return __awaiter(this, void 0, void 0, function* () {
+        for (const id of propertyIds) {
+            if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(id))))
+                return false;
+        }
+        return true;
+    });
+}
 const activePropertyVisibilityFilter = {
     isDeleted: { $ne: true },
     propertyOperationalStatus: { $ne: 'Archived' }
@@ -83,11 +107,13 @@ const getAgentProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         // Get only properties where the agent is the owner (ownerId matches the agent's userId)
         const showDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
+        const visibleIds = yield visiblePropertyIdList(req);
         const query = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Only properties owned by this agent
             isDeleted: showDeleted ? true : { $ne: true }
         };
+        if (visibleIds)
+            query._id = { $in: visibleIds };
         if (!showDeleted) {
             query.propertyOperationalStatus = { $ne: 'Archived' };
         }
@@ -136,6 +162,18 @@ const getAgentPropertyOwnerById = (req, res) => __awaiter(void 0, void 0, void 0
         if (!owner) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
+        const visible = yield visiblePropertyIdList(req);
+        if (visible) {
+            const linked = (owner.properties || []).some((id) => visible.some((row) => String(row) === String((id === null || id === void 0 ? void 0 : id._id) || id)));
+            const byField = yield Property_1.Property.exists({
+                _id: { $in: visible },
+                propertyOwnerId: owner._id,
+                companyId: req.user.companyId,
+            });
+            if (!linked && !byField) {
+                return res.status(404).json({ message: 'Property owner not found' });
+            }
+        }
         res.json(owner);
     }
     catch (error) {
@@ -158,7 +196,8 @@ const getAgentTenants = (req, res) => __awaiter(void 0, void 0, void 0, function
             throw new errorHandler_1.AppError('Company ID not found', 400);
         }
         // Fetch properties managed by this agent
-        const ownedProperties = yield Property_1.Property.find(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) }, activePropertyVisibilityFilter))
+        const visibleIds = yield visiblePropertyIdList(req);
+        const ownedProperties = yield Property_1.Property.find(Object.assign(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, (visibleIds ? { _id: { $in: visibleIds } } : {})), activePropertyVisibilityFilter))
             .select('_id')
             .lean();
         const ownedPropertyIds = ownedProperties.map((p) => p._id);
@@ -203,11 +242,10 @@ const getAgentLeases = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found', 400);
         }
-        const activePropertyIds = yield Property_1.Property.find(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId) }, activePropertyVisibilityFilter)).distinct('_id');
-        // Get leases created by this agent (using ownerId)
+        const visibleIds = yield visiblePropertyIdList(req);
+        const activePropertyIds = yield Property_1.Property.find(Object.assign(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, (visibleIds ? { _id: { $in: visibleIds } } : {})), activePropertyVisibilityFilter)).distinct('_id');
         const leases = yield Lease_1.Lease.find({
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Filter by agent who created the lease
             propertyId: { $in: activePropertyIds }
         })
             .populate('propertyId', 'name address')
@@ -237,7 +275,8 @@ const getAgentFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             throw new errorHandler_1.AppError('Company ID not found', 400);
         }
         // Determine properties that belong to this agent within the company
-        const agentPropertyIds = yield Property_1.Property.find(Object.assign({ ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, activePropertyVisibilityFilter)).distinct('_id');
+        const visibleIds = yield visiblePropertyIdList(req);
+        const agentPropertyIds = yield Property_1.Property.find(Object.assign(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, (visibleIds ? { _id: { $in: visibleIds } } : {})), activePropertyVisibilityFilter)).distinct('_id');
         // Fetch files where propertyId is within the agent's properties and scoped to company
         const files = yield File_1.default.find({
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
@@ -285,7 +324,8 @@ const getAgentCommission = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const now = new Date();
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
-        const activePropertyIds = yield Property_1.Property.find(Object.assign({ ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, activePropertyVisibilityFilter)).distinct('_id');
+        const visibleIds = yield visiblePropertyIdList(req);
+        const activePropertyIds = yield Property_1.Property.find(Object.assign(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, (visibleIds ? { _id: { $in: visibleIds } } : {})), activePropertyVisibilityFilter)).distinct('_id');
         // Fetch completed payments for this agent in this company
         const payments = yield Payment_1.Payment.find({
             agentId: new mongoose_1.default.Types.ObjectId(req.user.userId),
@@ -348,7 +388,7 @@ const getAgentCommission = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.getAgentCommission = getAgentCommission;
 // Create a new property for the agent
 const createAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -371,8 +411,14 @@ const createAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (req.body.type && !['apartment', 'house', 'commercial'].includes(req.body.type)) {
             throw new errorHandler_1.AppError('Invalid property type: Must be one of: apartment, house, commercial', 400);
         }
+        if (req.body.agentId) {
+            const assigned = yield User_1.User.findOne({ _id: req.body.agentId, companyId: req.user.companyId }).select('_id');
+            if (!assigned) {
+                throw new errorHandler_1.AppError('Assigned agent was not found in this company', 400);
+            }
+        }
         const vatSettings = (0, propertyCommissionCalculator_1.sanitizePropertyVatSettings)(req.body || {});
-        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), status: req.body.status || 'available', type: req.body.type || 'apartment', description: req.body.description || '', rent: req.body.rent || 0, bedrooms: req.body.bedrooms || 0, bathrooms: req.body.bathrooms || 0, area: req.body.area || 0, images: req.body.images || [], amenities: req.body.amenities || [], createdAt: new Date(), updatedAt: new Date(), rentalType: req.body.rentalType, commission: req.body.commission, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
+        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), agentId: ((_c = req.body) === null || _c === void 0 ? void 0 : _c.agentId) || new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), status: req.body.status || 'available', type: req.body.type || 'apartment', description: req.body.description || '', rent: req.body.rent || 0, bedrooms: req.body.bedrooms || 0, bathrooms: req.body.bathrooms || 0, area: req.body.area || 0, images: req.body.images || [], amenities: req.body.amenities || [], createdAt: new Date(), updatedAt: new Date(), rentalType: req.body.rentalType, commission: req.body.commission, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
         delete propertyData.vatRate;
         delete propertyData.vatPercentOnCommission;
         if (process.env.NODE_ENV !== 'production') {
@@ -427,9 +473,12 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Validate property ownership for single or multiple properties
         if (Array.isArray(propertyIds) && propertyIds.length > 0) {
             const ids = propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(String(id)));
+            const visible = yield visiblePropertyIdList(req);
+            const allowedIds = visible
+                ? ids.filter((id) => visible.some((row) => String(row) === String(id)))
+                : ids;
             const ownedCount = yield Property_1.Property.countDocuments({
-                _id: { $in: ids },
-                ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                _id: { $in: allowedIds },
                 companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
             });
             if (ownedCount !== ids.length) {
@@ -438,7 +487,9 @@ const createAgentTenant = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         else {
             // Ensure the property belongs to this agent (single)
-            const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+            const property = (yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))
+                ? yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) })
+                : null;
             if (!property) {
                 return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
             }
@@ -526,7 +577,9 @@ const createAgentLease = (req, res) => __awaiter(void 0, void 0, void 0, functio
             });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+        const property = (yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))
+            ? yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) })
+            : null;
         if (!property) {
             return res.status(403).json({ message: 'You can only create leases for your own properties.' });
         }
@@ -628,9 +681,11 @@ const updateAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
             return res.status(400).json({ message: 'Invalid property ID format.' });
         }
         // Ensure the property belongs to this agent and company
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
         const existing = yield Property_1.Property.findOne({
             _id: new mongoose_1.default.Types.ObjectId(propertyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             isDeleted: { $ne: true }
         });
@@ -701,9 +756,11 @@ const archiveAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
             return res.status(400).json({ message: 'Invalid property ID format.' });
         }
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
         const property = yield Property_1.Property.findOneAndUpdate({
             _id: new mongoose_1.default.Types.ObjectId(propertyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             isDeleted: { $ne: true }
         }, {
@@ -742,9 +799,11 @@ const deleteAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
             return res.status(400).json({ message: 'Invalid property ID format.' });
         }
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
         const property = yield Property_1.Property.findOneAndUpdate({
             _id: new mongoose_1.default.Types.ObjectId(propertyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             isDeleted: { $ne: true }
         }, {
@@ -783,9 +842,11 @@ const restoreAgentProperty = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
             return res.status(400).json({ message: 'Invalid property ID format.' });
         }
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId, { includeDeleted: true }))) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
         const property = yield Property_1.Property.findOneAndUpdate({
             _id: new mongoose_1.default.Types.ObjectId(propertyId),
-            ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             isDeleted: true
         }, {
@@ -824,7 +885,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (req.user.role !== 'agent') {
             return res.status(403).json({ message: 'Only agents can create payments via this endpoint.' });
         }
-        const { propertyId, tenantId, amount, paymentDate, paymentMethod, status, paymentType, propertyType, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
+        const { propertyId, tenantId, leaseId, amount, paymentDate, paymentMethod, status, paymentType, propertyType, depositAmount, referenceNumber, notes, currency, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         // Accept idempotency key from header or body
         const idempotencyKey = req.headers['idempotency-key'] || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.idempotencyKey) || undefined;
         // Validate required fields (allow deposit-only: amount=0 with depositAmount>0)
@@ -843,7 +904,9 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+        const property = (yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))
+            ? yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) })
+            : null;
         if (!property) {
             return res.status(403).json({ message: 'You can only create payments for your own properties.' });
         }
@@ -962,41 +1025,96 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
             }
         }
         const commissionBaseAmount = combinedAllocation ? combinedAllocation.rentAllocated : numericAmount;
-        // Calculate commission based on property's commission percentage and company-specific splits
+        const levyAllocated = Number((combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated) || 0);
         const commissionPercentage = Number(property.commission || 0);
-        const commissionDetails = yield (yield Promise.resolve().then(() => __importStar(require('../services/commissionService')))).CommissionService.calculate(commissionBaseAmount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
-        if (combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.hasLevy) {
-            commissionDetails.ownerAmount = Number(commissionDetails.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
+        const isAgentRentalPayment = resolvedPaymentType !== 'sale';
+        const propertyVatRequested = Boolean(property === null || property === void 0 ? void 0 : property.vatOnCommission);
+        const isIntroduction = String((property === null || property === void 0 ? void 0 : property.rentalType) || '').toLowerCase() === 'introduction';
+        const commissionVatPolicy = yield (0, vatPolicyService_1.resolveCommissionVatPolicy)({
+            companyId: String(req.user.companyId),
+            paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+            property: {
+                vatOnCommission: propertyVatRequested,
+                vatCommissionTreatment: property === null || property === void 0 ? void 0 : property.vatCommissionTreatment
+            },
+            requestedVatOnCommission: propertyVatRequested,
+            requestedTreatment: property === null || property === void 0 ? void 0 : property.vatCommissionTreatment,
+            commissionType: isIntroduction ? 'introduction' : 'management'
+        });
+        const blockedVatRate = (0, vatPolicyService_1.centralVatRateBlock)(commissionVatPolicy);
+        if (blockedVatRate) {
+            return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+        }
+        const commissionVat = (0, vatPolicyService_1.commissionVatFlagsFromPolicy)(commissionVatPolicy);
+        if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+            yield (0, taxObligationService_1.openReview)({
+                companyId: String(req.user.companyId),
+                kind: commissionVatPolicy.reviewReason,
+                title: 'VAT on commission requires review',
+                detail: commissionVatPolicy.reason,
+                propertyId: String(propertyId)
+            });
+        }
+        let commissionDetails;
+        let agentCommissionResult = null;
+        let resolvedAgentIntroductionLeaseId = leaseId ? String(leaseId) : undefined;
+        if (isAgentRentalPayment) {
+            const isDepositOnly = numericAmount <= 0 && numericDeposit > 0;
+            if (isIntroduction) {
+                const prepared = yield (0, introductionCommissionService_1.prepareIntroductionRentalCommission)({
+                    companyId: req.user.companyId,
+                    propertyId,
+                    tenantId,
+                    leaseId,
+                    rentAllocated: isDepositOnly ? 0 : commissionBaseAmount,
+                    levyAllocated: isDepositOnly ? 0 : levyAllocated,
+                    vatOnCommission: commissionVat.vatOnCommission,
+                    vatTreatment: commissionVat.vatTreatment,
+                    vatRate: commissionVat.vatRate,
+                    paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+                    propertyRent: Number((property === null || property === void 0 ? void 0 : property.rent) || 0)
+                });
+                if (!prepared.ok) {
+                    return res.status(400).json((0, introductionLeaseContext_1.introductionContextErrorResponse)(prepared));
+                }
+                resolvedAgentIntroductionLeaseId = prepared.context.leaseId;
+                agentCommissionResult = prepared.result;
+                commissionDetails = prepared.snapshot;
+            }
+            else {
+                agentCommissionResult = yield commissionService_1.CommissionService.calculateForProperty({
+                    companyId: req.user.companyId,
+                    grossRent: commissionBaseAmount,
+                    levy: 0,
+                    commissionPercentage,
+                    vatOnCommission: commissionVat.vatOnCommission,
+                    vatTreatment: commissionVat.vatTreatment,
+                    vatRate: commissionVat.vatRate,
+                    paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+                });
+                commissionDetails = (0, commissionService_1.applyLevyPassThroughToSnapshot)(agentCommissionResult, commissionBaseAmount, levyAllocated);
+            }
+        }
+        else {
+            commissionDetails = yield commissionService_1.CommissionService.calculate(commissionBaseAmount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+            if (levyAllocated > 0) {
+                commissionDetails.ownerAmount = Number(commissionDetails.ownerAmount || 0) + levyAllocated;
+            }
+            const saleCheck = (0, salePaymentCompleteness_1.validateSalePaymentCompleteness)({
+                amount: commissionBaseAmount,
+                commissionDetails
+            });
+            if (!saleCheck.ok) {
+                return res.status(400).json((0, salePaymentCompleteness_1.salePaymentIncompleteResponse)(saleCheck.missing));
+            }
         }
         // Create payment record
-        const payment = new Payment_1.Payment({
-            paymentType: resolvedPaymentType,
-            propertyType: propertyType || 'residential',
-            propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
-            tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
-            agentId: new mongoose_1.default.Types.ObjectId(req.user.userId), // Set the agent as the agent
-            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            paymentDate,
+        const payment = new Payment_1.Payment(Object.assign(Object.assign({ paymentType: resolvedPaymentType, transactionDomain: resolvedPaymentType === 'sale' ? 'SALE' : 'RENTAL', propertyType: propertyType || 'residential', propertyId: new mongoose_1.default.Types.ObjectId(propertyId), tenantId: new mongoose_1.default.Types.ObjectId(tenantId), leaseId: resolvedAgentIntroductionLeaseId
+                ? new mongoose_1.default.Types.ObjectId(resolvedAgentIntroductionLeaseId)
+                : undefined, agentId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), paymentDate,
             paymentMethod,
-            amount,
-            depositAmount: depositAmount || 0,
-            rentalPeriodMonth,
-            rentalPeriodYear,
-            referenceNumber: '', // Placeholder, will update after save
-            notes: notes || '',
-            processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
-            commissionDetails,
-            status: status || 'completed',
-            currency: currency || 'USD',
-            advanceMonthsPaid: advanceMonthsPaid || 1,
-            advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
-            advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined,
-            rentUsed: (_d = combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentUsed) !== null && _d !== void 0 ? _d : req.body.rentUsed,
-            levyUsed: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyUsed,
-            rentAllocated: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentAllocated,
-            levyAllocated: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated,
-            idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined
-        });
+            amount, depositAmount: depositAmount || 0, rentalPeriodMonth,
+            rentalPeriodYear, referenceNumber: '', notes: notes || '', processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId), commissionDetails, applyVatOnCommission: agentCommissionResult === null || agentCommissionResult === void 0 ? void 0 : agentCommissionResult.vatOnCommission, vatOnCommissionRate: (agentCommissionResult === null || agentCommissionResult === void 0 ? void 0 : agentCommissionResult.vatRate) || 0, vatCommissionTreatment: agentCommissionResult === null || agentCommissionResult === void 0 ? void 0 : agentCommissionResult.vatTreatment, status: status || 'completed' }, (0, paymentAccountingReconciliation_1.initialAccountingIntegrityFields)({ status: status || 'completed' })), { currency: currency || 'USD', advanceMonthsPaid: advanceMonthsPaid || 1, advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined, advancePeriodEnd: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodEnd : undefined, rentUsed: (_d = combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentUsed) !== null && _d !== void 0 ? _d : req.body.rentUsed, levyUsed: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyUsed, rentAllocated: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.rentAllocated, levyAllocated: combinedAllocation === null || combinedAllocation === void 0 ? void 0 : combinedAllocation.levyAllocated, idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined }));
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
@@ -1028,36 +1146,25 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // If depositAmount > 0, record in rentaldeposits (ledger)
         if (payment.depositAmount && payment.depositAmount > 0) {
             try {
-                const { RentalDeposit } = require('../models/rentalDeposit');
-                const deposit = new RentalDeposit({
-                    propertyId: payment.propertyId,
-                    agentId: payment.agentId,
-                    companyId: payment.companyId,
-                    tenantId: payment.tenantId,
-                    depositAmount: payment.depositAmount,
-                    depositDate: payment.paymentDate,
-                    paymentId: payment._id,
-                    type: 'payment',
-                    referenceNumber: payment.referenceNumber,
-                    notes: notes || '',
-                    processedBy: payment.processedBy,
-                    paymentMethod
-                });
-                yield deposit.save();
+                yield (0, paymentAccountingReconciliation_1.ensureDepositLedgerFromPayment)(payment);
             }
             catch (depositErr) {
                 console.error('Failed to record rental deposit for agent payment:', depositErr);
                 // Do not fail the payment creation if deposit ledger write fails
             }
         }
-        const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingOrchestrator')));
-        yield postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
+        const { ensurePaymentAccountingPosted } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingReconciliation')));
+        const postResult = yield ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
         // Notify agent by email with payment details (fire-and-forget)
         void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         res.status(201).json({
             status: 'success',
             data: payment,
-            message: 'Payment processed successfully'
+            message: 'Payment processed successfully',
+            receiptStatus: 'PAYMENT_RECEIVED',
+            accountingComplete: postResult.accountingComplete,
+            accountingStatus: postResult.accountingStatus,
+            accountingState: postResult.accountingComplete ? 'ACCOUNTING_COMPLETE' : 'ACCOUNTING_INCOMPLETE'
         });
     }
     catch (error) {
@@ -1072,7 +1179,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.createAgentPayment = createAgentPayment;
 // Update a payment for the agent
 const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
         if (process.env.NODE_ENV !== 'production') {
             console.log('updateAgentPayment called with:', {
@@ -1120,6 +1227,14 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (!payment) {
             return res.status(404).json({ message: 'Payment not found or you do not have permission to update it.' });
         }
+        try {
+            (0, paymentFinancialImmutability_1.assertCompletedPaymentFinanciallyImmutable)(payment, updateData);
+        }
+        catch (immErr) {
+            return res.status((immErr === null || immErr === void 0 ? void 0 : immErr.statusCode) || 409).json({
+                message: (immErr === null || immErr === void 0 ? void 0 : immErr.message) || paymentFinancialImmutability_1.COMPLETED_PAYMENT_IMMUTABLE_MESSAGE
+            });
+        }
         if (process.env.NODE_ENV !== 'production') {
             console.log('Original payment:', {
                 id: payment._id,
@@ -1127,26 +1242,95 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 propertyType: payment.propertyType
             });
         }
-        // If amount is being updated, recalculate commission using property's commission and company splits
-        if (updateData.amount && updateData.amount !== payment.amount) {
+        // If amount is being updated, recalculate commission from canonical calculators.
+        if (updateData.amount != null && Number(updateData.amount) !== Number(payment.amount)) {
             const linkedProperty = yield Property_1.Property.findById(payment.propertyId);
-            const company = yield Company_1.Company.findById(new mongoose_1.default.Types.ObjectId(req.user.companyId)).lean();
-            const commissionPercentage = Number((linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.commission) || 0);
-            const totalCommission = (updateData.amount * commissionPercentage) / 100;
-            const preaPercentOfTotal = Math.max(0, Math.min(1, (_g = (_f = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _f === void 0 ? void 0 : _f.preaPercentOfTotal) !== null && _g !== void 0 ? _g : 0.03));
-            const agentPercentOfRemaining = Math.max(0, Math.min(1, (_j = (_h = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _h === void 0 ? void 0 : _h.agentPercentOfRemaining) !== null && _j !== void 0 ? _j : 0.6));
-            const agencyPercentOfRemaining = Math.max(0, Math.min(1, (_l = (_k = company === null || company === void 0 ? void 0 : company.commissionConfig) === null || _k === void 0 ? void 0 : _k.agencyPercentOfRemaining) !== null && _l !== void 0 ? _l : 0.4));
-            const preaFee = totalCommission * preaPercentOfTotal;
-            const remainingCommission = totalCommission - preaFee;
-            const agentShare = remainingCommission * agentPercentOfRemaining;
-            const agencyShare = remainingCommission * agencyPercentOfRemaining;
-            updateData.commissionDetails = {
-                totalCommission,
-                preaFee,
-                agentShare,
-                agencyShare,
-                ownerAmount: updateData.amount - totalCommission,
-            };
+            const nextAmount = Number(updateData.amount);
+            const paymentKind = String(payment.paymentType || '').toLowerCase();
+            if (paymentKind === 'sale' || paymentKind === 'sales') {
+                const commissionPercentage = Number((linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.commission) || 0);
+                updateData.commissionDetails = yield commissionService_1.CommissionService.calculate(nextAmount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
+                const saleCheck = (0, salePaymentCompleteness_1.validateSalePaymentCompleteness)({
+                    amount: nextAmount,
+                    commissionDetails: updateData.commissionDetails
+                });
+                if (!saleCheck.ok) {
+                    return res.status(400).json((0, salePaymentCompleteness_1.salePaymentIncompleteResponse)(saleCheck.missing));
+                }
+            }
+            else {
+                const rentAllocated = Number((_g = (_f = updateData.rentAllocated) !== null && _f !== void 0 ? _f : payment.rentAllocated) !== null && _g !== void 0 ? _g : nextAmount);
+                const levyAllocated = Number((_j = (_h = updateData.levyAllocated) !== null && _h !== void 0 ? _h : payment.levyAllocated) !== null && _j !== void 0 ? _j : 0);
+                const isIntroduction = String((linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.rentalType) || '').toLowerCase() === 'introduction';
+                const propertyVatRequested = Boolean(linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.vatOnCommission);
+                const updatePaymentDate = updateData.paymentDate ? new Date(updateData.paymentDate) : payment.paymentDate;
+                const commissionVatPolicy = yield (0, vatPolicyService_1.resolveCommissionVatPolicy)({
+                    companyId: String(req.user.companyId),
+                    paymentDate: updatePaymentDate ? new Date(updatePaymentDate) : new Date(),
+                    property: {
+                        vatOnCommission: propertyVatRequested,
+                        vatCommissionTreatment: linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.vatCommissionTreatment
+                    },
+                    requestedVatOnCommission: propertyVatRequested,
+                    requestedTreatment: linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.vatCommissionTreatment,
+                    commissionType: isIntroduction ? 'introduction' : 'management'
+                });
+                const blockedVatRate = (0, vatPolicyService_1.centralVatRateBlock)(commissionVatPolicy);
+                if (blockedVatRate) {
+                    return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+                }
+                const commissionVat = (0, vatPolicyService_1.commissionVatFlagsFromPolicy)(commissionVatPolicy);
+                if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+                    yield (0, taxObligationService_1.openReview)({
+                        companyId: String(req.user.companyId),
+                        kind: commissionVatPolicy.reviewReason,
+                        title: 'VAT on commission requires review',
+                        detail: commissionVatPolicy.reason,
+                        propertyId: String(payment.propertyId || '')
+                    });
+                }
+                if (isIntroduction) {
+                    const prepared = yield (0, introductionCommissionService_1.prepareIntroductionRentalCommission)({
+                        companyId: req.user.companyId,
+                        propertyId: payment.propertyId,
+                        tenantId: payment.tenantId,
+                        leaseId: updateData.leaseId || payment.leaseId,
+                        rentAllocated,
+                        levyAllocated,
+                        vatOnCommission: commissionVat.vatOnCommission,
+                        vatTreatment: commissionVat.vatTreatment,
+                        vatRate: commissionVat.vatRate,
+                        paymentDate: updatePaymentDate,
+                        excludePaymentId: payment._id,
+                        propertyRent: Number((linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.rent) || 0),
+                        rentUsed: typeof payment.rentUsed === 'number' ? Number(payment.rentUsed) : undefined
+                    });
+                    if (!prepared.ok) {
+                        return res.status(400).json((0, introductionLeaseContext_1.introductionContextErrorResponse)(prepared));
+                    }
+                    updateData.commissionDetails = prepared.snapshot;
+                    updateData.applyVatOnCommission = prepared.result.vatOnCommission;
+                    updateData.vatOnCommissionRate = prepared.result.vatRate || 0;
+                    updateData.vatCommissionTreatment = prepared.result.vatTreatment;
+                    updateData.leaseId = prepared.context.leaseId;
+                }
+                else {
+                    const result = yield commissionService_1.CommissionService.calculateForProperty({
+                        companyId: req.user.companyId,
+                        grossRent: rentAllocated,
+                        levy: 0,
+                        commissionPercentage: Number((linkedProperty === null || linkedProperty === void 0 ? void 0 : linkedProperty.commission) || 0),
+                        vatOnCommission: commissionVat.vatOnCommission,
+                        vatTreatment: commissionVat.vatTreatment,
+                        vatRate: commissionVat.vatRate,
+                        paymentDate: updatePaymentDate
+                    });
+                    updateData.commissionDetails = (0, commissionService_1.applyLevyPassThroughToSnapshot)(result, rentAllocated, levyAllocated);
+                    updateData.applyVatOnCommission = result.vatOnCommission;
+                    updateData.vatOnCommissionRate = result.vatRate || 0;
+                    updateData.vatCommissionTreatment = result.vatTreatment;
+                }
+            }
             if (process.env.NODE_ENV !== 'production') {
                 console.log('Recalculated commission for payment', paymentId);
             }
@@ -1154,8 +1338,8 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (process.env.NODE_ENV !== 'production') {
             console.log('Updating payment', paymentId);
         }
-        // Update the payment
-        const updatedPayment = yield Payment_1.Payment.findByIdAndUpdate(new mongoose_1.default.Types.ObjectId(paymentId), updateData, { new: true });
+        payment.set(updateData);
+        const updatedPayment = yield payment.save();
         if (process.env.NODE_ENV !== 'production') {
             console.log('Payment updated successfully:', updatedPayment ? 'Yes' : 'No');
         }
@@ -1186,7 +1370,8 @@ const getAgentPayments = (req, res) => __awaiter(void 0, void 0, void 0, functio
             return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
         }
         // Find agent's property IDs
-        const agentPropertyIds = yield Property_1.Property.find(Object.assign({ ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, activePropertyVisibilityFilter)).distinct('_id');
+        const visibleIds = yield visiblePropertyIdList(req);
+        const agentPropertyIds = yield Property_1.Property.find(Object.assign(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, (visibleIds ? { _id: { $in: visibleIds } } : {})), activePropertyVisibilityFilter)).distinct('_id');
         // Build base query
         const baseQuery = {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
@@ -1240,7 +1425,8 @@ const getAgentLevyPayments = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
         }
-        const agentPropertyIds = yield Property_1.Property.find(Object.assign({ ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, activePropertyVisibilityFilter)).distinct('_id');
+        const visibleIds = yield visiblePropertyIdList(req);
+        const agentPropertyIds = yield Property_1.Property.find(Object.assign(Object.assign({ companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) }, (visibleIds ? { _id: { $in: visibleIds } } : {})), activePropertyVisibilityFilter)).distinct('_id');
         const levies = yield LevyPayment_1.LevyPayment.find({
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
             propertyId: { $in: agentPropertyIds }
@@ -1280,7 +1466,9 @@ const createAgentFile = (req, res) => __awaiter(void 0, void 0, void 0, function
             });
         }
         // Ensure the property belongs to this agent
-        const property = yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), ownerId: new mongoose_1.default.Types.ObjectId(req.user.userId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) });
+        const property = (yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))
+            ? yield Property_1.Property.findOne({ _id: new mongoose_1.default.Types.ObjectId(propertyId), companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) })
+            : null;
         if (!property) {
             return res.status(403).json({ message: 'You can only upload files for your own properties.' });
         }
@@ -1288,7 +1476,7 @@ const createAgentFile = (req, res) => __awaiter(void 0, void 0, void 0, function
         const file = new File_1.default({
             propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            fileName: req.file.originalname,
+            fileName: (0, contentDisposition_1.safeAttachmentFilename)(req.file.originalname),
             fileType,
             fileUrl: req.file.buffer.toString('base64'),
             uploadedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
@@ -1309,10 +1497,7 @@ const createAgentFile = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
     catch (error) {
         console.error('Error creating agent file:', error);
-        res.status(500).json({
-            message: 'Error uploading file',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        res.status(500).json({ message: 'Error uploading file' });
     }
 });
 exports.createAgentFile = createAgentFile;
@@ -1333,10 +1518,20 @@ const getAgentPropertyOwners = (req, res) => __awaiter(void 0, void 0, void 0, f
                 role: req.user.role
             });
         }
-        // Get property owners for the agent's company
-        const owners = yield PropertyOwner_1.PropertyOwner.find({
-            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
-        }).populate('properties', 'name address');
+        const visible = yield visiblePropertyIdList(req);
+        const ownerQuery = { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId) };
+        if (visible) {
+            const linkedOwnerIds = yield Property_1.Property.find({
+                _id: { $in: visible },
+                companyId: req.user.companyId,
+                propertyOwnerId: { $exists: true },
+            }).distinct('propertyOwnerId');
+            ownerQuery.$or = [
+                { properties: { $in: visible } },
+                { _id: { $in: linkedOwnerIds } },
+            ];
+        }
+        const owners = yield PropertyOwner_1.PropertyOwner.find(ownerQuery).populate('properties', 'name address');
         res.json({ owners });
     }
     catch (error) {
@@ -1372,15 +1567,8 @@ const createAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
         if (existingOwner) {
             return res.status(400).json({ message: 'Property owner with this email already exists' });
         }
-        // Validate that all properties belong to the same company
-        if (propertyIds && propertyIds.length > 0) {
-            const companyProperties = yield Property_1.Property.find({
-                _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
-                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
-            });
-            if (companyProperties.length !== propertyIds.length) {
-                return res.status(403).json({ message: 'All properties must belong to your company.' });
-            }
+        if (propertyIds && propertyIds.length > 0 && !(yield propertiesAreVisible(req, propertyIds))) {
+            return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
         }
         const ownerData = {
             email,
@@ -1447,10 +1635,12 @@ const updateAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
             _id: id,
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         });
-        if (!owner) {
+        if (!owner || !(yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, String(owner._id)))) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
-        // Validate that all properties belong to the same company
+        if (propertyIds && propertyIds.length > 0 && !(yield propertiesAreVisible(req, propertyIds))) {
+            return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
+        }
         if (propertyIds && propertyIds.length > 0) {
             const companyProperties = yield Property_1.Property.find({
                 _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
@@ -1503,7 +1693,7 @@ const deleteAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
             _id: id,
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
         });
-        if (!owner) {
+        if (!owner || !(yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, String(owner._id)))) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
         // Delete the property owner

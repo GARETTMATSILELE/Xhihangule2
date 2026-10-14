@@ -125,6 +125,13 @@ const companySchema = new mongoose_1.Schema({
         type: String,
         trim: true
     },
+    taxProfile: {
+        vatRegistered: { type: Boolean, default: false },
+        vatRegistrationEffectiveDate: { type: Date, required: false },
+        vatRegistrationCancelledAt: { type: Date, required: false },
+        vatCategory: { type: String, trim: true, required: false },
+        fiscalisationEnabled: { type: Boolean, default: false }
+    },
     ownerId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'User',
@@ -150,7 +157,7 @@ const companySchema = new mongoose_1.Schema({
     },
     onboardingStatus: {
         type: String,
-        enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED'],
+        enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED', 'EXPIRED'],
         default: 'ACTIVE',
         index: true
     },
@@ -219,8 +226,7 @@ const companySchema = new mongoose_1.Schema({
         vatPercentOnCommission: {
             type: Number,
             min: 0,
-            max: 1,
-            default: 0.155
+            max: 1
         }
     },
     plan: {
@@ -268,7 +274,15 @@ const companySchema = new mongoose_1.Schema({
         agents: {
             type: Boolean,
             default: true
-        }
+        },
+        tenantPortalEnabled: { type: Boolean, default: false },
+        contractorPortalEnabled: { type: Boolean, default: false },
+        propertyMarketplaceEnabled: { type: Boolean, default: false },
+        maintenanceQuotesEnabled: { type: Boolean, default: false },
+        onlinePaymentsEnabled: { type: Boolean, default: false },
+        multichannelNotificationsEnabled: { type: Boolean, default: false },
+        tenantReferencesEnabled: { type: Boolean, default: false },
+        contractorRatingsEnabled: { type: Boolean, default: false }
     },
     fiscalConfig: {
         enabled: { type: Boolean, default: false },
@@ -315,8 +329,16 @@ companySchema.pre('validate', function (next) {
         this.email = String(this.email).trim().toLowerCase();
         this.normalizedEmail = this.email;
     }
-    this.normalizedRegistrationNumber = normalizeCompanyIdentifier(this.registrationNumber);
-    this.normalizedTinNumber = normalizeCompanyIdentifier(this.tinNumber);
+    const registrationNumber = normalizeCompanyIdentifier(this.registrationNumber);
+    const tinNumber = normalizeCompanyIdentifier(this.tinNumber);
+    // Blank values must not be stored. The unique sparse indexes treat "" as a real key,
+    // so a second landlord with no TIN would be rejected as a duplicate company.
+    if (!registrationNumber)
+        this.registrationNumber = undefined;
+    if (!tinNumber)
+        this.tinNumber = undefined;
+    this.normalizedRegistrationNumber = registrationNumber;
+    this.normalizedTinNumber = tinNumber;
     // Legacy companies may have placeholder or missing legal identifiers. Enforce
     // stricter validation only for new/changed registered-business records.
     const shouldEnforceBusinessFields = this.isNew ||

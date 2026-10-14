@@ -24,7 +24,10 @@ const run = () => {
     assert_1.default.ok(((_a = windowed.paymentDate) === null || _a === void 0 ? void 0 : _a.$gte) instanceof Date, '48h safety net keeps a paymentDate window');
     assert_1.default.ok(!windowed.companyId, 'ledger recon without companyId remains global');
     assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 100, depositAmount: 0 }), false, 'normal completed payment remains eligible');
-    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 50, depositAmount: 50 }), true, 'deposit-only matches recordIncomeFromPayment early exit');
+    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 0, depositAmount: 1000 }), true, 'deposit-only matches recordIncomeFromPayment early exit');
+    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 50, depositAmount: 50 }), false, 'equal rent and deposit is a combined payment, not deposit-only');
+    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 1000, depositAmount: 1000 }), false, 'combined equal rent+deposit remains eligible for owner income');
+    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 500, depositAmount: 1000 }), false, 'rent less than deposit remains eligible for owner income');
     assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 100, reversalOfPaymentId: companyA }), true, 'reversal rows are not selected for income posting');
     assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'failed', amount: 100 }), true, 'non-completed payments are not selected');
     assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 200, depositAmount: 50 }), false, 'old completed payment with deposit portion remains eligible');

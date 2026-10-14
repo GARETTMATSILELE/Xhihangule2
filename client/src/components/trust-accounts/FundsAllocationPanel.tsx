@@ -11,7 +11,8 @@ const FundsAllocationPanel: React.FC<{ allocation?: TrustFundsAllocation | null 
     ['Agency Commission', allocation?.agencyCommission],
     ['VAT Liability', allocation?.vatLiability],
     ['VAT on Commission', allocation?.vatOnCommission],
-    ['CGT Liability', allocation?.cgtLiability],
+    ['Capital Gains Tax (liability — not withheld from trust)', allocation?.cgtLiability],
+    ['Capital Gains Withholding Tax', allocation?.cgwtLiability],
     ['Other Adjustments', allocation?.otherAdjustments],
     ['Remaining Unallocated', allocation?.remainingUnallocated],
     ['Total Trust Balance', allocation?.totalTrustBalance]

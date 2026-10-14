@@ -39,7 +39,7 @@ const collections_1 = require("../config/collections");
 const TaxRecordSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true, immutable: true, index: true },
     trustAccountId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'TrustAccount', required: true, immutable: true, index: true },
-    taxType: { type: String, enum: ['CGT', 'VAT', 'VAT_ON_COMMISSION'], required: true, index: true },
+    taxType: { type: String, enum: ['CGT', 'VAT', 'VAT_ON_COMMISSION', 'CGWT'], required: true, index: true },
     amount: { type: Number, required: true, min: 0 },
     calculationBreakdown: { type: mongoose_1.Schema.Types.Mixed, required: false },
     paidToZimra: { type: Boolean, required: true, default: false, index: true },

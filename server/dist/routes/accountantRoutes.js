@@ -19,6 +19,9 @@ const roles_1 = require("../middleware/roles");
 const agentPropertyReportController_1 = require("../controllers/agentPropertyReportController");
 const accountantController_1 = require("../controllers/accountantController");
 const paymentController_1 = require("../controllers/paymentController");
+const ownerCollectionController_1 = require("../controllers/ownerCollectionController");
+const lettingController_1 = require("../agency/lettingController");
+const paymentAccountingIntegrityController_1 = require("../controllers/paymentAccountingIntegrityController");
 const propertyAccountController_1 = require("../controllers/propertyAccountController");
 const chargeTypeController_1 = require("../controllers/chargeTypeController");
 const companyAccountController_1 = require("../controllers/companyAccountController");
@@ -107,6 +110,12 @@ router.put('/sales-payments/:id', roles_1.canManagePayments, paymentController_1
 // Rental/general payments
 router.post('/payments', roles_1.canManagePayments, paymentController_1.createPaymentAccountant);
 router.get('/payments/:id', roles_1.canManagePayments, paymentController_1.getPaymentDetails);
+router.get('/payments/:id/accounting', roles_1.canManagePayments, paymentController_1.getPaymentAccountingReconciliation);
+router.get('/payments/:id/financial-trace', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.getPaymentFinancialTrace);
+router.get('/trust-visibility', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.getTrustVisibility);
+router.post('/payments/:id/accounting/repair', roles_1.canViewAccountantDashboard, paymentController_1.repairPaymentAccountingExplicit);
+router.get('/accounting-integrity/summary', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.getAccountingIntegritySummary);
+router.get('/accounting-integrity/inconsistencies', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.listAccountingIntegrityInconsistencies);
 router.put('/payments/:id/status', roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
 router.post('/payments/:id/reverse', roles_1.canManagePayments, paymentController_1.reversePayment);
 router.post('/payments/:id/finalize', roles_1.canManagePayments, paymentController_1.finalizeProvisionalPayment);
@@ -174,14 +183,14 @@ router.post('/property-accounts/:propertyId/expense', roles_1.canViewCommissions
 router.post('/property-accounts/:propertyId/payout', roles_1.canViewCommissions, propertyAccountController_1.createOwnerPayout);
 router.put('/property-accounts/:propertyId/payout/:payoutId/status', roles_1.canViewCommissions, propertyAccountController_1.updatePayoutStatus);
 router.get('/property-accounts/:propertyId/payouts', roles_1.canViewCommissions, propertyAccountController_1.getPayoutHistory);
-router.post('/property-accounts/sync', roles_1.canViewCommissions, syncConcurrencyGuard, propertyAccountController_1.syncPropertyAccounts);
+router.post('/property-accounts/sync', roles_1.isAdminOrSystemAdmin, syncConcurrencyGuard, propertyAccountController_1.syncPropertyAccounts);
 router.get('/property-accounts/jobs', roles_1.canViewCommissions, propertyAccountController_1.listPropertyMaintenanceJobs);
 router.get('/property-accounts/jobs/:jobId', roles_1.canViewCommissions, propertyAccountController_1.getPropertyMaintenanceJobStatus);
 // Ensure development ledgers and backfill sales payments into them (idempotent)
-router.post('/property-accounts/developments/ensure-ledgers', roles_1.canViewCommissions, ledgerEnsureConcurrencyGuard, propertyAccountController_1.ensureDevelopmentLedgers);
-// Maintenance: remove duplicate income transactions for a property ledger (idempotent)
+router.post('/property-accounts/developments/ensure-ledgers', roles_1.isAdminOrSystemAdmin, ledgerEnsureConcurrencyGuard, propertyAccountController_1.ensureDevelopmentLedgers);
+// Maintenance: remove duplicate income transactions for a property ledger (confirm+reason required)
 router.post('/property-accounts/:propertyId/reconcile-duplicates', roles_1.canViewCommissions, propertyAccountController_1.reconcilePropertyDuplicates);
-// Maintenance: clean-merge legacy + new ledgers for a specific property, then reconcile
+// Maintenance: merge classifier-approved duplicate ledgers. Does not cancel income rows.
 router.post('/property-accounts/:propertyId/merge-duplicates', roles_1.canViewCommissions, propertyAccountController_1.mergePropertyAccountDuplicatesForProperty);
 router.get('/property-accounts/:propertyId/payout/:payoutId/payment-request', roles_1.canViewCommissions, propertyAccountController_1.getPaymentRequestDocument);
 router.get('/property-accounts/:propertyId/payout/:payoutId/acknowledgement', roles_1.canViewCommissions, propertyAccountController_1.getAcknowledgementDocument);
@@ -234,4 +243,10 @@ router.get('/agents/me/account', (req, res) => __awaiter(void 0, void 0, void 0,
         return res.status(500).json({ message: 'Failed to fetch agent account' });
     }
 }));
+router.get('/letting/work-queue', roles_1.canViewAccountantDashboard, lettingController_1.accountantWorkQueue);
+router.get('/letting/rent-board', roles_1.canViewAccountantDashboard, lettingController_1.rentCollectionBoard);
+router.get('/letting/portfolio', roles_1.canViewAccountantDashboard, lettingController_1.seniorPortfolio);
+router.get('/owner-collections', roles_1.canViewAccountantDashboard, ownerCollectionController_1.listOwnerCollections);
+router.post('/owner-collections', roles_1.canViewAccountantDashboard, ownerCollectionController_1.createOwnerCollection);
+router.post('/owner-collections/:id/advance', roles_1.canViewAccountantDashboard, ownerCollectionController_1.advanceOwnerCollection);
 exports.default = router;

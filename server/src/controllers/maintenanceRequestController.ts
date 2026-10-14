@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { MaintenanceRequest, IMaintenanceRequest, IMaintenanceAttachment } from '../models/MaintenanceRequest';
 import { Property, IProperty } from '../models/Property';
 import { AppError } from '../middleware/errorHandler';
+import { callerCanAccessProperty, hasCompanyWidePropertyAccess, propertyIdsForCaller } from '../utils/propertyAccess';
 import { JwtPayload } from '../types/auth';
 import mongoose from 'mongoose';
 import { logMaintenanceActivity, isValidMaintenanceStatus } from '../services/maintenanceManagementService';
@@ -28,7 +29,7 @@ export const createMaintenanceRequest = async (req: Request, res: Response) => {
 
     // Fetch the property to get ownerId and companyId
     const property = await Property.findOne({ _id: propertyId, companyId });
-    if (!property) {
+    if (!property || !(await callerCanAccessProperty(req, String(propertyId)))) {
       throw new AppError('Property not found', 404);
     }
 
@@ -78,10 +79,14 @@ export const createMaintenanceRequest = async (req: Request, res: Response) => {
 export const getPropertyMaintenanceRequests = async (req: Request, res: Response) => {
   try {
     const userId = (req.user as JwtPayload)?.userId;
+    const companyId = (req.user as JwtPayload)?.companyId;
     const { propertyId } = req.params;
+    if (!companyId || !(await callerCanAccessProperty(req, propertyId))) {
+      throw new AppError('Maintenance request not found', 404);
+    }
     const maintenanceRequests = await MaintenanceRequest.find({
       propertyId,
-      requestedBy: userId
+      companyId,
     })
       .populate('requestedBy', 'firstName lastName email')
       .populate('propertyId', 'name address')
@@ -89,10 +94,9 @@ export const getPropertyMaintenanceRequests = async (req: Request, res: Response
 
     res.json(maintenanceRequests);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Error fetching maintenance requests', 500);
+    const statusCode = error instanceof AppError ? error.statusCode : 500;
+    const message = error instanceof AppError ? error.message : 'Error fetching maintenance requests';
+    return res.status(statusCode).json({ message });
   }
 };
 
@@ -494,25 +498,24 @@ export const getMaintenanceRequests = async (req: Request, res: Response) => {
       query.propertyId = propertyId;
     }
 
-    const elevatedRoles = ['admin', 'agent', 'accountant', 'principal', 'prea'];
-    const canViewCompanyMaintenance = userRole && elevatedRoles.includes(userRole);
+    const companyWide = hasCompanyWidePropertyAccess(req);
 
     // If role is specified as 'owner', filter by properties owned by the user
-    if (role === 'owner') {
-      const properties = await Property.find({ ownerId: userId, companyId });
-      const propertyIds = properties.map((p: IProperty) => p._id);
-      query.propertyId = { $in: propertyIds };
+    if (role === 'owner' || (!companyWide && userRole === 'owner')) {
+      const ids = await propertyIdsForCaller(req);
+      query.propertyId = { $in: ids === 'company' ? [] : ids };
     }
     // If role is specified as 'tenant', filter by maintenance requests created by the user
     else if (role === 'tenant') {
       query.requestedBy = userId;
     }
-    else if (!canViewCompanyMaintenance) {
-      // Non-elevated users can only see records tied directly to them.
-      query.$or = [
-        { requestedBy: userId },
-        { ownerId: userId }
-      ];
+    else if (!companyWide) {
+      const ids = await propertyIdsForCaller(req);
+      const allowed = ids === 'company' ? [] : ids.map((id) => String(id));
+      if (propertyId && !allowed.includes(String(propertyId))) {
+        return res.json([]);
+      }
+      if (!propertyId) query.propertyId = { $in: allowed };
     }
 
     const maintenanceRequests = await MaintenanceRequest.find(query)
@@ -524,9 +527,8 @@ export const getMaintenanceRequests = async (req: Request, res: Response) => {
 
     res.json(maintenanceRequests);
   } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Error fetching maintenance requests', 500);
+    const statusCode = error instanceof AppError ? error.statusCode : 500;
+    const message = error instanceof AppError ? error.message : 'Error fetching maintenance requests';
+    return res.status(statusCode).json({ message });
   }
 }; 

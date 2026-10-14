@@ -77,6 +77,13 @@ export interface MaintenanceContractor {
   notes?: string;
   rating: number;
   active: boolean;
+  skills?: string[];
+  serviceAreas?: string[];
+  availability?: string;
+  description?: string;
+  verificationStatus?: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'SUSPENDED';
+  profileImage?: string;
+  profileImageType?: string;
 }
 
 export interface MaintenanceWorkOrder {

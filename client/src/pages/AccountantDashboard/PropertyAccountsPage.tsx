@@ -182,7 +182,7 @@ const PropertyAccountsPage: React.FC = () => {
 
   const handleAccountClick = (acc: PropertyAccount) => {
     const isSale = normalizeLedgerType(acc.ledgerType) === 'sale';
-    navigate(`/accountant-dashboard/property-accounts/${acc.propertyId}${isSale ? '?ledger=sale' : ''}`);
+    navigate(`/accountant-dashboard/property-accounts/${acc.propertyId}?ledger=${isSale ? 'sale' : 'rental'}`);
   };
 
   const rentalsSorted = useMemo(() => {
@@ -253,21 +253,13 @@ const PropertyAccountsPage: React.FC = () => {
         {visibleAccounts.length === 0 && (
           <Grid item xs={12}>
             <Alert severity="info" sx={{ mb: 2 }}>
-              No property accounts found. If you recently recorded payments, try syncing accounts.
+              No property accounts found. Missing accounting is detected on Accounting Integrity; do not use historical backfill from this page.
             </Alert>
             <Button
               variant="contained"
-              onClick={async () => {
-                try {
-                  setLoading(true);
-                  await propertyAccountService.syncPropertyAccounts();
-                  await loadFirstPage(debouncedSearch);
-                } finally {
-                  setLoading(false);
-                }
-              }}
+              onClick={() => navigate('/accountant-dashboard/accounting-integrity')}
             >
-              Sync Accounts
+              Open Accounting Integrity
             </Button>
           </Grid>
         )}

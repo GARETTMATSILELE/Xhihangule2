@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -116,6 +149,7 @@ function runReportingReconciliationTests() {
         const dto = yield builder.build({
             companyId,
             propertyId,
+            ledgerType: 'rental',
             companyName: 'Mantis Test',
             generatedBy: 'tester',
             period: {
@@ -142,5 +176,17 @@ function runReportingReconciliationTests() {
         assert_1.default.ok(!csv.buffer.toString('utf8').includes('Status'), 'Printed statement CSV should not include a status column.');
         const excel = yield exportEngine.exportOwnerStatement(dto, 'excel');
         assert_1.default.ok(excel.buffer.toString('utf8').includes('Executive Summary'), 'Excel export should contain summary worksheet.');
+        const pdf = yield exportEngine.exportOwnerStatement(dto, 'pdf');
+        const { PDFDocument } = yield Promise.resolve().then(() => __importStar(require('pdf-lib')));
+        const pdfDoc = yield PDFDocument.load(pdf.buffer);
+        const { width, height } = pdfDoc.getPage(0).getSize();
+        assert_1.default.ok(Math.abs(width - 841.89) < 1 && Math.abs(height - 595.28) < 1, `PDF page should be A4 landscape, got ${width} x ${height}`);
+        assert_1.default.ok(pdfDoc.getPageCount() >= 1, 'PDF should contain the statement page.');
+        const longDto = Object.assign(Object.assign({}, dto), { trustLedger: Array.from({ length: 40 }, () => dto.trustLedger).flat() });
+        const longPdf = yield exportEngine.exportOwnerStatement(longDto, 'pdf');
+        const longDoc = yield PDFDocument.load(longPdf.buffer);
+        assert_1.default.ok(longDoc.getPageCount() > 1, `A long statement should continue onto another A4 page, got ${longDoc.getPageCount()}`);
+        const longSize = longDoc.getPage(1).getSize();
+        assert_1.default.ok(Math.abs(longSize.width - 841.89) < 1 && Math.abs(longSize.height - 595.28) < 1, 'Continuation pages should stay A4 landscape.');
     });
 }

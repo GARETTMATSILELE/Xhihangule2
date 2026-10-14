@@ -7,10 +7,12 @@ import { apiService } from '../../api';
 import { useCompany } from '../../contexts/CompanyContext';
 import InvoicePrint from '../../components/InvoicePrint';
 import { calculateInvoiceTotals, formatCurrency } from '../../utils/money';
+import accountingService from '../../services/accountingService';
 
 interface InvoiceItem {
   code?: string;
   description: string;
+  taxable: boolean;
   taxPercentage: number;
   netPrice: number;
   quantity?: number;
@@ -34,7 +36,9 @@ const WrittenInvoicesPage: React.FC = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [invoiceType, setInvoiceType] = useState<'rental' | 'sale'>('rental');
   const [fiscalizeInvoice, setFiscalizeInvoice] = useState(true);
-  const [taxPercentage, setTaxPercentage] = useState(15);
+  const [taxPercentage, setTaxPercentage] = useState<number | null>(null);
+  const [vatEffectiveFrom, setVatEffectiveFrom] = useState<string | null>(null);
+  const [vatRateError, setVatRateError] = useState<string | null>(null);
   const [discount, setDiscount] = useState(0);
   const [selectedBankAccount, setSelectedBankAccount] = useState<string>('');
   const [clientDetails, setClientDetails] = useState<ClientDetails>({
@@ -45,7 +49,7 @@ const WrittenInvoicesPage: React.FC = () => {
     bpNumber: ''
   });
   const [items, setItems] = useState<InvoiceItem[]>([
-    { description: '', taxPercentage: 15, netPrice: 0, quantity: 1, unitPrice: 0 }
+    { description: '', taxable: true, taxPercentage: 0, netPrice: 0, quantity: 1, unitPrice: 0 }
   ]);
   const [invoiceCurrency, setInvoiceCurrency] = useState<'USD'|'ZiG'|'ZAR'>('USD');
   const [form, setForm] = useState({
@@ -57,6 +61,35 @@ const WrittenInvoicesPage: React.FC = () => {
   const [success, setSuccess] = useState(false);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    accountingService.getCurrentVatRate()
+      .then((current) => {
+        if (cancelled) return;
+        if (current?.source === 'none' || !(Number(current?.rate) > 0)) {
+          setTaxPercentage(null);
+          setVatRateError('No centrally managed VAT rate applies today. This invoice cannot be saved.');
+          return;
+        }
+        const rate = Number(current.rate);
+        setTaxPercentage(rate);
+        setVatEffectiveFrom(current.effectiveFrom || null);
+        setVatRateError(null);
+        setItems((currentItems) => currentItems.map((item) => ({
+          ...item,
+          taxable: item.taxable !== false,
+          taxPercentage: item.taxable === false ? 0 : rate
+        })));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTaxPercentage(null);
+          setVatRateError('The central VAT rate could not be loaded. This invoice cannot be saved.');
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const fetchInvoices = async () => {
@@ -93,9 +126,8 @@ const WrittenInvoicesPage: React.FC = () => {
       vatNumber: '',
       bpNumber: ''
     });
-    setItems([{ description: '', taxPercentage: 15, netPrice: 0 }]);
+    setItems([{ description: '', taxable: true, taxPercentage: taxPercentage ?? 0, netPrice: 0, quantity: 1, unitPrice: 0 }]);
     setDiscount(0);
-    setTaxPercentage(15);
     setFiscalizeInvoice(true);
     setSelectedBankAccount('');
     setInvoiceCurrency('USD');
@@ -120,8 +152,14 @@ const WrittenInvoicesPage: React.FC = () => {
     setItems(newItems);
   };
 
+  const setItemTaxable = (index: number, taxable: boolean) => {
+    setItems(items.map((item, itemIndex) => itemIndex === index
+      ? { ...item, taxable, taxPercentage: taxable ? (taxPercentage ?? 0) : 0 }
+      : item));
+  };
+
   const addItem = () => {
-    setItems([...items, { description: '', taxPercentage: taxPercentage, netPrice: 0, quantity: 1, unitPrice: 0 }]);
+    setItems([...items, { description: '', taxable: true, taxPercentage: taxPercentage ?? 0, netPrice: 0, quantity: 1, unitPrice: 0 }]);
   };
 
   const removeItem = (index: number) => {
@@ -131,7 +169,7 @@ const WrittenInvoicesPage: React.FC = () => {
   };
 
   const calculateTotals = () => {
-    return calculateInvoiceTotals(items, discount, taxPercentage);
+    return calculateInvoiceTotals(items, discount, taxPercentage ?? 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -150,6 +188,10 @@ const WrittenInvoicesPage: React.FC = () => {
       }
 
       // Validate items
+      if (taxPercentage == null) {
+        alert(vatRateError || 'No centrally managed VAT rate applies today. This invoice cannot be saved.');
+        return;
+      }
       if (items.some(item => !item.description || (item.unitPrice ?? item.netPrice) <= 0 || (item.quantity ?? 1) <= 0)) {
         alert('Please fill in all item descriptions and ensure quantity and unit price are greater than 0');
         return;
@@ -378,14 +420,14 @@ const WrittenInvoicesPage: React.FC = () => {
                   sx={{ mt: 1 }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
-                  label="Tax Percentage (%)"
-                  type="number"
-                  value={taxPercentage}
-                  onChange={(e) => setTaxPercentage(Number(e.target.value))}
-                  inputProps={{ min: 0, max: 100, step: 0.01 }}
+                  label="Standard VAT rate (%)"
+                  value={taxPercentage == null ? '' : taxPercentage}
+                  InputProps={{ readOnly: true }}
+                  helperText={vatRateError || `Centrally managed by Mantis${vatEffectiveFrom ? `. Effective from ${new Date(vatEffectiveFrom).toLocaleDateString()}` : ''}`}
+                  error={Boolean(vatRateError)}
                 />
               </Grid>
               <Grid item xs={12} md={3}>
@@ -560,8 +602,11 @@ const WrittenInvoicesPage: React.FC = () => {
             )}
 
             {/* Items Section */}
-            <Typography variant="h6" sx={{ mb: 2, color: '#1976d2' }}>
+            <Typography variant="h6" sx={{ mb: 0.5, color: '#1976d2' }}>
               Invoice Items
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Switch VAT off for non-taxable lines, such as a deposit. Taxable lines use the central rate.
             </Typography>
             <TableContainer component={Paper} sx={{ mb: 2 }}>
               <Table size="small">
@@ -570,7 +615,7 @@ const WrittenInvoicesPage: React.FC = () => {
                     <TableCell>Description</TableCell>
                     <TableCell align="center">Qty</TableCell>
                     <TableCell align="right">Unit Price</TableCell>
-                    <TableCell align="center">Tax %</TableCell>
+                    <TableCell align="center">VAT</TableCell>
                     <TableCell align="right">Line Total</TableCell>
                     <TableCell align="center">Actions</TableCell>
                   </TableRow>
@@ -608,13 +653,17 @@ const WrittenInvoicesPage: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell align="center">
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={item.taxPercentage}
-                          onChange={(e) => handleItemChange(index, 'taxPercentage', Number(e.target.value))}
-                          inputProps={{ min: 0, max: 100, step: 0.01 }}
-                          sx={{ width: 80 }}
+                        <FormControlLabel
+                          sx={{ m: 0 }}
+                          control={
+                            <Switch
+                              size="small"
+                              checked={item.taxable && taxPercentage != null}
+                              onChange={(e) => setItemTaxable(index, e.target.checked)}
+                              disabled={taxPercentage == null}
+                            />
+                          }
+                          label={taxPercentage == null ? '—' : (item.taxable ? `${taxPercentage}%` : 'Exempt')}
                         />
                       </TableCell>
                       <TableCell align="right">
@@ -690,11 +739,11 @@ const WrittenInvoicesPage: React.FC = () => {
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2">VAT ({taxPercentage}%):</Typography>
+                  <Typography variant="body2">VAT ({taxPercentage == null ? '—' : (items.some((item) => !item.taxable) ? `${taxPercentage}% on taxable lines` : `${taxPercentage}%`)}):</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                    {formatCurrency(totals.taxAmount, invoiceCurrency)}
+                    {taxPercentage == null ? '—' : formatCurrency(totals.taxAmount, invoiceCurrency)}
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -702,7 +751,7 @@ const WrittenInvoicesPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-                    {formatCurrency(totals.totalAmount, invoiceCurrency)}
+                    {taxPercentage == null ? '—' : formatCurrency(totals.totalAmount, invoiceCurrency)}
                   </Typography>
                 </Grid>
               </Grid>
@@ -723,7 +772,7 @@ const WrittenInvoicesPage: React.FC = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={handleClose}>Cancel</Button>
-            <Button type="submit" variant="contained" color="primary" disabled={loading}>
+            <Button type="submit" variant="contained" color="primary" disabled={loading || taxPercentage == null}>
               {loading ? 'Saving...' : 'Create Tax Invoice'}
             </Button>
           </DialogActions>

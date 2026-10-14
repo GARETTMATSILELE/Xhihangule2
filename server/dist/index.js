@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const compression_1 = __importDefault(require("compression"));
 const cors_1 = __importDefault(require("cors"));
+const corsOrigins_1 = require("./config/corsOrigins");
 const dotenv_1 = __importDefault(require("dotenv"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const helmet_1 = __importDefault(require("helmet"));
@@ -96,6 +97,7 @@ const individualRoutes_1 = __importDefault(require("./routes/individualRoutes"))
 const diagnosticsRoutes_1 = __importDefault(require("./routes/diagnosticsRoutes"));
 const accountingRoutes_1 = __importDefault(require("./routes/accountingRoutes"));
 const trustAccountRoutes_1 = __importDefault(require("./routes/trustAccountRoutes"));
+const routes_1 = __importDefault(require("./ecosystem/routes"));
 const webhookRoutes_1 = __importDefault(require("./routes/webhookRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const api_1 = __importDefault(require("./reporting/api"));
@@ -107,13 +109,12 @@ const startSyncServices_1 = require("./scripts/startSyncServices");
 const reportRoutes_1 = __importDefault(require("./routes/reportRoutes"));
 const publicReportRoutes_1 = __importDefault(require("./routes/publicReportRoutes"));
 const propertyAccountService_1 = require("./services/propertyAccountService");
-const SystemSetting_1 = __importDefault(require("./models/SystemSetting"));
-const propertyAccountService_2 = require("./services/propertyAccountService");
 const systemAdminRoutes_1 = __importDefault(require("./routes/systemAdminRoutes"));
 const trustEventListener_1 = require("./services/trustEventListener");
 const trustReconciliationJob_1 = require("./jobs/trustReconciliationJob");
 // Removed legacy bootstrap imports
-const User_1 = require("./models/User");
+const systemAdminBootstrap_1 = require("./services/systemAdminBootstrap");
+const productionConfig_1 = require("./config/productionConfig");
 const emailService_1 = require("./services/emailService");
 const requestSecurity_1 = require("./utils/requestSecurity");
 const runtimeRole_1 = require("./config/runtimeRole");
@@ -201,19 +202,11 @@ app.set('trust proxy', 1);
     }
 }))().catch(() => { });
 // Fail fast on missing critical environment in production
-if (process.env.NODE_ENV === 'production') {
-    const missing = [];
-    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)
-        missing.push('JWT_SECRET (min 32 chars)');
-    if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET.length < 32)
-        missing.push('JWT_REFRESH_SECRET (min 32 chars)');
-    if (!process.env.MONGODB_URI)
-        missing.push('MONGODB_URI');
-    if (missing.length > 0) {
-        // eslint-disable-next-line no-console
-        console.error(`Missing required environment variables in production: ${missing.join(', ')}`);
-        process.exit(1);
-    }
+const productionConfigProblems = (0, productionConfig_1.productionStartupProblems)(process.env);
+if (productionConfigProblems.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(`Missing required environment variables in production: ${productionConfigProblems.join(', ')}`);
+    process.exit(1);
 }
 // Optional canonical host redirect (configure via env to enable)
 const CANONICAL_HOST = process.env.CANONICAL_HOST;
@@ -236,19 +229,7 @@ if (CANONICAL_HOST && REDIRECT_FROM_HOSTS.length > 0) {
     });
 }
 // Middleware
-const allowedOriginsFromEnv = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-const allowedOrigins = [
-    process.env.CLIENT_URL || 'http://localhost:3000',
-    'http://localhost:5173', // Vite default port
-    'http://localhost:3000', // Create React App default port
-    // Production defaults (ensure both apex and www are allowed if env not configured)
-    'https://mantisafrica.com',
-    'https://www.mantisafrica.com',
-    ...allowedOriginsFromEnv
-];
+const allowedOrigins = (0, corsOrigins_1.buildAllowedOrigins)(process.env);
 // Security headers (production)
 if (process.env.NODE_ENV === 'production') {
     app.use((0, helmet_1.default)({
@@ -309,14 +290,13 @@ if (process.env.NODE_ENV === 'production') {
 }
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin)
+        if ((0, corsOrigins_1.isOriginAllowed)(origin, allowedOrigins)) {
             return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
         }
-        return callback(null, true);
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn(`CORS rejected origin: ${origin}`);
+        }
+        return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -425,6 +405,9 @@ app.use('/api/charts', chartRoutes_1.default);
 // Apply targeted rate limits to sensitive endpoints
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/signup', authLimiter);
+app.use('/api/onboarding/start', authLimiter);
+app.use('/api/paynow/web/create', authLimiter);
+app.use('/api/paynow/mobile/create', authLimiter);
 app.use('/api/auth/refresh-token', refreshLimiter);
 app.use('/api/auth/forgot-password', forgotLimiter);
 app.use('/api/auth/reset-password', resetLimiter);
@@ -477,6 +460,7 @@ app.use('/api/system-admin', systemAdminRoutes_1.default);
 app.use('/api/admin', adminRoutes_1.default);
 app.use('/api/accounting', accountingRoutes_1.default);
 app.use('/api/trust-accounts', trustAccountRoutes_1.default);
+app.use('/api/ecosystem', routes_1.default);
 // Session-scoped routes to support multiple concurrent sessions in one browser profile
 const sessionRouter = express_1.default.Router();
 sessionRouter.use('/properties', propertyRoutes_1.default);
@@ -516,6 +500,7 @@ sessionRouter.use('/sync', syncRoutes_1.default);
 sessionRouter.use('/fiscal', fiscalRoutes_1.default);
 sessionRouter.use('/accounting', accountingRoutes_1.default);
 sessionRouter.use('/trust-accounts', trustAccountRoutes_1.default);
+sessionRouter.use('/ecosystem', routes_1.default);
 sessionRouter.use('/admin', adminRoutes_1.default);
 app.use('/api/s/:sessionId', sessionRouter);
 // Serve client build in production
@@ -560,6 +545,11 @@ const { io } = (0, socket_1.initializeSocket)(httpServer);
 if (runtimeFeatures.runHttpServer) {
     httpServer.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
+        console.log('Accounting API boot', {
+            phase: '9',
+            startedAt: new Date().toISOString(),
+            nodeEnv: process.env.NODE_ENV || 'undefined'
+        });
     });
 }
 else {
@@ -581,69 +571,13 @@ const initializeDatabaseBackedServices = () => __awaiter(void 0, void 0, void 0,
         else {
             console.log('Trust background services disabled for this runtime role.');
         }
-        // Ensure a hard-coded System Admin user exists (requested)
-        // Creates or updates the user with email/password and system_admin role.
-        // Runs in all environments; idempotent.
+        // Opt-in, create-only break-glass administrator. Production never runs this.
+        // An existing user is not updated. See systemAdminBootstrap.ts.
         try {
-            const targetEmail = 'garet.matsi@gmail.com';
-            const targetPassword = 'Moreen@1981';
-            const firstName = 'System';
-            const lastName = 'Admin';
-            let user = yield User_1.User.findOne({ email: targetEmail }).maxTimeMS(5000);
-            if (!user) {
-                user = new User_1.User({
-                    email: targetEmail,
-                    password: targetPassword,
-                    firstName,
-                    lastName,
-                    role: 'admin',
-                    roles: ['admin', 'system_admin'],
-                    isActive: true
-                });
-                yield user.save();
-                console.log('Hardcoded system admin user created:', { email: targetEmail, id: user._id });
-            }
-            else {
-                let changed = false;
-                // Ensure primary role is admin for compatibility
-                if (user.role !== 'admin') {
-                    user.role = 'admin';
-                    changed = true;
-                }
-                // Ensure roles include system_admin
-                const rolesArr = Array.isArray(user.roles) ? user.roles : [];
-                if (!rolesArr.includes('system_admin')) {
-                    user.roles = Array.from(new Set([...(rolesArr || []), 'admin', 'system_admin']));
-                    changed = true;
-                }
-                // Ensure account is active
-                if (!user.isActive) {
-                    user.isActive = true;
-                    changed = true;
-                }
-                // If password differs, reset to requested one
-                try {
-                    const matches = yield user.comparePassword(targetPassword);
-                    if (!matches) {
-                        user.password = targetPassword;
-                        changed = true;
-                    }
-                }
-                catch (_a) {
-                    user.password = targetPassword;
-                    changed = true;
-                }
-                if (changed) {
-                    yield user.save();
-                    console.log('Hardcoded system admin user updated:', { email: targetEmail, id: user._id });
-                }
-                else {
-                    console.log('Hardcoded system admin user already up to date:', { email: targetEmail, id: user._id });
-                }
-            }
+            yield (0, systemAdminBootstrap_1.provisionBreakGlassSystemAdmin)();
         }
-        catch (seedErr) {
-            console.error('Failed to ensure hardcoded system admin user:', seedErr);
+        catch (_a) {
+            console.error('System admin bootstrap failed. Startup continued without creating an administrator.');
         }
         // Removed legacy bootstrap block referencing Xhihangule
         // Ensure critical property account indexes are in place at startup
@@ -661,33 +595,12 @@ const initializeDatabaseBackedServices = () => __awaiter(void 0, void 0, void 0,
         else {
             console.log('Scheduled synchronization services disabled for this runtime role.');
         }
-        // One-time ledger maintenance at boot (production only)
-        if (process.env.NODE_ENV === 'production' && runtimeFeatures.runStartupMaintenance) {
-            (() => __awaiter(void 0, void 0, void 0, function* () {
-                const maintenanceKey = 'ledger_maintenance_v1';
-                try {
-                    // Single-key lock record to avoid duplicate-key upsert races.
-                    const record = yield SystemSetting_1.default.findOneAndUpdate({ key: maintenanceKey }, { $setOnInsert: { key: maintenanceKey, version: 1, startedAt: new Date() } }, { upsert: true, new: true }).lean();
-                    if (record && record.completedAt) {
-                        console.log('Startup ledger maintenance already completed previously - skipping.');
-                        return;
-                    }
-                    console.log('Starting startup ledger maintenance (one-time) across all companies...');
-                    const result = yield (0, propertyAccountService_2.runPropertyLedgerMaintenance)({});
-                    yield SystemSetting_1.default.updateOne({ key: maintenanceKey }, { $set: { completedAt: new Date(), value: result, lastError: undefined } });
-                    console.log('Startup ledger maintenance completed.');
-                }
-                catch (e) {
-                    console.error('Startup ledger maintenance failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
-                    try {
-                        yield SystemSetting_1.default.updateOne({ key: maintenanceKey }, { $set: { lastError: (e === null || e === void 0 ? void 0 : e.message) || String(e) } }, { upsert: true });
-                    }
-                    catch (_a) { }
-                }
-            }))().catch(() => { });
-        }
-        else if (process.env.NODE_ENV === 'production') {
-            console.log('Startup ledger maintenance skipped for this runtime role.');
+        // Historical property-ledger maintenance (dedupe/archive/cancel) is a one-time
+        // migration. It must never run as ordinary application startup.
+        // Invoke via POST /api/system-admin/maintenance/ledger (system_admin, confirm+reason)
+        // or `npm run ledger:maintain -- --company-id=<id> [--dry-run]`.
+        if (process.env.NODE_ENV === 'production') {
+            console.log('Startup ledger maintenance is disabled; historical ledger mutation is admin/CLI only.');
         }
         databaseServicesInitialized = true;
     }

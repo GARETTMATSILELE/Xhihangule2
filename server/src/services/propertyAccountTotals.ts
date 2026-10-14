@@ -1,8 +1,14 @@
 /**
  * Deterministic PropertyAccount total calculation.
  * Cancelled, failed, and reversed-status rows are excluded.
- * PASS_THROUGH treatment is excluded from owner income/expense.
+ * PASS_THROUGH, LIABILITY (tenant deposits) and CAPITAL are excluded from owner P&L.
  */
+
+const NON_PNL_TREATMENTS = new Set(['PASS_THROUGH', 'LIABILITY', 'CAPITAL']);
+
+function isPnlRow(t: any): boolean {
+  return !NON_PNL_TREATMENTS.has(String(t?.accountingTreatment || ''));
+}
 
 export type PropertyAccountTotals = {
   totalIncome: number;
@@ -31,7 +37,7 @@ export function computePropertyAccountTotals(account: {
   const passThroughAccounts = Array.isArray(account.passThroughAccounts) ? account.passThroughAccounts : [];
 
   const totalIncome = transactions
-    .filter((t) => t?.type === 'income' && isActiveStatus(t.status) && t.accountingTreatment !== 'PASS_THROUGH')
+    .filter((t) => t?.type === 'income' && isActiveStatus(t.status) && isPnlRow(t))
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
   const totalExpenses = transactions
@@ -40,7 +46,7 @@ export function computePropertyAccountTotals(account: {
         t?.type !== 'income' &&
         t?.type !== 'opening_balance' &&
         isActiveStatus(t.status) &&
-        t.accountingTreatment !== 'PASS_THROUGH'
+        isPnlRow(t)
     )
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
@@ -74,6 +80,30 @@ export function computePropertyAccountTotals(account: {
     passThroughCollected: Number(passThroughCollected.toFixed(2)),
     passThroughPaid: Number(passThroughPaid.toFixed(2)),
     passThroughOutstanding: Number((passThroughCollected - passThroughPaid).toFixed(2))
+  };
+}
+
+export function sumPropertyAccountPeriodPnl(
+  transactions: any[] | undefined,
+  start?: Date,
+  end?: Date
+): { income: number; expenses: number; net: number } {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  let income = 0;
+  let expenses = 0;
+  for (const t of rows) {
+    if (!isActiveStatus(t.status) || !isPnlRow(t)) continue;
+    const date = t?.date ? new Date(t.date) : null;
+    if (start && date && date < start) continue;
+    if (end && date && date >= end) continue;
+    const amount = Number(t.amount || 0);
+    if (t?.type === 'income') income += amount;
+    else if (t?.type !== 'opening_balance') expenses += amount;
+  }
+  return {
+    income: Number(income.toFixed(2)),
+    expenses: Number(expenses.toFixed(2)),
+    net: Number((income - expenses).toFixed(2))
   };
 }
 

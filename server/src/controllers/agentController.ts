@@ -7,13 +7,34 @@ import { LevyPayment } from '../models/LevyPayment';
 import File, { IFile } from '../models/File';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { User } from '../models/User';
-import { Company } from '../models/Company';
 import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
 import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationService';
 import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
+import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
+import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy } from '../services/vatPolicyService';
+import { openReview } from '../services/taxObligationService';
+import { initialAccountingIntegrityFields, ensureDepositLedgerFromPayment } from '../services/paymentAccountingReconciliation';
+import { COMPLETED_PAYMENT_IMMUTABLE_MESSAGE, assertCompletedPaymentFinanciallyImmutable } from '../services/paymentFinancialImmutability';
+import { prepareIntroductionRentalCommission } from '../services/introductionCommissionService';
+import { introductionContextErrorResponse } from '../services/introductionLeaseContext';
+import { salePaymentIncompleteResponse, validateSalePaymentCompleteness } from '../services/salePaymentCompleteness';
+import { callerCanAccessProperty, callerCanMutatePropertyOwner, propertyIdsForCaller } from '../utils/propertyAccess';
+import { safeAttachmentFilename } from '../utils/contentDisposition';
+
+async function visiblePropertyIdList(req: Request): Promise<mongoose.Types.ObjectId[] | null> {
+  const ids = await propertyIdsForCaller(req);
+  return ids === 'company' ? null : ids;
+}
+
+async function propertiesAreVisible(req: Request, propertyIds: string[]): Promise<boolean> {
+  for (const id of propertyIds) {
+    if (!(await callerCanAccessProperty(req, String(id)))) return false;
+  }
+  return true;
+}
 
 const activePropertyVisibilityFilter = {
   isDeleted: { $ne: true },
@@ -40,11 +61,12 @@ export const getAgentProperties = async (req: Request, res: Response) => {
 
     // Get only properties where the agent is the owner (ownerId matches the agent's userId)
     const showDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
+    const visibleIds = await visiblePropertyIdList(req);
     const query: any = {
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Only properties owned by this agent
       isDeleted: showDeleted ? true : { $ne: true }
     };
+    if (visibleIds) query._id = { $in: visibleIds };
     if (!showDeleted) {
       query.propertyOperationalStatus = { $ne: 'Archived' };
     }
@@ -98,6 +120,18 @@ export const getAgentPropertyOwnerById = async (req: Request, res: Response) => 
     if (!owner) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
+    const visible = await visiblePropertyIdList(req);
+    if (visible) {
+      const linked = (owner.properties || []).some((id: any) => visible.some((row) => String(row) === String(id?._id || id)));
+      const byField = await Property.exists({
+        _id: { $in: visible },
+        propertyOwnerId: owner._id,
+        companyId: req.user.companyId,
+      });
+      if (!linked && !byField) {
+        return res.status(404).json({ message: 'Property owner not found' });
+      }
+    }
 
     res.json(owner);
   } catch (error) {
@@ -120,9 +154,10 @@ export const getAgentTenants = async (req: Request, res: Response) => {
     }
 
     // Fetch properties managed by this agent
+    const visibleIds = await visiblePropertyIdList(req);
     const ownedProperties = await Property.find({
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      ...(visibleIds ? { _id: { $in: visibleIds } } : {}),
       ...activePropertyVisibilityFilter
     })
       .select('_id')
@@ -171,16 +206,15 @@ export const getAgentLeases = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found', 400);
     }
 
+    const visibleIds = await visiblePropertyIdList(req);
     const activePropertyIds = await Property.find({
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
+      ...(visibleIds ? { _id: { $in: visibleIds } } : {}),
       ...activePropertyVisibilityFilter
     }).distinct('_id');
 
-    // Get leases created by this agent (using ownerId)
     const leases = await Lease.find({ 
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Filter by agent who created the lease
       propertyId: { $in: activePropertyIds as any }
     })
     .populate('propertyId', 'name address')
@@ -210,9 +244,10 @@ export const getAgentFiles = async (req: Request, res: Response) => {
     }
 
     // Determine properties that belong to this agent within the company
+    const visibleIds = await visiblePropertyIdList(req);
     const agentPropertyIds = await Property.find({
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...(visibleIds ? { _id: { $in: visibleIds } } : {}),
       ...activePropertyVisibilityFilter
     }).distinct('_id');
 
@@ -261,9 +296,10 @@ export const getAgentCommission = async (req: Request, res: Response) => {
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
+    const visibleIds = await visiblePropertyIdList(req);
     const activePropertyIds = await Property.find({
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...(visibleIds ? { _id: { $in: visibleIds } } : {}),
       ...activePropertyVisibilityFilter
     }).distinct('_id');
 
@@ -357,11 +393,18 @@ export const createAgentProperty = async (req: Request, res: Response) => {
     if (req.body.type && !['apartment', 'house', 'commercial'].includes(req.body.type)) {
       throw new AppError('Invalid property type: Must be one of: apartment, house, commercial', 400);
     }
+    if (req.body.agentId) {
+      const assigned = await User.findOne({ _id: req.body.agentId, companyId: req.user.companyId }).select('_id');
+      if (!assigned) {
+        throw new AppError('Assigned agent was not found in this company', 400);
+      }
+    }
 
     const vatSettings = sanitizePropertyVatSettings(req.body || {});
     const propertyData = {
       ...req.body,
-      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Agent becomes the owner
+      ownerId: new mongoose.Types.ObjectId(req.user.userId), // Creating user. This is not the landlord.
+      agentId: req.body?.agentId || new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       status: req.body.status || 'available',
       type: req.body.type || 'apartment',
@@ -440,9 +483,12 @@ export const createAgentTenant = async (req: Request, res: Response) => {
     // Validate property ownership for single or multiple properties
     if (Array.isArray(propertyIds) && propertyIds.length > 0) {
       const ids = propertyIds.map((id: any) => new mongoose.Types.ObjectId(String(id)));
+      const visible = await visiblePropertyIdList(req);
+      const allowedIds = visible
+        ? ids.filter((id: mongoose.Types.ObjectId) => visible.some((row) => String(row) === String(id)))
+        : ids;
       const ownedCount = await Property.countDocuments({
-        _id: { $in: ids },
-        ownerId: new mongoose.Types.ObjectId(req.user.userId),
+        _id: { $in: allowedIds },
         companyId: new mongoose.Types.ObjectId(req.user.companyId)
       });
       if (ownedCount !== ids.length) {
@@ -450,7 +496,9 @@ export const createAgentTenant = async (req: Request, res: Response) => {
       }
     } else {
       // Ensure the property belongs to this agent (single)
-      const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
+      const property = (await callerCanAccessProperty(req, String(propertyId)))
+      ? await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), companyId: new mongoose.Types.ObjectId(req.user.companyId) })
+      : null;
       if (!property) {
         return res.status(403).json({ message: 'You can only add tenants to your own properties.' });
       }
@@ -547,7 +595,9 @@ export const createAgentLease = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
+    const property = (await callerCanAccessProperty(req, String(propertyId)))
+      ? await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), companyId: new mongoose.Types.ObjectId(req.user.companyId) })
+      : null;
     if (!property) {
       return res.status(403).json({ message: 'You can only create leases for your own properties.' });
     }
@@ -657,9 +707,11 @@ export const updateAgentProperty = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent and company
+    if (!(await callerCanAccessProperty(req, propertyId))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
     const existing = await Property.findOne({
       _id: new mongoose.Types.ObjectId(propertyId),
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       isDeleted: { $ne: true }
     });
@@ -736,11 +788,13 @@ export const archiveAgentProperty = async (req: Request, res: Response) => {
     if (!mongoose.Types.ObjectId.isValid(propertyId)) {
       return res.status(400).json({ message: 'Invalid property ID format.' });
     }
+    if (!(await callerCanAccessProperty(req, propertyId))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
 
     const property = await Property.findOneAndUpdate(
       {
         _id: new mongoose.Types.ObjectId(propertyId),
-        ownerId: new mongoose.Types.ObjectId(req.user.userId),
         companyId: new mongoose.Types.ObjectId(req.user.companyId),
         isDeleted: { $ne: true }
       },
@@ -783,11 +837,13 @@ export const deleteAgentProperty = async (req: Request, res: Response) => {
     if (!mongoose.Types.ObjectId.isValid(propertyId)) {
       return res.status(400).json({ message: 'Invalid property ID format.' });
     }
+    if (!(await callerCanAccessProperty(req, propertyId))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
 
     const property = await Property.findOneAndUpdate(
       {
         _id: new mongoose.Types.ObjectId(propertyId),
-        ownerId: new mongoose.Types.ObjectId(req.user.userId),
         companyId: new mongoose.Types.ObjectId(req.user.companyId),
         isDeleted: { $ne: true }
       },
@@ -830,11 +886,13 @@ export const restoreAgentProperty = async (req: Request, res: Response) => {
     if (!mongoose.Types.ObjectId.isValid(propertyId)) {
       return res.status(400).json({ message: 'Invalid property ID format.' });
     }
+    if (!(await callerCanAccessProperty(req, propertyId, { includeDeleted: true }))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
 
     const property = await Property.findOneAndUpdate(
       {
         _id: new mongoose.Types.ObjectId(propertyId),
-        ownerId: new mongoose.Types.ObjectId(req.user.userId),
         companyId: new mongoose.Types.ObjectId(req.user.companyId),
         isDeleted: true
       },
@@ -881,6 +939,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     const {
       propertyId,
       tenantId,
+      leaseId,
       amount,
       paymentDate,
       paymentMethod,
@@ -917,7 +976,9 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
+    const property = (await callerCanAccessProperty(req, String(propertyId)))
+      ? await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), companyId: new mongoose.Types.ObjectId(req.user.companyId) })
+      : null;
     if (!property) {
       return res.status(403).json({ message: 'You can only create payments for your own properties.' });
     }
@@ -1041,24 +1102,108 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     }
 
     const commissionBaseAmount = combinedAllocation ? combinedAllocation.rentAllocated : numericAmount;
-
-    // Calculate commission based on property's commission percentage and company-specific splits
+    const levyAllocated = Number(combinedAllocation?.levyAllocated || 0);
     const commissionPercentage = Number(property.commission || 0);
-    const commissionDetails = await (await import('../services/commissionService')).CommissionService.calculate(
-      commissionBaseAmount,
-      commissionPercentage,
-      new mongoose.Types.ObjectId(req.user.companyId)
-    );
-    if (combinedAllocation?.hasLevy) {
-      commissionDetails.ownerAmount = Number(commissionDetails.ownerAmount || 0) + Number(combinedAllocation.levyAllocated || 0);
+    const isAgentRentalPayment = resolvedPaymentType !== 'sale';
+
+    const propertyVatRequested = Boolean((property as any)?.vatOnCommission);
+    const isIntroduction = String((property as any)?.rentalType || '').toLowerCase() === 'introduction';
+    const commissionVatPolicy = await resolveCommissionVatPolicy({
+      companyId: String(req.user.companyId),
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      property: {
+        vatOnCommission: propertyVatRequested,
+        vatCommissionTreatment: (property as any)?.vatCommissionTreatment
+      },
+      requestedVatOnCommission: propertyVatRequested,
+      requestedTreatment: (property as any)?.vatCommissionTreatment,
+      commissionType: isIntroduction ? 'introduction' : 'management'
+    });
+    const blockedVatRate = centralVatRateBlock(commissionVatPolicy);
+    if (blockedVatRate) {
+      return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+    }
+    const commissionVat = commissionVatFlagsFromPolicy(commissionVatPolicy);
+    if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+      await openReview({
+        companyId: String(req.user.companyId),
+        kind: commissionVatPolicy.reviewReason,
+        title: 'VAT on commission requires review',
+        detail: commissionVatPolicy.reason,
+        propertyId: String(propertyId)
+      });
+    }
+
+    let commissionDetails: any;
+    let agentCommissionResult: Awaited<ReturnType<typeof CommissionService.calculateForProperty>> | null = null;
+    let resolvedAgentIntroductionLeaseId: string | undefined = leaseId ? String(leaseId) : undefined;
+    if (isAgentRentalPayment) {
+      const isDepositOnly = numericAmount <= 0 && numericDeposit > 0;
+      if (isIntroduction) {
+        const prepared = await prepareIntroductionRentalCommission({
+          companyId: req.user.companyId,
+          propertyId,
+          tenantId,
+          leaseId,
+          rentAllocated: isDepositOnly ? 0 : commissionBaseAmount,
+          levyAllocated: isDepositOnly ? 0 : levyAllocated,
+          vatOnCommission: commissionVat.vatOnCommission,
+          vatTreatment: commissionVat.vatTreatment,
+          vatRate: commissionVat.vatRate,
+          paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+          propertyRent: Number((property as any)?.rent || 0)
+        });
+        if (!prepared.ok) {
+          return res.status(400).json(introductionContextErrorResponse(prepared));
+        }
+        resolvedAgentIntroductionLeaseId = prepared.context.leaseId;
+        agentCommissionResult = prepared.result;
+        commissionDetails = prepared.snapshot;
+      } else {
+        agentCommissionResult = await CommissionService.calculateForProperty({
+          companyId: req.user.companyId,
+          grossRent: commissionBaseAmount,
+          levy: 0,
+          commissionPercentage,
+          vatOnCommission: commissionVat.vatOnCommission,
+          vatTreatment: commissionVat.vatTreatment,
+          vatRate: commissionVat.vatRate,
+          paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+        });
+        commissionDetails = applyLevyPassThroughToSnapshot(
+          agentCommissionResult,
+          commissionBaseAmount,
+          levyAllocated
+        );
+      }
+    } else {
+      commissionDetails = await CommissionService.calculate(
+        commissionBaseAmount,
+        commissionPercentage,
+        new mongoose.Types.ObjectId(req.user.companyId)
+      );
+      if (levyAllocated > 0) {
+        commissionDetails.ownerAmount = Number(commissionDetails.ownerAmount || 0) + levyAllocated;
+      }
+      const saleCheck = validateSalePaymentCompleteness({
+        amount: commissionBaseAmount,
+        commissionDetails
+      });
+      if (!saleCheck.ok) {
+        return res.status(400).json(salePaymentIncompleteResponse(saleCheck.missing));
+      }
     }
 
     // Create payment record
     const payment = new Payment({
       paymentType: resolvedPaymentType,
+      transactionDomain: resolvedPaymentType === 'sale' ? 'SALE' : 'RENTAL',
       propertyType: propertyType || 'residential',
       propertyId: new mongoose.Types.ObjectId(propertyId),
       tenantId: new mongoose.Types.ObjectId(tenantId),
+      leaseId: resolvedAgentIntroductionLeaseId
+        ? new mongoose.Types.ObjectId(resolvedAgentIntroductionLeaseId)
+        : undefined,
       agentId: new mongoose.Types.ObjectId(req.user.userId), // Set the agent as the agent
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
       paymentDate,
@@ -1071,7 +1216,11 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       notes: notes || '',
       processedBy: new mongoose.Types.ObjectId(req.user.userId),
       commissionDetails,
+      applyVatOnCommission: agentCommissionResult?.vatOnCommission,
+      vatOnCommissionRate: agentCommissionResult?.vatRate || 0,
+      vatCommissionTreatment: agentCommissionResult?.vatTreatment,
       status: status || 'completed',
+      ...initialAccountingIntegrityFields({ status: status || 'completed' }),
       currency: currency || 'USD',
       advanceMonthsPaid: advanceMonthsPaid || 1,
       advancePeriodStart: advanceMonthsPaid && advanceMonthsPaid > 1 ? advancePeriodStart : undefined,
@@ -1116,30 +1265,15 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     // If depositAmount > 0, record in rentaldeposits (ledger)
     if (payment.depositAmount && payment.depositAmount > 0) {
       try {
-        const { RentalDeposit } = require('../models/rentalDeposit');
-        const deposit = new RentalDeposit({
-          propertyId: payment.propertyId,
-          agentId: payment.agentId,
-          companyId: payment.companyId,
-          tenantId: payment.tenantId,
-          depositAmount: payment.depositAmount,
-          depositDate: payment.paymentDate,
-          paymentId: payment._id,
-          type: 'payment',
-          referenceNumber: payment.referenceNumber,
-          notes: notes || '',
-          processedBy: payment.processedBy,
-          paymentMethod
-        } as any);
-        await deposit.save();
+        await ensureDepositLedgerFromPayment(payment);
       } catch (depositErr) {
         console.error('Failed to record rental deposit for agent payment:', depositErr);
         // Do not fail the payment creation if deposit ledger write fails
       }
     }
 
-    const { postPaymentAccounting } = await import('../services/paymentAccountingOrchestrator');
-    await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
+    const { ensurePaymentAccountingPosted } = await import('../services/paymentAccountingReconciliation');
+    const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
 
     // Notify agent by email with payment details (fire-and-forget)
     void sendAgentPaymentNotificationEmail(payment);
@@ -1147,7 +1281,11 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     res.status(201).json({
       status: 'success',
       data: payment,
-      message: 'Payment processed successfully'
+      message: 'Payment processed successfully',
+      receiptStatus: 'PAYMENT_RECEIVED',
+      accountingComplete: postResult.accountingComplete,
+      accountingStatus: postResult.accountingStatus,
+      accountingState: postResult.accountingComplete ? 'ACCOUNTING_COMPLETE' : 'ACCOUNTING_INCOMPLETE'
     });
   } catch (error) {
     console.error('Error creating agent payment:', error);
@@ -1217,6 +1355,14 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Payment not found or you do not have permission to update it.' });
     }
 
+    try {
+      assertCompletedPaymentFinanciallyImmutable(payment, updateData);
+    } catch (immErr: any) {
+      return res.status(immErr?.statusCode || 409).json({
+        message: immErr?.message || COMPLETED_PAYMENT_IMMUTABLE_MESSAGE
+      });
+    }
+
     if (process.env.NODE_ENV !== 'production') {
       console.log('Original payment:', {
         id: payment._id,
@@ -1225,28 +1371,101 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
       });
     }
 
-    // If amount is being updated, recalculate commission using property's commission and company splits
-    if (updateData.amount && updateData.amount !== payment.amount) {
+    // If amount is being updated, recalculate commission from canonical calculators.
+    if (updateData.amount != null && Number(updateData.amount) !== Number(payment.amount)) {
       const linkedProperty = await Property.findById(payment.propertyId);
-      const company = await Company.findById(new mongoose.Types.ObjectId(req.user.companyId)).lean();
-      const commissionPercentage = Number(linkedProperty?.commission || 0);
-      const totalCommission = (updateData.amount * commissionPercentage) / 100;
-      const preaPercentOfTotal = Math.max(0, Math.min(1, company?.commissionConfig?.preaPercentOfTotal ?? 0.03));
-      const agentPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agentPercentOfRemaining ?? 0.6));
-      const agencyPercentOfRemaining = Math.max(0, Math.min(1, company?.commissionConfig?.agencyPercentOfRemaining ?? 0.4));
-
-      const preaFee = totalCommission * preaPercentOfTotal;
-      const remainingCommission = totalCommission - preaFee;
-      const agentShare = remainingCommission * agentPercentOfRemaining;
-      const agencyShare = remainingCommission * agencyPercentOfRemaining;
-
-      updateData.commissionDetails = {
-        totalCommission,
-        preaFee,
-        agentShare,
-        agencyShare,
-        ownerAmount: updateData.amount - totalCommission,
-      };
+      const nextAmount = Number(updateData.amount);
+      const paymentKind = String(payment.paymentType || '').toLowerCase();
+      if (paymentKind === 'sale' || paymentKind === 'sales') {
+        const commissionPercentage = Number(linkedProperty?.commission || 0);
+        updateData.commissionDetails = await CommissionService.calculate(
+          nextAmount,
+          commissionPercentage,
+          new mongoose.Types.ObjectId(req.user.companyId)
+        );
+        const saleCheck = validateSalePaymentCompleteness({
+          amount: nextAmount,
+          commissionDetails: updateData.commissionDetails
+        });
+        if (!saleCheck.ok) {
+          return res.status(400).json(salePaymentIncompleteResponse(saleCheck.missing));
+        }
+      } else {
+        const rentAllocated = Number(
+          updateData.rentAllocated ?? (payment as any).rentAllocated ?? nextAmount
+        );
+        const levyAllocated = Number(
+          updateData.levyAllocated ?? (payment as any).levyAllocated ?? 0
+        );
+        const isIntroduction = String((linkedProperty as any)?.rentalType || '').toLowerCase() === 'introduction';
+        const propertyVatRequested = Boolean((linkedProperty as any)?.vatOnCommission);
+        const updatePaymentDate = updateData.paymentDate ? new Date(updateData.paymentDate) : payment.paymentDate;
+        const commissionVatPolicy = await resolveCommissionVatPolicy({
+          companyId: String(req.user.companyId),
+          paymentDate: updatePaymentDate ? new Date(updatePaymentDate) : new Date(),
+          property: {
+            vatOnCommission: propertyVatRequested,
+            vatCommissionTreatment: (linkedProperty as any)?.vatCommissionTreatment
+          },
+          requestedVatOnCommission: propertyVatRequested,
+          requestedTreatment: (linkedProperty as any)?.vatCommissionTreatment,
+          commissionType: isIntroduction ? 'introduction' : 'management'
+        });
+        const blockedVatRate = centralVatRateBlock(commissionVatPolicy);
+        if (blockedVatRate) {
+          return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+        }
+        const commissionVat = commissionVatFlagsFromPolicy(commissionVatPolicy);
+        if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+          await openReview({
+            companyId: String(req.user.companyId),
+            kind: commissionVatPolicy.reviewReason,
+            title: 'VAT on commission requires review',
+            detail: commissionVatPolicy.reason,
+            propertyId: String(payment.propertyId || '')
+          });
+        }
+        if (isIntroduction) {
+          const prepared = await prepareIntroductionRentalCommission({
+            companyId: req.user.companyId,
+            propertyId: payment.propertyId,
+            tenantId: payment.tenantId,
+            leaseId: updateData.leaseId || (payment as any).leaseId,
+            rentAllocated,
+            levyAllocated,
+            vatOnCommission: commissionVat.vatOnCommission,
+            vatTreatment: commissionVat.vatTreatment,
+            vatRate: commissionVat.vatRate,
+            paymentDate: updatePaymentDate,
+            excludePaymentId: payment._id,
+            propertyRent: Number((linkedProperty as any)?.rent || 0),
+            rentUsed: typeof (payment as any).rentUsed === 'number' ? Number((payment as any).rentUsed) : undefined
+          });
+          if (!prepared.ok) {
+            return res.status(400).json(introductionContextErrorResponse(prepared));
+          }
+          updateData.commissionDetails = prepared.snapshot;
+          updateData.applyVatOnCommission = prepared.result.vatOnCommission;
+          updateData.vatOnCommissionRate = prepared.result.vatRate || 0;
+          updateData.vatCommissionTreatment = prepared.result.vatTreatment;
+          updateData.leaseId = prepared.context.leaseId;
+        } else {
+          const result = await CommissionService.calculateForProperty({
+            companyId: req.user.companyId,
+            grossRent: rentAllocated,
+            levy: 0,
+            commissionPercentage: Number(linkedProperty?.commission || 0),
+            vatOnCommission: commissionVat.vatOnCommission,
+            vatTreatment: commissionVat.vatTreatment,
+            vatRate: commissionVat.vatRate,
+            paymentDate: updatePaymentDate
+          });
+          updateData.commissionDetails = applyLevyPassThroughToSnapshot(result, rentAllocated, levyAllocated);
+          updateData.applyVatOnCommission = result.vatOnCommission;
+          updateData.vatOnCommissionRate = result.vatRate || 0;
+          updateData.vatCommissionTreatment = result.vatTreatment;
+        }
+      }
 
       if (process.env.NODE_ENV !== 'production') {
         console.log('Recalculated commission for payment', paymentId);
@@ -1257,12 +1476,8 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
       console.log('Updating payment', paymentId);
     }
 
-    // Update the payment
-    const updatedPayment = await Payment.findByIdAndUpdate(
-      new mongoose.Types.ObjectId(paymentId),
-      updateData,
-      { new: true }
-    );
+    payment.set(updateData);
+    const updatedPayment = await payment.save();
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('Payment updated successfully:', updatedPayment ? 'Yes' : 'No');
@@ -1294,9 +1509,10 @@ export const getAgentPayments = async (req: Request, res: Response) => {
     }
 
     // Find agent's property IDs
+    const visibleIds = await visiblePropertyIdList(req);
     const agentPropertyIds = await Property.find({
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...(visibleIds ? { _id: { $in: visibleIds } } : {}),
       ...activePropertyVisibilityFilter
     }).distinct('_id');
 
@@ -1353,9 +1569,10 @@ export const getAgentLevyPayments = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
     }
 
+    const visibleIds = await visiblePropertyIdList(req);
     const agentPropertyIds = await Property.find({
-      ownerId: new mongoose.Types.ObjectId(req.user.userId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      ...(visibleIds ? { _id: { $in: visibleIds } } : {}),
       ...activePropertyVisibilityFilter
     }).distinct('_id');
 
@@ -1402,7 +1619,9 @@ export const createAgentFile = async (req: Request, res: Response) => {
     }
 
     // Ensure the property belongs to this agent
-    const property = await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), ownerId: new mongoose.Types.ObjectId(req.user.userId), companyId: new mongoose.Types.ObjectId(req.user.companyId) });
+    const property = (await callerCanAccessProperty(req, String(propertyId)))
+      ? await Property.findOne({ _id: new mongoose.Types.ObjectId(propertyId), companyId: new mongoose.Types.ObjectId(req.user.companyId) })
+      : null;
     if (!property) {
       return res.status(403).json({ message: 'You can only upload files for your own properties.' });
     }
@@ -1411,7 +1630,7 @@ export const createAgentFile = async (req: Request, res: Response) => {
     const file = new File({
       propertyId: new mongoose.Types.ObjectId(propertyId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      fileName: req.file.originalname,
+      fileName: safeAttachmentFilename(req.file.originalname),
       fileType,
       fileUrl: req.file.buffer.toString('base64'),
       uploadedBy: new mongoose.Types.ObjectId(req.user.userId),
@@ -1433,10 +1652,7 @@ export const createAgentFile = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error creating agent file:', error);
-    res.status(500).json({ 
-      message: 'Error uploading file',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    res.status(500).json({ message: 'Error uploading file' });
   }
 };
 
@@ -1458,10 +1674,20 @@ export const getAgentPropertyOwners = async (req: Request, res: Response) => {
       });
     }
 
-    // Get property owners for the agent's company
-    const owners = await PropertyOwner.find({ 
-      companyId: new mongoose.Types.ObjectId(req.user.companyId)
-    }).populate('properties', 'name address');
+    const visible = await visiblePropertyIdList(req);
+    const ownerQuery: any = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
+    if (visible) {
+      const linkedOwnerIds = await Property.find({
+        _id: { $in: visible },
+        companyId: req.user.companyId,
+        propertyOwnerId: { $exists: true },
+      }).distinct('propertyOwnerId');
+      ownerQuery.$or = [
+        { properties: { $in: visible } },
+        { _id: { $in: linkedOwnerIds } },
+      ];
+    }
+    const owners = await PropertyOwner.find(ownerQuery).populate('properties', 'name address');
 
     res.json({ owners });
   } catch (error) {
@@ -1501,16 +1727,8 @@ export const createAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
 
-    // Validate that all properties belong to the same company
-    if (propertyIds && propertyIds.length > 0) {
-      const companyProperties = await Property.find({ 
-        _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) },
-        companyId: new mongoose.Types.ObjectId(req.user.companyId)
-      });
-      
-      if (companyProperties.length !== propertyIds.length) {
-        return res.status(403).json({ message: 'All properties must belong to your company.' });
-      }
+    if (propertyIds && propertyIds.length > 0 && !(await propertiesAreVisible(req, propertyIds))) {
+      return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
     }
 
     const ownerData = {
@@ -1583,11 +1801,13 @@ export const updateAgentPropertyOwner = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId) 
     });
 
-    if (!owner) {
+    if (!owner || !(await callerCanMutatePropertyOwner(req, String(owner._id)))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    // Validate that all properties belong to the same company
+    if (propertyIds && propertyIds.length > 0 && !(await propertiesAreVisible(req, propertyIds))) {
+      return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
+    }
     if (propertyIds && propertyIds.length > 0) {
       const companyProperties = await Property.find({ 
         _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) },
@@ -1646,7 +1866,7 @@ export const deleteAgentPropertyOwner = async (req: Request, res: Response) => {
       companyId: new mongoose.Types.ObjectId(req.user.companyId) 
     });
 
-    if (!owner) {
+    if (!owner || !(await callerCanMutatePropertyOwner(req, String(owner._id)))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 

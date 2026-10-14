@@ -9,7 +9,8 @@ export type LedgerEventType =
   | 'agent_commission'
   | 'company_commission'
   | 'levy_collection'
-  | 'levy_payout';
+  | 'levy_payout'
+  | 'journal';
 
 export interface ILedgerEvent extends Document {
   type: LedgerEventType;
@@ -29,7 +30,7 @@ export interface ILedgerEvent extends Document {
 const LedgerEventSchema = new Schema<ILedgerEvent>({
   type: {
     type: String,
-    enum: ['owner_income', 'payment_reversal', 'agent_commission', 'company_commission', 'levy_collection', 'levy_payout'],
+    enum: ['owner_income', 'payment_reversal', 'agent_commission', 'company_commission', 'levy_collection', 'levy_payout', 'journal'],
     required: true
   },
   paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', required: false },

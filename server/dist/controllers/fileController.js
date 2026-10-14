@@ -15,6 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteFile = exports.downloadFile = exports.uploadFile = exports.getFiles = void 0;
 const File_1 = __importDefault(require("../models/File"));
 const Property_1 = require("../models/Property");
+const propertyAccess_1 = require("../utils/propertyAccess");
+const contentDisposition_1 = require("../utils/contentDisposition");
 // Get all files for a property
 const getFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -22,8 +24,11 @@ const getFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             return res.status(401).json({ message: 'Authentication required' });
         }
-        console.log('getFiles called: returning files for company', req.user.companyId);
-        const files = yield File_1.default.find({ companyId: req.user.companyId })
+        const scope = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        const query = { companyId: req.user.companyId };
+        if (scope !== 'company')
+            query.propertyId = { $in: scope };
+        const files = yield File_1.default.find(query)
             .populate('propertyId', 'name')
             .populate('uploadedBy', 'firstName lastName');
         console.log('Database query completed, found files:', files.length);
@@ -61,14 +66,14 @@ const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         }
         // Check if property exists
         const property = yield Property_1.Property.findOne({ _id: propertyId, companyId });
-        if (!property) {
+        if (!property || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))) {
             return res.status(404).json({ message: 'Property not found' });
         }
         // Create file record
         const file = new File_1.default({
             propertyId,
             companyId,
-            fileName: req.file.originalname,
+            fileName: (0, contentDisposition_1.safeAttachmentFilename)(req.file.originalname),
             fileType,
             fileUrl: req.file.buffer.toString('base64'),
             uploadedBy: userId
@@ -88,10 +93,7 @@ const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
     catch (error) {
         console.error('Error uploading file:', error);
-        res.status(500).json({
-            message: 'Error uploading file',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        res.status(500).json({ message: 'Error uploading file' });
     }
 });
 exports.uploadFile = uploadFile;
@@ -103,13 +105,13 @@ const downloadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             return res.status(401).json({ message: 'Authentication required' });
         }
         const file = yield File_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
-        if (!file) {
+        if (!file || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(file.propertyId)))) {
             return res.status(404).json({ message: 'File not found' });
         }
         // Convert base64 back to buffer
         const buffer = Buffer.from(file.fileUrl, 'base64');
         res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+        res.setHeader('Content-Disposition', (0, contentDisposition_1.attachmentContentDisposition)(file.fileName));
         res.send(buffer);
     }
     catch (error) {
@@ -126,7 +128,7 @@ const deleteFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             return res.status(401).json({ message: 'Authentication required' });
         }
         const file = yield File_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
-        if (!file) {
+        if (!file || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(file.propertyId)))) {
             return res.status(404).json({ message: 'File not found' });
         }
         yield file.deleteOne();

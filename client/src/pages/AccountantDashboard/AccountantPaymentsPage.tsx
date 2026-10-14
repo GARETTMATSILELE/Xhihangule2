@@ -21,6 +21,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usePropertyService } from '../../services/propertyService';
 import { useTenantService } from '../../services/tenantService';
 import paymentService from '../../services/paymentService';
+import { formatPaymentApiError } from '../../utils/paymentApiError';
 import { Payment, PaymentStatus, PaymentFormData, PaymentFilter } from '../../types/payment';
 import { Property } from '../../types/property';
 import { Tenant } from '../../types/tenant';
@@ -28,7 +29,7 @@ import PaymentList from '../../components/payments/PaymentList';
 import PaymentForm from '../../components/payments/PaymentForm';
 import PaymentSummary from '../../components/payments/PaymentSummary';
 import { AuthErrorReport } from '../../components/AuthErrorReport';
-import { dispatchPaymentsChanged } from '../../utils/paymentsChanged';
+import { dispatchPaymentsChanged, unwrapPaymentResponse } from '../../utils/paymentsChanged';
 
 const AccountantPaymentsPage: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
@@ -333,13 +334,13 @@ const AccountantPaymentsPage: React.FC = () => {
         response = await paymentService.createPaymentAccountant(data);
         setSuccessMessage('Payment created successfully');
       }
-      const created = (response as any)?.data ?? response;
+      const created = unwrapPaymentResponse(response);
       try {
         dispatchPaymentsChanged({ type: 'created', payment: created });
       } catch {}
       setShowForm(false);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create payment');
+      setError(formatPaymentApiError(err, 'Failed to create payment'));
     } finally {
       setLoading(false);
     }
@@ -363,7 +364,7 @@ const AccountantPaymentsPage: React.FC = () => {
         dispatchPaymentsChanged({ type: 'updated', payment: response });
       } catch {}
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to update payment');
+      setError(formatPaymentApiError(err, 'Failed to update payment'));
     } finally {
       setLoading(false);
     }

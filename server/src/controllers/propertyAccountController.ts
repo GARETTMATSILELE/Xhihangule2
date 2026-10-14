@@ -12,6 +12,18 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import { reconcilePropertyLedgerDuplicates } from '../services/propertyAccountService';
 import maintenanceJobQueueService from '../services/maintenanceJobQueueService';
+import {
+  requireExplicitMigrationConfirmation,
+  startMigrationAudit,
+  finishMigrationAudit
+} from '../services/financialMigrationGuard';
+
+function requestedLedger(req: Request): 'rental' | 'sale' | undefined {
+  const raw = String(req.query.ledger || req.query.ledgerType || '').trim().toLowerCase();
+  if (!raw) return undefined;
+  if (raw === 'rental' || raw === 'sale') return raw;
+  throw new AppError('ledger must be rental or sale', 400);
+}
 
 /**
  * Get property account with summary
@@ -24,8 +36,8 @@ export const getPropertyAccount = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Property ID is required' });
     }
 
-    // Load the most complete account (dedup-aware) and recalc balance; creates one if missing
-    const account = await propertyAccountService.getPropertyAccount(propertyId);
+    // Read-only: load the named ledger. Never posts income or repairs accounting.
+    const account = await propertyAccountService.getPropertyAccount(propertyId, requestedLedger(req));
     
     res.json({
       success: true,
@@ -230,7 +242,8 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
     if (category) filters.category = category;
     if (status) filters.status = status;
 
-    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters);
+    const ledger = requestedLedger(req);
+    const transactions = await propertyAccountService.getTransactionHistory(propertyId, filters, ledger);
     if (!includePayouts) {
       return res.json({
         success: true,
@@ -238,7 +251,7 @@ export const getPropertyTransactions = async (req: Request, res: Response) => {
       });
     }
 
-    const account = await propertyAccountService.getPropertyAccount(propertyId);
+    const account = await propertyAccountService.getPropertyAccount(propertyId, ledger);
     const payoutTransactions = (account.ownerPayouts || []).map((payout: any) => ({
       _id: String(payout?._id || ''),
       type: 'owner_payout',
@@ -618,18 +631,29 @@ export const getPayoutHistory = async (req: Request, res: Response) => {
 };
 
 /**
- * Reconcile and remove duplicate income transactions for a property ledger
+ * Reconcile and remove duplicate income transactions for a property ledger.
+ * Explicit maintenance: requires confirm=true and a non-empty reason.
  */
 export const reconcilePropertyDuplicates = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
+    const { reason } = requireExplicitMigrationConfirmation(req);
     const { propertyId } = req.params;
     if (!propertyId) {
       return res.status(400).json({ message: 'Property ID is required' });
     }
+    audit = await startMigrationAudit(req, 'maintenance:property_reconcile_duplicates', {
+      propertyId,
+      companyId: req.user?.companyId,
+      reason,
+      confirm: true
+    });
     const result = await reconcilePropertyLedgerDuplicates(propertyId);
+    await finishMigrationAudit(audit, true, { propertyId, reason, result });
     return res.json({ success: true, message: 'Reconciliation completed', data: result });
   } catch (error) {
     logger.error('Error in reconcilePropertyDuplicates:', error);
+    await finishMigrationAudit(audit, false, undefined, (error as any)?.message || String(error));
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
@@ -638,10 +662,16 @@ export const reconcilePropertyDuplicates = async (req: Request, res: Response) =
 };
 
 /**
- * Sync property accounts with payments
+ * EXPLICIT historical property-account backfill. Not a reconciliation action.
  */
 export const syncPropertyAccounts = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
+    const { reason } = requireExplicitMigrationConfirmation(req);
+    audit = await startMigrationAudit(req, 'migration:property_accounts_sync', {
+      companyId: req.user?.companyId,
+      reason
+    });
     const allowBusinessHoursSync =
       String(process.env.ALLOW_SYNC_DURING_BUSINESS_HOURS || '').toLowerCase() === 'true' ||
       String(req.query.force || '').toLowerCase() === 'true';
@@ -659,6 +689,7 @@ export const syncPropertyAccounts = async (req: Request, res: Response) => {
         }).format(now)
       );
       if (Number.isFinite(localHour) && localHour >= businessStartHour && localHour < businessEndHour) {
+        await finishMigrationAudit(audit, false, undefined, 'SYNC_BLOCKED_BUSINESS_HOURS');
         return res.status(409).json({
           success: false,
           code: 'SYNC_BLOCKED_BUSINESS_HOURS',
@@ -675,13 +706,15 @@ export const syncPropertyAccounts = async (req: Request, res: Response) => {
         companyId,
         requestedBy
       });
+      await finishMigrationAudit(audit, true, { queued: true, jobId: String((queued.job as any)._id), reason });
       return res.status(202).json({
         success: true,
         queued: true,
+        historicalBackfill: true,
         deduplicated: queued.deduplicated,
         message: queued.deduplicated
-          ? 'A property account sync job is already pending/running for this company.'
-          : 'Property account sync has been queued.',
+          ? 'A property account integrity check is already pending for this company.'
+          : 'Property account integrity check queued. It does not replay payments or move historical income.',
         job: {
           id: String((queued.job as any)._id),
           status: queued.job.status,
@@ -691,33 +724,15 @@ export const syncPropertyAccounts = async (req: Request, res: Response) => {
       });
     }
 
-    const companyId = req.user?.companyId ? String(req.user.companyId) : '';
-    await propertyAccountService.syncPropertyAccountsWithPayments({
-      companyId: companyId || undefined
-    });
-    // Also migrate sale income transactions into dedicated sale ledgers (idempotent)
-    try {
-      let migrateIds: string[] | undefined;
-      if (companyId) {
-        migrateIds = await propertyAccountService.getLedgerEntityIdsForCompany(companyId);
-        if (!migrateIds.length) {
-          logger.info('Sales ledger migration skipped after property-account sync (no company entities)');
-        }
-      }
-      if (!companyId || (migrateIds && migrateIds.length > 0)) {
-        const result = await propertyAccountService.migrateSalesLedgerForCompany(migrateIds);
-        logger.info('Sales ledger migration completed after property-account sync', result as any);
-      }
-    } catch (e) {
-      logger.warn('Sales ledger migration skipped/failed after property-account sync', e as any);
-    }
-    
+    await finishMigrationAudit(audit, true, { waitForCompletion: true, historicalReplay: false, reason });
     res.json({
       success: true,
-      message: 'Property accounts synced successfully'
+      historicalBackfill: false,
+      message: 'Historical payment replay is disabled. Use accounting integrity to detect gaps and repair one payment at a time.'
     });
   } catch (error) {
     logger.error('Error in syncPropertyAccounts:', error);
+    await finishMigrationAudit(audit, false, undefined, error instanceof Error ? error.message : String(error));
     
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({
@@ -861,7 +876,13 @@ export const getAcknowledgementDocument = async (req: Request, res: Response) =>
  * Scoped to the current user's company if available.
  */
 export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
+    const { reason } = requireExplicitMigrationConfirmation(req);
+    audit = await startMigrationAudit(req, 'migration:ensure_development_ledgers', {
+      companyId: req.user?.companyId,
+      reason
+    });
     const companyId = req.user?.companyId ? String(req.user.companyId) : undefined;
     const waitForCompletion = String(req.query.wait || req.body?.wait || '').toLowerCase() === 'true';
     if (!waitForCompletion) {
@@ -870,13 +891,15 @@ export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
         companyId: companyId || '',
         requestedBy
       });
+      await finishMigrationAudit(audit, true, { queued: true, jobId: String((queued.job as any)._id), reason });
       return res.status(202).json({
         success: true,
         queued: true,
+        historicalBackfill: true,
         deduplicated: queued.deduplicated,
         message: queued.deduplicated
-          ? 'An ensure-ledgers job is already pending/running for this company.'
-          : 'Ensure-ledgers job has been queued.',
+          ? 'An ensure-ledgers historical backfill job is already pending/running for this company.'
+          : 'Ensure-ledgers historical backfill has been queued.',
         job: {
           id: String((queued.job as any)._id),
           status: queued.job.status,
@@ -889,9 +912,16 @@ export const ensureDevelopmentLedgers = async (req: Request, res: Response) => {
     const result = await propertyAccountService.ensureDevelopmentLedgersAndBackfillPayments({
       companyId
     });
-    return res.json({ success: true, message: 'Development ledgers ensured and payments backfilled', data: result });
+    await finishMigrationAudit(audit, true, { ...result, reason });
+    return res.json({
+      success: true,
+      historicalBackfill: true,
+      message: 'Development ledgers ensured and payments backfilled (explicit migration)',
+      data: result
+    });
   } catch (error) {
     logger.error('Error in ensureDevelopmentLedgers:', error);
+    await finishMigrationAudit(audit, false, undefined, error instanceof Error ? error.message : String(error));
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
@@ -943,31 +973,45 @@ export const listPropertyMaintenanceJobs = async (req: Request, res: Response) =
  * archives the rest to preserve history.
  */
 export const mergePropertyAccountDuplicatesForProperty = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
+    const { reason } = requireExplicitMigrationConfirmation(req);
     const { propertyId } = req.params;
     if (!propertyId) {
       return res.status(400).json({ success: false, message: 'Property ID is required' });
     }
+    audit = await startMigrationAudit(req, 'maintenance:property_merge_duplicates', {
+      propertyId,
+      companyId: req.user?.companyId,
+      reason,
+      confirm: true
+    });
     const pid = new mongoose.Types.ObjectId(propertyId);
     // Load all non-archived ledgers for this property (covers legacy/null, rental, sale)
     const accounts = await PropertyAccount.find({ propertyId: pid, isArchived: { $ne: true } });
     const service: any = propertyAccountService as any;
     if (typeof service.mergeDuplicateAccounts !== 'function') {
+      await finishMigrationAudit(audit, false, undefined, 'Merge operation not available');
       return res.status(500).json({ success: false, message: 'Merge operation not available' });
     }
     const groupsChanged = await service.mergeDuplicateAccounts(accounts);
-    let reconciliation: any = null;
-    try { reconciliation = await reconcilePropertyLedgerDuplicates(propertyId); } catch {}
+    await finishMigrationAudit(audit, true, {
+      propertyId,
+      reason,
+      merged: groupsChanged,
+      reconciled: null
+    });
     return res.json({
       success: true,
-      message: 'Property ledgers merged and reconciled (if applicable)',
+      message: 'Property ledgers merged where the classifier proved it was safe. Income rows were not cancelled.',
       data: {
         merged: groupsChanged,
-        reconciled: reconciliation
+        reconciled: null
       }
     });
   } catch (error) {
     logger.error('Error in mergePropertyAccountDuplicatesForProperty:', error);
+    await finishMigrationAudit(audit, false, undefined, (error as any)?.message || String(error));
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }

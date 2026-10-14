@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { MaintenanceVerification } from '../models/MaintenanceVerification';
 import { JwtPayload } from '../types/auth';
 import { AppError } from '../middleware/errorHandler';
-import { MaintenanceContractor } from '../models/MaintenanceContractor';
+import { contractorDirectoryFilter, MaintenanceContractor } from '../models/MaintenanceContractor';
 import { MaintenanceWorkOrder } from '../models/MaintenanceWorkOrder';
 import { MaintenanceQuote } from '../models/MaintenanceQuote';
 import { MaintenanceAttachmentRecord } from '../models/MaintenanceAttachment';
@@ -122,13 +122,32 @@ export const getPropertyHistory = async (req: Request, res: Response) => {
   res.json(history);
 };
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export const listContractors = async (req: Request, res: Response) => {
   const { companyId } = ctx(req);
-  const query: any = { companyId };
+  const query: any = contractorDirectoryFilter(companyId);
   if (req.query.active === 'true') query.active = true;
-  if (req.query.trade) query.trade = req.query.trade;
-  const contractors = await MaintenanceContractor.find(query).sort({ companyName: 1 });
-  res.json(contractors);
+  const category = String(req.query.category || req.query.trade || '').trim();
+  if (category) {
+    const pattern = new RegExp(`^${escapeRegex(category)}$`, 'i');
+    query.$and = [...(query.$and || []), { $or: [{ trade: pattern }, { skills: pattern }] }];
+  }
+  const contractors = await MaintenanceContractor.find(query)
+    .populate('userId', 'avatar avatarMimeType')
+    .sort({ companyName: 1 })
+    .lean();
+  res.json(contractors.map((row: any) => {
+    const user = row.userId && typeof row.userId === 'object' ? row.userId : null;
+    return {
+      ...row,
+      userId: user?._id || row.userId || undefined,
+      profileImage: user?.avatar || undefined,
+      profileImageType: user?.avatarMimeType || undefined,
+    };
+  }));
 };
 
 export const createContractor = async (req: Request, res: Response) => {

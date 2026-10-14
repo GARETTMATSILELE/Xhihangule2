@@ -1,4 +1,5 @@
-import { LedgerRowDTO, OwnerStatementDTO, ReportPeriodDTO, StatementRowType } from '../dto';
+import { LedgerRowDTO, OwnerStatementDTO, OwnerWaterfallDTO, ReportPeriodDTO, StatementRowType } from '../dto';
+import { explainOwnerWaterfall } from '../ownerWaterfall';
 import { CashFlowEngine, ChartEngine, money, PropertyKPIEngine, ReconciliationEngine, TimelineEngine, AuditTrailEngine } from '../engines';
 import { CanonicalLedgerEntry, sortLedgerEntries, toSourceReference } from '../ledger';
 import { PaymentCommissionSnapshot, ReportingReadModels } from '../readModels';
@@ -7,6 +8,7 @@ import { cleanStatementDescription, formatRentPeriodDescription } from '../renta
 export interface OwnerStatementBuildInput {
   companyId: string;
   propertyId: string;
+  ledgerType: 'rental' | 'sale';
   period: ReportPeriodDTO;
   generatedBy?: string;
   companyName?: string;
@@ -102,12 +104,17 @@ export class OwnerStatementBuilder {
     const periodStart = parseDate(input.period.startDate);
     const periodEnd = parseEndDate(input.period.endDate);
 
+    if (input.ledgerType !== 'rental' && input.ledgerType !== 'sale') {
+      throw new Error('Owner statement requires an explicit ledgerType of rental or sale.');
+    }
+
     const [owner, property, entriesToDate, leaseContext, maintenanceContext, inspectionContext] = await Promise.all([
-      this.readModels.owner.getOwnerForProperty(input.companyId, input.propertyId),
-      this.readModels.property.getProperty(input.companyId, input.propertyId),
+      this.readModels.owner.getOwnerForProperty(input.companyId, input.propertyId, input.ledgerType),
+      this.readModels.property.getProperty(input.companyId, input.propertyId, input.ledgerType),
       this.readModels.ledger.getLedgerEntries({
         companyId: input.companyId,
         propertyId: input.propertyId,
+        ledgerType: input.ledgerType,
         from: LEDGER_ORIGIN,
         to: periodEnd
       }),
@@ -178,6 +185,33 @@ export class OwnerStatementBuilder {
       const rentAmount = rowType === 'Income' && snapshot && Number(snapshot.grossRent || 0) > 0
         ? money(snapshot.grossRent, currency)
         : undefined;
+      const paymentId = paymentIdOf(entry);
+      const explained = rowType === 'Income' && snapshot
+        ? explainOwnerWaterfall({
+            grossAmount: snapshot.grossRent,
+            commissionAmount: snapshot.commission,
+            levyAmount: snapshot.levy,
+            vatOnCommission: snapshot.vatOnCommission,
+            vatRate: snapshot.vatRate,
+            recordedOwnerAmount: entry.credit
+          })
+        : undefined;
+      const ownerWaterfall: OwnerWaterfallDTO | undefined = explained
+        ? {
+            grossAmount: money(explained.grossAmount, currency),
+            commissionAmount: money(explained.commissionAmount, currency),
+            levyAmount: money(explained.levyAmount, currency),
+            vatOnCommission: money(explained.vatOnCommission, currency),
+            vatRate: explained.vatRate,
+            netOwnerAmount: money(explained.netOwnerAmount, currency),
+            recordedOwnerAmount: explained.recordedOwnerAmount == null
+              ? undefined
+              : money(explained.recordedOwnerAmount, currency),
+            difference: money(explained.difference, currency),
+            reviewRequired: explained.reviewRequired,
+            formula: explained.formula
+          }
+        : undefined;
       return {
         id: entry.entryId,
         date: entry.effectiveDate.toISOString(),
@@ -194,7 +228,9 @@ export class OwnerStatementBuilder {
         vatOnCommission: rowType === 'Income' && snapshot ? money(snapshot.vatOnCommission, currency) : undefined,
         levies: rowType === 'Income' && snapshot ? money(snapshot.levy, currency) : undefined,
         ownerAmount,
-        vatRate: snapshot?.vatRate
+        vatRate: snapshot?.vatRate,
+        paymentId,
+        ownerWaterfall
       };
     });
 
@@ -336,6 +372,28 @@ export class OwnerStatementBuilder {
     const totalOwnerAmount = trustLedger
       .filter((row) => row.rowType === 'Income')
       .reduce((sum, row) => sum + Number(row.ownerAmount?.amount || 0), 0);
+    const statementWaterfall = displayedSnapshots.length
+      ? explainOwnerWaterfall({
+          grossAmount: settlementGrossRent,
+          commissionAmount: settlementCommission,
+          levyAmount: settlementLevy,
+          vatOnCommission: settlementVat,
+          recordedOwnerAmount: totalOwnerAmount
+        })
+      : undefined;
+    const ownerMoneyWaterfall: OwnerWaterfallDTO | undefined = statementWaterfall
+      ? {
+          grossAmount: money(statementWaterfall.grossAmount, currency),
+          commissionAmount: money(statementWaterfall.commissionAmount, currency),
+          levyAmount: money(statementWaterfall.levyAmount, currency),
+          vatOnCommission: money(statementWaterfall.vatOnCommission, currency),
+          netOwnerAmount: money(statementWaterfall.netOwnerAmount, currency),
+          recordedOwnerAmount: money(statementWaterfall.recordedOwnerAmount || 0, currency),
+          difference: money(statementWaterfall.difference, currency),
+          reviewRequired: statementWaterfall.reviewRequired || trustLedger.some((row) => row.ownerWaterfall?.reviewRequired),
+          formula: statementWaterfall.formula
+        }
+      : undefined;
     const statementSummary = {
       openingBalance: money(openingBalanceAmount, currency),
       totalRent: money(settlementGrossRent, currency),
@@ -361,7 +419,9 @@ export class OwnerStatementBuilder {
     };
     const dataWarnings = [
       ...(periodRows.length === 0 && openingBalanceAmount === 0 ? ['No property account ledger entries found for this property and statement period.'] : []),
+      ...(ownerMoneyWaterfall?.reviewRequired ? ['Review required. The stored payment allocation does not match the recorded owner income. No historical amount was changed.'] : []),
       ...(!property ? ['Property metadata was not found for this property ID.'] : []),
+      ...(owner?.unresolvedReason ? [owner.unresolvedReason] : []),
       ...(!owner ? ['Owner metadata was not found for this property ID.'] : [])
     ];
 
@@ -384,7 +444,7 @@ export class OwnerStatementBuilder {
       },
       owner: {
         id: owner?.id,
-        displayName: owner?.displayName || 'Unknown Owner',
+        displayName: owner?.displayName || 'Owner not assigned',
         email: owner?.email,
         phone: owner?.phone,
         type: 'owner'
@@ -395,6 +455,8 @@ export class OwnerStatementBuilder {
         address: property?.address
       },
       statementNumber: `OWNER-${input.period.label}`,
+      ledger: input.ledgerType,
+      currency,
       period: input.period,
       executiveSummary: {
         openingBalance: money(openingBalanceAmount, currency),
@@ -431,6 +493,7 @@ export class OwnerStatementBuilder {
       timeline,
       pluginSections: [],
       statementSummary,
+      ownerMoneyWaterfall,
       rentalSettlement: displayedSnapshots.length
         ? {
             grossRent: money(settlementGrossRent, currency),

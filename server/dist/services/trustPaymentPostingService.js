@@ -15,6 +15,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const Payment_1 = require("../models/Payment");
 const trustAccountService_1 = __importDefault(require("./trustAccountService"));
+const transactionDomain_1 = require("./transactionDomain");
+const TrustTransaction_1 = require("../models/TrustTransaction");
+const testFailureSeam_1 = require("./testFailureSeam");
 class TrustPaymentPostingService {
     postBuyerPaymentToTrust(payload) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -28,6 +31,9 @@ class TrustPaymentPostingService {
             }
             if (payment.isProvisional === true) {
                 return { skipped: true, reason: 'provisional' };
+            }
+            if (!(0, transactionDomain_1.mayPostSaleTrust)(payment)) {
+                return { skipped: true, reason: 'not_sale_domain' };
             }
             if (!mongoose_1.default.Types.ObjectId.isValid(String(payload.propertyId || ''))) {
                 throw new Error('Invalid propertyId in payment event');
@@ -51,19 +57,24 @@ class TrustPaymentPostingService {
             if (!originalPayment) {
                 throw new Error(`Original payment not found: ${payload.paymentId}`);
             }
-            if (String(originalPayment.paymentType || '').toLowerCase() !== 'sale') {
-                return null;
+            if (!(0, transactionDomain_1.mayPostSaleTrust)(originalPayment)) {
+                return { skipped: true, reason: 'not_sale_domain' };
             }
             const propertyId = String(originalPayment.propertyId || '');
             if (!mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
                 throw new Error('Invalid propertyId in reversal event');
             }
+            (0, testFailureSeam_1.throwOnceIfArmed)(String(payload.paymentId), `${String(originalPayment.notes || '')} ${String(payload.reason || '')}`, 'PHASE27_FAIL_TRUST');
+            const receipt = yield TrustTransaction_1.TrustTransaction.findOne({
+                paymentId: originalPayment._id,
+                type: 'BUYER_PAYMENT',
+                credit: { $gt: 0 }
+            }).sort({ createdAt: 1 }).lean();
+            if (!receipt) {
+                return { skipped: true, reason: 'no_trust_receipt' };
+            }
             const reversalPaymentId = String(payload.reversalPaymentId || '').trim();
-            const reversalPayment = reversalPaymentId && mongoose_1.default.Types.ObjectId.isValid(reversalPaymentId)
-                ? yield Payment_1.Payment.findById(reversalPaymentId).lean()
-                : null;
-            const reversalAmountRaw = Number((reversalPayment === null || reversalPayment === void 0 ? void 0 : reversalPayment.amount) || 0) || -Math.abs(Number((originalPayment === null || originalPayment === void 0 ? void 0 : originalPayment.amount) || 0));
-            const reversalAmount = Math.abs(reversalAmountRaw);
+            const reversalAmount = Math.abs(Number(receipt.credit || 0));
             if (reversalAmount <= 0) {
                 throw new Error('Reversal amount must be greater than zero');
             }

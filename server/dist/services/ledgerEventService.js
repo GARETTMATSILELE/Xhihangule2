@@ -62,6 +62,10 @@ class LedgerEventService {
         }
         return LedgerEventService.instance;
     }
+    /**
+     * Retry owner-income posting for a Payment that failed during live completion.
+     * Invokes paymentAccountingOrchestrator. Do not enqueue from historical full-sync.
+     */
     enqueueOwnerIncomeEvent(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.enqueueEvent('owner_income', paymentId);
@@ -151,6 +155,19 @@ class LedgerEventService {
                         ev.lastError = undefined;
                         ev.updatedAt = new Date();
                         yield ev.save();
+                        const eventPaymentId = ev.paymentId ? String(ev.paymentId) : '';
+                        if (eventPaymentId) {
+                            try {
+                                const { refreshPaymentAccountingStatus } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingReconciliation')));
+                                yield refreshPaymentAccountingStatus(eventPaymentId);
+                            }
+                            catch (refreshErr) {
+                                logger_1.logger.warn('LedgerEvent accounting status refresh failed', {
+                                    paymentId: eventPaymentId,
+                                    error: (refreshErr === null || refreshErr === void 0 ? void 0 : refreshErr.message) || refreshErr
+                                });
+                            }
+                        }
                     }
                     catch (err) {
                         const attempts = (ev.attemptCount || 0) + 1;
@@ -176,8 +193,21 @@ class LedgerEventService {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, _b, _c, _d;
             const paymentId = ev.paymentId ? ev.paymentId.toString() : '';
-            if (ev.type === 'owner_income' && paymentId) {
-                yield propertyAccountService_1.default.recordIncomeFromPayment(paymentId);
+            if (ev.type === 'journal' && paymentId) {
+                const { Payment } = yield Promise.resolve().then(() => __importStar(require('../models/Payment')));
+                const accountingIntegrationService = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
+                const payment = yield Payment.findById(paymentId);
+                if (!payment)
+                    throw new Error(`Payment not found: ${paymentId}`);
+                yield accountingIntegrationService.syncPaymentReceived(payment);
+                return;
+            }
+            if ((ev.type === 'owner_income' || ev.type === 'agent_commission' || ev.type === 'company_commission') && paymentId) {
+                const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+                const result = yield postPaymentAccounting(paymentId);
+                if (result.status === 'partial' || result.status === 'failed') {
+                    throw new Error(result.errors.join('; ') || 'accounting projection still incomplete');
+                }
                 return;
             }
             if (ev.type === 'payment_reversal' && paymentId) {
@@ -191,20 +221,6 @@ class LedgerEventService {
                 if (result.status === 'partial' || result.status === 'failed') {
                     throw new Error(result.errors.join('; ') || 'reversal still incomplete');
                 }
-                return;
-            }
-            if (ev.type === 'agent_commission' && paymentId) {
-                const agentAccountService = (yield Promise.resolve().then(() => __importStar(require('./agentAccountService')))).default;
-                yield agentAccountService.syncCommissionForPayment(paymentId);
-                return;
-            }
-            if (ev.type === 'company_commission' && paymentId) {
-                const { Payment } = yield Promise.resolve().then(() => __importStar(require('../models/Payment')));
-                const accountingIntegrationService = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
-                const payment = yield Payment.findById(paymentId);
-                if (!payment)
-                    return;
-                yield accountingIntegrationService.postCompanyCommission(payment);
                 return;
             }
             if (ev.type === 'levy_collection') {

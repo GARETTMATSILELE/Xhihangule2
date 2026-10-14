@@ -7,16 +7,116 @@ import { Voucher } from '../models/Voucher';
 import { PaymentSession } from '../models/PaymentSession';
 import { Company } from '../models/Company';
 import { activateSubscriptionFromPayment } from '../services/billingActivationService';
+import { enterpriseDirectCheckoutEnabled } from '../services/registrationPaymentPolicy';
+import { chargeForPlan, listDashboardPlans } from '../services/systemPlanService';
+import { initiatePaynowCheckout } from './paynowController';
 import crypto from 'crypto';
+
+export const listPublicPlans = async (_req: Request, res: Response, next: (error: unknown) => void) => {
+  try {
+    const enterpriseCheckout = enterpriseDirectCheckoutEnabled();
+    const plans = (await listDashboardPlans()).map((plan) => ({
+      ...plan,
+      checkout: plan.code === 'ENTERPRISE' && !enterpriseCheckout ? 'sales' as const : 'paynow' as const
+    }));
+    res.json({ trialDays: 14, currency: plans[0]?.currency || 'USD', plans });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getCheckoutSession = async (req: Request, res: Response) => {
+  if (!req.user?.companyId) return res.status(401).json({ message: 'Unauthorized' });
+  const requestedId = String(req.params.id || 'current');
+  const query: Record<string, unknown> = {
+    companyId: new mongoose.Types.ObjectId(req.user.companyId),
+    provider: 'paynow'
+  };
+  if (requestedId !== 'current') query._id = requestedId;
+  const session = await PaymentSession.findOne(query).sort({ createdAt: -1 });
+  if (!session) return res.status(404).json({ message: 'No checkout is waiting for this company', code: 'NO_CHECKOUT' });
+  const priced = await chargeForPlan(session.plan, session.billingCycle);
+  if (priced == null) {
+    return res.status(503).json({ message: 'This plan does not have a configured price for the selected billing frequency', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
+  }
+  res.json({
+    paymentSessionId: session._id,
+    plan: session.plan,
+    billingCycle: session.billingCycle,
+    amount: priced,
+    currency: session.currency || 'USD',
+    status: session.status,
+    awaitingConfirmation: Boolean(session.pollUrl) && (session.status === 'pending' || session.status === 'provider_created')
+  });
+};
 
 export const createCheckout = async (req: Request, res: Response) => {
   const { plan, cycle }: { plan: Plan; cycle: 'monthly' | 'yearly' } = req.body || {};
   if (!req.user?.companyId) return res.status(401).json({ message: 'Unauthorized' });
   if (!plan || !['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) return res.status(400).json({ message: 'Invalid plan' });
   if (!cycle || !['monthly','yearly'].includes(cycle)) return res.status(400).json({ message: 'Invalid cycle' });
+  if (plan === 'ENTERPRISE' && !enterpriseDirectCheckoutEnabled()) {
+    return res.status(400).json({ message: 'Enterprise is arranged with sales. Direct checkout is not available.', code: 'ENTERPRISE_SALES_ONLY' });
+  }
 
-  const cfg = PLAN_CONFIG[plan];
-  const amount = cfg.pricingUSD ? (cycle === 'monthly' ? cfg.pricingUSD.monthly : cfg.pricingUSD.yearly) : 0;
+  const pendingRegistration = await PaymentSession.findOne({
+    companyId: new mongoose.Types.ObjectId(req.user.companyId),
+    provider: 'paynow',
+    status: { $in: ['pending', 'provider_created'] }
+  }).sort({ createdAt: -1 });
+  if (pendingRegistration && (pendingRegistration.plan !== plan || pendingRegistration.billingCycle !== cycle)) {
+    return res.status(409).json({
+      message: 'Checkout does not match the plan and billing frequency selected at registration',
+      code: 'PLAN_MISMATCH',
+      plan: pendingRegistration.plan,
+      billingCycle: pendingRegistration.billingCycle,
+      paymentSessionId: pendingRegistration._id
+    });
+  }
+
+  const amount = (await chargeForPlan(plan, cycle)) || 0;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(503).json({ message: 'This plan does not have a configured price', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
+  }
+
+  const openSession = await PaymentSession.findOne({
+    companyId: new mongoose.Types.ObjectId(req.user.companyId),
+    plan,
+    billingCycle: cycle,
+    provider: 'paynow',
+    status: { $in: ['pending', 'provider_created'] }
+  }).sort({ createdAt: -1 });
+  if (openSession) {
+    if (openSession.amount !== amount) {
+      openSession.amount = amount;
+      await openSession.save();
+      if (openSession.billingPaymentId) {
+        await BillingPayment.updateOne({ _id: openSession.billingPaymentId }, { $set: { amount } });
+      }
+    }
+    try {
+      const checkout = await initiatePaynowCheckout(req, {
+        paymentSessionId: String(openSession._id),
+        plan,
+        cycle,
+        description: `Mantis ${plan} ${cycle} subscription`
+      });
+      return res.json({
+        redirectUrl: checkout.redirectUrl,
+        paymentId: openSession.billingPaymentId,
+        paymentSessionId: openSession._id,
+        reference: checkout.reference,
+        metadata: { companyId: req.user.companyId, userId: req.user.userId, plan, billingCycle: cycle }
+      });
+    } catch (e: any) {
+      return res.status(e?.statusCode || 502).json({
+        message: e?.message || 'Failed to start Paynow checkout',
+        code: e?.code || 'PAYNOW_CHECKOUT_FAILED',
+        paymentSessionId: openSession._id
+      });
+    }
+  }
+
   const ref = `PAY-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const idempotencyKey = req.get('idempotency-key') || `checkout:${req.user.companyId}:${plan}:${cycle}:${Date.now()}`;
   const subscription = await Subscription.findOneAndUpdate(
@@ -64,10 +164,26 @@ export const createCheckout = async (req: Request, res: Response) => {
   paymentSession.billingPaymentId = payment._id as any;
   await paymentSession.save();
 
-  // Deferred Paynow integration: return placeholder redirect URL (client can show instructions)
-  const redirectUrl = `/billing/pending?ref=${encodeURIComponent(ref)}`;
+  let checkout;
+  try {
+    checkout = await initiatePaynowCheckout(req, {
+      paymentSessionId: String(paymentSession._id),
+      plan,
+      cycle,
+      reference: ref,
+      description: `Mantis ${plan} ${cycle} subscription`
+    });
+  } catch (e: any) {
+    return res.status(e?.statusCode || 502).json({
+      message: e?.message || 'Failed to start Paynow checkout',
+      paymentId: payment._id,
+      paymentSessionId: paymentSession._id,
+      reference: ref
+    });
+  }
+
   return res.json({
-    redirectUrl,
+    redirectUrl: checkout.redirectUrl,
     paymentId: payment._id,
     paymentSessionId: paymentSession._id,
     reference: ref,
@@ -217,12 +333,20 @@ export const changePlan = async (req: Request, res: Response) => {
   if (plan && !['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) return res.status(400).json({ message: 'Invalid plan' });
   if (cycle && !['monthly','yearly'].includes(cycle)) return res.status(400).json({ message: 'Invalid cycle' });
 
-  const subscription = await Subscription.findOneAndUpdate(
-    { companyId: req.user.companyId },
-    { $set: { ...(plan ? { plan } : {}), ...(cycle ? { cycle } : {}) } },
-    { upsert: true, new: true }
-  );
-  return res.json({ message: 'Subscription updated', subscription });
+  const subscription = await Subscription.findOne({ companyId: req.user.companyId });
+  if (!subscription) {
+    return res.json({ message: 'Subscription unchanged', subscription: null, unchanged: true });
+  }
+  const planUnchanged = !plan || subscription.plan === plan;
+  const cycleUnchanged = !cycle || subscription.cycle === cycle;
+  if (planUnchanged && cycleUnchanged) {
+    return res.json({ message: 'Subscription unchanged', subscription, unchanged: true });
+  }
+  return res.status(403).json({
+    status: 'error',
+    message: 'Plan changes require a verified billing event',
+    code: 'PLAN_CHANGE_REQUIRES_BILLING',
+  });
 };
 
 

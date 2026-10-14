@@ -1,4 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { attachDemoAdapter } from '../demo/demoAdapter';
+import { isDemoMode } from '../demo/demoMode';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -14,9 +16,13 @@ const rawApiBase =
 // Ensure base ends with /api for production robustness
 const API_URL = (() => {
   try {
+    const candidate = String(rawApiBase);
+    if (process.env.NODE_ENV === 'production' && isBrowser && /localhost|127\.0\.0\.1/i.test(candidate)) {
+      return `${window.location.origin}/api`;
+    }
     // If rawApiBase already includes '/api' path, return as is
-    if (/\/api(?:\/?$)/.test(String(rawApiBase)) || String(rawApiBase).includes('/api/')) {
-      return String(rawApiBase);
+    if (/\/api(?:\/?$)/.test(candidate) || candidate.includes('/api/')) {
+      return candidate;
     }
     // If rawApiBase looks like an origin or a base without path, append /api
     const u = new URL(String(rawApiBase), isBrowser ? window.location.origin : 'http://localhost');
@@ -81,6 +87,7 @@ const getCookieValue = (name: string): string | null => {
 // Request interceptor
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    attachDemoAdapter(config);
     // Attach CSRF header for refresh endpoint
     try {
       const url = config.url || '';
@@ -112,6 +119,10 @@ api.interceptors.response.use(
         method: error.config?.method,
         isRetry: originalRequest._retry
       });
+    }
+
+    if (isDemoMode()) {
+      return Promise.reject(error);
     }
 
     // If the error is 401 and we haven't tried to refresh the token yet

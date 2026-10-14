@@ -544,9 +544,9 @@ export function printDisbursementReport(t: SaleTransactionRow, companyName = 'Co
         <div class="section">
           <h2>Seller Settlement</h2>
           <table>
-            <tr><td>Seller Amount (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
+            <tr><td>Seller proceeds (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
             <tr><td>VAT on Commission</td><td class="right">${currency(t.vatOnCommission)}</td></tr>
-            <tr class="total"><td>Seller Amount (after VAT on commission)</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
+            <tr class="total"><td>Net seller proceeds</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
           </table>
         </div>
         <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 200); };</script>

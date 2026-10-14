@@ -694,8 +694,13 @@ const reconcilePaymentPosting = (req, res) => __awaiter(void 0, void 0, void 0, 
             return res.status(400).json({ success: false, message: 'paymentId is required' });
         }
         const syncService = databaseSyncService_1.default.getInstance();
-        yield syncService.reconcilePaymentPosting(paymentId);
-        res.json({ success: true, message: 'Reconciliation triggered' });
+        const result = yield syncService.reconcilePaymentPosting(paymentId);
+        res.json({
+            success: true,
+            deprecated: true,
+            message: 'This endpoint is detection-only and no longer repairs accounting. Use POST /api/accountants/payments/:id/accounting/repair for authorised targeted repair.',
+            data: result
+        });
     }
     catch (error) {
         logger_1.logger.error('Error reconciling payment posting:', error);

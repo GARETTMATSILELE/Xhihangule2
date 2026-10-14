@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const mongoose_1 = __importDefault(require("mongoose"));
+const propertyAccess_1 = require("../../utils/propertyAccess");
 const Company_1 = require("../../models/Company");
 const PropertyAccount_1 = __importDefault(require("../../models/PropertyAccount"));
 const auth_1 = require("../../middleware/auth");
@@ -82,9 +83,20 @@ router.get('/owner/:propertyId', auth_1.auth, (req, res) => __awaiter(void 0, vo
             return res.status(400).json({ message: 'Company ID is required' });
         const company = yield getCompanyBrand(companyId);
         const propertyId = yield resolveStatementPropertyId(String(req.params.propertyId));
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
+        const ledgerType = String(req.query.ledger || req.query.ledgerType || '').toLowerCase();
+        if (ledgerType !== 'rental' && ledgerType !== 'sale') {
+            return res.status(400).json({
+                code: 'LEDGER_REQUIRED',
+                message: 'Owner statement requires ledger=rental or ledger=sale.'
+            });
+        }
         const dto = yield reportFactory_1.reportFactory.createOwnerStatement({
             companyId,
             propertyId,
+            ledgerType,
             period: toStatementPeriod(req.query),
             generatedBy: (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId,
             companyName: company.name,
@@ -108,9 +120,20 @@ router.get('/owner/:propertyId/:format', auth_1.auth, (req, res) => __awaiter(vo
             return res.status(400).json({ message: 'Unsupported report format' });
         const company = yield getCompanyBrand(companyId);
         const propertyId = yield resolveStatementPropertyId(String(req.params.propertyId));
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            return res.status(404).json({ message: 'Property not found' });
+        }
+        const ledgerType = String(req.query.ledger || req.query.ledgerType || '').toLowerCase();
+        if (ledgerType !== 'rental' && ledgerType !== 'sale') {
+            return res.status(400).json({
+                code: 'LEDGER_REQUIRED',
+                message: 'Owner statement requires ledger=rental or ledger=sale.'
+            });
+        }
         const result = yield reportFactory_1.reportFactory.exportOwnerStatement({
             companyId,
             propertyId,
+            ledgerType,
             period: toStatementPeriod(req.query),
             generatedBy: (_b = req.user) === null || _b === void 0 ? void 0 : _b.userId,
             companyName: company.name,

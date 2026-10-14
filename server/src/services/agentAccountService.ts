@@ -51,8 +51,34 @@ export class AgentAccountService {
   }
 
   /**
+   * True when this AgentAccount already has a commission row for the lane.
+   * Matches orchestrator references (paymentId / paymentId-role) and legacy
+   * payment.referenceNumber rows. Never used to overwrite amounts.
+   */
+  private isCommissionLaneAlreadyPosted(
+    account: IAgentAccount,
+    payment: any,
+    lane: { role: string; reference: string }
+  ): boolean {
+    const paymentId = String(payment?._id || payment?.id || '');
+    const baseRef = String(payment?.referenceNumber || '');
+    const legacyRef = lane.role === 'agent' ? baseRef : (baseRef ? `${baseRef}-${lane.role}` : '');
+    return (account.transactions || []).some((t: any) => {
+      if (t.type !== 'commission') return false;
+      const ref = String(t.reference || '');
+      if (lane.reference && ref === lane.reference) return true;
+      if (legacyRef && ref === legacyRef) return true;
+      if (paymentId && String(t.paymentId || '') === paymentId) {
+        return inferCommissionRoleFromReference(ref) === lane.role;
+      }
+      return false;
+    });
+  }
+
+  /**
    * Sync commission transactions for a single payment (SSOT: Payment)
    * Idempotent: uses paymentId + role-qualified reference for dedupe.
+   * Existing rows are never overwritten when amounts differ.
    */
   async syncCommissionForPayment(paymentId: string): Promise<void> {
     try {
@@ -64,6 +90,10 @@ export class AgentAccountService {
 
       const lanes = projectCommissionLanes(payment);
       for (const lane of lanes) {
+        const account = await this.getOrCreateAgentAccount(lane.agentId);
+        if (this.isCommissionLaneAlreadyPosted(account, payment, lane)) {
+          continue;
+        }
         const referenceBase = String((payment as any).referenceNumber || '');
         const description = lane.role === 'agent'
           ? `Commission from payment ${referenceBase}`
@@ -254,6 +284,19 @@ export class AgentAccountService {
   }): Promise<IAgentAccount> {
     try {
       const account = await this.getOrCreateAgentAccount(agentId);
+
+      if (commissionData.paymentId) {
+        const role = inferCommissionRoleFromReference(commissionData.reference || '');
+        const existsByPayment = account.transactions.some(t =>
+          t.type === 'commission' &&
+          String((t as any).paymentId || '') === String(commissionData.paymentId) &&
+          inferCommissionRoleFromReference(String(t.reference || '')) === role
+        );
+        if (existsByPayment) {
+          logger.warn(`Duplicate commission paymentId "${commissionData.paymentId}" role ${role} for agent ${agentId} ignored.`);
+          return account;
+        }
+      }
 
       if (commissionData.reference) {
         const exists = account.transactions.some(t =>
@@ -579,15 +622,13 @@ export class AgentAccountService {
   }
 
   /**
-   * Sync commission transactions for a specific agent
+   * Historical catch-up: project missing AgentAccount commissions from Payments.
+   * Uses the same writer as postPaymentAccounting (syncCommissionForPayment).
+   * Does not recalculate commission/VAT, does not overwrite existing rows,
+   * and does not rewrite the transactions array.
    */
   async syncCommissionTransactions(agentId: string): Promise<void> {
     try {
-      console.log('Syncing commission transactions for agent:', agentId);
-
-      // Get all completed payments where this agent is either:
-      // - the recorded agentId on the payment, or
-      // - the owner or collaborator in a sales split
       const agentObjId = new mongoose.Types.ObjectId(agentId);
       const payments = await Payment.find({
         status: 'completed',
@@ -604,175 +645,15 @@ export class AgentAccountService {
             ]
           }
         ]
-      }).select('paymentDate amount commissionDetails referenceNumber propertyId tenantId paymentType');
+      }).select('_id').lean();
 
-      const account = await this.getOrCreateAgentAccount(agentId);
-      let newTransactionsAdded = 0;
-
+      const seen = new Set<string>();
       for (const payment of payments) {
-        // Determine the applicable commission amount for this agent
-        const split = (payment as any)?.commissionDetails?.agentSplit;
-        let applicableAmount = 0;
-        let roleLabel: 'owner' | 'collaborator' | 'agent' = 'agent';
-        if (split && payment.paymentType === 'sale') {
-          const ownerId = split?.ownerUserId ? String(split.ownerUserId) : undefined;
-          const collabId = split?.collaboratorUserId ? String(split.collaboratorUserId) : undefined;
-          if (ownerId === agentId) {
-            applicableAmount = Number(split?.ownerAgentShare || 0);
-            roleLabel = 'owner';
-          } else if (collabId === agentId) {
-            applicableAmount = Number(split?.collaboratorAgentShare || 0);
-            roleLabel = 'collaborator';
-          } else {
-            applicableAmount = 0;
-          }
-        } else {
-          // Rentals and introductions: a single agent commission applies
-          applicableAmount = Number((payment as any)?.commissionDetails?.agentShare || 0);
-          roleLabel = 'agent';
-        }
-
-        if (applicableAmount && applicableAmount > 0) {
-          // Use a role-qualified reference ONLY for sales splits to distinguish entries
-          const baseRef = String((payment as any).referenceNumber || '');
-          const isSalesSplit = !!split && (payment as any).paymentType === 'sale';
-          const uniqueRef = isSalesSplit ? `${baseRef}-${roleLabel}` : baseRef;
-          // Check if this commission transaction already exists.
-          // Older rental transactions may have missing reference or a description without role tag,
-          // so we perform a broader match for non-sales payments to avoid duplicates.
-          const existingTransaction = account.transactions.find(t => {
-            if (t.type !== 'commission') return false;
-            // Only dedupe on exact same paymentId. This allows multiple installments
-            // that share the same textual reference to each create their own entry.
-            const samePayment = String((t as any).paymentId || '') === String((payment as any)._id || '');
-            if (!samePayment) return false;
-            // For split sales, also ensure we dedupe per role lane
-            if (isSalesSplit) {
-              return String(t.reference || '').endsWith(`-${roleLabel}`);
-            }
-            return true;
-          });
-          
-          if (!existingTransaction) {
-            // Try to match a legacy entry without paymentId using reference/description/amount (backfill paymentId instead of adding)
-            const amountsEqual = (a: number, b: number) => Math.abs(Number(a || 0) - Number(b || 0)) < 0.005;
-            const legacyMatch = account.transactions.find(t => {
-              if (t.type !== 'commission') return false;
-              if ((t as any).paymentId) return false;
-              if (!amountsEqual(t.amount, applicableAmount)) return false;
-              const ref = String(t.reference || '');
-              const desc = String(t.description || '');
-              if (isSalesSplit) {
-                // Must match role-qualified reference for split lanes
-                return ref === uniqueRef || desc.includes(uniqueRef);
-              }
-              // Non-split (rentals/introductions): allow base reference or description includes baseRef
-              return ref === baseRef || desc.includes(baseRef);
-            });
-
-            if (legacyMatch) {
-              // Backfill paymentId and normalize reference; do not create a new transaction
-              (legacyMatch as any).paymentId = (payment as any)._id;
-              if (isSalesSplit) {
-                legacyMatch.reference = uniqueRef;
-                legacyMatch.description = `Commission (${roleLabel}) from payment ${baseRef}`;
-              } else if (!legacyMatch.reference) {
-                legacyMatch.reference = baseRef;
-              }
-              account.lastCommissionDate = (payment as any).paymentDate;
-              // Continue to next payment without incrementing newTransactionsAdded
-              continue;
-            }
-
-            // Add commission transaction
-            // For rentals/introductions: keep legacy description to prevent duplicates.
-            const description = isSalesSplit
-              ? `Commission (${roleLabel}) from payment ${baseRef}`
-              : `Commission from payment ${baseRef}`;
-            const transaction: Transaction = {
-              type: 'commission',
-              amount: applicableAmount,
-              date: (payment as any).paymentDate,
-              paymentId: (payment as any)._id,
-              description,
-              reference: uniqueRef,
-              status: 'completed',
-              notes: `Property: ${(payment as any).propertyId}, Tenant: ${(payment as any).tenantId}`
-            };
-
-            account.transactions.push(transaction);
-            account.totalCommissions += applicableAmount;
-            account.lastCommissionDate = (payment as any).paymentDate;
-            newTransactionsAdded++;
-            
-            console.log(`Added commission transaction (${isSalesSplit ? roleLabel : 'agent'}): ${applicableAmount} for payment ${baseRef}`);
-          }
-        }
+        const pid = String((payment as any)?._id || '');
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        await this.syncCommissionForPayment(pid);
       }
-
-      // Strong de-duplication pass:
-      // - For commission entries WITH paymentId: keep one per (paymentId, role), prefer latest date
-      // - For commission entries WITHOUT paymentId: keep at most one per (normalizedRef, role, amountCents),
-      //   and drop any that collide with an existing paymentId-backed (paymentId, role)
-      {
-        const inferRole = (ref: string): 'owner' | 'collaborator' | 'agent' => {
-          const r = (ref || '').toLowerCase();
-          if (r.endsWith('-owner')) return 'owner';
-          if (r.endsWith('-collaborator')) return 'collaborator';
-          return 'agent';
-        };
-        const normalizeRef = (ref: string) => (ref || '').trim().replace(/\s+/g, ' ').toLowerCase();
-        const nonCommission: Transaction[] = [];
-        const commissions: Transaction[] = [];
-        for (const t of account.transactions) {
-          if (t.type === 'commission') commissions.push(t); else nonCommission.push(t);
-        }
-        const keepByPidRole: Record<string, Transaction> = Object.create(null);
-        const legacyBuckets: Record<string, Transaction[]> = Object.create(null);
-        // Partition into paymentId-backed and legacy buckets
-        for (const t of commissions) {
-          const ref = String(t.reference || '');
-          const role = inferRole(ref);
-          if ((t as any).paymentId) {
-            const key = `${String((t as any).paymentId)}:${role}`;
-            const existing = keepByPidRole[key];
-            if (!existing || new Date(t.date).getTime() >= new Date(existing.date).getTime()) {
-              keepByPidRole[key] = t;
-            }
-          } else {
-            const amtCents = Math.round(Number(t.amount || 0) * 100);
-            const bucketKey = `${normalizeRef(ref)}:${role}:${amtCents}`;
-            if (!legacyBuckets[bucketKey]) legacyBuckets[bucketKey] = [];
-            legacyBuckets[bucketKey].push(t);
-          }
-        }
-        // Build final list: start with paymentId-backed kept entries
-        const finalCommissions: Transaction[] = Object.values(keepByPidRole);
-        // For each legacy bucket, keep only one if there is no payment-backed entry that would cover it
-        for (const bucketKey of Object.keys(legacyBuckets)) {
-          const list = legacyBuckets[bucketKey];
-          if (list.length === 0) continue;
-          // If any item in bucket has a paymentId already (shouldn't be here), skip bucket
-          // Otherwise, retain the earliest by date
-          const chosen = list.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
-          // Determine role from chosen reference and check if a paymentId-backed entry with same role exists
-          const role = inferRole(String(chosen.reference || ''));
-          // We cannot link to a specific paymentId here; if any payment-backed entry exists with same role and similar reference,
-          // assume coverage and drop legacy. Otherwise keep single legacy.
-          const anyPidSameRole = finalCommissions.some(t => inferRole(String(t.reference || '')) === role);
-          if (!anyPidSameRole) {
-            finalCommissions.push(chosen);
-          }
-        }
-        // Reassemble final transactions list
-        account.transactions = [...nonCommission, ...finalCommissions]
-          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      }
-
-      // Always recalc and save to ensure running balance and timestamps stay current
-      await this.recalculateBalance(account);
-      await account.save();
-      console.log(`Commission sync complete for agent ${agentId}; new transactions added: ${newTransactionsAdded}`);
     } catch (error) {
       logger.error('Error syncing commission transactions:', error);
       throw error;

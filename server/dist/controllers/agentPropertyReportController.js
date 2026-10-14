@@ -22,6 +22,7 @@ const Company_1 = require("../models/Company");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
+const propertyAccess_1 = require("../utils/propertyAccess");
 const propertyReportDataset_1 = require("../services/propertyReportDataset");
 const activePropertyVisibilityFilter = {
     isDeleted: { $ne: true },
@@ -34,11 +35,12 @@ function userRoles(req) {
     return (roles || []).filter(Boolean).map(String);
 }
 function reportScopeForUser(req, explicit) {
+    const wide = userRoles(req).some((role) => COMPANY_WIDE_REPORT_ROLES.includes(role));
+    if (!wide)
+        return 'agent';
     if (explicit === 'company')
         return 'company';
-    if (userRoles(req).some((role) => COMPANY_WIDE_REPORT_ROLES.includes(role)))
-        return 'company';
-    return explicit || 'agent';
+    return 'company';
 }
 function parseIdList(value) {
     const raw = Array.isArray(value) ? value.join(',') : String(value || '');
@@ -63,9 +65,14 @@ function sendPropertyDetailsReport(req, res, scope) {
             const requestedIds = parseIdList(req.query.propertyIds);
             const query = Object.assign({ companyId }, activePropertyVisibilityFilter);
             if (scope === 'agent') {
-                query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+                const visible = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+                const allowed = visible === 'company' ? null : visible.map((id) => String(id));
+                const chosen = requestedIds.length
+                    ? requestedIds.filter((id) => !allowed || allowed.includes(id))
+                    : allowed;
+                query._id = { $in: (chosen || []).map((id) => new mongoose_1.default.Types.ObjectId(id)) };
             }
-            if (requestedIds.length) {
+            else if (requestedIds.length) {
                 query._id = { $in: requestedIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) };
             }
             const [properties, company] = yield Promise.all([

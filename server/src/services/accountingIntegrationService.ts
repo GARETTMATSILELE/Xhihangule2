@@ -9,6 +9,16 @@ import {
   shouldPostCompanyCommission,
   shouldPostJournal
 } from './accountingPostingPolicy';
+import { buildAgentReceiptJournal, buildAgentReceiptReversal } from './tax/principalAgentJournal';
+import { allocateRentalReceipt } from './tax/paymentAllocation';
+import { filingPeriodFromDate as taxFilingPeriod } from './tax/vatCalculation';
+import { GL } from './tax/chartAccounts';
+import { upsertPaymentTaxObligation, reversePaymentTaxObligations } from './taxObligationService';
+import { journalPaymentType } from './transactionDomain';
+import { JournalEntry } from '../models/JournalEntry';
+import { JournalLine } from '../models/JournalLine';
+import { ChartOfAccount } from '../models/ChartOfAccount';
+import { throwOnceIfArmed } from './testFailureSeam';
 
 const toMoney = (value: number): number => Number(Number(value || 0).toFixed(2));
 
@@ -54,15 +64,17 @@ class AccountingIntegrationService {
   }
 
   /**
-   * CompanyAccount is the commission-revenue source of truth.
-   * Company.revenue is a denormalized cache and is not written here.
+   * Company commission projection writer for a Payment.
+   * Call only from paymentAccountingOrchestrator (or explicit repair via orchestrator).
+   * Do not call from scheduled jobs, GET handlers, integrity, or historical sync.
+   * Payment.commissionDetails is the source of truth; CompanyAccount is a projection.
    */
   async postCompanyCommission(payment: IPayment): Promise<void> {
     if (!shouldPostCompanyCommission(payment)) return;
     const agencyShare = toMoney((payment.commissionDetails as any)?.agencyShare || 0);
     if (!(agencyShare > 0) || !payment.companyId) return;
     const companyId = payment.companyId;
-    const desiredSource = payment.paymentType === 'sale' ? 'sales_commission' : 'rental_commission';
+    const desiredSource = journalPaymentType(payment) === 'sale' ? 'sales_commission' : 'rental_commission';
     const txDoc = {
       type: 'income',
       source: desiredSource,
@@ -103,28 +115,45 @@ class AccountingIntegrationService {
       const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
       const paymentVat = toMoney((payment as any)?.vatAmount || 0);
       const totalVatCollected = toMoney(vatOnCommission + paymentVat);
-      const effectiveVatRate = Number((payment as any)?.vatRate || 0);
-      const incomeCode = payment.paymentType === 'sale' ? '4002' : '4001';
-      const incomeCredit = toMoney(Math.max(0, amount - totalVatCollected));
+      const commissionNet = toMoney(
+        Number((payment.commissionDetails as any)?.commissionNet || (payment.commissionDetails as any)?.totalCommission || 0)
+      );
+      const effectiveVatRate = Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0);
+      const propertyId = (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined;
+      const agentId = (payment as any)?.agentId ? String((payment as any).agentId) : undefined;
+      const levyAmount = toMoney(
+        Number((payment.commissionDetails as any)?.levy ?? (payment as any)?.levyAllocated ?? 0)
+      );
+      const allocation = allocateRentalReceipt({
+        amount,
+        rent: toMoney(Number((payment as any)?.rentAllocated ?? (payment.commissionDetails as any)?.commissionBase ?? amount - levyAmount)),
+        levy: levyAmount,
+        commissionBase: toMoney(Number((payment.commissionDetails as any)?.commissionBase || 0)),
+        commissionNet,
+        vatOnCommission: vatOnCommission
+      });
+      const domainPaymentType = journalPaymentType(payment);
+      const receiptJournal = buildAgentReceiptJournal({
+        paymentType: domainPaymentType,
+        amount,
+        ownerAmount: allocation.ownerPayable,
+        commissionNet: allocation.commissionNet,
+        vatAmount: totalVatCollected,
+        levyAmount: domainPaymentType === 'sale' ? 0 : allocation.levyPayable,
+        propertyId,
+        agentId
+      });
 
-      if (amount > 0) {
+      if (amount > 0 && receiptJournal.lines.length > 0) {
         await accountingService.postTransaction({
           companyId,
           reference: `PAY-${payment.referenceNumber || paymentId}`,
-          description: `Auto-post payment ${payment.referenceNumber || paymentId}`,
-          sourceModule: payment.paymentType === 'sale' ? 'sale' : 'payment',
+          description: `Agent collection ${payment.referenceNumber || paymentId} (commission as company revenue; principal funds as client liability)`,
+          sourceModule: journalPaymentType(payment) === 'sale' ? 'sale' : 'payment',
           sourceId: paymentId,
           transactionDate: payment.paymentDate,
           createdBy: opts?.createdBy,
-          lines: [
-            {
-              accountCode: '1001',
-              debit: amount,
-              propertyId: (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined,
-              agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
-            },
-            { accountCode: incomeCode, credit: incomeCredit }
-          ].concat(totalVatCollected > 0 ? [{ accountCode: '2101', credit: totalVatCollected }] : []),
+          lines: receiptJournal.lines,
           vat: totalVatCollected > 0
             ? {
                 sourceType: payment.paymentType,
@@ -134,6 +163,42 @@ class AccountingIntegrationService {
                 status: 'pending'
               }
             : undefined
+        });
+      }
+
+      const period = taxFilingPeriod(payment.paymentDate);
+      if (vatOnCommission > 0) {
+        await upsertPaymentTaxObligation({
+          companyId,
+          taxType: 'VAT_ON_COMMISSION',
+          paymentId,
+          propertyId,
+          taxPeriod: period,
+          transactionDate: payment.paymentDate,
+          currency: (payment as any).currency,
+          taxableAmount: commissionNet,
+          taxRate: effectiveVatRate,
+          taxAmount: vatOnCommission,
+          calculationBasis: String((payment.commissionDetails as any)?.vatTreatment || 'COMMISSION_VAT'),
+          glAccount: GL.VAT_PAYABLE,
+          createdBy: opts?.createdBy
+        });
+      }
+      if (paymentVat > 0) {
+        await upsertPaymentTaxObligation({
+          companyId,
+          taxType: 'VAT_OUTPUT',
+          paymentId,
+          propertyId,
+          taxPeriod: period,
+          transactionDate: payment.paymentDate,
+          currency: (payment as any).currency,
+          taxableAmount: toMoney(amount - paymentVat),
+          taxRate: Number((payment as any)?.vatRate || 0),
+          taxAmount: paymentVat,
+          calculationBasis: 'PROPERTY_SALE_VAT',
+          glAccount: GL.VAT_PAYABLE,
+          createdBy: opts?.createdBy
         });
       }
 
@@ -166,7 +231,7 @@ class AccountingIntegrationService {
       await AccountingEventLog.create({
         companyId: new mongoose.Types.ObjectId(companyId),
         eventType: 'payment_sync_failed',
-        sourceModule: payment.paymentType === 'sale' ? 'sale' : 'payment',
+        sourceModule: journalPaymentType(payment) === 'sale' ? 'sale' : 'payment',
         sourceId: paymentId,
         success: false,
         message: error?.message || 'Failed to sync payment to accounting',
@@ -176,116 +241,204 @@ class AccountingIntegrationService {
     }
   }
 
-  async syncPaymentReversed(payment: IPayment, opts?: { createdBy?: string; reason?: string }): Promise<void> {
+  async postCompanyCommissionReversal(
+    payment: IPayment,
+    opts?: { createdBy?: string; reason?: string; reversalPaymentId?: string }
+  ): Promise<'reversed' | 'skipped'> {
     const companyId = String(payment.companyId);
     const paymentId = String(payment._id);
-    try {
-      const amount = toMoney(Math.abs(payment.amount || 0));
-      const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
-      const paymentVat = toMoney((payment as any)?.vatAmount || 0);
-      const totalVatCollected = toMoney(vatOnCommission + paymentVat);
-      const incomeCode = payment.paymentType === 'sale' ? '4002' : '4001';
-      const incomeDebit = toMoney(Math.max(0, amount - totalVatCollected));
+    throwOnceIfArmed(
+      paymentId,
+      `${String((payment as any).notes || '')} ${String(opts?.reason || '')}`,
+      'PHASE27_FAIL_COMPANY'
+    );
+    const companyObjectId = new mongoose.Types.ObjectId(companyId);
+    const account = await CompanyAccount.findOne({ companyId: companyObjectId }).lean();
+    const originalLines = Array.isArray((account as any)?.transactions)
+      ? (account as any).transactions.filter(
+          (t: any) =>
+            String(t?.paymentId || '') === paymentId &&
+            !t?.reversesPaymentId &&
+            t?.isArchived !== true &&
+            Number(t?.amount || 0) > 0
+        )
+      : [];
+    if (!originalLines.length) return 'skipped';
+    const already = Array.isArray((account as any)?.transactions)
+      && (account as any).transactions.some((t: any) => String(t?.reversesPaymentId || '') === paymentId);
+    if (already) return 'reversed';
 
-      if (amount > 0) {
-        await accountingService.postTransaction({
-          companyId,
-          reference: `REV-PAY-${payment.referenceNumber || paymentId}`,
-          description: `Reversal of payment ${payment.referenceNumber || paymentId}`,
-          sourceModule: payment.paymentType === 'sale' ? 'sale' : 'payment',
-          sourceId: `${paymentId}:reversal`,
-          transactionDate: new Date(),
-          createdBy: opts?.createdBy,
-          lines: [
-            {
-              accountCode: '1001',
-              credit: amount,
-              propertyId: (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined,
-              agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
-            },
-            { accountCode: incomeCode, debit: incomeDebit }
-          ].concat(totalVatCollected > 0 ? [{ accountCode: '2101', debit: totalVatCollected }] : []),
-        });
+    const posted = toMoney(originalLines.reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0));
+    const source = originalLines[0]?.source || (journalPaymentType(payment) === 'sale' ? 'sales_commission' : 'rental_commission');
+    const reversalPaymentId = opts?.reversalPaymentId && mongoose.Types.ObjectId.isValid(opts.reversalPaymentId)
+      ? new mongoose.Types.ObjectId(opts.reversalPaymentId)
+      : undefined;
+    const counter: any = {
+      type: 'income',
+      source,
+      amount: -posted,
+      date: new Date(),
+      currency: (payment as any).currency || 'USD',
+      reversesPaymentId: payment._id,
+      referenceNumber: `REV-COM-${payment.referenceNumber || paymentId}`,
+      description: `Reversal of ${source} for ${payment.referenceNumber || paymentId}`,
+      notes: opts?.reason || 'Payment reversal',
+      processedBy: opts?.createdBy && mongoose.Types.ObjectId.isValid(opts.createdBy)
+        ? new mongoose.Types.ObjectId(opts.createdBy)
+        : undefined,
+      isArchived: false
+    };
+    if (reversalPaymentId) counter.paymentId = reversalPaymentId;
+
+    const result = await CompanyAccount.updateOne(
+      {
+        companyId: companyObjectId,
+        transactions: { $not: { $elemMatch: { reversesPaymentId: payment._id } } }
+      },
+      {
+        $push: { transactions: counter },
+        $inc: { totalIncome: -posted, runningBalance: -posted },
+        $set: { lastUpdated: new Date() }
+      }
+    );
+    if (Number((result as any).matchedCount || 0) === 0) {
+      const fresh = await CompanyAccount.findOne({
+        companyId: companyObjectId,
+        'transactions.reversesPaymentId': payment._id
+      }).select('_id').lean();
+      if (!fresh) {
+        throw new Error('Company commission reversal was not recorded');
+      }
+    }
+    return 'reversed';
+  }
+
+  async postReversalJournal(
+    payment: IPayment,
+    opts?: { createdBy?: string; reason?: string }
+  ): Promise<'reversed' | 'skipped'> {
+    const companyId = String(payment.companyId);
+    const paymentId = String(payment._id);
+    throwOnceIfArmed(
+      paymentId,
+      `${String((payment as any).notes || '')} ${String(opts?.reason || '')}`,
+      'PHASE27_FAIL_JOURNAL'
+    );
+    const sourceModule = journalPaymentType(payment) === 'sale' ? 'sale' : 'payment';
+    const companyObjectId = new mongoose.Types.ObjectId(companyId);
+    try {
+      const existing = await JournalEntry.findOne({
+        companyId: companyObjectId,
+        sourceModule,
+        sourceId: `${paymentId}:reversal`
+      }).select('_id').lean();
+      if (!existing) {
+        const original = await JournalEntry.findOne({
+          companyId: companyObjectId,
+          sourceModule,
+          sourceId: paymentId
+        }).lean();
+        let lines: Array<{ accountCode: string; debit?: number; credit?: number; propertyId?: string; agentId?: string }> = [];
+        if (original) {
+          const stored = await JournalLine.find({ journalEntryId: (original as any)._id }).lean();
+          const accounts = await ChartOfAccount.find({
+            _id: { $in: stored.map((line: any) => line.accountId) }
+          }).select('code').lean();
+          const codeById = new Map(accounts.map((account: any) => [String(account._id), String(account.code)]));
+          lines = stored
+            .map((line: any) => ({
+              accountCode: codeById.get(String(line.accountId)) || '',
+              debit: toMoney(Number(line.credit || 0)),
+              credit: toMoney(Number(line.debit || 0)),
+              propertyId: line.propertyId ? String(line.propertyId) : undefined,
+              agentId: line.agentId ? String(line.agentId) : undefined
+            }))
+            .filter((line) => line.accountCode && ((line.debit || 0) > 0 || (line.credit || 0) > 0));
+        } else {
+          const amount = toMoney(Math.abs(payment.amount || 0));
+          const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
+          const paymentVat = toMoney((payment as any)?.vatAmount || 0);
+          const commissionNet = toMoney(
+            Number((payment.commissionDetails as any)?.commissionNet || (payment.commissionDetails as any)?.totalCommission || 0)
+          );
+          const levyAmount = toMoney(
+            Number((payment.commissionDetails as any)?.levy ?? (payment as any)?.levyAllocated ?? 0)
+          );
+          const allocation = allocateRentalReceipt({
+            amount,
+            rent: toMoney(Number((payment as any)?.rentAllocated ?? (payment.commissionDetails as any)?.commissionBase ?? amount - levyAmount)),
+            levy: levyAmount,
+            commissionBase: toMoney(Number((payment.commissionDetails as any)?.commissionBase || 0)),
+            commissionNet,
+            vatOnCommission
+          });
+          const reversalDomain = journalPaymentType(payment);
+          lines = amount > 0
+            ? buildAgentReceiptReversal({
+                paymentType: reversalDomain,
+                amount,
+                ownerAmount: allocation.ownerPayable,
+                commissionNet: allocation.commissionNet,
+                vatAmount: toMoney(vatOnCommission + paymentVat),
+                levyAmount: reversalDomain === 'sale' ? 0 : allocation.levyPayable,
+                propertyId: (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined,
+                agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
+              })
+            : [];
+        }
+        if (original && lines.length === 0) {
+          throw new Error('Original journal lines could not be reversed');
+        }
+        if (lines.length > 0) {
+          await accountingService.postTransaction({
+            companyId,
+            reference: `REV-PAY-${payment.referenceNumber || paymentId}`,
+            description: `Reversal of agent collection ${payment.referenceNumber || paymentId}`,
+            sourceModule,
+            sourceId: `${paymentId}:reversal`,
+            transactionDate: new Date(),
+            createdBy: opts?.createdBy,
+            lines
+          });
+        } else if (!original) {
+          return 'skipped';
+        }
       }
 
       const agentShare = toMoney((payment.commissionDetails as any)?.agentShare || 0);
       if (agentShare > 0) {
-        await accountingService.postTransaction({
-          companyId,
-          reference: `REV-COM-${payment.referenceNumber || paymentId}`,
-          description: `Reversal of commission payable for ${payment.referenceNumber || paymentId}`,
+        const agentJournal = await JournalEntry.findOne({
+          companyId: companyObjectId,
           sourceModule: 'commission',
-          sourceId: `${paymentId}:commission:reversal`,
-          transactionDate: new Date(),
-          createdBy: opts?.createdBy,
-          lines: [
-            {
-              accountCode: '5002',
-              credit: agentShare
-            },
-            {
-              accountCode: '2102',
-              debit: agentShare,
-              agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
-            }
-          ]
-        });
-      }
-
-      // Keep company-level commission rollups consistent with reversal.
-      try {
-        const result = await CompanyAccount.updateOne(
-          { companyId: new mongoose.Types.ObjectId(companyId), 'transactions.paymentId': payment._id },
-          { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } },
-          { arrayFilters: [{ 't.paymentId': payment._id, 't.isArchived': { $ne: true } }] as any }
-        );
-        if (Number((result as any)?.modifiedCount || 0) > 0) {
-          const fresh = await CompanyAccount.findOne({ companyId: new mongoose.Types.ObjectId(companyId) }).lean();
-          const active = Array.isArray((fresh as any)?.transactions)
-            ? (fresh as any).transactions.filter((t: any) => t?.isArchived !== true)
-            : [];
-          const totalIncome = active
-            .filter((t: any) => t?.type === 'income')
-            .reduce((sum: number, t: any) => sum + Number(t?.amount || 0), 0);
-          const totalExpenses = active
-            .filter((t: any) => t?.type !== 'income')
-            .reduce((sum: number, t: any) => sum + Number(t?.amount || 0), 0);
-          await CompanyAccount.updateOne(
-            { companyId: new mongoose.Types.ObjectId(companyId) },
-            { $set: { totalIncome, totalExpenses, runningBalance: totalIncome - totalExpenses, lastUpdated: new Date() } }
-          );
+          sourceId: `${paymentId}:commission:reversal`
+        }).select('_id').lean();
+        if (!agentJournal) {
+          await accountingService.postTransaction({
+            companyId,
+            reference: `REV-AGT-${payment.referenceNumber || paymentId}`,
+            description: `Reversal of commission payable for ${payment.referenceNumber || paymentId}`,
+            sourceModule: 'commission',
+            sourceId: `${paymentId}:commission:reversal`,
+            transactionDate: new Date(),
+            createdBy: opts?.createdBy,
+            lines: [
+              { accountCode: '5002', credit: agentShare },
+              {
+                accountCode: '2102',
+                debit: agentShare,
+                agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
+              }
+            ]
+          });
         }
-      } catch (companyErr: any) {
-        throw new Error(`CompanyAccount commission archive failed: ${companyErr?.message || companyErr}`);
       }
-
-      // Keep VAT reporting aligned with accounting reversals.
-      try {
-        await VatRecord.updateOne(
-          {
-            companyId: new mongoose.Types.ObjectId(companyId),
-            transactionId: paymentId,
-            sourceType: payment.paymentType
-          },
-          {
-            $set: {
-              vatCollected: 0,
-              vatPaid: 0,
-              vatRate: Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0),
-              filingPeriod: filingPeriodFromDate(payment.paymentDate),
-              status: 'reversed'
-            }
-          }
-        );
-      } catch {
-        // Non-fatal: VAT journal reversal remains source of truth.
-      }
+      return 'reversed';
     } catch (error: any) {
-      if (isDuplicateKeyError(error)) return;
+      if (isDuplicateKeyError(error)) return 'reversed';
       await AccountingEventLog.create({
-        companyId: new mongoose.Types.ObjectId(companyId),
+        companyId: companyObjectId,
         eventType: 'payment_reversal_sync_failed',
-        sourceModule: payment.paymentType === 'sale' ? 'sale' : 'payment',
+        sourceModule,
         sourceId: paymentId,
         success: false,
         message: error?.message || 'Failed to sync payment reversal to accounting',
@@ -293,6 +446,21 @@ class AccountingIntegrationService {
       });
       throw error;
     }
+  }
+
+  async syncPaymentReversed(
+    payment: IPayment,
+    opts?: { createdBy?: string; reason?: string; reversalPaymentId?: string }
+  ): Promise<void> {
+    await this.postCompanyCommissionReversal(payment, opts);
+    await this.postReversalJournal(payment, opts);
+    await reversePaymentTaxObligations({
+      companyId: String(payment.companyId),
+      paymentId: String(payment._id),
+      createdBy: opts?.createdBy,
+      reason: opts?.reason,
+      notes: String((payment as any).notes || '')
+    });
   }
 
   async syncExpenseCreated(input: {
@@ -338,6 +506,7 @@ class AccountingIntegrationService {
   }
 
   async backfillFromExistingData(companyId: string): Promise<{ paymentsSynced: number; expensesSynced: number }> {
+    // EXPLICIT HISTORICAL MIGRATION ONLY. Never call from integrity, GET, reporting, or scheduled jobs.
     const companyObjectId = safeObjectId(companyId);
     if (!companyObjectId) {
       return { paymentsSynced: 0, expensesSynced: 0 };

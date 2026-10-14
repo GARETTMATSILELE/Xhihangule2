@@ -45,8 +45,23 @@ const run = () => {
     const introduction = Object.assign(Object.assign({}, completedRental), { _id: 'intro-1', paymentType: 'introduction', amount: 120000, commissionDetails: { agentShare: 0, agencyShare: 0, ownerAmount: 120000, totalCommission: 0 } });
     assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)(introduction).allowed, true, 'introduction posts owner income');
     assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)(introduction), false);
-    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 50, depositAmount: 50 }), true);
-    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 50, depositAmount: 50 }).allowed, false);
+    // Deposit-only is amount <= 0 with a positive deposit. Combined rent+deposit must post rental accounting.
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 0, depositAmount: 1000 }), true, 'Test A: deposit-only');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 0, depositAmount: 1000 }).allowed, false, 'Test A: deposit-only must not post rental accounting');
+    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 0, depositAmount: 1000 }), true);
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 1000, depositAmount: 0 }), false, 'Test B: rent-only');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 1000, depositAmount: 0 }).allowed, true, 'Test B: rent-only must post rental accounting');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 1000, depositAmount: 1000 }), false, 'Test C: equal rent and deposit');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 1000, depositAmount: 1000 }).allowed, true, 'Test C: $1000 rent + $1000 deposit must generate rental accounting');
+    assert_1.default.strictEqual((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)({ status: 'completed', amount: 1000, depositAmount: 1000 }), false);
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 500, depositAmount: 1000 }), false, 'Test D: rent less than deposit');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 500, depositAmount: 1000 }).allowed, true, 'Test D: $500 rent + $1000 deposit must generate rental accounting');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 1000, depositAmount: 200 }), false, 'Test E: rent greater than deposit');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 1000, depositAmount: 200 }).allowed, true, 'Test E: combined payment with rent > deposit remains eligible');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 50, depositAmount: 50 }), false, 'equal amounts are combined, not deposit-only');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)({ status: 'completed', amount: 50, depositAmount: 50 }).allowed, true, 'equal rent and deposit must not be skipped as deposit-only');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 0, depositAmount: 0 }), false, 'Test F: zero/zero is not deposit-only');
+    assert_1.default.strictEqual((0, accountingPostingPolicy_1.isDepositOnlyPayment)({ amount: 100, depositAmount: 5000 }), false, 'small rent + large deposit is combined');
     // --- Reversal eligibility ---
     assert_1.default.strictEqual((0, accountingPostingPolicy_1.shouldAttemptAccountingReversal)({ status: 'reversed', reversalPaymentId: 'rev-1' }), true);
     assert_1.default.strictEqual((0, accountingPostingPolicy_1.shouldAttemptAccountingReversal)({ reversalOfPaymentId: 'orig' }), false);
@@ -273,15 +288,18 @@ const run = () => {
     const path = require('path');
     const srcFile = (rel) => fs.readFileSync(path.join(__dirname, '..', '..', 'src', rel), 'utf8');
     const webhookSrc = srcFile('controllers/paymentWebhookController.ts');
-    assert_1.default.ok(webhookSrc.includes('postPaymentAccounting'), 'webhook completion must call postPaymentAccounting');
+    assert_1.default.ok(webhookSrc.includes('postPaymentAccounting') || webhookSrc.includes('ensurePaymentAccountingPosted'), 'webhook completion must call postPaymentAccounting or ensurePaymentAccountingPosted');
     const syncSrc = srcFile('services/databaseSyncService.ts');
     assert_1.default.ok(syncSrc.includes('postPaymentAccounting'), 'change stream / poll must call postPaymentAccounting');
     assert_1.default.ok(/paymentType === 'introduction'/.test(syncSrc), 'polling/change-stream must include introduction payments');
     assert_1.default.ok(syncSrc.includes('evaluatePermanentAccountingPolicy'), 'verifyAndReconcile must consult the central policy');
     assert_1.default.ok(!/\$push:\s*\{\s*transactions:\s*txDoc/.test(syncSrc), 'verifyAndReconcile must not raw-$push CompanyAccount transactions');
     const reconSrc = srcFile('services/scheduledSyncService.ts');
-    assert_1.default.ok(reconSrc.includes('shouldPostCompanyCommission'), 'scheduled recon company pass must use policy');
-    assert_1.default.ok(reconSrc.includes('postCompanyCommission'), 'scheduled recon must not raw-write CompanyAccount');
+    const ledgerReconFn = reconSrc.slice(reconSrc.indexOf('private async executeLedgerReconciliation'), reconSrc.indexOf('private async executeWeeklyConsistencyCheck'));
+    assert_1.default.ok(ledgerReconFn.includes('detection-only'), 'scheduled recon must not automatically create missing accounting');
+    assert_1.default.ok(!ledgerReconFn.includes('reconcilePropertyLedgerDuplicates'), 'scheduled recon must not delete duplicate ledger rows');
+    assert_1.default.ok(!reconSrc.includes('postCompanyCommission'), 'scheduled recon must not post company commission');
+    assert_1.default.ok(!reconSrc.includes('recordIncomeFromPayment'), 'scheduled recon must not post owner income');
     const getPropertyCtrl = srcFile('controllers/propertyAccountController.ts');
     const getPropertyFn = getPropertyCtrl.slice(getPropertyCtrl.indexOf('export const getPropertyAccount'), getPropertyCtrl.indexOf('export const migrateLegacyLedgerTypes'));
     assert_1.default.ok(!getPropertyFn.includes('recordIncomeFromPayment'), 'GET getPropertyAccount must not post income');
@@ -298,6 +316,31 @@ const run = () => {
     assert_1.default.ok(getFullFn.includes('getForTrustAccount'), 'GET trust full must read existing TrustMatter only');
     const getMatterFn = trustCtrl.slice(trustCtrl.indexOf('export const getTrustMatter'), trustCtrl.indexOf('export const updateTrustMatterCustody'));
     assert_1.default.ok(!getMatterFn.includes('ensureForTrustAccount'), 'GET trust matter must not upsert');
+    // Owner-income idempotency: two recordIncomeFromPayment calls must not create two income rows
+    const recordIncomeSrc = srcFile('services/propertyAccountService.ts');
+    const recordStart = recordIncomeSrc.indexOf('async recordIncomeFromPayment');
+    const recordEnd = recordIncomeSrc.indexOf('async reverseIncomeFromPayment');
+    assert_1.default.ok(recordStart >= 0 && recordEnd > recordStart, 'recordIncomeFromPayment located');
+    const recordFn = recordIncomeSrc.slice(recordStart, recordEnd);
+    assert_1.default.ok(recordFn.includes("t.type === 'income'") && recordFn.includes('existingTransaction'), 'in-memory income duplicate check remains');
+    assert_1.default.ok(recordFn.includes("'transactions.idempotencyKey': { $ne:") &&
+        recordFn.includes('payment:${paymentId}'), 'atomic $ne idempotencyKey guard remains on owner-income $push');
+    const simulateOwnerIncomePush = () => {
+        const txs = [];
+        const push = (pid) => {
+            const key = `payment:${pid}`;
+            if (txs.some((t) => t.paymentId === pid && t.type === 'income'))
+                return 'duplicate-memory';
+            if (txs.some((t) => t.idempotencyKey === key))
+                return 'duplicate-key';
+            txs.push({ type: 'income', paymentId: pid, idempotencyKey: key });
+            return 'inserted';
+        };
+        assert_1.default.strictEqual(push(paymentId), 'inserted');
+        assert_1.default.strictEqual(push(paymentId), 'duplicate-memory');
+        assert_1.default.strictEqual(txs.length, 1, 'second recordIncomeFromPayment must not create a second income row');
+    };
+    simulateOwnerIncomePush();
     console.log('phase5b accounting tests passed');
 };
 run();

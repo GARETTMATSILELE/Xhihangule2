@@ -19,8 +19,17 @@ class TemplateEngine {
             `Owner: ${dto.owner.displayName}`,
             `Period: ${dto.period.label === 'All Transactions' ? 'All Transactions' : `${dto.period.startDate} – ${dto.period.endDate}`}`,
             '',
+            `Ledger: ${dto.ledger || 'required'}`,
             'Statement Summary',
             `Opening Balance: ${summary.openingBalance.currency} ${summary.openingBalance.amount.toFixed(2)}`,
+            ...(dto.ownerMoneyWaterfall ? [
+                `Amount Received: ${dto.ownerMoneyWaterfall.grossAmount.currency} ${dto.ownerMoneyWaterfall.grossAmount.amount.toFixed(2)}`,
+                `Less Commission: ${dto.ownerMoneyWaterfall.commissionAmount.currency} ${dto.ownerMoneyWaterfall.commissionAmount.amount.toFixed(2)}`,
+                `Less Levy: ${dto.ownerMoneyWaterfall.levyAmount.currency} ${dto.ownerMoneyWaterfall.levyAmount.amount.toFixed(2)}`,
+                `Less VAT on Commission: ${dto.ownerMoneyWaterfall.vatOnCommission.currency} ${dto.ownerMoneyWaterfall.vatOnCommission.amount.toFixed(2)}`,
+                `Net Owner Amount: ${dto.ownerMoneyWaterfall.netOwnerAmount.currency} ${dto.ownerMoneyWaterfall.netOwnerAmount.amount.toFixed(2)}`,
+                dto.ownerMoneyWaterfall.reviewRequired ? 'Review required. Recorded owner income does not match the stored allocation. No amount was changed.' : 'Recorded owner income matches the stored allocation.'
+            ] : []),
             ...(dto.statementSummary ? [
                 `Total Rent: ${dto.statementSummary.totalRent.currency} ${dto.statementSummary.totalRent.amount.toFixed(2)}`,
                 `Total Commission: ${dto.statementSummary.totalCommission.currency} ${dto.statementSummary.totalCommission.amount.toFixed(2)}`,

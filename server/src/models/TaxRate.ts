@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
-export type TaxType = 'VAT';
+export type TaxType = 'VAT' | 'CGT' | 'CGWT';
 
 export interface ITaxRate extends Document {
   companyId: Types.ObjectId;
@@ -19,7 +19,7 @@ export interface ITaxRate extends Document {
 const TaxRateSchema = new Schema<ITaxRate>(
   {
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
-    taxType: { type: String, enum: ['VAT'], required: true, default: 'VAT', index: true },
+    taxType: { type: String, enum: ['VAT', 'CGT', 'CGWT'], required: true, default: 'VAT', index: true },
     rate: {
       type: Number,
       required: true,

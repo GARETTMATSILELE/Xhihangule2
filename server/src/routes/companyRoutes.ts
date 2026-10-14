@@ -9,7 +9,8 @@ import {
   deleteCompany,
   getCurrentCompany,
   uploadCompanyLogo,
-  updateCurrentCompany
+  updateCurrentCompany,
+  rejectCompanyPlanChange
 } from '../controllers/companyController';
 import { auth, authWithCompany } from '../middleware/auth';
 import { authorize } from '../middleware/auth';
@@ -42,8 +43,8 @@ const upload = multer({
 // Allow fetching current company even if none exists (returns 404 inside controller)
 router.get('/current', auth, asyncRoute(getCurrentCompany));
 router.put('/current', authWithCompany, asyncRoute(updateCurrentCompany));
-// Admin: change plan directly by company id (can be restricted later)
-router.put('/:id/plan', authWithCompany, asyncRoute(updateCompany));
+// Plan entitlement changes belong to billing activation, not a profile update.
+router.put('/:id/plan', authWithCompany, asyncRoute(rejectCompanyPlanChange));
 
 // Company metadata is tenant-sensitive. Keep /current for normal users and
 // restrict global/list-by-id access to platform admins.

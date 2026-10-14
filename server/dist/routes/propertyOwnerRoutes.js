@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
+const propertyAccess_1 = require("../utils/propertyAccess");
 const propertyOwnerController_1 = require("../controllers/propertyOwnerController");
 const ownerManagementController_1 = require("../controllers/ownerManagementController");
 const router = express_1.default.Router();
@@ -39,6 +40,9 @@ router.get('/by-property/:propertyId', auth_1.authWithCompany, (req, res) => __a
         }
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
             return res.status(401).json({ message: 'Authentication required' });
+        }
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            return res.status(404).json({ message: 'Owner not found for this property' });
         }
         const companyFilter = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
         // Find owner whose properties array contains this propertyId as ObjectId or string or $oid
@@ -68,36 +72,21 @@ router.get('/by-property/:propertyId', auth_1.authWithCompany, (req, res) => __a
         };
         let owner = owners.find((o) => Array.isArray(o === null || o === void 0 ? void 0 : o.properties) && o.properties.some(isMatch)) || null;
         if (!owner) {
-            // Fallback: get property and use its ownerId
             const Property = require('../models/Property').Property;
-            const User = require('../models/User').User;
-            const property = yield Property.findOne({ _id: objectId, companyId: companyFilter.companyId });
-            const rawOwnerId = property === null || property === void 0 ? void 0 : property.ownerId;
-            if (rawOwnerId) {
-                // Try to find a PropertyOwner by this id
-                owner = yield PropertyOwner.findOne(Object.assign({ _id: rawOwnerId }, (companyFilter.companyId ? { companyId: companyFilter.companyId } : {})));
-                if (owner) {
-                    return res.json({
-                        _id: owner._id,
-                        email: owner.email,
-                        firstName: owner.firstName,
-                        lastName: owner.lastName,
-                        companyId: owner.companyId
-                    });
-                }
-                // Try User collection fallback (owner stored as user)
-                const user = yield User.findOne(Object.assign({ _id: rawOwnerId }, (companyFilter.companyId ? { companyId: companyFilter.companyId } : {}))).select('firstName lastName email companyId role');
-                if (user) {
-                    return res.json({
-                        _id: user._id,
-                        email: user.email,
-                        firstName: user.firstName,
-                        lastName: user.lastName,
-                        companyId: user.companyId
-                    });
-                }
+            const property = yield Property.findOne({ _id: objectId, companyId: companyFilter.companyId }).select('propertyOwnerId');
+            if (property === null || property === void 0 ? void 0 : property.propertyOwnerId) {
+                owner = yield PropertyOwner.findOne({ _id: property.propertyOwnerId, companyId: companyFilter.companyId });
             }
-            return res.status(404).json({ message: 'Owner not found for this property' });
+            if (!owner) {
+                return res.status(404).json({ message: 'Owner not found for this property' });
+            }
+            return res.json({
+                _id: owner._id,
+                email: owner.email,
+                firstName: owner.firstName,
+                lastName: owner.lastName,
+                companyId: owner.companyId
+            });
         }
         res.json({
             _id: owner._id,

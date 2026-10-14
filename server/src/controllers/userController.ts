@@ -70,9 +70,8 @@ export const getUserCommissionSummary = async (req: Request, res: Response) => {
   }
 };
 
-import { NextFunction } from 'express';
 import { User } from '../models/User';
-import { UserRole } from '../types/auth';
+import { assertCompanyAssignableRoleSet } from '../utils/companyUserRoles';
 
 export const getCurrentUser = async (userId: string) => {
   if (!userId) {
@@ -95,32 +94,28 @@ export const getCurrentUser = async (userId: string) => {
 };
 
 export const createUser = async (userData: any) => {
-  console.log('Creating user with data:', userData);
-
-  // Check if user already exists
   const existingUser = await User.findOne({ email: userData.email, companyId: userData.companyId, isArchived: { $ne: true } });
   if (existingUser) {
     throw new AppError('User already exists', 400);
   }
 
-  // Normalize roles: if roles array provided, ensure unique/valid and set primary role
-  const VALID_ROLES = ['admin','agent','accountant','owner','sales','principal','prea'];
-  let payload: any = { ...userData };
-  if (Array.isArray(userData.roles) && userData.roles.length > 0) {
-    const roles = Array.from(new Set(userData.roles.map((r: any) => String(r)))).filter((r: any) => VALID_ROLES.includes(r));
-    if (roles.length === 0) throw new AppError('At least one valid role is required', 400);
-    payload.roles = roles;
-    // Set primary role if not provided or not valid
-    if (!VALID_ROLES.includes(String(userData.role))) {
-      payload.role = roles[0];
-    }
+  const assignment = assertCompanyAssignableRoleSet(userData.role, userData.roles);
+  const payload: any = {
+    email: userData.email,
+    password: userData.password,
+    firstName: userData.firstName,
+    lastName: userData.lastName,
+    companyId: userData.companyId,
+    isActive: true,
+  };
+  if (assignment.roles) {
+    payload.roles = assignment.roles;
+    payload.role = assignment.role;
+  } else if (assignment.role) {
+    payload.role = assignment.role;
   }
 
-  // Create new user
   const user = await User.create(payload);
-  console.log('User created successfully:', user);
-
-  // Return user without password
   const { password, ...userWithoutPassword } = user.toObject();
   return userWithoutPassword;
 }; 
@@ -138,27 +133,36 @@ export const updateUserById = async (id: string, updates: any, currentCompanyId?
     throw new AppError('Archived users cannot be updated', 400);
   }
 
-  // Enforce company scoping if provided
-  if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
+  // A missing company on the target is not a grant. Platform users are not editable here.
+  if (!currentCompanyId || !user.companyId || user.companyId.toString() !== String(currentCompanyId)) {
     throw new AppError('Forbidden: User does not belong to your company', 403);
   }
 
-  // Apply allowed updates
+  const targetRoles = [
+    String(user.role || ''),
+    ...(Array.isArray((user as any).roles) ? (user as any).roles.map((role: unknown) => String(role)) : []),
+  ];
+  if (targetRoles.includes('system_admin')) {
+    throw new AppError('Forbidden', 403);
+  }
+
+  // Apply allowed updates. companyId, isActive, and platform roles are not accepted.
   if (typeof updates.firstName === 'string') user.firstName = updates.firstName;
   if (typeof updates.lastName === 'string') user.lastName = updates.lastName;
   if (typeof updates.email === 'string') user.email = updates.email;
-  if (typeof updates.role === 'string') user.role = updates.role;
-  // Update roles array if provided
-  const VALID_ROLES = ['admin','agent','accountant','owner','sales','principal','prea'];
-  if (Array.isArray(updates.roles)) {
-    const roles = Array.from(new Set(updates.roles.map((r: any) => String(r)))).filter((r: any) => VALID_ROLES.includes(r));
-    if (roles.length === 0) {
-      throw new AppError('At least one valid role is required', 400);
+  if (updates.role !== undefined || updates.roles !== undefined) {
+    const assignment = assertCompanyAssignableRoleSet(
+      updates.role !== undefined ? updates.role : undefined,
+      updates.roles !== undefined ? updates.roles : undefined
+    );
+    if (assignment.roles) {
+      (user as any).roles = assignment.roles;
+      if (!assignment.roles.includes(user.role as any)) {
+        user.role = assignment.role as any;
+      }
     }
-    (user as any).roles = roles as any;
-    // Ensure primary role is aligned with roles array
-    if (!roles.includes(user.role)) {
-      user.role = roles[0] as any;
+    if (updates.role !== undefined && assignment.role) {
+      user.role = assignment.role as any;
     }
   }
 

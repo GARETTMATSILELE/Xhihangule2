@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 import { Payment } from '../models/Payment';
 import trustAccountService from './trustAccountService';
+import { mayPostSaleTrust } from './transactionDomain';
+import { TrustTransaction } from '../models/TrustTransaction';
+import { throwOnceIfArmed } from './testFailureSeam';
 
 type PaymentConfirmedPayload = {
   paymentId: string;
@@ -37,6 +40,9 @@ class TrustPaymentPostingService {
     if ((payment as any).isProvisional === true) {
       return { skipped: true, reason: 'provisional' };
     }
+    if (!mayPostSaleTrust(payment as any)) {
+      return { skipped: true, reason: 'not_sale_domain' };
+    }
 
     if (!mongoose.Types.ObjectId.isValid(String(payload.propertyId || ''))) {
       throw new Error('Invalid propertyId in payment event');
@@ -61,8 +67,8 @@ class TrustPaymentPostingService {
       throw new Error(`Original payment not found: ${payload.paymentId}`);
     }
 
-    if (String((originalPayment as any).paymentType || '').toLowerCase() !== 'sale') {
-      return null;
+    if (!mayPostSaleTrust(originalPayment as any)) {
+      return { skipped: true, reason: 'not_sale_domain' };
     }
 
     const propertyId = String((originalPayment as any).propertyId || '');
@@ -70,15 +76,23 @@ class TrustPaymentPostingService {
       throw new Error('Invalid propertyId in reversal event');
     }
 
-    const reversalPaymentId = String(payload.reversalPaymentId || '').trim();
-    const reversalPayment =
-      reversalPaymentId && mongoose.Types.ObjectId.isValid(reversalPaymentId)
-        ? await Payment.findById(reversalPaymentId).lean()
-        : null;
+    throwOnceIfArmed(
+      String(payload.paymentId),
+      `${String((originalPayment as any).notes || '')} ${String(payload.reason || '')}`,
+      'PHASE27_FAIL_TRUST'
+    );
 
-    const reversalAmountRaw =
-      Number((reversalPayment as any)?.amount || 0) || -Math.abs(Number((originalPayment as any)?.amount || 0));
-    const reversalAmount = Math.abs(reversalAmountRaw);
+    const receipt = await TrustTransaction.findOne({
+      paymentId: originalPayment._id,
+      type: 'BUYER_PAYMENT',
+      credit: { $gt: 0 }
+    }).sort({ createdAt: 1 }).lean();
+    if (!receipt) {
+      return { skipped: true, reason: 'no_trust_receipt' };
+    }
+
+    const reversalPaymentId = String(payload.reversalPaymentId || '').trim();
+    const reversalAmount = Math.abs(Number((receipt as any).credit || 0));
     if (reversalAmount <= 0) {
       throw new Error('Reversal amount must be greater than zero');
     }

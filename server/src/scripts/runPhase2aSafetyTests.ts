@@ -31,9 +31,24 @@ const run = () => {
     'normal completed payment remains eligible'
   );
   assert.strictEqual(
-    isRecordIncomeEarlyExit({ status: 'completed', amount: 50, depositAmount: 50 }),
+    isRecordIncomeEarlyExit({ status: 'completed', amount: 0, depositAmount: 1000 }),
     true,
     'deposit-only matches recordIncomeFromPayment early exit'
+  );
+  assert.strictEqual(
+    isRecordIncomeEarlyExit({ status: 'completed', amount: 50, depositAmount: 50 }),
+    false,
+    'equal rent and deposit is a combined payment, not deposit-only'
+  );
+  assert.strictEqual(
+    isRecordIncomeEarlyExit({ status: 'completed', amount: 1000, depositAmount: 1000 }),
+    false,
+    'combined equal rent+deposit remains eligible for owner income'
+  );
+  assert.strictEqual(
+    isRecordIncomeEarlyExit({ status: 'completed', amount: 500, depositAmount: 1000 }),
+    false,
+    'rent less than deposit remains eligible for owner income'
   );
   assert.strictEqual(
     isRecordIncomeEarlyExit({ status: 'completed', amount: 100, reversalOfPaymentId: companyA }),

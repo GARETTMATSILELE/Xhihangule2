@@ -15,11 +15,6 @@ import { mainConnection, accountingConnection } from '../config/database';
 import chargeTypeService from './chargeTypeService';
 import { emitPropertyAccountUpdated } from '../events/propertyAccountSocket';
 import {
-  PAYMENT_RECONCILIATION_BATCH_SIZE,
-  buildOwnerIncomeReconciliationPaymentFilter,
-  isRecordIncomeEarlyExit
-} from './paymentReconciliationQuery';
-import {
   buildOwnerIncomeLedgerTargets,
   checkPaymentAccountingCompleteness,
   computeOwnerIncomeAmount,
@@ -27,8 +22,15 @@ import {
   type PaymentAccountingCompletenessDeps
 } from './paymentAccountingCompleteness';
 import { evaluatePermanentAccountingPolicy } from './accountingPostingPolicy';
+import {
+  historicalTransactionDomain,
+  ledgerForDomain,
+  OwnerIncomeAmountMissingError
+} from './transactionDomain';
+import { classifyDuplicateGroup, classifyLedgerTransactionDuplicates } from './propertyAccountDuplicateInventory';
 import { computePropertyAccountTotals } from './propertyAccountTotals';
 import { isIndexCreationAllowed } from './ledgerMutationPolicy';
+import { throwOnceIfArmed } from './testFailureSeam';
 
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise: Promise<void> | null = null;
@@ -730,6 +732,7 @@ export class PropertyAccountService {
     processedBy?: string;
     notes?: string;
     idempotencyKey?: string;
+    ledgerType?: 'rental' | 'sale';
   }): Promise<IPropertyAccount> {
     const amount = Number(input.amount || 0);
     if (amount <= 0) {
@@ -742,7 +745,7 @@ export class PropertyAccountService {
     }
     const idKey = input.idempotencyKey || `pass-through:${chargeType}:payment:${input.levyPaymentId || input.paymentId || uuidv4()}`;
     const account = this.validateWritableAccount(
-      await this.getOrCreatePropertyAccount(input.propertyId),
+      await this.getOrCreatePropertyAccount(input.propertyId, input.ledgerType),
       input.propertyId,
       'recordPassThroughPayment'
     );
@@ -847,10 +850,10 @@ export class PropertyAccountService {
   /**
    * Get or create property account
    */
-  async getOrCreatePropertyAccount(propertyId: string): Promise<IPropertyAccount> {
+  async getOrCreatePropertyAccount(propertyId: string, ledgerOverride?: 'rental' | 'sale'): Promise<IPropertyAccount> {
     try {
-      const resolution = await this.resolveLedgerTypeForProperty(propertyId, 'getOrCreatePropertyAccount');
-      const effectiveLedger = resolution.ledgerType;
+      const effectiveLedger = ledgerOverride
+        ?? (await this.resolveLedgerTypeForProperty(propertyId, 'getOrCreatePropertyAccount')).ledgerType;
       const propertyObjectId = new mongoose.Types.ObjectId(propertyId);
 
       const activeAccounts = await PropertyAccount.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
@@ -995,8 +998,6 @@ export class PropertyAccountService {
         try {
           const cosmosMongo = this.isCosmosMongoEndpoint();
           const runOneTimeDuplicateCleanup = await this.shouldRunOneTimeDuplicateCleanup();
-          let normalizedForCleanup = 0;
-          let archivedForCleanup = 0;
           // Cosmos Mongo partial indexes do not support `$ne` in filter expressions.
           // Normalize legacy docs so active records are explicitly `isArchived: false`.
           try {
@@ -1035,20 +1036,10 @@ export class PropertyAccountService {
           }
           // Run heavy duplicate cleanup only once (persisted via SystemSetting) to avoid load on every restart.
           if (runOneTimeDuplicateCleanup) {
-            try {
-              normalizedForCleanup = await this.normalizeActiveLedgerTypes();
-              archivedForCleanup = await this.archiveDuplicateActiveLedgers();
-              console.log(
-                `One-time PropertyAccount duplicate cleanup completed (normalized=${normalizedForCleanup}, archived=${archivedForCleanup}).`
-              );
-              await this.markOneTimeDuplicateCleanupComplete({
-                normalized: normalizedForCleanup,
-                archived: archivedForCleanup
-              });
-            } catch (archiveErr: any) {
-              await this.markOneTimeDuplicateCleanupError(archiveErr);
-              console.warn('One-time duplicate cleanup failed before index migration:', archiveErr?.message || archiveErr);
-            }
+            console.warn(
+              'Skipping PropertyAccount duplicate archival during index migration. ' +
+              'Archive-without-merge hides owner income. Reconcile duplicates explicitly first.'
+            );
           } else {
             console.log('Skipping heavy duplicate cleanup (already completed or in progress).');
           }
@@ -1082,19 +1073,12 @@ export class PropertyAccountService {
               } catch (createErr: any) {
                 lastCompoundError = createErr;
                 if (this.isDuplicateKeyError(createErr)) {
-                  if (runOneTimeDuplicateCleanup) {
-                    try {
-                      const archived = await this.archiveDuplicateActiveLedgers();
-                      console.warn(
-                        `Compound index attempt ${attempt} hit duplicate keys; archived ${archived} duplicate active ledger records before retry.`
-                      );
-                    } catch (archiveErr: any) {
-                      console.warn('Could not archive duplicate active ledgers during compound index retry:', archiveErr?.message || archiveErr);
-                    }
-                  } else {
-                    console.warn('Compound index hit duplicate keys but one-time duplicate cleanup is disabled/already completed; skipping additional heavy archival.');
-                    break;
-                  }
+                  console.warn(
+                    'Partial unique index was not created because duplicate PropertyAccounts exist. ' +
+                    'Duplicates must be reconciled without archiving history before the index can be enabled. ' +
+                    'ALLOW_ACCOUNTING_INDEX_MIGRATION must stay unset in production until that reconciliation is proven.'
+                  );
+                  break;
                 } else {
                   break;
                 }
@@ -1267,70 +1251,9 @@ export class PropertyAccountService {
     }
   }
 
-  private async reconcileReversedPaymentArtifacts(account: IPropertyAccount): Promise<void> {
-    try {
-      this.validateWritableAccount(account, String((account as any).propertyId), 'reconcileReversedPaymentArtifacts');
-      const paymentIds = Array.from(
-        new Set(
-          (account.transactions || [])
-            .map((t: any) => String(t?.paymentId || ''))
-            .filter(Boolean)
-        )
-      );
-      if (!paymentIds.length) return;
-
-      const reversedPayments = await Payment.find({
-        _id: { $in: paymentIds.map((id) => new mongoose.Types.ObjectId(id)) },
-        status: 'reversed'
-      })
-        .select('_id reversalPaymentId')
-        .lean();
-      if (!reversedPayments.length) return;
-
-      const reversedSet = new Set<string>(reversedPayments.map((p: any) => String(p._id)));
-      const reversalSet = new Set<string>(
-        reversedPayments
-          .map((p: any) => (p?.reversalPaymentId ? String(p.reversalPaymentId) : ''))
-          .filter(Boolean)
-      );
-
-      const transactionIdsToCancel: any[] = [];
-      for (const tx of (account.transactions || []) as any[]) {
-        const txPid = String(tx?.paymentId || '');
-        if (!txPid) continue;
-        const isReversedChain = reversedSet.has(txPid) || reversalSet.has(txPid);
-        if (!isReversedChain) continue;
-
-        if (tx.type === 'income' && String(tx.status || '') === 'completed') {
-          transactionIdsToCancel.push(tx._id);
-        }
-        if (
-          tx.type === 'expense' &&
-          String(tx.category || '') === 'payment_reversal' &&
-          String(tx.status || '') === 'completed'
-        ) {
-          transactionIdsToCancel.push(tx._id);
-        }
-      }
-
-      if (transactionIdsToCancel.length > 0) {
-        await PropertyAccount.updateOne(
-          { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
-          {
-            $set: {
-              'transactions.$[t].status': 'cancelled',
-              'transactions.$[t].updatedAt': new Date(),
-              lastUpdated: new Date()
-            }
-          },
-          {
-            arrayFilters: [{ 't._id': { $in: transactionIdsToCancel.filter(Boolean) } }] as any
-          } as any
-        );
-      }
-    } catch (e) {
-      logger.warn('Failed to reconcile reversed payment artifacts (non-fatal):', e);
-    }
+  private async reconcileReversedPaymentArtifacts(_account: IPropertyAccount): Promise<void> {
+    // Counter-postings neutralise a reversal. Cancelling the original income would erase history.
+    return;
   }
 
   private ownerIncomeCompletenessDeps(): PaymentAccountingCompletenessDeps {
@@ -1367,8 +1290,88 @@ export class PropertyAccountService {
   }
 
   /**
-   * Record income from rental payments
+   * Append a completed row to the property ledger. Used by individualAccountingService
+   * only — rent still posts through recordIncomeFromPayment.
    */
+  async appendManualLedgerTransaction(input: {
+    propertyId: string;
+    idempotencyKey: string;
+    transaction: Partial<Transaction> & {
+      type: Transaction['type'];
+      amount: number;
+      date: Date;
+      description: string;
+      idempotencyKey: string;
+    };
+  }): Promise<{ accountId: mongoose.Types.ObjectId; transactionId?: mongoose.Types.ObjectId }> {
+    const account = this.validateWritableAccount(
+      await this.getOrCreatePropertyAccount(input.propertyId),
+      input.propertyId,
+      'appendManualLedgerTransaction'
+    );
+    const existing = (account.transactions || []).find(
+      (tx: any) => String(tx.idempotencyKey || '') === input.idempotencyKey
+    );
+    if (existing) {
+      return {
+        accountId: (account as any)._id,
+        transactionId: existing._id
+      };
+    }
+
+    const row: any = {
+      type: input.transaction.type,
+      amount: Number(input.transaction.amount),
+      date: input.transaction.date,
+      idempotencyKey: input.idempotencyKey,
+      description: input.transaction.description,
+      category: input.transaction.category,
+      transactionCategory: input.transaction.transactionCategory,
+      accountingTreatment: input.transaction.accountingTreatment,
+      referenceNumber: input.transaction.referenceNumber,
+      status: input.transaction.status || 'completed',
+      processedBy: input.transaction.processedBy,
+      notes: input.transaction.notes,
+      attachments: input.transaction.attachments || [],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    await PropertyAccount.updateOne(
+      {
+        _id: (account as any)._id,
+        propertyId: (account as any).propertyId,
+        isArchived: false,
+        isActive: { $ne: false },
+        'transactions.idempotencyKey': { $ne: input.idempotencyKey }
+      },
+      {
+        $push: { transactions: row },
+        $set: { lastUpdated: new Date() }
+      }
+    );
+    const fresh = await PropertyAccount.findOne({
+      _id: (account as any)._id,
+      isArchived: false,
+      isActive: { $ne: false }
+    }) as any;
+    if (fresh) await this.recalculateBalance(fresh as any);
+    const posted = (fresh?.transactions || []).find(
+      (tx: any) => String(tx.idempotencyKey || '') === input.idempotencyKey
+    );
+    return {
+      accountId: (account as any)._id,
+      transactionId: posted?._id
+    };
+  }
+
+  /**
+   * Record income from a completed Payment onto the property ledger.
+ *
+ * Call only from paymentAccountingOrchestrator (live completion) or from
+ * explicit authorised repair, which itself calls the orchestrator.
+ * Do not call from scheduled jobs, GET handlers, integrity, or historical sync.
+ */
   async recordIncomeFromPayment(paymentId: string): Promise<void> {
     try {
       const payment = await Payment.findById(paymentId);
@@ -1395,22 +1398,16 @@ export class PropertyAccountService {
         logger.debug('payment completeness check failed: completeness_error', { paymentId: String(payment._id) });
       }
 
-      const baseResolution = await this.resolveLedgerTypeForProperty(String(payment.propertyId), 'recordIncomeFromPayment');
-      const isSale = baseResolution.ledgerType === 'sale' || payment.paymentType === 'sale';
-      if (
-        payment.paymentType &&
-        payment.paymentType !== 'introduction' &&
-        ((payment.paymentType === 'sale') !== (baseResolution.ledgerType === 'sale'))
-      ) {
-        throw new AppError(
-          `Payment type ${payment.paymentType} does not match Property.rentalType (${baseResolution.businessType}) for property ${String(payment.propertyId)}`,
-          400
-        );
+      const domain = historicalTransactionDomain(payment);
+      if (!domain) {
+        throw new AppError(`Payment ${paymentId} has no authoritative transaction domain`, 409);
       }
+      const isSale = domain === 'SALE';
+      const ledgerType = ledgerForDomain(domain);
 
       const targets = await buildOwnerIncomeLedgerTargets({
         isSale,
-        ledgerType: baseResolution.ledgerType,
+        ledgerType,
         propertyId: String(payment.propertyId),
         developmentId: (payment as any)?.developmentId,
         developmentUnitId: (payment as any)?.developmentUnitId,
@@ -1436,10 +1433,29 @@ export class PropertyAccountService {
       const propertyExpenseTotal = propertyExpenseLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
       const propertyIncomeLines = chargeLines.filter(line => line.chargeType.ownerIncome && line.chargeType.category === 'PROPERTY_INCOME');
       const primaryIncomeChargeType = propertyIncomeLines[0]?.chargeType;
+      const ownerIncomeAmount = computeOwnerIncomeAmount({
+        isSale,
+        ownerAmount: payment.commissionDetails?.ownerAmount || 0,
+        passThroughTotal
+      });
+      if (Number(payment.amount || 0) > 0 && ownerIncomeAmount <= 0) {
+        throw new OwnerIncomeAmountMissingError(paymentId);
+      }
+      const ownerSeamKey = String(paymentId);
+      const ownerSeams = (global as any).__phase26OwnerSeam || ((global as any).__phase26OwnerSeam = new Set<string>());
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        process.env.MANTIS_TEST_SEAM === '1' &&
+        String((payment as any).notes || '').includes('PHASE26_FAIL_OWNER_INCOME') &&
+        !ownerSeams.has(ownerSeamKey)
+      ) {
+        ownerSeams.add(ownerSeamKey);
+        throw new Error('PHASE26_FAIL_OWNER_INCOME');
+      }
       for (const target of targets) {
         let account: IPropertyAccount | null = null as any;
         try {
-          account = await this.getOrCreatePropertyAccount(target.id);
+          account = await this.getOrCreatePropertyAccount(target.id, ledgerType);
         } catch (e: any) {
           const message = String(e?.message || '');
           const status = Number((e as any)?.statusCode || (e as any)?.status || 0);
@@ -1456,17 +1472,7 @@ export class PropertyAccountService {
         }
         account = this.validateWritableAccount(account, target.id, 'recordIncomeFromPayment');
 
-        const ownerAmount = payment.commissionDetails?.ownerAmount || 0;
-        const totalPaid = payment.amount || 0;
-        const depositPortion = payment.depositAmount || 0;
-        const totalCommission = payment.commissionDetails?.totalCommission || 0;
-        // Align owner income with commission-calculated owner amount while removing non-owner charge lines.
-        // Deposit-only payments are already excluded above.
-        const incomeAmount = computeOwnerIncomeAmount({
-          isSale,
-          ownerAmount,
-          passThroughTotal
-        });
+        const incomeAmount = ownerIncomeAmount;
 
         const recordPassThroughIfNeeded = async () => {
           const grouped = new Map<string, { amount: number; line: any }>();
@@ -1633,47 +1639,48 @@ export class PropertyAccountService {
     }
   }
 
-  async reverseIncomeFromPayment(paymentId: string, opts?: { processedBy?: string; reason?: string }): Promise<void> {
+  async reverseIncomeFromPayment(paymentId: string, opts?: { processedBy?: string; reason?: string }): Promise<{ countered: boolean }> {
     try {
       const payment = await Payment.findById(paymentId);
       if (!payment) {
         throw new AppError('Payment not found', 404);
       }
 
-      const baseResolution = await this.resolveLedgerTypeForProperty(String(payment.propertyId), 'reverseIncomeFromPayment');
-      const targets: Array<{ id: string; ledger: 'rental' | 'sale' }> = [];
-      const isSale = baseResolution.ledgerType === 'sale' || payment.paymentType === 'sale';
-      if (
-        payment.paymentType &&
-        payment.paymentType !== 'introduction' &&
-        ((payment.paymentType === 'sale') !== (baseResolution.ledgerType === 'sale'))
-      ) {
-        throw new AppError(
-          `Payment type ${payment.paymentType} does not match Property.rentalType (${baseResolution.businessType}) for property ${String(payment.propertyId)}`,
-          400
-        );
+      const domain = historicalTransactionDomain(payment);
+      if (!domain) {
+        throw new AppError(`Payment ${paymentId} has no authoritative transaction domain`, 409);
       }
+      const targets: Array<{ id: string; ledger: 'rental' | 'sale' }> = [];
+      const isSale = domain === 'SALE';
+      const ledgerType = ledgerForDomain(domain);
       let devId = (payment as any)?.developmentId as mongoose.Types.ObjectId | undefined;
       const unitId = (payment as any)?.developmentUnitId as mongoose.Types.ObjectId | undefined;
       if (isSale) {
-        if (unitId) targets.push({ id: unitId.toString(), ledger: baseResolution.ledgerType });
+        if (unitId) targets.push({ id: unitId.toString(), ledger: ledgerType });
         if (!devId && unitId) {
           try { const unitDoc = await DevelopmentUnit.findById(unitId).select('developmentId'); devId = unitDoc?.developmentId as any; } catch {}
         }
-        if (devId) targets.push({ id: devId.toString(), ledger: baseResolution.ledgerType });
-        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
+        if (devId) targets.push({ id: devId.toString(), ledger: ledgerType });
+        if (!unitId && !devId) targets.push({ id: payment.propertyId.toString(), ledger: ledgerType });
       } else {
-        targets.push({ id: payment.propertyId.toString(), ledger: baseResolution.ledgerType });
+        targets.push({ id: payment.propertyId.toString(), ledger: ledgerType });
       }
+
+      throwOnceIfArmed(
+        paymentId,
+        `${String((payment as any).notes || '')} ${String(opts?.reason || '')}`,
+        'PHASE27_FAIL_OWNER'
+      );
 
       const chargeLines = isSale
         ? []
         : await chargeTypeService.getCompatibilityChargeLines(payment, payment.companyId);
       const passThroughLines = chargeLines.filter(line => line.chargeType.category === 'PASS_THROUGH');
+      let countered = false;
 
       for (const target of targets) {
         const account = this.validateWritableAccount(
-          await this.getOrCreatePropertyAccount(target.id),
+          await this.getOrCreatePropertyAccount(target.id, target.ledger),
           target.id,
           'reverseIncomeFromPayment'
         );
@@ -1697,80 +1704,100 @@ export class PropertyAccountService {
             description: `${row.line.chargeType.name} reversal - ${(payment as any).referenceNumber || paymentId}`,
             processedBy: opts?.processedBy,
             notes: opts?.reason || 'Payment reversal',
-            idempotencyKey: `payment:${paymentId}:pass-through:${code}:reversal`
+            idempotencyKey: `payment:${paymentId}:pass-through:${code}:reversal`,
+            ledgerType: target.ledger
           });
         }
-        const originalIncomeIds = (account.transactions || [])
-          .filter(
-            (t: any) =>
-              t.type === 'income' &&
-              String(t.paymentId || '') === String(payment._id || '') &&
-              String(t.status || '') === 'completed'
-          )
-          .map((t: any) => t._id)
-          .filter(Boolean);
-
-        // Clean up accidental legacy posting of reversal payment as income.
-        const reversalPaymentId = (payment as any).reversalPaymentId ? String((payment as any).reversalPaymentId) : '';
-        const reversalIncomeIds = (account.transactions || [])
-          .filter(
-            (t: any) =>
-              t.type === 'income' &&
-              reversalPaymentId &&
-              String(t.paymentId || '') === reversalPaymentId &&
-              String(t.status || '') === 'completed'
-          )
-          .map((t: any) => t._id)
-          .filter(Boolean);
-
-        const idsToCancel = [...originalIncomeIds, ...reversalIncomeIds];
-        const configuredExpenseIds = (account.transactions || [])
-          .filter(
-            (t: any) =>
-              t.type === 'expense' &&
-              String(t.category || '') === 'configured_expense' &&
-              String(t.status || '') === 'completed' &&
-              (String(t.idempotencyKey || '') === `payment:${paymentId}:configured-expense` ||
-                String(t.paymentId || '') === String(payment._id || ''))
-          )
-          .map((t: any) => t._id)
-          .filter(Boolean);
-        idsToCancel.push(...configuredExpenseIds);
-        if (idsToCancel.length > 0) {
+        const originalIncome = (account.transactions || []).filter(
+          (t: any) =>
+            t.type === 'income' &&
+            String(t.paymentId || '') === String(payment._id || '') &&
+            String(t.status || '') === 'completed' &&
+            !t.reversesPaymentId
+        );
+        const postedIncome = Number(
+          originalIncome.reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0).toFixed(2)
+        );
+        const incomeKey = `payment:${paymentId}:owner-income:reversal:${target.id}`;
+        const incomeAlready = (account.transactions || []).some(
+          (t: any) => String(t.idempotencyKey || '') === incomeKey && String(t.status || '') === 'completed'
+        );
+        if (postedIncome > 0 && !incomeAlready) {
+          const counter: any = {
+            type: 'expense',
+            amount: postedIncome,
+            date: new Date(),
+            reversesPaymentId: payment._id,
+            idempotencyKey: incomeKey,
+            description: `Reversal of owner income ${String((payment as any).referenceNumber || paymentId)}`,
+            category: 'payment_reversal',
+            transactionCategory: 'OTHER',
+            accountingTreatment: 'PROPERTY_EXPENSE',
+            status: 'completed',
+            notes: opts?.reason || 'Payment reversal',
+            referenceNumber: `REV-OWN-${String((payment as any).referenceNumber || paymentId)}`,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
           await PropertyAccount.updateOne(
-            { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
             {
-              $set: {
-                'transactions.$[t].status': 'cancelled',
-                'transactions.$[t].updatedAt': new Date(),
-                lastUpdated: new Date()
-              }
+              _id: (account as any)._id,
+              propertyId: (account as any).propertyId,
+              isArchived: false,
+              isActive: { $ne: false },
+              'transactions.idempotencyKey': { $ne: incomeKey }
             },
-            {
-              arrayFilters: [{ 't._id': { $in: idsToCancel } }] as any
-            } as any
+            { $push: { transactions: counter }, $set: { lastUpdated: new Date() } }
           );
+          countered = true;
+        } else if (postedIncome > 0 && incomeAlready) {
+          countered = true;
         }
 
-        // Retire old expense-based reversal rows for this payment to avoid duplicate noise.
-        await PropertyAccount.updateOne(
-          { _id: (account as any)._id, propertyId: (account as any).propertyId, isArchived: false, isActive: { $ne: false } },
-          {
-            $set: {
-              'transactions.$[t].status': 'cancelled',
-              'transactions.$[t].updatedAt': new Date(),
-              lastUpdated: new Date()
-            }
-          },
-          {
-            arrayFilters: [{
-              't.type': 'expense',
-              't.category': 'payment_reversal',
-              't.paymentId': new mongoose.Types.ObjectId(paymentId),
-              't.status': 'completed'
-            }] as any
-          } as any
+        const configuredExpenses = (account.transactions || []).filter(
+          (t: any) =>
+            t.type === 'expense' &&
+            String(t.category || '') === 'configured_expense' &&
+            String(t.status || '') === 'completed' &&
+            (String(t.idempotencyKey || '') === `payment:${paymentId}:configured-expense` ||
+              String(t.paymentId || '') === String(payment._id || ''))
         );
+        for (const expense of configuredExpenses) {
+          const expenseKey = `payment:${paymentId}:configured-expense:reversal:${String((expense as any)._id || target.id)}`;
+          const expenseAlready = (account.transactions || []).some(
+            (t: any) => String(t.idempotencyKey || '') === expenseKey
+          );
+          if (expenseAlready || Number((expense as any).amount || 0) <= 0) continue;
+          await PropertyAccount.updateOne(
+            {
+              _id: (account as any)._id,
+              propertyId: (account as any).propertyId,
+              isArchived: false,
+              isActive: { $ne: false },
+              'transactions.idempotencyKey': { $ne: expenseKey }
+            },
+            {
+              $push: {
+                transactions: {
+                  type: 'income',
+                  amount: Number(Number((expense as any).amount || 0).toFixed(2)),
+                  date: new Date(),
+                  reversesPaymentId: payment._id,
+                  idempotencyKey: expenseKey,
+                  description: `Reversal of configured expense ${String((payment as any).referenceNumber || paymentId)}`,
+                  category: 'payment_reversal',
+                  transactionCategory: 'OTHER',
+                  accountingTreatment: 'PROPERTY_INCOME',
+                  status: 'completed',
+                  notes: opts?.reason || 'Payment reversal',
+                  createdAt: new Date(),
+                  updatedAt: new Date()
+                }
+              },
+              $set: { lastUpdated: new Date() }
+            }
+          );
+        }
 
         const fresh = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
         if (fresh) {
@@ -1784,6 +1811,7 @@ export class PropertyAccountService {
           eventType: 'payment_reversed'
         });
       }
+      return { countered };
     } catch (error) {
       logger.error('Error reversing income from payment:', error);
       throw error;
@@ -1791,10 +1819,9 @@ export class PropertyAccountService {
   }
 
   /**
-   * Ensure ledgers for developments (with units) exist and backfill existing sale payments into those ledgers.
-   * - Cross-references Developments and DevelopmentUnits
-   * - Creates sale ledgers per development if missing (idempotent)
-   * - Posts existing completed sale payments tied to the development or its units
+   * EXPLICIT HISTORICAL BACKFILL for development sale ledgers.
+   * Call only from the authorised admin migration endpoint after confirm=true.
+   * Never from GET, integrity, or scheduled reconciliation.
    */
   async ensureDevelopmentLedgersAndBackfillPayments(options?: {
     companyId?: string;
@@ -1849,14 +1876,11 @@ export class PropertyAccountService {
         ]
       }).select('_id');
       paymentsScanned += salePayments.length;
-      // Backfill incomes into dev ledger (and unit ledger if missing) idempotently
-      for (const p of salePayments) {
-        try {
-          await this.recordIncomeFromPayment(p._id.toString());
-          backfillInvocations++;
-        } catch (e) {
-          console.warn(`Backfill failed for payment ${String((p as any)._id)} on development ${String(dev._id)}:`, (e as any)?.message || e);
-        }
+      if (salePayments.length > 0) {
+        logger.info('Development ledger ensured. Historical sale payments were not replayed.', {
+          developmentId: String(dev._id),
+          payments: salePayments.length
+        });
       }
     }
     return {
@@ -2243,17 +2267,13 @@ export class PropertyAccountService {
   /**
    * Get property account with summary
    */
-  async getPropertyAccount(propertyId: string, legacyLedgerHint?: 'rental' | 'sale'): Promise<IPropertyAccount> {
+  async getPropertyAccount(propertyId: string, ledger?: 'rental' | 'sale'): Promise<IPropertyAccount> {
     try {
       const pid = new mongoose.Types.ObjectId(propertyId);
-      const resolution = await this.resolveLedgerTypeForProperty(propertyId, 'getPropertyAccount');
-      const effectiveLedger = resolution.ledgerType;
-      if (legacyLedgerHint && legacyLedgerHint !== effectiveLedger) {
-        throw new AppError(
-          `Requested ledger ${legacyLedgerHint} does not match Property.rentalType (${resolution.businessType}) for property ${propertyId}; expected ${effectiveLedger}`,
-          400
-        );
-      }
+      // An explicit ledger is historical account identity. Property.rentalType is only
+      // the current-state default when the caller did not name a ledger.
+      const effectiveLedger = ledger
+        ?? (await this.resolveLedgerTypeForProperty(propertyId, 'getPropertyAccount')).ledgerType;
       const candidates = await PropertyAccount.find({
         propertyId: pid,
         isArchived: { $ne: true },
@@ -2439,59 +2459,21 @@ export class PropertyAccountService {
   }
 
   /**
-   * Bounded safety-net: attempt owner-income posting for completed payments that
-   * are not Payment-field no-ops. Does not skip payments that already have a
-   * ledger income row â€” sale multi-target and pass-through recovery still need
-   * recordIncomeFromPayment. Idempotency inside that function remains the write guard.
+   * EXPLICIT HISTORICAL BACKFILL. Call only from the authorised admin migration
+   * endpoint after confirm=true and a non-empty reason. Never from GET, integrity,
+   * or scheduled reconciliation.
    */
   async syncPropertyAccountsWithPayments(options?: {
     companyId?: string;
     onProgress?: () => Promise<void> | void;
   }): Promise<{ selected: number; attempted: number; failures: number }> {
-    const companyId = typeof options?.companyId === 'string' ? options.companyId.trim() : '';
-    const stats = { selected: 0, attempted: 0, failures: 0 };
-    try {
-      logger.info('Starting property account sync with payments...', {
-        companyScoped: Boolean(companyId)
-      });
-
-      const filter = buildOwnerIncomeReconciliationPaymentFilter({
-        companyId: companyId || undefined
-      });
-      const cursor = Payment.find(filter)
-        .select('_id status amount depositAmount reversalOfPaymentId companyId')
-        .sort({ _id: 1 })
-        .batchSize(PAYMENT_RECONCILIATION_BATCH_SIZE)
-        .cursor();
-
-      let processedSinceHeartbeat = 0;
-      for await (const payment of cursor as AsyncIterable<any>) {
-        stats.selected += 1;
-        processedSinceHeartbeat += 1;
-        if (processedSinceHeartbeat >= PAYMENT_RECONCILIATION_BATCH_SIZE) {
-          processedSinceHeartbeat = 0;
-          if (options?.onProgress) {
-            await options.onProgress();
-          }
-        }
-        if (isRecordIncomeEarlyExit(payment)) {
-          continue;
-        }
-        try {
-          await this.recordIncomeFromPayment(String(payment._id));
-          stats.attempted += 1;
-        } catch (error) {
-          stats.failures += 1;
-          logger.error(`Failed to sync payment ${payment._id}:`, error);
-        }
-      }
-
-      logger.info('Property account sync completed.', stats);
-      return stats;
-    } catch (error) {
-      logger.error('Error syncing property accounts:', error);
-      throw error;
-    }
+    logger.warn('Historical payment replay is disabled. Use the read-only duplicate inventory and single-payment repair.', {
+      companyId: options?.companyId || null
+    });
+    throw new AppError(
+      'HISTORICAL_REPLAY_DISABLED: property-account sync no longer posts or replays payments. Detect gaps and repair one payment at a time.',
+      409
+    );
   }
 
   async getLedgerEntityIdsForCompany(companyId: string): Promise<string[]> {
@@ -2599,7 +2581,31 @@ export class PropertyAccountService {
 
     for (const group of groups) {
       if (group.items.length <= 1) continue;
-      // Choose keeper: prefer legacy (missing/null ledgerType), then by most entries, then latest lastUpdated
+      const [groupPropertyId, groupLedger] = group.key.split('|');
+      const plan = classifyDuplicateGroup(
+        groupPropertyId,
+        groupLedger,
+        group.items.map((account) => ({
+          id: String(account._id),
+          propertyId: String(account.propertyId),
+          ledgerType: (account as any).ledgerType || groupLedger,
+          isArchived: (account as any).isArchived === true,
+          isActive: (account as any).isActive !== false,
+          transactions: (account.transactions || []) as any,
+          ownerPayouts: (account.ownerPayouts || []) as any,
+          createdAt: (account as any).createdAt
+        }))
+      );
+      if (!plan.automaticMergeAllowed) {
+        logger.warn('Refusing automatic duplicate merge', {
+          propertyId: groupPropertyId,
+          ledgerType: groupLedger,
+          classification: plan.classification,
+          reason: plan.reason
+        });
+        continue;
+      }
+      // Choose keeper from the safe classification, then by financial history.
       const legacy = group.items.filter(i => (i as any).ledgerType == null);
       const candidates = legacy.length > 0 ? legacy : group.items;
       const pickScore = (i: IPropertyAccount) => {
@@ -2720,7 +2726,7 @@ export class PropertyAccountService {
       this.validateWritableAccount(rental as any, String((rental as any).propertyId), 'migrateSalesLedgerForCompany');
       const saleTx = (rental.transactions || []).filter(t => t.type === 'income' && t.category === 'sale_income');
       if (saleTx.length === 0) continue;
-      const saleAccount = await this.getOrCreatePropertyAccount(rental.propertyId.toString());
+      const saleAccount = await this.getOrCreatePropertyAccount(rental.propertyId.toString(), 'sale');
       // Move each tx if not already present in sale ledger (by paymentId)
       let movedHere = 0;
       for (const tx of saleTx) {
@@ -2959,50 +2965,78 @@ export async function migrateSalesLedgerForCompany(
   return service.migrateSalesLedgerForCompany(companyPropertyIds);
 }
 
-// One-off maintenance: remove duplicate income transactions per (type,paymentId) for a given property ledger
+// Explicit maintenance only. Identical income copies may be cancelled after classification.
+// Ambiguous, cross-ledger, and reversal rows are preserved.
 export async function reconcilePropertyLedgerDuplicates(
   propertyId: string
-): Promise<{ removed: number; kept: number; accountId?: string }> {
+): Promise<{
+  removed: number;
+  kept: number;
+  accountId?: string;
+  classification: string;
+  reason: string;
+  mutated: boolean;
+}> {
   const service = PropertyAccountService.getInstance();
   const account = await service.getPropertyAccount(propertyId);
   (service as any).validateWritableAccount(account, propertyId, 'reconcilePropertyLedgerDuplicates');
   const tx = Array.isArray(account.transactions) ? account.transactions : [];
-  const byKey: Record<string, Array<{ _id?: any; date: Date }>> = Object.create(null);
-  for (const t of tx) {
-    const pid = (t as any)?.paymentId ? String((t as any).paymentId) : '';
-    if (!pid) continue; // only dedupe entries that reference a payment
-    const key = `${t.type}:${pid}`;
-    if (!byKey[key]) byKey[key] = [];
-    byKey[key].push({ _id: (t as any)._id, date: new Date(t.date) });
+  const plan = classifyLedgerTransactionDuplicates(
+    tx.map((line: any) => ({
+      _id: line._id,
+      type: line.type,
+      status: line.status,
+      amount: line.amount,
+      category: line.category,
+      paymentId: line.paymentId,
+      reversesPaymentId: line.reversesPaymentId,
+      idempotencyKey: line.idempotencyKey,
+      date: line.date,
+      ledgerType: (account as any).ledgerType
+    }))
+  );
+  const kept = tx.length - (plan.classification === 'SAFE_IDENTICAL' ? plan.cancelIds.length : 0);
+  if (plan.classification !== 'SAFE_IDENTICAL' || plan.cancelIds.length === 0) {
+    return {
+      removed: 0,
+      kept: tx.length,
+      accountId: String(account._id),
+      classification: plan.classification,
+      reason: plan.reason,
+      mutated: false
+    };
   }
-  const toRemove: any[] = [];
-  let kept = 0;
-  for (const key of Object.keys(byKey)) {
-    const list = byKey[key];
-    if (list.length <= 1) { kept += list.length; continue; }
-    // Keep the earliest by date, remove the rest
-    const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-    kept += 1;
-    toRemove.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
-  }
-  if (toRemove.length > 0) {
-    await PropertyAccount.updateOne(
-      { _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } },
-      {
-        $set: {
-          'transactions.$[t].status': 'cancelled',
-          'transactions.$[t].updatedAt': new Date(),
-          lastUpdated: new Date()
+  await PropertyAccount.updateOne(
+    { _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false } },
+    {
+      $set: {
+        'transactions.$[t].status': 'cancelled',
+        'transactions.$[t].updatedAt': new Date(),
+        lastUpdated: new Date()
+      }
+    },
+    {
+      arrayFilters: [{
+        't._id': {
+          $in: plan.cancelIds.map((id) => (
+            mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id
+          ))
         }
-      },
-      { arrayFilters: [{ 't._id': { $in: toRemove } }] as any } as any
-    );
-    const fresh = await PropertyAccount.findOne({ _id: account._id, isArchived: false, isActive: { $ne: false } });
-    if (fresh) {
-      await service.recalculateBalance(fresh as any);
-    }
+      }] as any
+    } as any
+  );
+  const fresh = await PropertyAccount.findOne({ _id: account._id, isArchived: false, isActive: { $ne: false } });
+  if (fresh) {
+    await service.recalculateBalance(fresh as any);
   }
-  return { removed: toRemove.length, kept, accountId: String(account._id) };
+  return {
+    removed: plan.cancelIds.length,
+    kept,
+    accountId: String(account._id),
+    classification: plan.classification,
+    reason: plan.reason,
+    mutated: true
+  };
 }
 
 // Convenience export to ensure development ledgers exist and backfill payments
@@ -3030,53 +3064,15 @@ export async function initializePropertyAccountIndexes(): Promise<void> {
   }
 }
 
-// Orchestrated maintenance: normalize legacy types, merge duplicates (keeping legacy), reconcile duplicate tx, recalc
+// Detection-only. Duplicate merges stay on the confirmed per-property endpoint,
+// and only SAFE_DUPLICATE groups are eligible there.
 export async function runPropertyLedgerMaintenance(options?: { companyId?: string; dryRun?: boolean; limit?: number }): Promise<{
   migrated: { examined: number; updated: number; merged: number; skipped: number; errors: number };
   deduped: { groupsChanged: boolean };
   reconciled: { accountsProcessed: number; removals: number };
 }> {
   const service = PropertyAccountService.getInstance();
-  await initializePropertyAccountIndexes();
-  const migrated = await service.migrateLegacyLedgerTypesForCompany(options?.companyId || undefined, { dryRun: Boolean(options?.dryRun) });
-  let groupsChanged = false;
-  if (!options?.dryRun) {
-    // Scope accounts by company if provided (via Properties/Developments/Units)
-    let accountFilter: any = {};
-    if (options?.companyId) {
-      const [props, devs] = await Promise.all([
-        Property.find({ companyId: options.companyId }).select('_id'),
-        Development.find({ companyId: options.companyId }).select('_id')
-      ]);
-      const devIds = devs.map((d: any) => d._id);
-      let unitIds: any[] = [];
-      try {
-        unitIds = await DevelopmentUnit.find({ developmentId: { $in: devIds } }).distinct('_id');
-      } catch {}
-      const ids = [...props.map(p => p._id), ...devIds, ...unitIds];
-      accountFilter.propertyId = { $in: ids };
-    }
-    const accounts = await PropertyAccount.find({ ...accountFilter, isArchived: { $ne: true } });
-    // Use internal merge with legacy preference
-    const svcAny = service as any;
-    if (typeof svcAny.mergeDuplicateAccounts === 'function') {
-      groupsChanged = await svcAny.mergeDuplicateAccounts(accounts);
-    }
-    // Reconcile duplicate income transactions per account
-    const propertyIds = Array.from(new Set(accounts.map(a => String((a as any).propertyId))));
-    let removals = 0;
-    for (const pid of propertyIds) {
-      try {
-        const res = await reconcilePropertyLedgerDuplicates(pid);
-        removals += res.removed || 0;
-      } catch {}
-    }
-    return {
-      migrated,
-      deduped: { groupsChanged },
-      reconciled: { accountsProcessed: propertyIds.length, removals }
-    };
-  }
+  const migrated = await service.migrateLegacyLedgerTypesForCompany(options?.companyId || undefined, { dryRun: true });
   return {
     migrated,
     deduped: { groupsChanged: false },

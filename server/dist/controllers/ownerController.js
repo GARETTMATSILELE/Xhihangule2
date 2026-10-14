@@ -23,32 +23,47 @@ const maintenanceManagementService_2 = require("../services/maintenanceManagemen
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 // Helper function to get property owner context (from either PropertyOwner or User collection)
-const getPropertyOwnerContext = (ownerId) => __awaiter(void 0, void 0, void 0, function* () {
+const getPropertyOwnerContext = (ownerId, companyHint) => __awaiter(void 0, void 0, void 0, function* () {
+    const companyClause = companyHint && mongoose_1.default.Types.ObjectId.isValid(companyHint)
+        ? { companyId: companyHint }
+        : {};
     // First, try to find the property owner document (this is the primary source)
-    let propertyOwner = yield PropertyOwner_1.PropertyOwner.findById(ownerId);
+    let propertyOwner = yield PropertyOwner_1.PropertyOwner.findOne(Object.assign({ _id: ownerId }, companyClause));
     if (propertyOwner) {
-        console.log(`Found PropertyOwner record: ${propertyOwner.email} with companyId: ${propertyOwner.companyId}`);
+        const linked = yield Property_1.Property.find({
+            companyId: propertyOwner.companyId,
+            isDeleted: { $ne: true },
+            $or: [
+                { propertyOwnerId: propertyOwner._id },
+                ...((propertyOwner.properties || []).length ? [{ _id: { $in: propertyOwner.properties } }] : []),
+            ],
+        }).select('_id');
         return {
             _id: propertyOwner._id,
-            properties: propertyOwner.properties || [],
+            properties: linked.map((row) => row._id),
             companyId: propertyOwner.companyId
         };
     }
     // If not found in PropertyOwner collection, try User collection as fallback
-    console.log(`PropertyOwner not found for ID: ${ownerId}, checking User collection...`);
     const user = yield User_1.User.findById(ownerId);
     if (!user || user.role !== 'owner') {
         throw new errorHandler_1.AppError('Property owner not found', 404);
     }
-    console.log(`Found owner user in User collection: ${user.email}`);
-    // Additional fallback: try to find PropertyOwner by email (common when accounts are linked by email but have different IDs)
+    // Match the landlord record in the same company. Email alone is not a company boundary.
     try {
-        const ownerByEmail = yield PropertyOwner_1.PropertyOwner.findOne({ email: user.email });
+        const ownerByEmail = yield PropertyOwner_1.PropertyOwner.findOne(Object.assign({ email: user.email }, (user.companyId ? { companyId: user.companyId } : companyClause)));
         if (ownerByEmail) {
-            console.log(`Matched PropertyOwner by email: ${ownerByEmail.email} with properties: ${(ownerByEmail.properties || []).length}`);
+            const linked = yield Property_1.Property.find({
+                companyId: ownerByEmail.companyId,
+                isDeleted: { $ne: true },
+                $or: [
+                    { propertyOwnerId: ownerByEmail._id },
+                    ...((ownerByEmail.properties || []).length ? [{ _id: { $in: ownerByEmail.properties } }] : []),
+                ],
+            }).select('_id');
             return {
                 _id: ownerByEmail._id,
-                properties: ownerByEmail.properties || [],
+                properties: linked.map((row) => row._id),
                 companyId: ownerByEmail.companyId
             };
         }
@@ -65,13 +80,13 @@ const getPropertyOwnerContext = (ownerId) => __awaiter(void 0, void 0, void 0, f
 });
 // Get properties for the authenticated owner
 const getOwnerProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             throw new errorHandler_1.AppError('Authentication required', 401);
         }
         const ownerId = req.user.userId;
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         // Get properties using the properties array from PropertyOwner, or fallback to ownerId
         let properties;
         if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
@@ -144,7 +159,7 @@ const getOwnerProperties = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.getOwnerProperties = getOwnerProperties;
 // Get a specific property for the authenticated owner
 const getOwnerPropertyById = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -154,9 +169,9 @@ const getOwnerPropertyById = (req, res, next) => __awaiter(void 0, void 0, void 
         if (!propertyId || !mongoose_1.default.isValidObjectId(propertyId)) {
             throw new errorHandler_1.AppError('Invalid property ID', 400);
         }
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         // Check if the property is in the owner's properties array
-        const isOwnerProperty = (_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.some((propId) => propId.toString() === propertyId);
+        const isOwnerProperty = (_c = propertyOwnerContext.properties) === null || _c === void 0 ? void 0 : _c.some((propId) => propId.toString() === propertyId);
         if (!isOwnerProperty) {
             // Fallback: check if property has this owner as ownerId
             const query = { _id: propertyId, ownerId: ownerId };
@@ -233,7 +248,7 @@ const getOwnerPropertyById = (req, res, next) => __awaiter(void 0, void 0, void 
 exports.getOwnerPropertyById = getOwnerPropertyById;
 // Get maintenance requests for the authenticated owner's properties
 const getOwnerMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         console.log('getOwnerMaintenanceRequests: Starting request processing');
         // Get user context from query parameters (for public API) or from authentication middleware
@@ -257,9 +272,9 @@ const getOwnerMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void
         }
         // Get property owner context
         console.log('getOwnerMaintenanceRequests: Getting property owner context for', ownerId);
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         console.log('getOwnerMaintenanceRequests: Property owner context retrieved', {
-            hasProperties: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) > 0,
+            hasProperties: ((_c = propertyOwnerContext.properties) === null || _c === void 0 ? void 0 : _c.length) > 0,
             companyId: propertyOwnerContext.companyId
         });
         // Get property IDs for this owner
@@ -363,7 +378,7 @@ const getOwnerMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void
 exports.getOwnerMaintenanceRequests = getOwnerMaintenanceRequests;
 // Get a specific maintenance request for the authenticated owner
 const getOwnerMaintenanceRequestById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         console.log('getOwnerMaintenanceRequestById: Starting request processing');
         // Get user context from query parameters (for public API) or from authentication middleware
@@ -393,9 +408,9 @@ const getOwnerMaintenanceRequestById = (req, res) => __awaiter(void 0, void 0, v
         }
         // Get property owner context
         console.log('getOwnerMaintenanceRequestById: Getting property owner context for', ownerId);
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         console.log('getOwnerMaintenanceRequestById: Property owner context retrieved', {
-            hasProperties: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) > 0,
+            hasProperties: ((_c = propertyOwnerContext.properties) === null || _c === void 0 ? void 0 : _c.length) > 0,
             companyId: propertyOwnerContext.companyId
         });
         // Get property IDs for this owner
@@ -451,7 +466,7 @@ const getOwnerMaintenanceRequestById = (req, res) => __awaiter(void 0, void 0, v
 exports.getOwnerMaintenanceRequestById = getOwnerMaintenanceRequestById;
 // Update a maintenance request (for owner approval, status changes, etc.)
 const updateOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         // Get user context from query parameters (for public API) or from authentication middleware
         let ownerId;
@@ -471,7 +486,7 @@ const updateOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
         }
         const requestId = req.params.id;
         const updates = req.body;
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         let propertyIds = [];
         if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
             propertyIds = propertyOwnerContext.properties;
@@ -508,7 +523,7 @@ const updateOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
 exports.updateOwnerMaintenanceRequest = updateOwnerMaintenanceRequest;
 // Approve a maintenance request (owner action)
 const approveOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         // Get user context from query parameters (for public API) or from authentication middleware
         let ownerId;
@@ -530,7 +545,7 @@ const approveOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, v
         if (!requestId) {
             throw new errorHandler_1.AppError('Maintenance request ID is required', 400);
         }
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         let propertyIds = [];
         if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
             propertyIds = propertyOwnerContext.properties;
@@ -591,7 +606,7 @@ const approveOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, v
 exports.approveOwnerMaintenanceRequest = approveOwnerMaintenanceRequest;
 // Reject a maintenance request (owner action)
 const rejectOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         // Get user context from query parameters (for public API) or from authentication middleware
         let ownerId;
@@ -614,7 +629,7 @@ const rejectOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
         if (!requestId) {
             throw new errorHandler_1.AppError('Maintenance request ID is required', 400);
         }
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         let propertyIds = [];
         if (propertyOwnerContext.properties && propertyOwnerContext.properties.length > 0) {
             propertyIds = propertyOwnerContext.properties;
@@ -679,7 +694,7 @@ const rejectOwnerMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, vo
 exports.rejectOwnerMaintenanceRequest = rejectOwnerMaintenanceRequest;
 // Add a message to a maintenance request
 const addOwnerMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         // Get user context from query parameters (for public API) or from authentication middleware
         let ownerId;
@@ -699,7 +714,7 @@ const addOwnerMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 
         }
         const requestId = req.params.id;
         const { content } = req.body;
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         if (!content) {
             throw new errorHandler_1.AppError('Message content is required', 400);
         }
@@ -748,7 +763,7 @@ const addOwnerMaintenanceMessage = (req, res) => __awaiter(void 0, void 0, void 
 exports.addOwnerMaintenanceMessage = addOwnerMaintenanceMessage;
 // Get owner's net income from payments
 const getOwnerNetIncome = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         console.log('getOwnerNetIncome: Starting request processing');
         // Get user context from query parameters (for public API) or from authentication middleware
@@ -772,9 +787,9 @@ const getOwnerNetIncome = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         // Get property owner context
         console.log('getOwnerNetIncome: Getting property owner context for', ownerId);
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         console.log('getOwnerNetIncome: Property owner context retrieved', {
-            hasProperties: ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) > 0,
+            hasProperties: ((_c = propertyOwnerContext.properties) === null || _c === void 0 ? void 0 : _c.length) > 0,
             companyId: propertyOwnerContext.companyId
         });
         // Get property IDs for this owner
@@ -830,7 +845,7 @@ const getOwnerNetIncome = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.getOwnerNetIncome = getOwnerNetIncome;
 const getOwnerMaintenanceSummaryReport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     try {
         let ownerId;
         let companyId;
@@ -845,16 +860,16 @@ const getOwnerMaintenanceSummaryReport = (req, res) => __awaiter(void 0, void 0,
                 return res.status(400).json({ message: 'userId is required as query parameter' });
             }
         }
-        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId);
+        const propertyOwnerContext = yield getPropertyOwnerContext(ownerId, (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId);
         let propertyIds = [];
-        if ((_b = propertyOwnerContext.properties) === null || _b === void 0 ? void 0 : _b.length) {
+        if ((_c = propertyOwnerContext.properties) === null || _c === void 0 ? void 0 : _c.length) {
             propertyIds = propertyOwnerContext.properties.map((id) => String(id));
         }
         else {
             const owned = yield Property_1.Property.find(Object.assign({ ownerId }, (companyId ? { companyId } : {}))).select('_id').lean();
             propertyIds = owned.map((p) => String(p._id));
         }
-        const summary = yield (0, maintenanceManagementService_2.getOwnerMaintenanceSummary)(propertyIds, companyId || ((_c = propertyOwnerContext.companyId) === null || _c === void 0 ? void 0 : _c.toString()));
+        const summary = yield (0, maintenanceManagementService_2.getOwnerMaintenanceSummary)(propertyIds, companyId || ((_d = propertyOwnerContext.companyId) === null || _d === void 0 ? void 0 : _d.toString()));
         res.json(summary);
     }
     catch (error) {

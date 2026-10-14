@@ -41,13 +41,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __asyncValues = (this && this.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -57,11 +50,9 @@ const cron_1 = require("cron");
 const databaseSyncService_1 = __importDefault(require("./databaseSyncService"));
 const SyncFailure_1 = __importDefault(require("../models/SyncFailure"));
 const logger_1 = require("../utils/logger");
-const Payment_1 = require("../models/Payment");
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
-const propertyAccountService_1 = __importStar(require("./propertyAccountService"));
+const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const jobLeaseService_1 = require("./jobLeaseService");
-const paymentReconciliationQuery_1 = require("./paymentReconciliationQuery");
 class ScheduledSyncService {
     constructor() {
         this.syncJobs = new Map();
@@ -83,7 +74,7 @@ class ScheduledSyncService {
         this.addSyncSchedule({
             name: 'daily_sync',
             cronExpression: '0 2 * * *',
-            description: 'Daily full synchronization at 2 AM',
+            description: 'Daily operational sync. Payment accounting is detection-only.',
             enabled: true,
             runCount: 0,
             averageDuration: 0
@@ -101,7 +92,15 @@ class ScheduledSyncService {
         this.addSyncSchedule({
             name: 'ledger_reconciliation',
             cronExpression: '*/5 * * * *',
-            description: 'Re-post recent payments and dedupe property ledgers',
+            description: 'Detect duplicate ledger rows. Detection-only: does not archive, delete, or rewrite financial records.',
+            enabled: true,
+            runCount: 0,
+            averageDuration: 0
+        });
+        this.addSyncSchedule({
+            name: 'payment_accounting_integrity',
+            cronExpression: '*/2 * * * *',
+            description: 'Detect incomplete accounting for tracked payments. Read-only: never repairs or backfills.',
             enabled: true,
             runCount: 0,
             averageDuration: 0
@@ -110,7 +109,7 @@ class ScheduledSyncService {
         this.addSyncSchedule({
             name: 'weekly_consistency_check',
             cronExpression: '0 3 * * 0',
-            description: 'Weekly data consistency validation',
+            description: 'Weekly data consistency validation (detection-only)',
             enabled: true,
             runCount: 0,
             averageDuration: 0
@@ -119,7 +118,7 @@ class ScheduledSyncService {
         this.addSyncSchedule({
             name: 'monthly_deep_sync',
             cronExpression: '0 4 1 * *',
-            description: 'Monthly deep synchronization and cleanup',
+            description: 'Monthly operational sync. Payment accounting is detection-only.',
             enabled: true,
             runCount: 0,
             averageDuration: 0
@@ -232,6 +231,9 @@ class ScheduledSyncService {
                             break;
                         case 'ledger_reconciliation':
                             yield this.executeLedgerReconciliation();
+                            break;
+                        case 'payment_accounting_integrity':
+                            yield this.executePaymentAccountingIntegrity();
                             break;
                         case 'weekly_consistency_check':
                             yield this.executeWeeklyConsistencyCheck();
@@ -356,153 +358,23 @@ class ScheduledSyncService {
         });
     }
     /**
+     * Tracked payments only: accountingComplete=false or diagnostic incomplete statuses.
+     * Historical payments without those fields are never selected.
+     * This pass DETECTS and FLAGS. It does not create accounting records.
+     */
+    executePaymentAccountingIntegrity() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { runPaymentAccountingIntegrityPass } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingIntegrity')));
+            yield runPaymentAccountingIntegrityPass(50);
+        });
+    }
+    /**
      * Execute ledger reconciliation
      */
     executeLedgerReconciliation() {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, e_1, _b, _c, _d, e_2, _e, _f;
-            const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
             try {
-                const filter = (0, paymentReconciliationQuery_1.buildOwnerIncomeReconciliationPaymentFilter)({ paymentDateFrom: since });
-                const cursor = Payment_1.Payment.find(filter)
-                    .select('_id status amount depositAmount reversalOfPaymentId isProvisional isInSuspense')
-                    .sort({ _id: 1 })
-                    .batchSize(paymentReconciliationQuery_1.PAYMENT_RECONCILIATION_BATCH_SIZE)
-                    .cursor();
-                let selected = 0;
-                let attempted = 0;
-                let skippedEarlyExit = 0;
-                let failures = 0;
-                try {
-                    for (var _g = true, _h = __asyncValues(cursor), _j; _j = yield _h.next(), _a = _j.done, !_a; _g = true) {
-                        _c = _j.value;
-                        _g = false;
-                        const p = _c;
-                        selected += 1;
-                        if ((0, paymentReconciliationQuery_1.isRecordIncomeEarlyExit)(p)) {
-                            skippedEarlyExit += 1;
-                            continue;
-                        }
-                        try {
-                            yield propertyAccountService_1.default.recordIncomeFromPayment(String(p._id));
-                            attempted += 1;
-                        }
-                        catch (e) {
-                            failures += 1;
-                            try {
-                                yield (yield Promise.resolve().then(() => __importStar(require('./ledgerEventService')))).default.enqueueOwnerIncomeEvent(String(p._id));
-                            }
-                            catch (_k) { }
-                            logger_1.logger.warn('Reconciliation: failed to post income for payment, enqueued:', (e === null || e === void 0 ? void 0 : e.message) || e);
-                        }
-                    }
-                }
-                catch (e_1_1) { e_1 = { error: e_1_1 }; }
-                finally {
-                    try {
-                        if (!_g && !_a && (_b = _h.return)) yield _b.call(_h);
-                    }
-                    finally { if (e_1) throw e_1.error; }
-                }
-                logger_1.logger.info('Ledger reconciliation owner-income pass completed', {
-                    windowHours: 48,
-                    selected,
-                    attempted,
-                    skippedEarlyExit,
-                    failures
-                });
-                // 2) Ensure company commissions via the policy-gated writer (idempotent; skips provisional)
-                try {
-                    const accountingIntegrationService = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
-                    const { shouldPostCompanyCommission } = yield Promise.resolve().then(() => __importStar(require('./accountingPostingPolicy')));
-                    const payList = yield Payment_1.Payment.find({
-                        status: 'completed',
-                        paymentDate: { $gte: since },
-                        'commissionDetails.agencyShare': { $gt: 0 }
-                    }).select('_id companyId paymentType commissionDetails paymentDate isProvisional isInSuspense reversalOfPaymentId amount commissionFinalized');
-                    for (const p of payList) {
-                        if (!p.companyId)
-                            continue;
-                        if (!shouldPostCompanyCommission(p))
-                            continue;
-                        yield accountingIntegrationService.postCompanyCommission(p);
-                    }
-                }
-                catch (ensureErr) {
-                    logger_1.logger.warn('Reconciliation: ensuring company commissions skipped:', (ensureErr === null || ensureErr === void 0 ? void 0 : ensureErr.message) || ensureErr);
-                }
-                // 3) Dedupe any property accounts updated recently
-                const recentAccounts = yield PropertyAccount_1.default.find({
-                    lastUpdated: { $gte: since },
-                    isArchived: false,
-                    isActive: { $ne: false }
-                }).select('_id propertyId ledgerType');
-                for (const acct of recentAccounts) {
-                    try {
-                        yield (0, propertyAccountService_1.reconcilePropertyLedgerDuplicates)(String(acct.propertyId));
-                    }
-                    catch (e) {
-                        logger_1.logger.warn('Reconciliation: failed to dedupe ledger', { accountId: String(acct._id), err: (e === null || e === void 0 ? void 0 : e.message) || e });
-                    }
-                }
-                // 4) Dedupe company accounts updated recently (keep earliest for each paymentId, archive the rest)
-                try {
-                    const { CompanyAccount } = yield Promise.resolve().then(() => __importStar(require('../models/CompanyAccount')));
-                    const cursor = CompanyAccount.find({ lastUpdated: { $gte: since } })
-                        .select('_id companyId transactions.paymentId transactions.date transactions._id transactions.type transactions.amount')
-                        .lean()
-                        .cursor();
-                    try {
-                        for (var _l = true, _m = __asyncValues(cursor), _o; _o = yield _m.next(), _d = _o.done, !_d; _l = true) {
-                            _f = _o.value;
-                            _l = false;
-                            const ca = _f;
-                            try {
-                                const grouped = Object.create(null);
-                                const txs = Array.isArray(ca.transactions) ? ca.transactions : [];
-                                for (const t of txs) {
-                                    const pid = (t === null || t === void 0 ? void 0 : t.paymentId) ? String(t.paymentId) : '';
-                                    if (!pid)
-                                        continue;
-                                    (grouped[pid] || (grouped[pid] = [])).push({ _id: t._id, date: new Date(t.date) });
-                                }
-                                const toArchive = [];
-                                for (const pid of Object.keys(grouped)) {
-                                    const list = grouped[pid];
-                                    if (list.length <= 1)
-                                        continue;
-                                    const sorted = list.slice().sort((a, b) => a.date.getTime() - b.date.getTime());
-                                    toArchive.push(...sorted.slice(1).map(i => i._id).filter(Boolean));
-                                }
-                                if (toArchive.length > 0) {
-                                    // Soft-archive duplicates via native update to bypass immutability
-                                    yield CompanyAccount.collection.updateOne({ _id: ca._id }, { $set: { 'transactions.$[t].isArchived': true, lastUpdated: new Date() } }, { arrayFilters: [{ 't._id': { $in: toArchive } }] });
-                                    // Recalculate totals using only active transactions
-                                    const fresh = yield CompanyAccount.findById(ca._id).select('_id transactions').lean();
-                                    if (fresh) {
-                                        const active = (Array.isArray(fresh.transactions) ? fresh.transactions : []).filter((t) => (t === null || t === void 0 ? void 0 : t.isArchived) !== true);
-                                        const income = active.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                        const expenses = active.filter((t) => t.type !== 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-                                        yield CompanyAccount.updateOne({ _id: fresh._id }, { $set: { totalIncome: income, totalExpenses: expenses, runningBalance: income - expenses, lastUpdated: new Date() } });
-                                    }
-                                }
-                            }
-                            catch (docErr) {
-                                logger_1.logger.warn('Reconciliation: company ledger dedupe failed for account', { accountId: String((ca === null || ca === void 0 ? void 0 : ca._id) || ''), err: (docErr === null || docErr === void 0 ? void 0 : docErr.message) || docErr });
-                            }
-                        }
-                    }
-                    catch (e_2_1) { e_2 = { error: e_2_1 }; }
-                    finally {
-                        try {
-                            if (!_l && !_d && (_e = _m.return)) yield _e.call(_m);
-                        }
-                        finally { if (e_2) throw e_2.error; }
-                    }
-                }
-                catch (dedupeErr) {
-                    logger_1.logger.warn('Reconciliation: company ledger dedupe skipped:', (dedupeErr === null || dedupeErr === void 0 ? void 0 : dedupeErr.message) || dedupeErr);
-                }
+                logger_1.logger.info('Ledger reconciliation is detection-only; automatic duplicate archive/delete is disabled');
             }
             catch (err) {
                 logger_1.logger.error('Ledger reconciliation job failed:', err);
@@ -520,12 +392,10 @@ class ScheduledSyncService {
             const consistency = yield this.databaseSyncService.validateDataConsistency();
             if (!consistency.isConsistent) {
                 logger_1.logger.warn(`Data consistency issues found: ${consistency.inconsistencies.length}`);
-                // Log inconsistencies
                 for (const issue of consistency.inconsistencies) {
                     logger_1.logger.warn(`Consistency issue: ${issue.type} - ${issue.description}`);
                 }
-                // Attempt to fix common issues
-                yield this.attemptConsistencyFixes(consistency.inconsistencies);
+                logger_1.logger.info('Weekly consistency check is detection-only; automatic account create/archive is disabled');
             }
             else {
                 logger_1.logger.info('Data consistency check passed');

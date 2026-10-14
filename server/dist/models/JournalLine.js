@@ -56,4 +56,28 @@ JournalLineSchema.pre('validate', function (next) {
     }
     return next();
 });
+JournalLineSchema.pre('save', function (next) {
+    if (!this.isNew && this.isModified()) {
+        return next(new Error('Journal lines are immutable after posting.'));
+    }
+    return next();
+});
+JournalLineSchema.pre('deleteOne', { document: false, query: true }, function (next) {
+    next(new Error('Hard delete is disabled for journal lines.'));
+});
+JournalLineSchema.pre('deleteMany', { document: false, query: true }, function (next) {
+    next(new Error('Hard delete is disabled for journal lines.'));
+});
+JournalLineSchema.pre('findOneAndDelete', function (next) {
+    next(new Error('Hard delete is disabled for journal lines.'));
+});
+JournalLineSchema.pre('findOneAndUpdate', function (next) {
+    next(new Error('Journal lines are immutable after posting.'));
+});
+JournalLineSchema.pre('updateOne', { document: false, query: true }, function (next) {
+    next(new Error('Journal lines are immutable after posting.'));
+});
+JournalLineSchema.pre('updateMany', { document: false, query: true }, function (next) {
+    next(new Error('Journal lines are immutable after posting.'));
+});
 exports.JournalLine = mongoose_1.default.model('JournalLine', JournalLineSchema, collections_1.COLLECTIONS.JOURNAL_LINES);

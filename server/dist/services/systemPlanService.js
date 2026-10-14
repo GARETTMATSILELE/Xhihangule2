@@ -11,6 +11,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.seedDefaultPlans = seedDefaultPlans;
 exports.getPlanConfig = getPlanConfig;
+exports.chargeForPlan = chargeForPlan;
+exports.listDashboardPlans = listDashboardPlans;
 const plan_1 = require("../types/plan");
 const Plan_1 = require("../models/Plan");
 const DEFAULT_DESCRIPTIONS = {
@@ -63,8 +65,48 @@ function getPlanConfig(code) {
             code,
             monthlyPrice: Number(dbPlan.monthlyPrice || 0),
             annualPrice: Number(dbPlan.annualPrice || 0),
+            currency: dbPlan.currency || 'USD',
             propertyLimit: (_d = (_c = dbPlan.limits) === null || _c === void 0 ? void 0 : _c.maxProperties) !== null && _d !== void 0 ? _d : fallback.propertyLimit,
             featureFlags: Object.assign(Object.assign({}, fallback.featureFlags), (dbPlan.featureFlags || {}))
         };
+    });
+}
+/** Price for a public plan. Uses the system-admin plan record and does not substitute the other billing frequency. */
+function chargeForPlan(code, cycle) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        if (code !== 'INDIVIDUAL' && code !== 'SME' && code !== 'ENTERPRISE')
+            return null;
+        const dbPlan = yield Plan_1.Plan.findOne({ code, isActive: true }).select('monthlyPrice annualPrice').lean();
+        const fallback = (_a = plan_1.PLAN_CONFIG[code]) === null || _a === void 0 ? void 0 : _a.pricingUSD;
+        const amount = dbPlan
+            ? Number(cycle === 'yearly' ? dbPlan.annualPrice : dbPlan.monthlyPrice)
+            : Number(cycle === 'yearly' ? fallback === null || fallback === void 0 ? void 0 : fallback.yearly : fallback === null || fallback === void 0 ? void 0 : fallback.monthly);
+        if (!Number.isFinite(amount) || amount <= 0)
+            return null;
+        return amount;
+    });
+}
+function listDashboardPlans() {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield seedDefaultPlans();
+        const codes = ['INDIVIDUAL', 'SME', 'ENTERPRISE'];
+        const names = {
+            INDIVIDUAL: 'Landlord',
+            SME: 'Property Manager',
+            ENTERPRISE: 'Enterprise'
+        };
+        return Promise.all(codes.map((code) => __awaiter(this, void 0, void 0, function* () {
+            const saved = yield Plan_1.Plan.findOne({ code }).lean();
+            const cfg = yield getPlanConfig(code);
+            return {
+                code,
+                name: (saved === null || saved === void 0 ? void 0 : saved.name) || names[code],
+                monthly: cfg.monthlyPrice > 0 ? cfg.monthlyPrice : null,
+                yearly: cfg.annualPrice > 0 ? cfg.annualPrice : null,
+                currency: (saved === null || saved === void 0 ? void 0 : saved.currency) || 'USD',
+                isActive: saved ? saved.isActive !== false : true
+            };
+        })));
     });
 }

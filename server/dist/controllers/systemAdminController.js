@@ -18,6 +18,7 @@ const User_1 = require("../models/User");
 const backupService_1 = require("../services/backupService");
 const reconciliationService_1 = require("../services/reconciliationService");
 const propertyAccountService_1 = require("../services/propertyAccountService");
+const financialMigrationGuard_1 = require("../services/financialMigrationGuard");
 const databaseSyncService_1 = __importDefault(require("../services/databaseSyncService"));
 const AdminAuditLog_1 = __importDefault(require("../models/AdminAuditLog"));
 const Company_1 = require("../models/Company");
@@ -164,8 +165,9 @@ const reconcile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 exports.reconcile = reconcile;
 const ledgerMaintenance = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     requireSystemAdmin(req);
+    const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
     const { companyId, dryRun } = req.body || {};
-    const audit = yield startAudit(req, 'maintenance:ledger', { companyId, dryRun: Boolean(dryRun) });
+    const audit = yield startAudit(req, 'maintenance:ledger', { companyId, dryRun: Boolean(dryRun), reason });
     try {
         const result = yield (0, propertyAccountService_1.runPropertyLedgerMaintenance)({ companyId, dryRun: Boolean(dryRun) });
         yield finishAudit(audit, true, result);

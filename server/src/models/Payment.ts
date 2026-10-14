@@ -1,9 +1,17 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 import { triggerDashboardKpiRefresh } from '../services/dashboardKpiRefreshTrigger';
+import {
+  COMPLETED_PAYMENT_IMMUTABLE_MESSAGE,
+  isCompletedFinancialPayment,
+  PAYMENT_FINANCIAL_FIELDS,
+  financialFieldsInQueryUpdate
+} from '../services/paymentFinancialImmutability';
 
 export interface IPayment extends Document {
   paymentType: 'sale' | 'rental' | 'introduction';
+  /** Snapshot of RENTAL or SALE at acceptance. Absent on legacy rows; do not backfill. */
+  transactionDomain?: 'RENTAL' | 'SALE';
   saleMode?: 'quick' | 'installment';
   propertyType: 'residential' | 'commercial';
   propertyId: mongoose.Types.ObjectId;
@@ -11,7 +19,7 @@ export interface IPayment extends Document {
   agentId: mongoose.Types.ObjectId;
   companyId: mongoose.Types.ObjectId;
   paymentDate: Date;
-  paymentMethod: 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money';
+  paymentMethod: 'cash' | 'bank_transfer' | 'credit_card' | 'mobile_money' | 'online_payment' | 'other';
   amount: number;
   depositAmount: number;
   referenceNumber: string;
@@ -75,9 +83,29 @@ export interface IPayment extends Document {
   vatCommissionTreatment?: 'inclusive' | 'exclusive';
   status: 'pending' | 'completed' | 'failed' | 'reversed' | 'refunded';
   postingStatus?: 'draft' | 'posted' | 'reversed' | 'voided';
+  /**
+   * Verified binary accounting projection. Absent on historical documents (untouched).
+   * True only after reconcilePayment confirms every required record exists.
+   * postingStatus is payment lifecycle (draft/posted/reversed/voided) and is NOT this flag.
+   */
+  accountingComplete?: boolean;
+  /**
+   * Diagnostic process state only. Never treat pending/partial/failed as complete.
+   */
+  accountingStatus?: 'pending' | 'posted' | 'partial' | 'failed' | 'not_applicable' | 'incomplete';
+  accountingLastAttemptAt?: Date;
+  accountingPostedAt?: Date;
+  accountingRetryCount?: number;
+  accountingLastError?: string;
+  accountingMissing?: string[];
+  accountingMismatched?: string[];
+  accountingNextAttemptAt?: Date;
   currency: 'USD' | 'ZWL';
   reversalOfPaymentId?: mongoose.Types.ObjectId;
   reversalPaymentId?: mongoose.Types.ObjectId;
+  reversalState?: 'reversal_in_progress' | 'reversal_incomplete' | 'reversed';
+  reversalLockAt?: Date;
+  reversalLockBy?: mongoose.Types.ObjectId;
   correctedPaymentId?: mongoose.Types.ObjectId;
   reversedBy?: mongoose.Types.ObjectId;
   reversedAt?: Date;
@@ -123,6 +151,12 @@ const PaymentSchema: Schema = new Schema({
     enum: ['sale', 'rental', 'introduction'],
     required: true,
   },
+  transactionDomain: {
+    type: String,
+    enum: ['RENTAL', 'SALE'],
+    required: false,
+    immutable: true
+  },
   saleMode: {
     type: String,
     enum: ['quick', 'installment'],
@@ -137,12 +171,17 @@ const PaymentSchema: Schema = new Schema({
   propertyId: {
     type: Schema.Types.ObjectId,
     ref: 'Property',
-    required: true,
+    required: function requiredProperty(this: { paymentType?: string; developmentId?: unknown; developmentUnitId?: unknown }) {
+      if (this.paymentType === 'sale' && (this.developmentId || this.developmentUnitId)) return false;
+      return true;
+    },
   },
   tenantId: {
     type: Schema.Types.ObjectId,
     ref: 'Tenant',
-    required: true,
+    required: function requiredTenant(this: { paymentType?: string }) {
+      return this.paymentType !== 'sale';
+    },
   },
   agentId: {
     type: Schema.Types.ObjectId,
@@ -167,7 +206,7 @@ const PaymentSchema: Schema = new Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['cash', 'bank_transfer', 'credit_card', 'mobile_money'],
+    enum: ['cash', 'bank_transfer', 'credit_card', 'mobile_money', 'online_payment', 'other'],
     required: true,
   },
   amount: {
@@ -309,6 +348,9 @@ const PaymentSchema: Schema = new Schema({
     vatTreatment: { type: String, enum: ['inclusive', 'exclusive'], required: false },
     vatRate: { type: Number, required: false, min: 0, max: 1 },
     vatAmount: { type: Number, required: false, default: 0 },
+    vatJurisdiction: { type: String, required: false },
+    vatRuleId: { type: String, required: false },
+    vatTaxPoint: { type: Date, required: false },
     agentSplit: {
       ownerAgentShare: { type: Number, required: false, default: 0 },
       collaboratorAgentShare: { type: Number, required: false, default: 0 },
@@ -364,6 +406,24 @@ const PaymentSchema: Schema = new Schema({
     default: 'draft',
     index: true,
   },
+  accountingComplete: {
+    type: Boolean,
+    required: false,
+    index: true
+  },
+  accountingStatus: {
+    type: String,
+    enum: ['pending', 'posted', 'partial', 'failed', 'not_applicable', 'incomplete'],
+    required: false,
+    index: true
+  },
+  accountingLastAttemptAt: { type: Date, required: false },
+  accountingPostedAt: { type: Date, required: false },
+  accountingRetryCount: { type: Number, required: false, default: undefined },
+  accountingLastError: { type: String, required: false },
+  accountingMissing: { type: [String], required: false },
+  accountingMismatched: { type: [String], required: false },
+  accountingNextAttemptAt: { type: Date, required: false },
   currency: {
     type: String,
     enum: ['USD', 'ZWL'],
@@ -476,6 +536,20 @@ const PaymentSchema: Schema = new Schema({
     ref: 'Payment',
     required: false,
   },
+  reversalState: {
+    type: String,
+    enum: ['reversal_in_progress', 'reversal_incomplete', 'reversed'],
+    required: false,
+  },
+  reversalLockAt: {
+    type: Date,
+    required: false,
+  },
+  reversalLockBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: false,
+  },
   correctedPaymentId: {
     type: Schema.Types.ObjectId,
     ref: 'Payment',
@@ -538,7 +612,17 @@ PaymentSchema.index({ developmentId: 1 });
 PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
 PaymentSchema.index({ reversalOfPaymentId: 1 });
+PaymentSchema.index(
+  { reversalOfPaymentId: 1 },
+  {
+    name: 'one_full_reversal_per_payment',
+    unique: true,
+    partialFilterExpression: { reversalOfPaymentId: { $exists: true }, amount: { $lt: 0 } }
+  }
+);
 PaymentSchema.index({ companyId: 1, postingStatus: 1, paymentDate: -1 });
+PaymentSchema.index({ accountingComplete: 1, accountingLastAttemptAt: 1 });
+PaymentSchema.index({ accountingStatus: 1, accountingNextAttemptAt: 1 });
 PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
 PaymentSchema.index(
   { companyId: 1, externalProvider: 1, externalTransactionId: 1 },
@@ -579,7 +663,9 @@ function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
         'status','isProvisional','isInSuspense','commissionFinalized','provisionalRelationshipType',
         'finalizedAt','finalizedBy','idempotencyKey','manualPropertyAddress','manualTenantName',
         'buyerName','sellerName','saleId','developmentId','developmentUnitId','notes',
-        'postingStatus','vatIncluded','vatRate','vatAmount','applyVatOnCommission','vatOnCommissionRate','vatCommissionTreatment',
+        'postingStatus','accountingComplete','accountingStatus','accountingLastAttemptAt','accountingPostedAt','accountingRetryCount',
+        'accountingLastError','accountingMissing','accountingMismatched','accountingNextAttemptAt',
+        'vatIncluded','vatRate','vatAmount','applyVatOnCommission','vatOnCommissionRate','vatCommissionTreatment',
         'reversalOfPaymentId','reversalPaymentId','correctedPaymentId',
         'reversedBy','reversedAt','reversalReason','voidedBy','voidedAt','voidReason','isCorrectionEntry'
       ].includes(key)) continue;
@@ -591,6 +677,17 @@ function isIllegalPaymentUpdate(update: Record<string, any>): boolean {
 
 PaymentSchema.pre('save', function(next) {
   try {
+    if (!this.isNew) {
+      const stillProvisional = (this as any).isProvisional === true || (this as any).isInSuspense === true;
+      const finalizing = this.isModified('isProvisional') || this.isModified('isInSuspense');
+      const statusChanging = this.isModified('status');
+      if (!stillProvisional && !finalizing && !statusChanging && isCompletedFinancialPayment(this as any)) {
+        const modifiedFinancial = PAYMENT_FINANCIAL_FIELDS.filter((field) => this.isModified(field));
+        if (modifiedFinancial.length) {
+          return next(new Error(COMPLETED_PAYMENT_IMMUTABLE_MESSAGE));
+        }
+      }
+    }
     const lines = Array.isArray((this as any).paymentLines) ? (this as any).paymentLines : [];
     if (lines.length > 0) {
       (this as any).amount = Number(lines.reduce((sum: number, line: any) => sum + Number(line?.amount || 0), 0).toFixed(2));
@@ -608,15 +705,20 @@ PaymentSchema.pre('save', function(next) {
   }
 });
 
-PaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate'], function(next) {
-  try {
-    const update = (this as any).getUpdate?.() || {};
-    if (isIllegalPaymentUpdate(update)) {
-      return next(new Error('Payment records are immutable. Create a correcting payment instead of editing core fields.'));
-    }
-    return next();
-  } catch (e) {
-    return next(e as any);
+PaymentSchema.pre(['updateOne','updateMany','findOneAndUpdate','findOneAndReplace','replaceOne'], async function() {
+  const update = (this as any).getUpdate?.() || {};
+  if (isIllegalPaymentUpdate(update)) {
+    throw new Error('Payment records are immutable. Create a correcting payment instead of editing core fields.');
+  }
+  const attemptedFinancial = financialFieldsInQueryUpdate(update);
+  if (attemptedFinancial.length === 0) return;
+  const query = (this as any).getQuery?.() || {};
+  const matched = await (this as any).model.find(query)
+    .select('status postingStatus isProvisional isInSuspense')
+    .limit(50)
+    .lean();
+  if (matched.some((doc: any) => isCompletedFinancialPayment(doc))) {
+    throw new Error(COMPLETED_PAYMENT_IMMUTABLE_MESSAGE);
   }
 });
 

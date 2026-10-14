@@ -25,6 +25,12 @@ export interface IMaintenanceContractor extends Document {
   notes?: string;
   rating: number;
   active: boolean;
+  userId?: mongoose.Types.ObjectId;
+  skills?: string[];
+  serviceAreas?: string[];
+  availability?: string;
+  description?: string;
+  verificationStatus?: 'UNVERIFIED' | 'PENDING' | 'VERIFIED' | 'SUSPENDED';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,6 +47,17 @@ const MaintenanceContractorSchema = new Schema<IMaintenanceContractor>(
     notes: { type: String },
     rating: { type: Number, default: 0, min: 0, max: 5 },
     active: { type: Boolean, default: true, index: true },
+    userId: { type: Schema.Types.ObjectId, ref: 'User', index: true, sparse: true },
+    skills: [{ type: String, trim: true }],
+    serviceAreas: [{ type: String, trim: true }],
+    availability: { type: String, trim: true },
+    description: { type: String },
+    verificationStatus: {
+      type: String,
+      enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'SUSPENDED'],
+      default: 'UNVERIFIED',
+      index: true
+    },
   },
   { timestamps: true, collection: 'maintenance_contractors' }
 );
@@ -52,3 +69,14 @@ export const MaintenanceContractor = mongoose.model<IMaintenanceContractor>(
   'MaintenanceContractor',
   MaintenanceContractorSchema
 );
+
+/** Agency-owned vendors plus every active self-registered contractor, so any agency can offer them work. */
+export function contractorDirectoryFilter(agencyCompanyId?: string) {
+  return {
+    verificationStatus: { $ne: 'SUSPENDED' as const },
+    $or: [
+      ...(agencyCompanyId ? [{ companyId: agencyCompanyId }] : []),
+      { userId: { $exists: true, $ne: null }, active: true },
+    ],
+  };
+}

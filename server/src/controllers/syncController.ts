@@ -730,8 +730,14 @@ export const reconcilePaymentPosting = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'paymentId is required' });
     }
     const syncService = DatabaseSyncService.getInstance();
-    await syncService.reconcilePaymentPosting(paymentId);
-    res.json({ success: true, message: 'Reconciliation triggered' });
+    const result = await syncService.reconcilePaymentPosting(paymentId);
+    res.json({
+      success: true,
+      deprecated: true,
+      message:
+        'This endpoint is detection-only and no longer repairs accounting. Use POST /api/accountants/payments/:id/accounting/repair for authorised targeted repair.',
+      data: result
+    });
   } catch (error) {
     logger.error('Error reconciling payment posting:', error);
     res.status(500).json({ success: false, message: 'Failed to reconcile payment posting' });

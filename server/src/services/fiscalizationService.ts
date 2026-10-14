@@ -7,6 +7,10 @@ export interface FiscalData {
   deviceSerial?: string;
   documentNumber?: string;
   signature?: string;
+  status: 'FISCALISATION_ATTEMPT' | 'FISCALISATION_SUCCESS' | 'FISCALISATION_FAILURE' | 'NOT_FISCALISED';
+  fdmsReference?: string;
+  fiscalisedAt?: Date;
+  error?: string;
 }
 
 export const tryFiscalizeInvoice = async (
@@ -23,13 +27,13 @@ export const tryFiscalizeInvoice = async (
   try {
     const company = await Company.findById(new mongoose.Types.ObjectId(companyId));
     if (!company || !company.fiscalConfig || !company.fiscalConfig.enabled) {
-      return null;
+      return { status: 'NOT_FISCALISED' };
     }
 
     const { tinNumber } = company;
     const deviceSerial = company.fiscalConfig.deviceSerial || undefined;
 
-    // Placeholder implementation: construct a QR payload; replace with agent/FDMS call when available
+    // Local QR payload is an attempt only. It is not FDMS confirmation.
     const qrPayload = JSON.stringify({
       tin: tinNumber,
       total: invoicePayload.totalAmount,
@@ -43,11 +47,12 @@ export const tryFiscalizeInvoice = async (
 
     return {
       qrContent: qrPayload,
-      deviceSerial
+      deviceSerial,
+      status: 'NOT_FISCALISED',
+      error: 'FDMS integration is not implemented; local QR is not a fiscal invoice'
     };
-  } catch (e) {
-    // Fail-open: if anything goes wrong, return null so invoice still saves
-    return null;
+  } catch (e: any) {
+    return { status: 'FISCALISATION_FAILURE', error: e?.message || 'Fiscalisation failed' };
   }
 };
 

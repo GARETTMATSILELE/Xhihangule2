@@ -22,25 +22,33 @@ const Valuation_1 = require("../models/Valuation");
 const Deal_1 = require("../models/Deal");
 const mongoose_1 = __importDefault(require("mongoose"));
 const access_1 = require("../utils/access");
+const propertyAccess_1 = require("../utils/propertyAccess");
+const User_1 = require("../models/User");
 const Buyer_1 = require("../models/Buyer");
 const trustAccountService_1 = __importDefault(require("../services/trustAccountService"));
 const propertyCommissionCalculator_1 = require("../services/propertyCommissionCalculator");
-// Helper function to extract user context from request
+// Authenticated server context only. Client query and header company claims are not authorization.
 const getUserContext = (req) => {
-    // Try to get user context from query parameters first
-    const userId = req.query.userId;
-    const companyId = req.query.companyId;
-    const userRole = req.query.userRole;
-    // Fallback to headers if query params not available
-    const headerUserId = req.headers['x-user-id'];
-    const headerCompanyId = req.headers['x-company-id'];
-    const headerUserRole = req.headers['x-user-role'];
+    var _a, _b, _c;
     return {
-        userId: userId || headerUserId,
-        companyId: companyId || headerCompanyId,
-        userRole: userRole || headerUserRole
+        userId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId,
+        companyId: (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId,
+        userRole: (_c = req.user) === null || _c === void 0 ? void 0 : _c.role
     };
 };
+function rejectForeignAgentAssignment(agentId, companyId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (agentId == null || String(agentId).trim() === '')
+            return null;
+        const raw = String(agentId);
+        if (!mongoose_1.default.Types.ObjectId.isValid(raw))
+            return 'Invalid agentId';
+        const assigned = yield User_1.User.findOne({ _id: raw, companyId }).select('_id').lean();
+        if (!assigned)
+            return 'Assigned agent was not found in this company';
+        return null;
+    });
+}
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const PROPERTY_LIST_MAX_TIME_MS = Math.max(3000, Number(process.env.PROPERTY_LIST_QUERY_MAX_TIME_MS || 12000));
 const PROPERTY_LIST_DEFAULT_LIMIT = Math.max(20, Number(process.env.PROPERTY_LIST_DEFAULT_LIMIT || 100));
@@ -124,10 +132,11 @@ const getPublicProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
             companyId: new mongoose_1.default.Types.ObjectId(userContext.companyId),
             isDeleted: includeDeleted ? true : { $ne: true }
         };
-        // If user is not in a company-wide visibility role, only show their own properties
-        const companyWideRoles = ['admin', 'accountant', 'principal', 'prea'];
-        if (!companyWideRoles.includes(String(userContext.userRole || ''))) {
-            query.ownerId = new mongoose_1.default.Types.ObjectId(userContext.userId);
+        // Company-wide roles keep the existing search permission. Everyone else is limited
+        // to properties they saved (ownerId) or are assigned (agentId).
+        if (!(0, propertyAccess_1.hasCompanyWidePropertyAccess)(req)) {
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            query._id = { $in: ids === 'company' ? [] : ids };
         }
         // Optional lightweight search and projection for fast autocomplete
         const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -268,21 +277,17 @@ const getProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (typeof req.query.rentalType === 'string' && req.query.rentalType.trim()) {
             query.rentalType = req.query.rentalType;
         }
-        // Restrict visibility based on role (multi-role aware)
-        const isAdminOrAccountant = (0, access_1.hasAnyRole)(req, ['admin', 'accountant']);
+        // Company-wide roles see every property in their company. Sales users stay on
+        // sale stock inside their portfolio. Other users see properties they saved or
+        // are assigned to. A pure owner sees landlord-linked properties.
+        const companyWide = (0, propertyAccess_1.hasCompanyWidePropertyAccess)(req);
         const isSales = (0, access_1.hasRole)(req, 'sales');
-        if (isSales && !isAdminOrAccountant) {
-            // Pure sales users should only see their own sales properties
-            query.rentalType = 'sale';
-            query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
-        }
-        else if (!isAdminOrAccountant && (0, access_1.hasRole)(req, 'owner')) {
-            // Property owners should see properties they own (unless they are also admin/accountant)
-            query.ownerId = new mongoose_1.default.Types.ObjectId(req.user.userId);
-        }
-        else if (!isAdminOrAccountant) {
-            // Other non-admin/accountant users only see properties assigned to them as agent
-            query.agentId = new mongoose_1.default.Types.ObjectId(req.user.userId);
+        if (!companyWide) {
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            query._id = { $in: ids === 'company' ? [] : ids };
+            if (isSales && !(0, access_1.hasAnyRole)(req, ['agent', 'owner'])) {
+                query.rentalType = query.rentalType || 'sale';
+            }
         }
         // Get properties with populated owner information.
         // Retry once for transient connection resets from managed Mongo services.
@@ -373,9 +378,8 @@ const getProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             companyId: req.user.companyId,
             isDeleted: { $ne: true }
         };
-        // If user is not an admin or accountant, only allow access to their properties
-        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
-            query.ownerId = req.user.userId;
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(req.params.id)))) {
+            throw new errorHandler_1.AppError('Property not found', 404);
         }
         const property = yield Property_1.Property.findOne(query)
             .populate('ownerId', 'firstName lastName email');
@@ -393,7 +397,7 @@ const getProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.getProperty = getProperty;
 const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d;
     try {
         console.log('Property creation request received:', {
             headers: req.headers,
@@ -406,8 +410,12 @@ const createProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             throw new errorHandler_1.AppError('Company ID not found. Please ensure you are associated with a company.', 400);
         }
+        const assignmentError = yield rejectForeignAgentAssignment((_c = req.body) === null || _c === void 0 ? void 0 : _c.agentId, req.user.companyId);
+        if (assignmentError) {
+            throw new errorHandler_1.AppError(assignmentError, 400);
+        }
         const vatSettings = (0, propertyCommissionCalculator_1.sanitizePropertyVatSettings)(req.body || {});
-        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, rentalType: req.body.rentalType, commission: req.body.commission, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
+        const propertyData = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, agentId: ((_d = req.body) === null || _d === void 0 ? void 0 : _d.agentId) || req.user.userId, companyId: req.user.companyId, rentalType: req.body.rentalType, commission: req.body.commission, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
         delete propertyData.vatRate;
         delete propertyData.vatPercentOnCommission;
         console.log('Processed property data:', propertyData);
@@ -500,6 +508,10 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
         const { name, address, price, type, bedrooms, bathrooms, status, builtArea, landArea, pricePerSqm, description, images, propertyOwnerId, agentId, commission, saleType, commissionPreaPercent, commissionAgencyPercentRemaining, commissionAgentPercentRemaining, sourceValuationId, propertyCategory, propertySubtype, propertySpecifications, propertyOperationalStatus, propertyUse } = req.body || {};
         if (!name || !address) {
             throw new errorHandler_1.AppError('Missing required fields: name and address', 400);
+        }
+        const assignmentError = yield rejectForeignAgentAssignment(agentId, req.user.companyId);
+        if (assignmentError) {
+            throw new errorHandler_1.AppError(assignmentError, 400);
         }
         // Optional: link a valuation permanently to the created listing (hot-load conversion)
         let sourceValuationObjectId = null;
@@ -597,7 +609,7 @@ const createSalesProperty = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.createSalesProperty = createSalesProperty;
 const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -610,8 +622,9 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
             companyId: req.user.companyId,
             isDeleted: { $ne: true }
         };
-        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
-            match.ownerId = req.user.userId;
+        if (!(0, propertyAccess_1.hasCompanyWidePropertyAccess)(req)) {
+            const id = new mongoose_1.default.Types.ObjectId(req.user.userId);
+            match.$or = [{ ownerId: id }, { agentId: id }];
         }
         const before = yield Property_1.Property.findOne(match).select('status price buyerId').lean();
         if (!before) {
@@ -641,8 +654,14 @@ const updateProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 nextBuyerId = new mongoose_1.default.Types.ObjectId(rawId);
             }
         }
+        const assignmentError = yield rejectForeignAgentAssignment((_d = req.body) === null || _d === void 0 ? void 0 : _d.agentId, req.user.companyId);
+        if (assignmentError) {
+            throw new errorHandler_1.AppError(assignmentError, 400);
+        }
         const vatSettings = (0, propertyCommissionCalculator_1.sanitizePropertyVatSettings)(req.body || {});
-        const updateDoc = Object.assign(Object.assign({}, req.body), { ownerId: req.user.userId, companyId: req.user.companyId, vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
+        const updateDoc = Object.assign(Object.assign({}, req.body), { vatOnCommission: vatSettings.vatOnCommission, vatCommissionTreatment: vatSettings.vatCommissionTreatment });
+        delete updateDoc.ownerId;
+        delete updateDoc.companyId;
         delete updateDoc.vatRate;
         delete updateDoc.vatPercentOnCommission;
         // Ensure we only ever write a validated buyerId
@@ -769,8 +788,9 @@ const deleteProperty = (req, res) => __awaiter(void 0, void 0, void 0, function*
             companyId: req.user.companyId,
             isDeleted: { $ne: true }
         };
-        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
-            match.ownerId = req.user.userId;
+        if (!(0, propertyAccess_1.hasCompanyWidePropertyAccess)(req)) {
+            const id = new mongoose_1.default.Types.ObjectId(req.user.userId);
+            match.$or = [{ ownerId: id }, { agentId: id }];
         }
         const property = yield Property_1.Property.findOneAndUpdate(match, {
             $set: {
@@ -806,8 +826,9 @@ const restoreProperty = (req, res) => __awaiter(void 0, void 0, void 0, function
             companyId: req.user.companyId,
             isDeleted: true
         };
-        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
-            match.ownerId = req.user.userId;
+        if (!(0, propertyAccess_1.hasCompanyWidePropertyAccess)(req)) {
+            const id = new mongoose_1.default.Types.ObjectId(req.user.userId);
+            match.$or = [{ ownerId: id }, { agentId: id }];
         }
         const property = yield Property_1.Property.findOneAndUpdate(match, {
             $set: {
@@ -844,10 +865,13 @@ const getVacantProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
         });
         const query = {
             companyId: req.user.companyId,
-            ownerId: req.user.userId,
             status: 'available',
             isDeleted: { $ne: true }
         };
+        if (!(0, propertyAccess_1.hasCompanyWidePropertyAccess)(req)) {
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            query._id = { $in: ids === 'company' ? [] : ids };
+        }
         console.log('Query:', JSON.stringify(query, null, 2));
         try {
             const properties = yield Property_1.Property.find(query).lean();
@@ -873,11 +897,20 @@ const getVacantProperties = (req, res) => __awaiter(void 0, void 0, void 0, func
 });
 exports.getVacantProperties = getVacantProperties;
 const getAdminDashboardProperties = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        console.log('getAdminDashboardProperties request received');
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+            return res.status(401).json({ status: 'error', message: 'Authentication required', code: 'AUTH_REQUIRED' });
+        }
         const includeDeleted = String(req.query.deleted || '').toLowerCase() === 'true';
-        // Get all properties without authentication requirements
-        const properties = yield Property_1.Property.find(includeDeleted ? {} : { isDeleted: { $ne: true } })
+        const query = { companyId: req.user.companyId };
+        if (!includeDeleted)
+            query.isDeleted = { $ne: true };
+        if (!(0, propertyAccess_1.hasCompanyWidePropertyAccess)(req)) {
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            query._id = { $in: ids === 'company' ? [] : ids };
+        }
+        const properties = yield Property_1.Property.find(query)
             .populate('ownerId', 'firstName lastName email')
             .sort({ createdAt: -1 });
         console.log('Found properties for admin dashboard:', {
@@ -933,15 +966,17 @@ const getAdminDashboardProperties = (req, res) => __awaiter(void 0, void 0, void
     }
 });
 exports.getAdminDashboardProperties = getAdminDashboardProperties;
-// Public endpoint for creating property - no authentication required
+// Legacy creator. Company and user come from the authenticated session, never from the client.
 const createPropertyPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
-        console.log('Public property creation request received:', {
-            headers: req.headers,
-            body: req.body,
-            query: req.query
-        });
-        // Extract user context from query parameters or headers
+        if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId) || !((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Authentication required',
+                code: 'AUTH_REQUIRED'
+            });
+        }
         const userContext = getUserContext(req);
         console.log('User context for public property creation:', userContext);
         // Validate required user context

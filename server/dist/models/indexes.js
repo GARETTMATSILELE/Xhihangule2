@@ -54,6 +54,21 @@ const DutyRosterShift_1 = require("./DutyRosterShift");
 const AgentAvailability_1 = require("./AgentAvailability");
 const LeaveRequest_1 = require("./LeaveRequest");
 const PublicHoliday_1 = require("./PublicHoliday");
+const LandlordFinancialTransaction_1 = require("./LandlordFinancialTransaction");
+const AccountingEventLog_1 = require("./AccountingEventLog");
+const TransactionTaxSnapshot_1 = require("./TransactionTaxSnapshot");
+const TaxPeriod_1 = require("./TaxPeriod");
+const TaxRule_1 = require("./TaxRule");
+const IndividualTaxProfile_1 = require("./IndividualTaxProfile");
+const IndividualVatRecord_1 = require("./IndividualVatRecord");
+const IndividualRentalTaxRecord_1 = require("./IndividualRentalTaxRecord");
+const IndividualRentalTaxPayment_1 = require("./IndividualRentalTaxPayment");
+const IndividualIncomeTaxRecord_1 = require("./IndividualIncomeTaxRecord");
+const IndividualIncomeTaxAdjustment_1 = require("./IndividualIncomeTaxAdjustment");
+const IndividualIncomeTaxPayment_1 = require("./IndividualIncomeTaxPayment");
+const IndividualTaxEvidence_1 = require("./IndividualTaxEvidence");
+const IndividualTaxComplianceReview_1 = require("./IndividualTaxComplianceReview");
+const IndividualTaxPack_1 = require("./IndividualTaxPack");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const isRetryableMongoConnectionError = (error) => {
     const labels = error === null || error === void 0 ? void 0 : error[Symbol.for('errorLabels')];
@@ -155,6 +170,21 @@ function createIndexes() {
                 { model: AgentAvailability_1.AgentAvailability, name: 'AgentAvailability' },
                 { model: LeaveRequest_1.LeaveRequest, name: 'LeaveRequest' },
                 { model: PublicHoliday_1.PublicHoliday, name: 'PublicHoliday' },
+                { model: LandlordFinancialTransaction_1.LandlordFinancialTransaction, name: 'LandlordFinancialTransaction' },
+                { model: AccountingEventLog_1.AccountingEventLog, name: 'AccountingEventLog' },
+                { model: TransactionTaxSnapshot_1.TransactionTaxSnapshot, name: 'TransactionTaxSnapshot' },
+                { model: TaxPeriod_1.TaxPeriod, name: 'TaxPeriod' },
+                { model: TaxRule_1.TaxRule, name: 'TaxRule' },
+                { model: IndividualTaxProfile_1.IndividualTaxProfile, name: 'IndividualTaxProfile' },
+                { model: IndividualVatRecord_1.IndividualVatRecord, name: 'IndividualVatRecord' },
+                { model: IndividualRentalTaxRecord_1.IndividualRentalTaxRecord, name: 'IndividualRentalTaxRecord' },
+                { model: IndividualRentalTaxPayment_1.IndividualRentalTaxPayment, name: 'IndividualRentalTaxPayment' },
+                { model: IndividualIncomeTaxRecord_1.IndividualIncomeTaxRecord, name: 'IndividualIncomeTaxRecord' },
+                { model: IndividualIncomeTaxAdjustment_1.IndividualIncomeTaxAdjustment, name: 'IndividualIncomeTaxAdjustment' },
+                { model: IndividualIncomeTaxPayment_1.IndividualIncomeTaxPayment, name: 'IndividualIncomeTaxPayment' },
+                { model: IndividualTaxEvidence_1.IndividualTaxEvidence, name: 'IndividualTaxEvidence' },
+                { model: IndividualTaxComplianceReview_1.IndividualTaxComplianceReview, name: 'IndividualTaxComplianceReview' },
+                { model: IndividualTaxPack_1.IndividualTaxPack, name: 'IndividualTaxPack' },
             ];
             for (const { model, name } of models) {
                 // Try to create the collection if it doesn't exist yet

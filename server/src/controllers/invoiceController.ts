@@ -5,6 +5,7 @@ import { AppError } from '../middleware/errorHandler';
 import { accountingConnection } from '../config/database';
 import { tryFiscalizeInvoice } from '../services/fiscalizationService';
 import { calculateTaxBreakdown } from '../utils/money';
+import { getVatRateForDate } from '../services/taxRateService';
 
 // Function to generate unique item code
 const generateItemCode = async (): Promise<string> => {
@@ -44,7 +45,14 @@ export const createInvoice = async (req: Request, res: Response) => {
       throw new AppError('Company ID not found. Please ensure you are associated with a company.', 400);
     }
 
-    const { items, discount = 0, taxPercentage = 15, client, currency = 'USD', fiscalize = true, ...otherData } = req.body;
+    const { items, discount = 0, client, currency = 'USD', fiscalize = true, ...otherData } = req.body;
+    delete (otherData as any).taxPercentage;
+    const invoiceDate = new Date();
+    const centralVat = await getVatRateForDate(req.user.companyId, invoiceDate);
+    if (centralVat.source === 'none' || !(centralVat.percent > 0)) {
+      throw new AppError('No centrally managed VAT rate applies on the invoice date. The invoice was not saved.', 400);
+    }
+    const taxPercentage = centralVat.percent;
 
     // Validate client details
     const validatedClient = validateClientDetails(client);
@@ -55,13 +63,17 @@ export const createInvoice = async (req: Request, res: Response) => {
         const quantity = Number(item.quantity ?? 1) || 1;
         const unitPrice = Number(item.unitPrice ?? item.netPrice ?? 0) || 0;
         const netPrice = Number(item.netPrice ?? (quantity * unitPrice));
+        const exempt = item?.taxable === false;
+        const itemFields = { ...item };
+        delete itemFields.taxable;
+        delete itemFields.taxPercentage;
         return ({
-          ...item,
+          ...itemFields,
           quantity,
           unitPrice,
           netPrice,
           code: item.code || await generateItemCode(),
-          taxPercentage: item.taxPercentage || taxPercentage
+          taxPercentage: exempt ? 0 : taxPercentage
         });
       })
     );
@@ -76,6 +88,9 @@ export const createInvoice = async (req: Request, res: Response) => {
       items: processedItems,
       discount,
       taxPercentage,
+      vatJurisdiction: centralVat.jurisdiction,
+      vatRuleId: centralVat.taxRateId,
+      vatTaxPoint: invoiceDate,
       ...breakdown,
       fiscalize: fiscalize !== false,
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
@@ -95,6 +110,9 @@ export const createInvoice = async (req: Request, res: Response) => {
         });
         if (fiscal) {
           (invoice as any).fiscalData = fiscal;
+          (invoice as any).fiscalisationStatus = fiscal.status || 'NOT_FISCALISED';
+        } else {
+          (invoice as any).fiscalisationStatus = 'NOT_FISCALISED';
         }
       } catch {}
     }

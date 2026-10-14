@@ -43,5 +43,6 @@ const OwnerPreferencesSchema = new mongoose_1.Schema({
     maintenanceAlerts: { type: Boolean, default: true },
     monthlyReports: { type: Boolean, default: true },
     leaseExpiryAlerts: { type: Boolean, default: true },
+    rentPaymentEmails: { type: Boolean, default: true },
 }, { timestamps: true, collection: 'owner_preferences' });
 exports.OwnerPreferences = mongoose_1.default.model('OwnerPreferences', OwnerPreferencesSchema);

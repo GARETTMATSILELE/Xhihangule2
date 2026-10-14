@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { isDepositOnlyPayment } from './accountingPostingPolicy';
 
 /**
  * Matches existing poll/failure-reprocessor conventions (100).
@@ -65,7 +66,6 @@ export function isRecordIncomeEarlyExit(payment: {
   if (payment.status !== 'completed') return true;
   if (payment.isProvisional === true) return true;
   if (payment.isInSuspense === true) return true;
-  const deposit = Number(payment.depositAmount || 0);
-  if (deposit > 0 && Number(payment.amount || 0) <= deposit) return true;
+  if (isDepositOnlyPayment(payment)) return true;
   return false;
 }

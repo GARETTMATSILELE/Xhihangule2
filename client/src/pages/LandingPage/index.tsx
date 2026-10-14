@@ -1,752 +1,745 @@
-import React, { useMemo, useState } from 'react';
-import { alpha } from '@mui/material/styles';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
+import Seo from '../../components/SEO/Seo';
+import { MobilePropertyMock, FloatingKpis } from './ProductMocks';
+import { ProductShot } from './ProductShot';
+import { FeatureIcon, IconWhatsApp } from './LandingIcons';
+import { LandingLogo } from './LandingLogo';
+import PaynowBadge from '../../components/payments/PaynowBadge';
+import { OnboardingChooser } from './OnboardingChooser';
+import publicApi from '../../api/publicApi';
 import {
-  Box,
-  Button,
-  Container,
-  Menu,
-  MenuItem,
-  Typography,
-  Grid,
-  Card,
-  CardContent,
-  CardActions,
-  Chip,
-  Tabs,
-  Tab,
-  Link,
-  IconButton,
-  ToggleButtonGroup,
-  ToggleButton,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText
-} from '@mui/material';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import FacebookIcon from '@mui/icons-material/Facebook';
-import TwitterIcon from '@mui/icons-material/Twitter';
-import InstagramIcon from '@mui/icons-material/Instagram';
-import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+  CONTACT,
+  ROUTES,
+  featureTabs,
+  coreFeatures,
+  howItWorks,
+  zimbabwePoints,
+  securityPoints,
+  credibilityPoints,
+  faqs,
+  type FeatureKey
+} from './landingData';
+import { beginPaidPlan, beginTrial, writeOnboardingState } from '../../utils/onboardingState';
+import './LandingPage.css';
+
+function scrollToId(id: string) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+type PublicPlan = {
+  code: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
+  monthly: number | null;
+  yearly: number | null;
+  currency: string;
+  checkout: 'paynow' | 'sales';
+};
 
 const LandingPage: React.FC = () => {
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly');
-
-  type FeatureKey =
-    | 'ACCOUNTING'
-    | 'PAYMENTS'
-    | 'LEASING'
-    | 'MAINTENANCE'
-    | 'INTEGRATIONS'
-    | 'SALES'
-    | 'REPORTING'
-    | 'DASHBOARDS';
-
+  const [plans, setPlans] = useState<PublicPlan[] | null>(null);
+  const [pricesUnavailable, setPricesUnavailable] = useState(false);
   const [active, setActive] = useState<FeatureKey>('ACCOUNTING');
-  const [featuresAnchorEl, setFeaturesAnchorEl] = useState<null | HTMLElement>(null);
-  const [pricingAnchorEl, setPricingAnchorEl] = useState<null | HTMLElement>(null);
+  const [persona, setPersona] = useState<'landlord' | 'manager'>('landlord');
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [openNav, setOpenNav] = useState<string | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
-  const scrollToId = (id: string) => {
-    if (typeof window === 'undefined') return;
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
+  const activeData = featureTabs.find((t) => t.key === active) || featureTabs[0];
 
-  const openFeaturesMenu = (e: React.MouseEvent<HTMLElement>) => setFeaturesAnchorEl(e.currentTarget);
-  const closeFeaturesMenu = () => setFeaturesAnchorEl(null);
-  const openPricingMenu = (e: React.MouseEvent<HTMLElement>) => setPricingAnchorEl(e.currentTarget);
-  const closePricingMenu = () => setPricingAnchorEl(null);
+  const priceFor = useCallback((code: PublicPlan['code']) => {
+    const plan = plans?.find((item) => item.code === code);
+    if (!plan) return null;
+    const amount = cycle === 'yearly' ? plan.yearly : plan.monthly;
+    return amount == null ? null : { amount, currency: plan.currency || 'USD' };
+  }, [plans, cycle]);
 
-  const handleSelectFeature = (key: FeatureKey) => {
+  const formatPrice = useCallback((code: PublicPlan['code']) => {
+    const price = priceFor(code);
+    if (!price) return pricesUnavailable ? 'Unavailable' : '…';
+    return price.currency === 'USD' ? `$${price.amount}` : `${price.currency} ${price.amount}`;
+  }, [priceFor, pricesUnavailable]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = (attempt: number) => {
+      publicApi.get('/billing/plans')
+        .then((response) => {
+          if (cancelled) return;
+          const next = (Array.isArray(response.data?.plans) ? response.data.plans : []).map((plan: any) => ({
+            code: plan.code,
+            monthly: plan.monthly ?? plan.monthlyPrice ?? null,
+            yearly: plan.yearly ?? plan.annualPrice ?? null,
+            currency: plan.currency || 'USD',
+            checkout: plan.checkout
+          }));
+          setPlans(next);
+          setPricesUnavailable(next.length === 0);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempt < 2) {
+            window.setTimeout(() => load(attempt + 1), 600);
+            return;
+          }
+          setPricesUnavailable(true);
+        });
+    };
+    load(0);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        setOpenNav(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    document.body.style.overflow = menuOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    const onPointer = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) {
+        setOpenNav(null);
+      }
+    };
+    document.addEventListener('mousedown', onPointer);
+    return () => document.removeEventListener('mousedown', onPointer);
+  }, []);
+
+  const go = useCallback((id: string) => {
+    setMenuOpen(false);
+    setOpenNav(null);
+    scrollToId(id);
+  }, []);
+
+  const selectFeature = useCallback((key: FeatureKey) => {
     setActive(key);
-    closeFeaturesMenu();
-    // Scroll to features section
-    setTimeout(() => scrollToId('features-section'), 0);
-  };
+    go('product-tour');
+  }, [go]);
 
-  const handleSelectPricing = (id: 'free' | 'individual' | 'sme' | 'enterprise') => {
-    closePricingMenu();
-    scrollToId(`pricing-${id}`);
-  };
-
-  const featureTabs: { key: FeatureKey; label: string; title: string; description: string; bullets: string[]; cta: string; image: string; }[] = [
-    {
-      key: 'ACCOUNTING',
-      label: 'ACCOUNTING',
-      title: 'Purpose-Built Accounting',
-      description:
-        'Guided workflows and automations for accurate, property-specific accounting.',
-      bullets: [
-        'Automatic bank reconciliation',
-        'Generate statements and tax-ready reports',
-        'Property-specific financial reporting'
-      ],
-      cta: 'View Accounting Features',
-      image:
-        'https://images.unsplash.com/photo-1556742044-3c52d6e88c62?auto=format&fit=crop&w=1200&q=80'
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'Mantis Africa',
+    applicationCategory: 'BusinessApplication',
+    operatingSystem: 'Web',
+    description:
+      'Property management software for landlords and property managers in Zimbabwe and Africa. Manage properties, tenants, leases, payments, accounting, maintenance and reporting in one workspace.',
+    offers: {
+      '@type': 'AggregateOffer',
+      priceCurrency: 'USD',
+      lowPrice: '0',
+      highPrice: String(priceFor('ENTERPRISE')?.amount ?? ''),
+      offerCount: 4
     },
-    {
-      key: 'PAYMENTS',
-      label: 'PAYMENTS',
-      title: 'Modern Payments & Collections',
-      description:
-        'Collect rent online and reconcile faster with automated reminders and receipts.',
-      bullets: [
-        'Online payments via Paynow',
-        'Automatic receipts and reminders',
-        'Deposit and refund management'
-      ],
-      cta: 'View Payments Features',
-      image:
-        'https://images.unsplash.com/photo-1605901309584-818e25960a8b?auto=format&fit=crop&w=1200&q=80'
-    },
-    {
-      key: 'LEASING',
-      label: 'LEASING',
-      title: 'Smart Leasing',
-      description:
-        'Create, renew, and track leases with e-sign-ready documents and reminders.',
-      bullets: [
-        'Lease creation and renewals',
-        'Tenant onboarding checklist',
-        'Automated lease reminders'
-      ],
-      cta: 'View Leasing Features',
-      image:
-        'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1200&q=80'
-    },
-    {
-      key: 'MAINTENANCE',
-      label: 'MAINTENANCE',
-      title: 'Maintenance & Work Orders',
-      description:
-        'Track requests from report to resolution with clear ownership and timelines.',
-      bullets: [
-        'Resident and staff requests',
-        'Assign tasks to agents/contractors',
-        'Status tracking to completion'
-      ],
-      cta: 'View Maintenance Features',
-      image:
-        'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1200&q=80'
-    },
-    
-    {
-      key: 'INTEGRATIONS',
-      label: 'INTEGRATIONS',
-      title: 'Integrations',
-      description:
-        'Connect your favorite tools for payments, analytics, and document management.',
-      bullets: [
-        'Accounting exports',
-        'Payment gateway integration',
-        'Data import/export'
-      ],
-      cta: 'View Integrations',
-      image:
-        'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80'
-    },
-    {
-      key: 'SALES',
-      label: 'SALES / CRM',
-      title: 'Sales CRM for Listings',
-      description:
-        'Manage leads to deals with viewings, buyers, owners, and property pipelines.',
-      bullets: [
-        'Leads, viewings, and buyer tracking',
-        'Owners, listings, and developments',
-        'Deals pipeline with stages'
-      ],
-      cta: 'View Sales Features',
-      image:
-        'https://images.unsplash.com/photo-1560520653-9e0e4a7a0cf5?auto=format&fit=crop&w=1200&q=80'
-    },
-    {
-      key: 'REPORTING',
-      label: 'REPORTING',
-      title: 'Reporting & Analytics',
-      description:
-        'Operational and financial insights to guide performance and growth.',
-      bullets: [
-        'Income and expense reports',
-        'Occupancy and performance KPIs',
-        'CSV/PDF exports'
-      ],
-      cta: 'View Reporting Features',
-      image:
-        'https://images.unsplash.com/photo-1551281044-8b29fbcb625a?auto=format&fit=crop&w=1200&q=80'
-    },
-    
-    {
-      key: 'DASHBOARDS',
-      label: 'DASHBOARDS & PORTALS',
-      title: 'Dashboards & Portals',
-      description:
-        'Focused dashboards for each role to get work done faster.',
-      bullets: [
-        'Admin, Owner, Agent, Accountant dashboards',
-        'Quick actions and KPIs',
-        'Tenant-facing portal options'
-      ],
-      cta: 'View Dashboards',
-      image:
-        'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=1200&q=80'
+    provider: {
+      '@type': 'Organization',
+      name: 'Mantis Africa',
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: '8 Normandy Road, Alexandra Park',
+        addressLocality: 'Harare',
+        addressCountry: 'ZW'
+      },
+      email: CONTACT.email,
+      telephone: CONTACT.phoneTel
     }
-  ];
-
-  const activeData = featureTabs.find(t => t.key === active)!;
-
-  const prices = useMemo(() => {
-    // Base monthly USD prices
-    const monthly = { INDIVIDUAL: 250, SME: 600, ENTERPRISE: 1200 } as const;
-    if (cycle === 'monthly') return monthly;
-    // Yearly totals (12 months)
-    return {
-      INDIVIDUAL: monthly.INDIVIDUAL * 12,
-      SME: monthly.SME * 12,
-      ENTERPRISE: monthly.ENTERPRISE * 12
-    } as const;
-  }, [cycle]);
-
-  const pricingPlans = [
-    {
-      id: 'free',
-      name: 'Free Trial',
-      eyebrow: 'Start safely',
-      price: 'FREE',
-      suffix: '14 days',
-      badge: 'No card required',
-      badgeColor: 'success' as const,
-      borderColor: 'success.main',
-      cta: 'Start Free Trial',
-      to: '/admin-signup',
-      bestFor: 'Testing Mantis with real workflows',
-      range: 'Up to 10 properties',
-      users: 'Single admin',
-      billing: 'Trial access, cancel anytime',
-      features: ['No credit card required', 'Core property workflows', 'Guided workspace setup', 'Upgrade when ready']
-    },
-    {
-      id: 'individual',
-      name: 'Individual',
-      eyebrow: 'Solo landlords',
-      price: `$${prices.INDIVIDUAL}`,
-      suffix: cycle === 'monthly' ? '/mo' : '/yr',
-      badge: 'Best for landlords',
-      badgeColor: 'primary' as const,
-      borderColor: 'divider',
-      cta: 'Choose Individual',
-      to: '/signup?plan=INDIVIDUAL',
-      bestFor: 'Solo landlords managing rentals',
-      range: '1-10 properties',
-      users: 'Single admin',
-      billing: cycle === 'monthly' ? 'Monthly billing' : 'Annual billing',
-      features: ['Simple dashboard', 'Rent and occupancy tracking', 'Lease expirations', 'Maintenance requests']
-    },
-    {
-      id: 'sme',
-      name: 'SME',
-      eyebrow: 'Growing agencies',
-      price: `$${prices.SME}`,
-      suffix: cycle === 'monthly' ? '/mo' : '/yr',
-      badge: 'Recommended',
-      badgeColor: 'secondary' as const,
-      borderColor: 'primary.main',
-      highlighted: true,
-      cta: 'Choose SME',
-      to: '/signup?plan=SME',
-      bestFor: 'Agencies with teams and workflows',
-      range: '10-120 properties',
-      users: 'Multi-user teams',
-      billing: cycle === 'monthly' ? 'Monthly billing' : 'Annual billing',
-      features: ['Team activity', 'Agent performance', 'Commission tools', 'Approval queues']
-    },
-    {
-      id: 'enterprise',
-      name: 'Enterprise',
-      eyebrow: 'Large portfolios',
-      price: `$${prices.ENTERPRISE}`,
-      suffix: cycle === 'monthly' ? '/mo' : '/yr',
-      badge: 'Custom onboarding',
-      badgeColor: 'default' as const,
-      borderColor: 'divider',
-      cta: 'Choose Enterprise',
-      to: '/signup?plan=ENTERPRISE',
-      bestFor: 'Large portfolios and operations teams',
-      range: 'Unlimited units',
-      users: 'Advanced permissions',
-      billing: cycle === 'monthly' ? 'Monthly billing' : 'Annual billing',
-      features: ['Portfolio analytics', 'Audit alerts', 'Priority support', 'Operational KPIs']
-    }
-  ];
+  };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      {/* Hero Section */}
-      <Box
-        sx={{
-          bgcolor: 'primary.main',
-          color: 'primary.contrastText',
-          pt: { xs: 20, md: 22 },
-          pb: 8,
-          position: 'relative',
-        }}
-      >
-        {/* Top-center Nav (text-only) */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: { xs: 16, md: 16 },
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: { xs: 'none', md: 'flex' },
-            alignItems: 'center',
-            gap: 2,
-          }}
-        >
-          <Button
-            variant="text"
-            color="inherit"
-            onClick={openFeaturesMenu}
-            aria-haspopup="true"
-            aria-controls="features-menu"
-            sx={{ textTransform: 'none', fontWeight: 600, fontStyle: 'normal' }}
-          >
-            Features
-          </Button>
-          <Menu
-            id="features-menu"
-            anchorEl={featuresAnchorEl}
-            open={Boolean(featuresAnchorEl)}
-            onClose={closeFeaturesMenu}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-            PaperProps={{
-              sx: {
-                backgroundColor: 'transparent',
-                boxShadow: 'none',
-                color: 'primary.contrastText',
-              }
-            }}
-            MenuListProps={{
-              sx: { p: 0 }
-            }}
-          >
-            {featureTabs.map((t) => (
-              <MenuItem
-                key={t.key}
-                onClick={() => handleSelectFeature(t.key)}
-                sx={{
-                  color: 'primary.contrastText',
-                  backgroundColor: 'transparent',
-                  fontStyle: 'normal',
-                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' }
-                }}
+    <div className="lp">
+      <Seo
+        title="Mantis Africa | Property Management Software"
+        description="Property management software for landlords and property managers in Zimbabwe and Africa. Manage properties, tenants, leases, rent, accounting, maintenance and reporting from one workspace. Start a 14-day free trial."
+        image={`${process.env.PUBLIC_URL || ''}/hero-laptop.png`}
+        jsonLd={jsonLd}
+      />
+      <a className="lp-skip" href="#main">Skip to content</a>
+
+      <header className={`lp-nav${scrolled ? ' is-scrolled' : ''}`} ref={navRef}>
+        <div className="lp-nav-inner">
+          <RouterLink to="/" className="lp-logo" aria-label="Mantis Africa home">
+            <LandingLogo />
+          </RouterLink>
+
+          <nav className="lp-nav-links" aria-label="Primary">
+            <div className={`lp-nav-item${openNav === 'product' ? ' is-open' : ''}`}>
+              <button
+                className="lp-nav-btn"
+                aria-expanded={openNav === 'product'}
+                aria-haspopup="true"
+                onClick={() => setOpenNav(openNav === 'product' ? null : 'product')}
               >
-                {t.label}
-              </MenuItem>
-            ))}
-          </Menu>
+                Product
+              </button>
+              <div className="lp-drop" role="menu">
+                {featureTabs.map((t) => (
+                  <button key={t.key} role="menuitem" onClick={() => selectFeature(t.key)}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className={`lp-nav-item${openNav === 'solutions' ? ' is-open' : ''}`}>
+              <button
+                className="lp-nav-btn"
+                aria-expanded={openNav === 'solutions'}
+                aria-haspopup="true"
+                onClick={() => setOpenNav(openNav === 'solutions' ? null : 'solutions')}
+              >
+                Solutions
+              </button>
+              <div className="lp-drop" role="menu">
+                <button role="menuitem" onClick={() => { setPersona('landlord'); go('solutions'); }}>Individual Landlords</button>
+                <button role="menuitem" onClick={() => { setPersona('manager'); go('solutions'); }}>Property Managers</button>
+                <button role="menuitem" onClick={() => go('solutions')}>Estate Agencies</button>
+                <button role="menuitem" onClick={() => go('solutions')}>Property Owners</button>
+                <button role="menuitem" onClick={() => go('solutions')}>Accountants</button>
+              </div>
+            </div>
+            <button className="lp-nav-link" onClick={() => go('pricing')}>Pricing</button>
+            <div className={`lp-nav-item${openNav === 'resources' ? ' is-open' : ''}`}>
+              <button
+                className="lp-nav-btn"
+                aria-expanded={openNav === 'resources'}
+                aria-haspopup="true"
+                onClick={() => setOpenNav(openNav === 'resources' ? null : 'resources')}
+              >
+                Resources
+              </button>
+              <div className="lp-drop" role="menu">
+                <button role="menuitem" onClick={() => go('start')}>Getting Started</button>
+                <RouterLink role="menuitem" to={ROUTES.demo} onClick={() => setOpenNav(null)}>Product Demo</RouterLink>
+                <button role="menuitem" onClick={() => go('faq')}>FAQs</button>
+                <button role="menuitem" onClick={() => go('contact')}>Support</button>
+              </div>
+            </div>
+            <button className="lp-nav-link" onClick={() => go('contact')}>Contact</button>
+          </nav>
 
-          <Button
-            variant="text"
-            color="inherit"
-            onClick={openPricingMenu}
-            aria-haspopup="true"
-            aria-controls="pricing-menu"
-            sx={{ textTransform: 'none', fontWeight: 600, fontStyle: 'normal' }}
-          >
-            Pricing
-          </Button>
-          <Menu
-            id="pricing-menu"
-            anchorEl={pricingAnchorEl}
-            open={Boolean(pricingAnchorEl)}
-            onClose={closePricingMenu}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-            PaperProps={{
-              sx: {
-                backgroundColor: 'transparent',
-                boxShadow: 'none',
-                color: 'primary.contrastText',
-              }
-            }}
-            MenuListProps={{
-              sx: { p: 0 }
-            }}
-          >
-            <MenuItem
-              onClick={() => handleSelectPricing('free')}
-              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
+          <div className="lp-nav-cta">
+            <RouterLink className="lp-login" to={ROUTES.login}>Log in</RouterLink>
+            <RouterLink className="lp-btn lp-btn-primary" to={ROUTES.trial} onClick={() => beginTrial()}>Start free trial</RouterLink>
+            <button
+              className="lp-menu-toggle"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={menuOpen}
+              aria-controls="mobile-menu"
+              onClick={() => setMenuOpen((v) => !v)}
             >
-              Free Trial
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleSelectPricing('individual')}
-              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
-            >
-              Individual
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleSelectPricing('sme')}
-              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
-            >
-              SME
-            </MenuItem>
-            <MenuItem
-              onClick={() => handleSelectPricing('enterprise')}
-              sx={{ color: 'primary.contrastText', backgroundColor: 'transparent', fontStyle: 'normal', '&:hover': { backgroundColor: 'rgba(255,255,255,0.12)' } }}
-            >
-              Enterprise
-            </MenuItem>
-          </Menu>
-          <Button
-            variant="text"
-            color="inherit"
-            onClick={() => scrollToId('contact-section')}
-            sx={{ textTransform: 'none', fontWeight: 600, fontStyle: 'normal' }}
-          >
-            Contact Us
-          </Button>
-        </Box>
-        {/* Top-left Logo */}
-        <Box
-          component={RouterLink}
-          to="/"
-          sx={{
-            position: 'absolute',
-            top: { xs: 12, md: 16 },
-            left: { xs: 12, md: 16 },
-            display: 'inline-flex',
-            alignItems: 'center',
-            textDecoration: 'none',
-          }}
-          aria-label="Mantis Africa Home"
-        >
-          <Box
-            component="img"
-            src="/mantis logo.png"
-            alt="Mantis Africa"
-            sx={{
-              height: { xs: 112, md: 144 },
-              display: 'block',
-            }}
-          />
-        </Box>
-        {/* Top-right CTAs */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: { xs: 12, md: 16 },
-            right: { xs: 12, md: 16 },
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1.5,
-          }}
-        >
-          <Button
-            component={RouterLink}
-            to="/login"
-            variant="outlined"
-            color="inherit"
-            size="medium"
-          >
-            Login
-          </Button>
-          <Button
-            component={RouterLink}
-            to="/admin-signup"
-            variant="contained"
-            color="secondary"
-            size="medium"
-          >
-            Start Free Trial
-          </Button>
-        </Box>
-        <Container maxWidth="lg">
-          <Grid container spacing={4} alignItems="center">
-            <Grid item xs={12} md={6}>
-              <Typography variant="h2" component="h1" gutterBottom>
-                Welcome to Mantis Africa
-              </Typography>
-              <Typography variant="h5" paragraph>
-                Your all-in-one solution for property management
-              </Typography>
-              <Typography variant="h6" paragraph sx={{ color: 'common.white', fontWeight: 600 }}>
-                🎉 Start your 14-day free trial today - No credit card required!
-              </Typography>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Box
-                component="img"
-                src="/hero-laptop.png"
-                alt="Mantis Africa agent dashboard on a laptop"
-                sx={{
-                  width: '100%',
-                  maxWidth: 460,
-                  display: 'block',
-                  mx: 'auto',
-                  
-              
-                }}
-                loading="lazy"
-              />
-            </Grid>
-          </Grid>
-        </Container>
-      </Box>
+              <span /><span /><span />
+            </button>
+          </div>
+        </div>
+      </header>
 
-      {/* Features Section */}
-      <Container id="features-section" maxWidth="lg" sx={{ py: 8 }}>
-        <Typography variant="overline" align="center" display="block" gutterBottom color="primary">
-          FEATURES
-        </Typography>
-        <Typography variant="h4" component="h2" align="center" gutterBottom>
-          Every feature. All in one platform.
-        </Typography>
-
-        {/* Tabs */}
-        <Box sx={{ mt: 4 }}>
-          <Tabs
-            value={active}
-            onChange={(_, v) => setActive(v)}
-            variant="scrollable"
-            scrollButtons
-            allowScrollButtonsMobile
-            textColor="primary"
-            indicatorColor="primary"
-            TabIndicatorProps={{ sx: { height: 3, borderRadius: 3 } }}
-            sx={{ borderBottom: theme => `1px dashed ${theme.palette.divider}` }}
+      {menuOpen && (
+        <div className="lp-drawer" id="mobile-menu" onClick={() => setMenuOpen(false)}>
+          <div
+            className="lp-drawer-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mobile navigation"
+            onClick={(e) => e.stopPropagation()}
           >
-            {featureTabs.map(t => (
-              <Tab key={t.key} value={t.key} label={t.label} sx={{ fontWeight: 700 }} />
-            ))}
-          </Tabs>
+            <button onClick={() => go('product')}>Product</button>
+            <button onClick={() => go('solutions')}>Solutions</button>
+            <button onClick={() => go('pricing')}>Pricing</button>
+            <button onClick={() => go('faq')}>Resources</button>
+            <button onClick={() => go('contact')}>Contact</button>
+            <RouterLink to={ROUTES.login} onClick={() => setMenuOpen(false)}>Log in</RouterLink>
+            <RouterLink to={ROUTES.demo} onClick={() => setMenuOpen(false)}>Explore demo</RouterLink>
+            <RouterLink className="lp-btn lp-btn-primary" to={ROUTES.trial} onClick={() => { setMenuOpen(false); beginTrial(); }}>Start free trial</RouterLink>
+          </div>
+        </div>
+      )}
 
-          {/* Featured panel */}
-          <Box
-            sx={{
-              mt: 3,
-              p: { xs: 2, md: 4 },
-              borderRadius: 3,
-              bgcolor: theme => alpha(theme.palette.success.light, 0.16)
-            }}
-          >
-            <Grid container spacing={4} alignItems="center">
-              <Grid item xs={12} md={6}>
-                <Box
-                  component="img"
-                  src={activeData.image}
-                  alt={activeData.title}
-                  sx={{ width: '100%', borderRadius: 2, boxShadow: 1 }}
+      <main id="main">
+        <section className="lp-hero" aria-labelledby="hero-heading">
+          <div className="lp-wrap lp-hero-grid">
+            <div>
+              <p className="lp-eyebrow">Property management software</p>
+              <h1 id="hero-heading" className="lp-hero-title">
+                Property management,<br />built for the way<br /><em>Africa works.</em>
+              </h1>
+              <p className="lp-hero-copy">
+                Manage rent, tenants, owners, accounting, maintenance and more — all from one powerful platform.
+              </p>
+              <div className="lp-hero-actions">
+                <RouterLink className="lp-btn lp-btn-primary" to={ROUTES.trial} onClick={() => beginTrial()}>Start free trial</RouterLink>
+                <RouterLink className="lp-btn lp-btn-ghost" to={ROUTES.demo}>Explore demo</RouterLink>
+              </div>
+              <ul className="lp-trust-points">
+                <li>No credit card required</li>
+                <li>Set up in minutes</li>
+                <li>14-day free trial</li>
+              </ul>
+            </div>
+            <div className="lp-hero-visual">
+              <div className="lp-hero-stage">
+                <ProductShot
+                  src="/assets/product/dashboard-individual.png"
+                  alt="Mantis property management dashboard showing portfolio occupancy and rent collection"
+                  fallback="dashboard"
+                  priority
                 />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Typography variant="h4" gutterBottom>
-                  {activeData.title}
-                </Typography>
-                <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-                  {activeData.description}
-                </Typography>
-                <List dense>
-                  {activeData.bullets.map(b => (
-                    <ListItem key={b} sx={{ py: 0.5 }}>
-                      <ListItemIcon sx={{ minWidth: 28 }}>
-                        <CheckCircleOutlineIcon color="primary" fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText primary={b} />
-                    </ListItem>
-                  ))}
-                </List>
-                <Link href="#" underline="hover" sx={{ fontWeight: 600 }}>
-                  {activeData.cta}
-                </Link>
-              </Grid>
-            </Grid>
-          </Box>
-        </Box>
-      </Container>
+                <div className="lp-phone-wrap"><MobilePropertyMock /></div>
+                <FloatingKpis />
+              </div>
+            </div>
+          </div>
+        </section>
 
-      {/* Packages/Pricing Section */}
-      <Container id="pricing-section" maxWidth="lg" sx={{ py: 8 }}>
-        <Typography variant="overline" align="center" display="block" gutterBottom color="primary">
-          PRICING
-        </Typography>
-        <Typography variant="h4" component="h2" align="center" gutterBottom>
-          Start with a free trial, upgrade when you're ready.
-        </Typography>
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
-          <ToggleButtonGroup
-            value={cycle}
-            exclusive
-            onChange={(_, v) => v && setCycle(v)}
-            sx={{ bgcolor: 'grey.100', borderRadius: 9999, p: 0.5 }}
-          >
-            <ToggleButton value="monthly" sx={{ px: 3, border: 0, borderRadius: 9999 }}>Monthly</ToggleButton>
-            <ToggleButton value="yearly" sx={{ px: 3, border: 0, borderRadius: 9999 }}>Yearly</ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
+        <section className="lp-strip" aria-label="Who Mantis is built for">
+          <div className="lp-wrap lp-strip-inner">
+            <p className="lp-strip-label">Built for property professionals</p>
+            <ul className="lp-audiences">
+              <li>Landlords</li>
+              <li>Property Managers</li>
+              <li>Estate Agencies</li>
+              <li>Property Owners</li>
+              <li>Accountants</li>
+            </ul>
+            <ul className="lp-trust-row">
+              <li>USD, ZiG &amp; ZAR</li>
+              <li>Role-based access</li>
+              <li>Secure login</li>
+              <li>Harare-based support</li>
+            </ul>
+          </div>
+        </section>
 
-        <Grid container spacing={3}>
-          {pricingPlans.map((plan) => (
-            <Grid item xs={12} md={3} key={plan.id} id={`pricing-${plan.id}`}>
-              <Card
-                elevation={plan.highlighted ? 6 : 0}
-                sx={{
-                  height: '100%',
-                  border: '2px solid',
-                  borderColor: plan.borderColor,
-                  borderRadius: 3,
-                  bgcolor: plan.highlighted ? 'primary.main' : 'background.paper',
-                  color: plan.highlighted ? 'primary.contrastText' : 'text.primary',
-                  position: 'relative'
-                }}
-              >
-                <CardContent sx={{ p: 3 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
-                    <Typography variant="subtitle2" sx={{ opacity: plan.highlighted ? 0.9 : 0.7 }}>
-                      {plan.eyebrow}
-                    </Typography>
-                    <Chip size="small" label={plan.badge} color={plan.badgeColor} sx={{ fontWeight: 700 }} />
-                  </Box>
-                  <Typography variant="h5" gutterBottom>{plan.name}</Typography>
-                  <Typography variant="h3" sx={{ fontWeight: 900 }}>
-                    {plan.price} <Typography component="span" variant="subtitle2">{plan.suffix}</Typography>
-                  </Typography>
-                  <Typography variant="body2" sx={{ mt: 1, opacity: plan.highlighted ? 0.9 : 0.75 }}>
-                    Best for: {plan.bestFor}
-                  </Typography>
-                  <Grid container spacing={1} sx={{ my: 2 }}>
-                    {[plan.range, plan.users, plan.billing].map((item) => (
-                      <Grid item xs={12} key={item}>
-                        <Chip size="small" variant={plan.highlighted ? 'filled' : 'outlined'} label={item} sx={{ width: '100%' }} />
-                      </Grid>
-                    ))}
-                  </Grid>
-                  <List dense sx={{ color: plan.highlighted ? 'primary.contrastText' : 'text.primary' }}>
-                    {plan.features.map((feature) => (
-                      <ListItem key={feature} sx={{ py: 0.5, px: 0 }}>
-                        <ListItemIcon sx={{ minWidth: 28, color: plan.highlighted ? 'primary.contrastText' : 'primary.main' }}>
-                          <CheckCircleOutlineIcon fontSize="small" />
-                        </ListItemIcon>
-                        <ListItemText primary={feature} primaryTypographyProps={{ variant: 'body2' }} />
-                      </ListItem>
-                    ))}
-                  </List>
-                </CardContent>
-                <CardActions sx={{ px: 3, pb: 3 }}>
-                  <Button
-                    component={RouterLink}
-                    to={plan.to}
-                    variant={plan.highlighted ? 'contained' : 'outlined'}
-                    color={plan.highlighted ? 'secondary' : 'primary'}
-                    fullWidth
+        <OnboardingChooser />
+
+        <section id="product" className="lp-section" style={{ paddingTop: 0 }}>
+          <div className="lp-wrap">
+            <p className="lp-kicker">Every tool you need</p>
+            <h2 className="lp-h2">Manage property from one workspace.</h2>
+            <p className="lp-lead">Accounting, payments, leasing, maintenance, sales and reporting — connected to the same properties and people.</p>
+            <div className="lp-cards-6">
+              {coreFeatures.map((feature) => (
+                <article className="lp-feature-card" key={feature.key}>
+                  <div className="lp-icon" aria-hidden="true"><FeatureIcon name={feature.title} /></div>
+                  <h3>{feature.title}</h3>
+                  <p className="lp-value">{feature.value}</p>
+                  <p>{feature.body}</p>
+                  <ul className="lp-checks">
+                    {feature.points.map((p) => <li key={p}>{p}</li>)}
+                  </ul>
+                  <button className="lp-more" type="button" onClick={() => selectFeature(feature.key as FeatureKey)}>
+                    Learn more →
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="product-tour" className="lp-section lp-tour">
+          <div className="lp-wrap">
+            <p className="lp-kicker">See the product</p>
+            <h2 className="lp-h2">The actual Mantis workspace — not stock photography.</h2>
+            <div
+              className="lp-tabs"
+              role="tablist"
+              aria-label="Product areas"
+              onKeyDown={(e) => {
+                const idx = featureTabs.findIndex((t) => t.key === active);
+                if (e.key === 'ArrowRight') {
+                  e.preventDefault();
+                  setActive(featureTabs[(idx + 1) % featureTabs.length].key);
+                }
+                if (e.key === 'ArrowLeft') {
+                  e.preventDefault();
+                  setActive(featureTabs[(idx - 1 + featureTabs.length) % featureTabs.length].key);
+                }
+              }}
+            >
+              {featureTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  className="lp-tab"
+                  role="tab"
+                  id={`tab-${tab.key}`}
+                  aria-selected={active === tab.key}
+                  aria-controls={`panel-${tab.key}`}
+                  tabIndex={active === tab.key ? 0 : -1}
+                  onClick={() => setActive(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div
+              className="lp-tour-panel"
+              role="tabpanel"
+              id={`panel-${activeData.key}`}
+              aria-labelledby={`tab-${activeData.key}`}
+            >
+              <ProductShot
+                src={activeData.key === 'DASHBOARDS' ? '/assets/product/dashboard-enterprise.png' : '/assets/product/dashboard-individual.png'}
+                alt={activeData.key === 'DASHBOARDS'
+                  ? 'Mantis enterprise property management dashboard'
+                  : 'Mantis property management dashboard showing portfolio occupancy and rent collection'}
+                fallback={activeData.mock}
+              />
+              <div className="lp-tour-copy">
+                <h3>{activeData.title}</h3>
+                <p>{activeData.description}</p>
+                <ul className="lp-checks">
+                  {activeData.bullets.map((b) => <li key={b}>{b}</li>)}
+                </ul>
+                <RouterLink className="lp-btn lp-btn-primary" to={ROUTES.trial} onClick={() => beginTrial()}>{activeData.cta}</RouterLink>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="how" className="lp-section">
+          <div className="lp-wrap">
+            <p className="lp-kicker">From spreadsheets to a smarter workspace</p>
+            <h2 className="lp-h2">Get your property operation organised in a few simple steps.</h2>
+            <div className="lp-steps">
+              {howItWorks.map((step) => (
+                <article className="lp-step" key={step.step}>
+                  <div className="lp-step-num">{step.step}</div>
+                  <h3>{step.title}</h3>
+                  <p>{step.text}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="zimbabwe" className="lp-section lp-local">
+          <div className="lp-wrap lp-local-grid">
+            <div>
+              <p className="lp-kicker">Zimbabwe</p>
+              <h2 className="lp-h2">Built for property management in Zimbabwe.</h2>
+              <p className="lp-lead">Local workflows. Real-world property needs.</p>
+              <ul className="lp-checks" style={{ marginTop: '1.2rem' }}>
+                {zimbabwePoints.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+            <figure className="lp-local-photo">
+              <img
+                src="/assets/photography/harare-rbz.jpg"
+                alt="Harare skyline featuring the Reserve Bank of Zimbabwe building"
+                width={1280}
+                height={857}
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>
+                Harare, Zimbabwe — Reserve Bank building on the skyline. Photo: Baynham Goredema, CC BY 2.0.
+              </figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section id="proof" className="lp-section">
+          <div className="lp-wrap">
+            <p className="lp-kicker">Built with property professionals</p>
+            <h2 className="lp-h2">Designed around the people who actually run property.</h2>
+            <p className="lp-lead">
+              We do not publish invented testimonials. What we can show is the product itself: role-based workspaces, property-level accounting, and operations that match how agencies and landlords already work.
+            </p>
+            <figure className="lp-editorial-photo">
+              <img
+                src="/assets/photography/harare-first-street.jpg"
+                alt="First Street in Harare, a Zimbabwean business district used as supporting editorial photography"
+                width={1280}
+                height={960}
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>First Street, Harare. Photo: Gary Bembridge, CC BY 2.0. Editorial supporting image — not a Mantis customer.</figcaption>
+            </figure>
+            <div className="lp-cred-grid">
+              {credibilityPoints.map((item) => (
+                <article className="lp-highlight" key={item.title}>
+                  <h3>{item.title}</h3>
+                  <p>{item.text}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="demo" className="lp-section lp-tour">
+          <div className="lp-wrap">
+            <p className="lp-kicker">See Mantis in action</p>
+            <h2 className="lp-h2">An interactive look at the workspace.</h2>
+            <p className="lp-lead">
+              Open a labelled sample workspace with fictional properties, tenants and payments, or start a trial and click through the real dashboards.
+            </p>
+            <div className="lp-demo-card">
+              <ProductShot
+                src={persona === 'manager' ? '/assets/product/dashboard-enterprise.png' : '/assets/product/dashboard-individual.png'}
+                alt={persona === 'manager'
+                  ? 'Mantis enterprise property management dashboard'
+                  : 'Mantis property management dashboard showing portfolio occupancy and rent collection'}
+                fallback={persona === 'manager' ? 'dashboards' : 'dashboard'}
+              />
+            </div>
+            <div className="lp-demo-actions">
+              <RouterLink className="lp-btn lp-btn-primary" to={ROUTES.demo}>
+                Explore sample workspace
+              </RouterLink>
+              <RouterLink className="lp-btn lp-btn-ghost" to={ROUTES.trial} onClick={() => beginTrial()}>Start free trial</RouterLink>
+            </div>
+          </div>
+        </section>
+
+        <section id="pricing" className="lp-section">
+          <div className="lp-wrap lp-center">
+            <p className="lp-kicker">Pricing</p>
+            <h2 className="lp-h2">Simple, transparent pricing.</h2>
+            <p className="lp-lead">Choose the plan that fits your portfolio. Upgrade or downgrade as you grow.</p>
+            <div className="lp-toggle" role="group" aria-label="Billing cycle">
+              <button type="button" aria-pressed={cycle === 'monthly'} onClick={() => setCycle('monthly')}>Monthly</button>
+              <button type="button" aria-pressed={cycle === 'yearly'} onClick={() => setCycle('yearly')}>Yearly</button>
+            </div>
+            <div className="lp-pricing-grid">
+              <article className="lp-plan" id="pricing-free">
+                <div className="lp-plan-top">
+                  <p className="lp-kicker">Start safely</p>
+                  <span className="lp-badge">No card required</span>
+                </div>
+                <h3>Free Trial</h3>
+                <p className="lp-price">Free <span>14 days</span></p>
+                <p className="lp-who">For testing Mantis with real workflows.</p>
+                <p className="lp-range">Up to 10 properties · single admin</p>
+                <ul className="lp-checks">
+                  <li>No credit card required</li>
+                  <li>Core property workflows</li>
+                  <li>Guided workspace setup</li>
+                  <li>Upgrade when ready</li>
+                </ul>
+                <RouterLink className="lp-btn lp-btn-ghost" to={ROUTES.trial} onClick={() => beginTrial({ selectedPlan: 'TRIAL' })}>Start 14-Day Free Trial</RouterLink>
+                <p className="lp-who">No payment required to get started.</p>
+              </article>
+
+              <article className="lp-plan" id="pricing-landlord">
+                <div className="lp-plan-top">
+                  <p className="lp-kicker">Solo landlords</p>
+                </div>
+                <h3>Landlord</h3>
+                <p className="lp-price">{formatPrice('INDIVIDUAL')} <span>{cycle === 'monthly' ? '/mo' : '/yr'}</span></p>
+                <p className="lp-who">For landlords managing their own rentals.</p>
+                <p className="lp-range">1–10 properties · single admin</p>
+                <ul className="lp-checks">
+                  <li>Landlord dashboard</li>
+                  <li>Rent and occupancy tracking</li>
+                  <li>Lease expirations</li>
+                  <li>Maintenance requests</li>
+                </ul>
+                <RouterLink className="lp-btn lp-btn-ghost" to={`${ROUTES.landlord}&cycle=${cycle}`} onClick={() => beginPaidPlan('INDIVIDUAL', { role: 'landlord', billingCycle: cycle })}>Choose Landlord</RouterLink>
+                <p className="lp-who">Secure checkout via Paynow.</p>
+              </article>
+
+              <article className="lp-plan is-popular" id="pricing-manager">
+                <div className="lp-plan-top">
+                  <p className="lp-kicker">Agencies</p>
+                  <span className="lp-badge">Most popular</span>
+                </div>
+                <h3>Property Manager</h3>
+                <p className="lp-price">{formatPrice('SME')} <span>{cycle === 'monthly' ? '/mo' : '/yr'}</span></p>
+                <p className="lp-who">For agencies with teams and owner reporting.</p>
+                <p className="lp-range">10–120 properties · multi-user teams</p>
+                <ul className="lp-checks">
+                  <li>Agent and owner workspaces</li>
+                  <li>Commission tools</li>
+                  <li>Property accounts</li>
+                  <li>Advanced reports</li>
+                </ul>
+                <RouterLink className="lp-btn lp-btn-primary" to={`${ROUTES.manager}&cycle=${cycle}`} onClick={() => beginPaidPlan('SME', { role: 'manager', billingCycle: cycle })}>Choose Property Manager</RouterLink>
+                <p className="lp-who">Secure checkout via Paynow.</p>
+              </article>
+
+              <article className="lp-plan" id="pricing-enterprise">
+                <div className="lp-plan-top">
+                  <p className="lp-kicker">Large portfolios</p>
+                </div>
+                <h3>Enterprise</h3>
+                <p className="lp-price">{formatPrice('ENTERPRISE')} <span>{cycle === 'monthly' ? '/mo' : '/yr'}</span></p>
+                <p className="lp-who">For large portfolios and operations teams.</p>
+                <p className="lp-range">Unlimited units · advanced permissions</p>
+                <ul className="lp-checks">
+                  <li>Portfolio analytics</li>
+                  <li>API access</li>
+                  <li>Priority support</li>
+                  <li>Operational controls</li>
+                </ul>
+                {plans?.find((item) => item.code === 'ENTERPRISE')?.checkout === 'paynow' ? (
+                  <RouterLink className="lp-btn lp-btn-ghost" to={`/signup?plan=ENTERPRISE&checkout=paid&cycle=${cycle}`} onClick={() => writeOnboardingState({ role: 'manager', selectedPlan: 'ENTERPRISE', registrationMode: 'paid', billingCycle: cycle })}>Choose Enterprise</RouterLink>
+                ) : (
+                  <a className="lp-btn lp-btn-ghost" href={ROUTES.enterprise} target="_blank" rel="noopener noreferrer" onClick={() => writeOnboardingState({ role: 'manager', selectedPlan: 'ENTERPRISE', setupMode: 'help' })}>Talk to Sales</a>
+                )}
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="faq" className="lp-section">
+          <div className="lp-wrap">
+            <p className="lp-kicker">Frequently asked questions</p>
+            <h2 className="lp-h2">Straight answers before you start.</h2>
+            <div className="lp-faq">
+              {faqs.map((item, idx) => (
+                <div className="lp-acc" key={item.q}>
+                  <button
+                    className="lp-acc-btn"
+                    aria-expanded={openFaq === idx}
+                    aria-controls={`faq-panel-${idx}`}
+                    onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
                   >
-                    {plan.cta}
-                  </Button>
-                </CardActions>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      </Container>
+                    {item.q}
+                    <span aria-hidden="true">{openFaq === idx ? '–' : '+'}</span>
+                  </button>
+                  <div className="lp-acc-panel" id={`faq-panel-${idx}`} hidden={openFaq !== idx}>
+                    {item.a}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-      {/* CTA Section */}
-      <Box sx={{ bgcolor: 'grey.100', py: 8 }}>
-        <Container maxWidth="md">
-          <Typography variant="h3" component="h2" align="center" gutterBottom>
-            Ready to Get Started?
-          </Typography>
-          <Typography variant="h6" align="center" paragraph>
-            Join thousands of businesses already using Mantis Africa
-          </Typography>
-          <Box sx={{ mt: 4, textAlign: 'center' }}>
-            <Button
-              component={RouterLink}
-              to="/admin-signup"
-              variant="contained"
-              color="primary"
-              size="large"
-              sx={{ mr: 2 }}
-            >
-              Sign Up Now
-            </Button>
-            <Button
-              component={RouterLink}
-              to="/login"
-              variant="outlined"
-              color="primary"
-              size="large"
-            >
-              Login
-            </Button>
-          </Box>
-        </Container>
-      </Box>
+        <section id="security" className="lp-section" style={{ paddingTop: 0 }}>
+          <div className="lp-wrap">
+            <p className="lp-kicker">Trust</p>
+            <h2 className="lp-h2">Your property data deserves serious protection.</h2>
+            <div className="lp-secure-grid">
+              {securityPoints.map((item) => (
+                <article key={item.title}>
+                  <h3>{item.title}</h3>
+                  <p>{item.text}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
 
-      {/* Footer */}
-      <Box id="contact-section" component="footer" sx={{ bgcolor: 'background.paper', py: 6 }}>
-        <Container maxWidth="lg">
-          <Grid container spacing={4} justifyContent="center">
-            <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" gutterBottom>
-                Socials
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                <IconButton aria-label="Facebook" color="primary" component="a" href="#">
-                  <FacebookIcon />
-                </IconButton>
-                <IconButton aria-label="X" color="primary" component="a" href="#">
-                  <TwitterIcon />
-                </IconButton>
-                <IconButton aria-label="Instagram" color="primary" component="a" href="#">
-                  <InstagramIcon />
-                </IconButton>
-                <IconButton
-                  aria-label="WhatsApp"
-                  color="primary"
-                  component="a"
-                  href="https://wa.me/263783222010"
+        <section className="lp-section lp-final">
+          <div className="lp-wrap">
+            <h2 className="lp-h2">Ready to simplify your property management?</h2>
+            <p className="lp-lead">Start with Mantis free for 14 days.</p>
+            <div className="lp-final-actions">
+              <RouterLink className="lp-btn lp-btn-on-dark" to={ROUTES.trial} onClick={() => beginTrial()}>Start free trial</RouterLink>
+              <a className="lp-btn lp-btn-on-dark-ghost" href={CONTACT.whatsapp} target="_blank" rel="noopener noreferrer">Talk to sales</a>
+            </div>
+            <ul className="lp-trust-points">
+              <li>No credit card required</li>
+              <li>14-day free trial</li>
+            </ul>
+          </div>
+        </section>
+      </main>
+
+      <footer id="contact" className="lp-footer">
+        <div className="lp-wrap">
+          <div className="lp-footer-grid">
+            <div className="lp-footer-brand">
+              <div className="lp-logo">
+                <LandingLogo withWordmark={false} />
+              </div>
+              <p>Properties. People. Progress.</p>
+              <p>{CONTACT.address}</p>
+              <p><a href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a></p>
+              <p><a href={`tel:${CONTACT.phoneTel}`}>{CONTACT.phoneDisplay}</a></p>
+              <div className="lp-social">
+                <a
+                  className="lp-social-link"
+                  href={CONTACT.whatsapp}
                   target="_blank"
                   rel="noopener noreferrer"
+                  aria-label="WhatsApp Mantis Africa"
                 >
-                  <WhatsAppIcon />
-                </IconButton>
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" gutterBottom>
-                Contact Us
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Email: garett@kibycom.com
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Phone: +263783222010
-              </Typography>
-            </Grid>
-            <Grid item xs={12} md={4} sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" gutterBottom>
-                Address
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                8 Normandy Road Alexandra Park, Harare, Zimbabwe
-              </Typography>
-            </Grid>
-          </Grid>
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="body2" color="text.secondary" align="center">
-              © {new Date().getFullYear()} Mantis Africa. All rights reserved.
-            </Typography>
-          </Box>
-        </Container>
-      </Box>
-    </Box>
+                  <IconWhatsApp />
+                </a>
+              </div>
+            </div>
+            <div>
+              <h3>Product</h3>
+              <button type="button" onClick={() => selectFeature('ACCOUNTING')}>Accounting</button>
+              <button type="button" onClick={() => selectFeature('PAYMENTS')}>Payments</button>
+              <button type="button" onClick={() => selectFeature('LEASING')}>Leasing</button>
+              <button type="button" onClick={() => selectFeature('MAINTENANCE')}>Maintenance</button>
+              <button type="button" onClick={() => selectFeature('REPORTING')}>Reporting</button>
+              <button type="button" onClick={() => selectFeature('SALES')}>CRM</button>
+            </div>
+            <div>
+              <h3>Solutions</h3>
+              <button type="button" onClick={() => { setPersona('landlord'); go('solutions'); }}>Landlords</button>
+              <button type="button" onClick={() => { setPersona('manager'); go('solutions'); }}>Property Managers</button>
+              <button type="button" onClick={() => go('solutions')}>Estate Agencies</button>
+              <button type="button" onClick={() => go('solutions')}>Property Owners</button>
+              <button type="button" onClick={() => go('solutions')}>Accountants</button>
+            </div>
+            <div>
+              <h3>Resources</h3>
+              <RouterLink to={ROUTES.demo}>Demo</RouterLink>
+              <button type="button" onClick={() => go('faq')}>FAQs</button>
+              <a href={CONTACT.whatsapp} target="_blank" rel="noopener noreferrer">Support</a>
+              <button type="button" onClick={() => go('start')}>Getting Started</button>
+            </div>
+            <div>
+              <h3>Company</h3>
+              <button type="button" onClick={() => go('zimbabwe')}>About</button>
+              <button type="button" onClick={() => go('contact')}>Contact</button>
+            </div>
+            <div>
+              <h3>Legal</h3>
+              <button type="button" onClick={() => go('privacy')}>Privacy</button>
+              <button type="button" onClick={() => go('terms')}>Terms</button>
+              <button type="button" onClick={() => go('security')}>Security</button>
+            </div>
+          </div>
+
+          <div className="lp-legal-grid">
+            <div id="privacy" className="lp-legal">
+              <h3>Privacy</h3>
+              <p>
+                Mantis Africa uses the account and property information you enter to provide the workspace. For privacy questions, email {CONTACT.email}.
+              </p>
+            </div>
+            <div id="terms" className="lp-legal">
+              <h3>Terms</h3>
+              <p>
+                Use of Mantis Africa is subject to your account and subscription. Contact {CONTACT.email} if you need a copy of current terms for your organisation.
+              </p>
+            </div>
+          </div>
+          <div className="lp-paynow">
+            <PaynowBadge className="lp-paynow-badge" />
+          </div>
+          <p className="lp-copy">© {new Date().getFullYear()} Mantis Africa. All rights reserved. {CONTACT.city}.</p>
+        </div>
+      </footer>
+    </div>
   );
 };
 
-export default LandingPage; 
+export default LandingPage;

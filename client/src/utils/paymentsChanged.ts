@@ -15,9 +15,25 @@ function asId(value: any): string | undefined {
   return String(value);
 }
 
+/**
+ * Accountant create returns `{ message, payment }`. Sales create may return
+ * `{ payment }` or `{ data }`. Axios callers may still hold `{ data: ... }`.
+ * Always resolve to the payment record so `_id` / `propertyId` are available.
+ */
+export function unwrapPaymentResponse(response: any): any {
+  if (!response || typeof response !== 'object') return response;
+  return (
+    response.payment ||
+    response.data?.payment ||
+    response.data?.data ||
+    response.data ||
+    response
+  );
+}
+
 export function extractPropertyAccountChangeIds(source: any): PropertyAccountChangeIds {
   if (!source || typeof source !== 'object') return {};
-  const payment = source.payment;
+  const payment = unwrapPaymentResponse(source.payment);
   return {
     type: source.type ? String(source.type) : undefined,
     eventType: source.eventType ? String(source.eventType) : undefined,
@@ -34,12 +50,13 @@ export function dispatchPaymentsChanged(input: {
   propertyId?: string;
   accountId?: string;
 }): void {
-  const ids = extractPropertyAccountChangeIds(input);
+  const payment = unwrapPaymentResponse(input.payment);
+  const ids = extractPropertyAccountChangeIds({ ...input, payment });
   try {
     window.dispatchEvent(new CustomEvent('payments:changed', {
       detail: {
         type: input.type,
-        payment: input.payment,
+        payment,
         ...(ids.paymentId ? { paymentId: ids.paymentId } : {}),
         ...(ids.propertyId ? { propertyId: ids.propertyId } : {}),
         ...(ids.accountId ? { accountId: ids.accountId } : {})

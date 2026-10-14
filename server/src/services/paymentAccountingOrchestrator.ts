@@ -8,10 +8,19 @@ import propertyAccountService from './propertyAccountService';
 import agentAccountService from './agentAccountService';
 import accountingIntegrationService from './accountingIntegrationService';
 import { Payment } from '../models/Payment';
+import { Company } from '../models/Company';
+import individualTaxMetadataService from './individualTaxMetadataService';
+import individualVatService from './individualVatService';
+import individualRentalTaxService from './individualRentalTaxService';
+import individualIncomeTaxService from './individualIncomeTaxService';
 import {
   classifyReversalOutcome,
   ReversalProgress
 } from './ledgerEventStateMachine';
+import { AccountingException } from '../models/AccountingException';
+import { isPermanentAccountingFailure, mayPostSaleTrust, OwnerIncomeAmountMissingError } from './transactionDomain';
+import { reversePaymentTaxObligations } from './taxObligationService';
+import trustPaymentPostingService from './trustPaymentPostingService';
 
 export type AccountingArtifactResult = 'posted' | 'reversed' | 'skipped' | 'failed' | 'absent' | 'already_applied';
 
@@ -29,6 +38,40 @@ export type PaymentReversalResult = {
   artifacts: Record<string, AccountingArtifactResult>;
   errors: string[];
 };
+
+async function recordOwnerIncomeException(payment: { _id?: unknown; companyId?: unknown; propertyId?: unknown }, message: string): Promise<void> {
+  try {
+    const now = new Date();
+    await AccountingException.updateOne(
+      {
+        paymentId: payment._id,
+        kind: 'incomplete_projection',
+        component: 'ownerIncome',
+        status: 'open'
+      },
+      {
+        $set: {
+          issueType: 'missing',
+          ledger: 'property',
+          error: message,
+          companyId: payment.companyId,
+          propertyId: payment.propertyId,
+          lastCheckedAt: now,
+          detectedAt: now
+        },
+        $setOnInsert: {
+          kind: 'incomplete_projection',
+          status: 'open',
+          component: 'ownerIncome',
+          paymentId: payment._id
+        }
+      },
+      { upsert: true }
+    );
+  } catch (error) {
+    logger.warn('Failed to record owner-income accounting exception', error);
+  }
+}
 
 function asState(value: AccountingArtifactResult): ReversalProgress[keyof ReversalProgress] {
   if (value === 'failed') return 'failed';
@@ -55,6 +98,9 @@ export async function postPaymentAccounting(
 
   const policy = evaluatePermanentAccountingPolicy(payment);
   if (!policy.allowed) {
+    if (policy.reason === 'deposit_only') {
+      await individualTaxMetadataService.safeAttachForPayment(paymentId);
+    }
     return {
       paymentId,
       status: 'skipped',
@@ -77,10 +123,15 @@ export async function postPaymentAccounting(
     } catch (e: any) {
       artifacts.ownerIncome = 'failed';
       errors.push(`ownerIncome: ${e?.message || e}`);
-      try {
-        await ledgerEventService.enqueueOwnerIncomeEvent(paymentId);
-      } catch (enqueueErr: any) {
-        errors.push(`ownerIncome.enqueue: ${enqueueErr?.message || enqueueErr}`);
+      if (e instanceof OwnerIncomeAmountMissingError || e?.code === 'OWNER_INCOME_AMOUNT_MISSING') {
+        await recordOwnerIncomeException(payment, e?.message || String(e));
+      }
+      if (!isPermanentAccountingFailure(e)) {
+        try {
+          await ledgerEventService.enqueueOwnerIncomeEvent(paymentId);
+        } catch (enqueueErr: any) {
+          errors.push(`ownerIncome.enqueue: ${enqueueErr?.message || enqueueErr}`);
+        }
       }
     }
   } else {
@@ -123,11 +174,29 @@ export async function postPaymentAccounting(
 
   if (!policy.skipJournal) {
     try {
+      const journalSeamKey = String(paymentId);
+      const journalSeams = (global as any).__phase26JournalSeam || ((global as any).__phase26JournalSeam = new Set<string>());
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        process.env.MANTIS_TEST_SEAM === '1' &&
+        String((payment as any).notes || '').includes('PHASE26_FAIL_JOURNAL') &&
+        !journalSeams.has(journalSeamKey)
+      ) {
+        journalSeams.add(journalSeamKey);
+        throw new Error('PHASE26_FAIL_JOURNAL');
+      }
       await accountingIntegrationService.syncPaymentReceived(payment as any, { createdBy: opts?.createdBy });
       artifacts.journal = 'posted';
     } catch (e: any) {
       artifacts.journal = 'failed';
       errors.push(`journal: ${e?.message || e}`);
+      if (!isPermanentAccountingFailure(e)) {
+        try {
+          await ledgerEventService.enqueueEvent('journal', paymentId);
+        } catch (enqueueErr: any) {
+          errors.push(`journal.enqueue: ${enqueueErr?.message || enqueueErr}`);
+        }
+      }
     }
   } else {
     artifacts.journal = 'skipped';
@@ -138,6 +207,10 @@ export async function postPaymentAccounting(
   const status: PaymentPostingResult['status'] = failed ? (posted ? 'partial' : 'failed') : 'posted';
   if (failed) {
     logger.warn('Payment accounting post incomplete', { paymentId, artifacts, errors });
+  }
+  const company = await Company.findById(payment.companyId).select('workspaceType plan').lean();
+  if ((company as any)?.workspaceType === 'individual' || (company as any)?.plan === 'INDIVIDUAL') {
+    await individualTaxMetadataService.safeAttachForPayment(paymentId);
   }
   return { paymentId, status, artifacts, errors, reason: policy.reason };
 }
@@ -164,11 +237,11 @@ export async function reversePaymentAccounting(
   }
 
   try {
-    await propertyAccountService.reverseIncomeFromPayment(paymentId, {
+    const income = await propertyAccountService.reverseIncomeFromPayment(paymentId, {
       processedBy: opts?.processedBy,
       reason: opts?.reason
     });
-    artifacts.ownerIncome = 'reversed';
+    artifacts.ownerIncome = income.countered ? 'reversed' : 'skipped';
     artifacts.configuredExpense = 'reversed';
     artifacts.passThrough = 'reversed';
   } catch (e: any) {
@@ -187,16 +260,56 @@ export async function reversePaymentAccounting(
   }
 
   try {
-    await accountingIntegrationService.syncPaymentReversed(payment as any, {
+    artifacts.companyCommission = await accountingIntegrationService.postCompanyCommissionReversal(payment as any, {
+      createdBy: opts?.processedBy,
+      reason: opts?.reason,
+      reversalPaymentId: opts?.reversalPaymentId
+    });
+  } catch (e: any) {
+    artifacts.companyCommission = 'failed';
+    errors.push(`companyCommission: ${e?.message || e}`);
+  }
+
+  try {
+    artifacts.journal = await accountingIntegrationService.postReversalJournal(payment as any, {
       createdBy: opts?.processedBy,
       reason: opts?.reason
     });
-    artifacts.journal = 'reversed';
-    artifacts.companyCommission = 'reversed';
   } catch (e: any) {
     artifacts.journal = 'failed';
-    artifacts.companyCommission = 'failed';
-    errors.push(`journal/company: ${e?.message || e}`);
+    errors.push(`journal: ${e?.message || e}`);
+  }
+
+  try {
+    artifacts.tax = await reversePaymentTaxObligations({
+      companyId: String(payment.companyId),
+      paymentId,
+      createdBy: opts?.processedBy,
+      reason: opts?.reason,
+      notes: String((payment as any).notes || '')
+    });
+  } catch (e: any) {
+    artifacts.tax = 'failed';
+    errors.push(`tax: ${e?.message || e}`);
+  }
+
+  if (mayPostSaleTrust(payment as any)) {
+    try {
+      const trustResult = await trustPaymentPostingService.reverseBuyerPaymentInTrust({
+        paymentId,
+        reversalPaymentId: opts?.reversalPaymentId,
+        companyId: String(payment.companyId),
+        performedBy: opts?.processedBy,
+        reason: opts?.reason,
+        sourceEvent: 'payment.reversed'
+      });
+      artifacts.trust = (trustResult as any)?.skipped ? 'skipped' : 'reversed';
+    } catch (e: any) {
+      artifacts.trust = 'failed';
+      errors.push(`trust: ${e?.message || e}`);
+    }
+  } else {
+    artifacts.trust = 'skipped';
   }
 
   const progress: ReversalProgress = {
@@ -204,10 +317,11 @@ export async function reversePaymentAccounting(
     configuredExpense: asState(artifacts.configuredExpense || 'absent'),
     companyCommission: asState(artifacts.companyCommission || 'absent'),
     agentCommission: asState(artifacts.agentCommission || 'absent'),
-    trust: 'absent',
+    trust: asState(artifacts.trust || 'absent'),
     journal: asState(artifacts.journal || 'absent')
   };
   let status = classifyReversalOutcome(progress);
+  if (artifacts.tax === 'failed') status = status === 'failed' ? 'failed' : 'partial';
   if (errors.length && status === 'reversed') status = 'partial';
   if (errors.length && status === 'already_reversed') status = 'partial';
 
@@ -221,6 +335,45 @@ export async function reversePaymentAccounting(
       errors.push(`reversal.enqueue: ${enqueueErr?.message || enqueueErr}`);
     }
     logger.warn('Payment accounting reversal incomplete', { paymentId, artifacts, errors });
+  }
+
+  const company = await Company.findById(payment.companyId).select('workspaceType plan').lean();
+  if ((company as any)?.workspaceType === 'individual' || (company as any)?.plan === 'INDIVIDUAL') {
+    await individualVatService.safeReverseForSource({
+      companyId: String(payment.companyId),
+      sourceType: 'Payment',
+      sourceId: paymentId,
+      reason: opts?.reason,
+      reversalTransactionId: opts?.reversalPaymentId,
+      userId: opts?.processedBy
+    });
+    await individualRentalTaxService.safeReverseForSource({
+      companyId: String(payment.companyId),
+      sourceType: 'Payment',
+      sourceId: paymentId,
+      reason: opts?.reason,
+      reversalTransactionId: opts?.reversalPaymentId,
+      userId: opts?.processedBy
+    });
+    await individualIncomeTaxService.safeReverseForSource({
+      companyId: String(payment.companyId),
+      sourceType: 'Payment',
+      sourceId: paymentId,
+      reason: opts?.reason,
+      reversalTransactionId: opts?.reversalPaymentId,
+      userId: opts?.processedBy
+    });
+  }
+
+  const reversalComplete = status === 'reversed' || status === 'already_reversed';
+  const reversalState = reversalComplete ? 'reversed' : 'reversal_incomplete';
+  const reversalPaymentId = opts?.reversalPaymentId || (payment as any).reversalPaymentId;
+  await Payment.updateOne({ _id: payment._id }, { $set: { reversalState } });
+  if (reversalPaymentId) {
+    await Payment.updateOne(
+      { _id: reversalPaymentId },
+      { $set: { reversalState, accountingComplete: reversalComplete, status: 'completed' } }
+    );
   }
 
   return { paymentId, status, artifacts, errors };

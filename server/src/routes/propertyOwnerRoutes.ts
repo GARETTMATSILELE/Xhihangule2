@@ -1,5 +1,6 @@
 import express from 'express';
 import { authWithCompany } from '../middleware/auth';
+import { callerCanAccessProperty } from '../utils/propertyAccess';
 import {
   createPropertyOwner,
   getPropertyOwners,
@@ -54,6 +55,9 @@ router.get('/by-property/:propertyId', authWithCompany, async (req, res) => {
     if (!req.user?.companyId) {
       return res.status(401).json({ message: 'Authentication required' });
     }
+    if (!(await callerCanAccessProperty(req, propertyId))) {
+      return res.status(404).json({ message: 'Owner not found for this property' });
+    }
     const companyFilter: any = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
     // Find owner whose properties array contains this propertyId as ObjectId or string or $oid
     const PropertyOwner = require('../models/PropertyOwner').PropertyOwner;
@@ -79,36 +83,21 @@ router.get('/by-property/:propertyId', authWithCompany, async (req, res) => {
     };
     let owner = owners.find((o: any) => Array.isArray(o?.properties) && o.properties.some(isMatch)) || null;
     if (!owner) {
-      // Fallback: get property and use its ownerId
       const Property = require('../models/Property').Property;
-      const User = require('../models/User').User;
-      const property = await Property.findOne({ _id: objectId, companyId: companyFilter.companyId });
-      const rawOwnerId = property?.ownerId;
-      if (rawOwnerId) {
-        // Try to find a PropertyOwner by this id
-        owner = await PropertyOwner.findOne({ _id: rawOwnerId, ...(companyFilter.companyId ? { companyId: companyFilter.companyId } : {}) });
-        if (owner) {
-          return res.json({
-            _id: owner._id,
-            email: owner.email,
-            firstName: owner.firstName,
-            lastName: owner.lastName,
-            companyId: owner.companyId
-          });
-        }
-        // Try User collection fallback (owner stored as user)
-        const user = await User.findOne({ _id: rawOwnerId, ...(companyFilter.companyId ? { companyId: companyFilter.companyId } : {}) }).select('firstName lastName email companyId role');
-        if (user) {
-          return res.json({
-            _id: user._id,
-            email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            companyId: user.companyId
-          });
-        }
+      const property = await Property.findOne({ _id: objectId, companyId: companyFilter.companyId }).select('propertyOwnerId');
+      if (property?.propertyOwnerId) {
+        owner = await PropertyOwner.findOne({ _id: property.propertyOwnerId, companyId: companyFilter.companyId });
       }
-      return res.status(404).json({ message: 'Owner not found for this property' });
+      if (!owner) {
+        return res.status(404).json({ message: 'Owner not found for this property' });
+      }
+      return res.json({
+        _id: owner._id,
+        email: owner.email,
+        firstName: owner.firstName,
+        lastName: owner.lastName,
+        companyId: owner.companyId
+      });
     }
     res.json({
       _id: owner._id,

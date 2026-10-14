@@ -11,6 +11,14 @@ export interface PlanFeatures {
   maintenanceApprovals: boolean;
   accounting: boolean;
   agents: boolean;
+  tenantPortalEnabled?: boolean;
+  contractorPortalEnabled?: boolean;
+  propertyMarketplaceEnabled?: boolean;
+  maintenanceQuotesEnabled?: boolean;
+  onlinePaymentsEnabled?: boolean;
+  multichannelNotificationsEnabled?: boolean;
+  tenantReferencesEnabled?: boolean;
+  contractorRatingsEnabled?: boolean;
 }
 
 export interface PlanConfig {
@@ -34,7 +42,7 @@ export const PLAN_CONFIG: Record<Plan, PlanConfig> = {
       accounting: true,
       agents: false
     },
-    pricingUSD: { monthly: 100, yearly: 1200 },
+    pricingUSD: { monthly: 250, yearly: 3000 },
     workspaceType: 'individual'
   },
   SME: {
@@ -50,7 +58,7 @@ export const PLAN_CONFIG: Record<Plan, PlanConfig> = {
       accounting: true,
       agents: true
     },
-    pricingUSD: { monthly: 300, yearly: 3600 },
+    pricingUSD: { monthly: 600, yearly: 7200 },
     workspaceType: 'agency'
   },
   ENTERPRISE: {
@@ -66,7 +74,7 @@ export const PLAN_CONFIG: Record<Plan, PlanConfig> = {
       accounting: true,
       agents: true
     },
-    pricingUSD: { monthly: 600, yearly: 7200 },
+    pricingUSD: { monthly: 1200, yearly: 14400 },
     workspaceType: 'agency'
   }
 };

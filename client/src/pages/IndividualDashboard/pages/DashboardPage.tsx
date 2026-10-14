@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Box, Card, CardContent, Grid, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Grid, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
 import {
   AttachMoney,
   Build,
@@ -9,7 +9,9 @@ import {
   TrendingDown,
   TrendingUp
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
+import { workspacePath } from '../../../demo/demoMode';
 import { ActionCenter } from '../components/ActionCenter';
 import { BarChartPanel, CHART_COLORS, LineChartPanel } from '../components/Charts';
 import { OwnerBrief } from '../components/OwnerBrief';
@@ -19,6 +21,7 @@ import { INDIVIDUAL_THEME } from '../theme';
 import { money, percent } from '../utils/formatters';
 
 export function DashboardPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const {
     data,
@@ -63,9 +66,10 @@ export function DashboardPage() {
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Occupied" value={String(occupancyCounts.occupied)} icon={<HomeWork />} accent={INDIVIDUAL_THEME.success} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Vacant" value={String(occupancyCounts.vacant)} icon={<HomeWork />} accent={INDIVIDUAL_THEME.warning} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Tenants" value={String(data.summary.totalTenants)} icon={<People />} /></Grid>
-        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Income This Month" value={money(data.summary.monthlyIncome)} icon={<TrendingUp />} accent={INDIVIDUAL_THEME.success} /></Grid>
-        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Expenses This Month" value={money(data.summary.monthlyExpenses)} icon={<TrendingDown />} accent={INDIVIDUAL_THEME.danger} /></Grid>
-        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Net Profit" value={money(data.summary.netProfit)} icon={<AttachMoney />} /></Grid>
+        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title={`Rent collected — ${data.period?.label || 'This month'}`} value={money(data.summary.rentCollected ?? data.summary.monthlyIncome)} icon={<TrendingUp />} accent={INDIVIDUAL_THEME.success} /></Grid>
+        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title={`Property expenses — ${data.period?.label || 'This month'}`} value={money(data.summary.monthlyExpenses)} icon={<TrendingDown />} accent={INDIVIDUAL_THEME.danger} /></Grid>
+        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title={`Net property result — ${data.period?.label || 'This month'}`} value={money(data.summary.netProfit)} icon={<AttachMoney />} /></Grid>
+        <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Year to date profit" value={money(data.summary.yearToDateProfit || 0)} icon={<AttachMoney />} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Outstanding Bills" value={money(outstandingBillsTotal)} icon={<Receipt />} accent={INDIVIDUAL_THEME.warning} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Lease Renewals" value={String(upcomingLeaseRenewals)} icon={<Receipt />} /></Grid>
         <Grid item xs={6} sm={4} md={3} lg={2}><StatCard title="Open Maintenance" value={String(maintenanceOpen)} icon={<Build />} /></Grid>
@@ -159,7 +163,21 @@ export function DashboardPage() {
                   </TableRow>
                 ))}
                 {!topProperties.length && (
-                  <TableRow><TableCell colSpan={5}><Typography color="text.secondary" align="center">No properties yet</Typography></TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Box sx={{ py: 2, textAlign: 'center' }}>
+                        <Typography sx={{ fontWeight: 700 }}>No properties yet.</Typography>
+                        <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>
+                          Add your first property to start tracking tenants, leases, rent and property finances.
+                        </Typography>
+                        <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap>
+                          <Button size="small" variant="contained" onClick={() => navigate(workspacePath('/individual-dashboard/properties'))}>Add property</Button>
+                          <Button size="small" variant="outlined" onClick={() => navigate('/onboarding/import')}>Import properties</Button>
+                          <Button size="small" onClick={() => navigate('/demo')}>Explore sample data</Button>
+                        </Stack>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
                 )}
               </TableBody>
             </Table>

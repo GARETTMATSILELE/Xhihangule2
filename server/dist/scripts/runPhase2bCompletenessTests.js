@@ -190,7 +190,9 @@ const run = () => __awaiter(void 0, void 0, void 0, function* () {
     assert_1.default.strictEqual(test9.complete, false, 'TEST 9: reversal is never treated as complete');
     assert_1.default.strictEqual(test9.reason, 'not_eligible');
     assert_1.default.strictEqual((0, paymentAccountingCompleteness_1.shouldSkipRecordIncomePosting)(test9), false);
-    // TEST 10 — duplicate pass-through must not call getPropertyAccount
+    // TEST 10 — duplicate pass-through must return the already-loaded account
+    // Current writer uses atomic pushPassThroughTransactionAtomic → pushed === 'duplicate'.
+    // Older contract used `if (!inserted)`. Both must return `account` without getPropertyAccount.
     const srcTs = path_1.default.join(__dirname, '..', '..', 'src', 'services', 'propertyAccountService.ts');
     const distJs = path_1.default.join(__dirname, '..', 'services', 'propertyAccountService.js');
     const serviceSrc = fs_1.default.readFileSync(fs_1.default.existsSync(srcTs) ? srcTs : distJs, 'utf8');
@@ -198,9 +200,9 @@ const run = () => __awaiter(void 0, void 0, void 0, function* () {
     const collectionEnd = serviceSrc.indexOf('async recordPassThroughPayment');
     assert_1.default.ok(collectionStart >= 0 && collectionEnd > collectionStart, 'TEST 10: collection method located');
     const collectionFn = serviceSrc.slice(collectionStart, collectionEnd);
-    assert_1.default.ok(/if\s*\(\s*!inserted\s*\)\s*\{[\s\S]*?return account;/.test(collectionFn), 'TEST 10: duplicate collection returns the already-loaded account');
-    const duplicateBranch = collectionFn.match(/if\s*\(\s*!inserted\s*\)\s*\{[\s\S]*?return account;[\s\S]*?\}/);
-    assert_1.default.ok(duplicateBranch, 'TEST 10: duplicate collection branch located');
+    const duplicateBranch = collectionFn.match(/if\s*\(\s*pushed\s*===\s*['"]duplicate['"]\s*\)\s*\{[\s\S]*?return account;[\s\S]*?\}/) ||
+        collectionFn.match(/if\s*\(\s*!inserted\s*\)\s*\{[\s\S]*?return account;[\s\S]*?\}/);
+    assert_1.default.ok(duplicateBranch, 'TEST 10: duplicate collection returns the already-loaded account');
     assert_1.default.ok(!/this\.getPropertyAccount\s*\(/.test(duplicateBranch[0]), 'TEST 10: duplicate collection must not call getPropertyAccount');
     // TEST 11 — existing accounting calculations unchanged when completeness = false
     assert_1.default.strictEqual((0, paymentAccountingCompleteness_1.computeOwnerIncomeAmount)({ isSale: false, ownerAmount: 900, passThroughTotal: 50 }), 850, 'TEST 11: rental owner income subtracts pass-through');
@@ -237,9 +239,15 @@ const run = () => __awaiter(void 0, void 0, void 0, function* () {
     }));
     assert_1.default.strictEqual(chargeLookupThrows.complete, false, 'unknown/missing charge type lookup must not skip');
     assert_1.default.strictEqual(chargeLookupThrows.reason, 'completeness_error');
-    const typeMismatch = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(Object.assign(Object.assign({}, rentalPayment), { paymentType: 'sale' }), rentalDeps());
+    const typeMismatch = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(Object.assign(Object.assign({}, rentalPayment), { paymentType: 'sale', transactionDomain: 'RENTAL' }), rentalDeps());
     assert_1.default.strictEqual(typeMismatch.complete, false, 'payment type mismatch must not skip');
     assert_1.default.strictEqual(typeMismatch.reason, 'payment_type_mismatch');
+    const historicalIgnoresCurrentProperty = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(rentalPayment, rentalDeps({
+        resolveLedgerTypeForProperty: () => __awaiter(void 0, void 0, void 0, function* () {
+            throw new Error('current property type must not reclassify a payment');
+        })
+    }));
+    assert_1.default.strictEqual(historicalIgnoresCurrentProperty.complete, true, 'persisted rental payment ignores current property type');
     const malformedTarget = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(Object.assign(Object.assign({}, salePayment), { developmentUnitId: 'not-an-id', developmentId: undefined }), saleDeps({}));
     assert_1.default.strictEqual(malformedTarget.complete, false, 'malformed target must not skip');
     const unitLookupTimeout = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(Object.assign(Object.assign({}, salePayment), { developmentId: undefined }), Object.assign(Object.assign({}, saleDeps({ [unitId]: [saleIncomeAccount(unitId)] })), { findDevelopmentIdForUnit: () => __awaiter(void 0, void 0, void 0, function* () {

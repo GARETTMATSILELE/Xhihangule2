@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../api/axios';
+import { OwnerLettingDecisions } from './OwnerLettingDecisions';
 import { apiService } from '../../api';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -622,6 +623,10 @@ const PropertyDetails: React.FC = () => {
             <Alert severity="error">{error}</Alert>
           </Grid>
         )}
+
+        <Grid item xs={12}>
+          <OwnerLettingDecisions propertyId={String(propertyId)} />
+        </Grid>
 
         {/* Property Address and Rent Section */}
         <Grid item xs={12}>

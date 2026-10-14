@@ -12,6 +12,7 @@ const CompanyTransactionSchema = new mongoose_1.Schema({
     currency: { type: String, required: false, default: 'USD' },
     paymentMethod: { type: String, required: false },
     paymentId: { type: mongoose_1.Schema.Types.ObjectId, required: false },
+    reversesPaymentId: { type: mongoose_1.Schema.Types.ObjectId, required: false },
     referenceNumber: { type: String },
     description: { type: String },
     processedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false },

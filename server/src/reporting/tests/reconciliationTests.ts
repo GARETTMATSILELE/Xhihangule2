@@ -99,6 +99,7 @@ export async function runReportingReconciliationTests(): Promise<void> {
   const dto = await builder.build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'Mantis Test',
     generatedBy: 'tester',
     period: {
@@ -129,5 +130,22 @@ export async function runReportingReconciliationTests(): Promise<void> {
 
   const excel = await exportEngine.exportOwnerStatement(dto, 'excel');
   assert.ok(excel.buffer.toString('utf8').includes('Executive Summary'), 'Excel export should contain summary worksheet.');
+
+  const pdf = await exportEngine.exportOwnerStatement(dto, 'pdf');
+  const { PDFDocument } = await import('pdf-lib');
+  const pdfDoc = await PDFDocument.load(pdf.buffer);
+  const { width, height } = pdfDoc.getPage(0).getSize();
+  assert.ok(Math.abs(width - 841.89) < 1 && Math.abs(height - 595.28) < 1, `PDF page should be A4 landscape, got ${width} x ${height}`);
+  assert.ok(pdfDoc.getPageCount() >= 1, 'PDF should contain the statement page.');
+
+  const longDto = {
+    ...dto,
+    trustLedger: Array.from({ length: 40 }, () => dto.trustLedger).flat()
+  };
+  const longPdf = await exportEngine.exportOwnerStatement(longDto, 'pdf');
+  const longDoc = await PDFDocument.load(longPdf.buffer);
+  assert.ok(longDoc.getPageCount() > 1, `A long statement should continue onto another A4 page, got ${longDoc.getPageCount()}`);
+  const longSize = longDoc.getPage(1).getSize();
+  assert.ok(Math.abs(longSize.width - 841.89) < 1 && Math.abs(longSize.height - 595.28) < 1, 'Continuation pages should stay A4 landscape.');
 }
 

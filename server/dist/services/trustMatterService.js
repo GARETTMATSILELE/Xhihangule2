@@ -44,7 +44,7 @@ const WORKFLOW_LABELS = [
     { key: 'SETTLEMENT_APPROVED', label: 'Settlement Approved' },
     { key: 'FUNDS_ALLOCATED', label: 'Funds Allocated' },
     { key: 'SELLER_PAID', label: 'Seller Paid' },
-    { key: 'TAXES_PAID', label: 'Taxes Paid' },
+    { key: 'TAXES_PAID', label: 'Tax Deductions Recorded (not ZIMRA remittance)' },
     { key: 'TRUST_BALANCED', label: 'Trust Balanced' },
     { key: 'TRUST_CLOSED', label: 'Trust Closed' }
 ];
@@ -348,9 +348,10 @@ class TrustMatterService {
         const agencyCommission = money(Number(deductions.get('COMMISSION') || 0));
         const vatLiability = money(Number(deductions.get('VAT') || 0));
         const vatOnCommission = money(Number(deductions.get('VAT_ON_COMMISSION') || 0));
-        const cgtLiability = money(Number(deductions.get('CGT') || 0));
+        const cgwtLiability = money(Number(deductions.get('CAPITAL_GAINS_WITHHOLDING_TAX') || deductions.get('CGWT') || 0));
+        const cgtLiability = money(Number(deductions.get('CGT') || deductions.get('CAPITAL_GAINS_TAX') || 0));
         const totalTrustBalance = money(Number(((_c = input.account) === null || _c === void 0 ? void 0 : _c.runningBalance) || 0));
-        const allocated = money(sellerFunds + agencyCommission + vatLiability + vatOnCommission + cgtLiability);
+        const allocated = money(sellerFunds + agencyCommission + vatLiability + vatOnCommission + cgwtLiability);
         return {
             fundsCurrentlyHeld: totalTrustBalance,
             sellerFunds,
@@ -358,6 +359,7 @@ class TrustMatterService {
             vatLiability,
             vatOnCommission,
             cgtLiability,
+            cgwtLiability,
             otherAdjustments: 0,
             remainingUnallocated: money(totalTrustBalance - allocated),
             totalTrustBalance
@@ -367,7 +369,7 @@ class TrustMatterService {
         var _a, _b, _c;
         const funds = this.buildFundsAllocation(input);
         const purchasePrice = money(Number(((_a = input.settlement) === null || _a === void 0 ? void 0 : _a.salePrice) || ((_b = input.settlement) === null || _b === void 0 ? void 0 : _b.grossProceeds) || ((_c = input.account) === null || _c === void 0 ? void 0 : _c.purchasePrice) || 0));
-        const allocated = money(funds.sellerFunds + funds.agencyCommission + funds.vatOnCommission + funds.vatLiability + funds.cgtLiability + funds.otherAdjustments);
+        const allocated = money(funds.sellerFunds + funds.agencyCommission + funds.vatOnCommission + funds.vatLiability + (funds.cgwtLiability || 0) + funds.otherAdjustments);
         return {
             purchasePrice,
             allocated: {
@@ -375,7 +377,8 @@ class TrustMatterService {
                 commission: funds.agencyCommission,
                 vatCommission: funds.vatOnCommission,
                 vat: funds.vatLiability,
-                cgt: funds.cgtLiability,
+                capitalGainsTax: funds.cgtLiability,
+                capitalGainsWithholdingTax: funds.cgwtLiability || 0,
                 other: funds.otherAdjustments
             },
             balanceRemaining: money(Math.max(0, purchasePrice - allocated))

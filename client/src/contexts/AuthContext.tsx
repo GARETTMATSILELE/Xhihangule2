@@ -12,9 +12,14 @@ function isAuthOptionalPublicPath(pathname: string): boolean {
     pathname === '/' ||
     pathname === '/login' ||
     pathname === '/signup' ||
+    pathname === '/tenant-register' ||
+    pathname === '/contractor-register' ||
     pathname === '/forgot-password' ||
     pathname === '/reset-password' ||
     pathname === '/admin-signup' ||
+    pathname === '/demo' ||
+    pathname.startsWith('/demo/') ||
+    pathname === '/onboarding/import' ||
     pathname.startsWith('/billing/') ||
     pathname.startsWith('/checkout') ||
     pathname.startsWith('/payments')
@@ -55,6 +60,8 @@ function pickRoleForPath(nextPath: string, roles: string[]): string | null {
   if (nextPath.startsWith('/agent-dashboard')) return has('agent') ? 'agent' : null;
   if (nextPath.startsWith('/owner-dashboard')) return has('owner') ? 'owner' : null;
   if (nextPath.startsWith('/system-admin')) return has('system_admin') ? 'system_admin' : null;
+  if (nextPath.startsWith('/tenant-dashboard')) return has('tenant') ? 'tenant' : null;
+  if (nextPath.startsWith('/contractor-dashboard')) return has('contractor') ? 'contractor' : null;
   return null;
 }
 

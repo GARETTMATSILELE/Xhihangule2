@@ -23,6 +23,12 @@ const Payment_1 = require("../models/Payment");
 const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
 const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
+const individualAccountingService_1 = __importDefault(require("./individualAccountingService"));
+const individualTaxMetadataService_1 = __importDefault(require("./individualTaxMetadataService"));
+const LandlordFinancialTransaction_1 = require("../models/LandlordFinancialTransaction");
+const TransactionTaxSnapshot_1 = require("../models/TransactionTaxSnapshot");
+const propertyAccountTotals_1 = require("./propertyAccountTotals");
+const individualReportingPeriod_1 = require("./individualReportingPeriod");
 const INCOME_CATEGORIES = ['Rent', 'Parking', 'Levy Recovery', 'Utilities Recovery', 'Storage Income', 'Other Income'];
 const EXPENSE_CATEGORIES = ['Maintenance', 'Municipal', 'Levies', 'Security', 'Insurance', 'Gardening', 'Cleaning', 'Repairs', 'Utilities', 'Legal', 'Other'];
 function asObjectId(value) {
@@ -228,7 +234,7 @@ class IndividualWorkspaceService {
             })));
         });
     }
-    propertyMetrics(row, activeLeaseCountByProperty, collectedThisMonth, occupiedPropertyIds) {
+    propertyMetrics(row, activeLeaseCountByProperty, collectedThisMonth, occupiedPropertyIds, periodStart, periodEnd, yearStart, yearEnd, periodDays = 30) {
         const { property, account } = row;
         const units = Math.max(1, Number(property.units || 1));
         const isOccupied = occupiedPropertyIds.has(String(property._id));
@@ -237,9 +243,12 @@ class IndividualWorkspaceService {
         const monthlyRent = Number(property.rent || 0);
         const expectedRent = activeLeaseCountByProperty.has(String(property._id)) ? monthlyRent : 0;
         const collectedRent = Number(collectedThisMonth.get(String(property._id)) || 0);
-        const monthlyIncome = Number(account.totalIncome || 0);
-        const monthlyExpenses = Number(account.totalExpenses || 0);
-        const netProfit = monthlyIncome - monthlyExpenses;
+        const pnl = (0, propertyAccountTotals_1.sumPropertyAccountPeriodPnl)(account.transactions, periodStart, periodEnd);
+        const ytd = (0, propertyAccountTotals_1.sumPropertyAccountPeriodPnl)(account.transactions, yearStart, yearEnd);
+        const lifetime = (0, propertyAccountTotals_1.sumPropertyAccountPeriodPnl)(account.transactions);
+        const monthlyIncome = pnl.income;
+        const monthlyExpenses = pnl.expenses;
+        const netProfit = pnl.net;
         const collectionPercent = expectedRent > 0 ? Math.min(100, Math.round((collectedRent / expectedRent) * 100)) : 100;
         const expenseRatio = monthlyIncome > 0 ? Math.round((monthlyExpenses / monthlyIncome) * 100) : 0;
         const profitabilityPercent = monthlyIncome > 0 ? Math.round((netProfit / monthlyIncome) * 100) : 0;
@@ -261,8 +270,12 @@ class IndividualWorkspaceService {
             monthlyIncome,
             monthlyExpenses,
             netProfit,
-            annualProfit: netProfit * 12,
-            roiPlaceholder: null,
+            yearToDateProfit: ytd.net,
+            financialYearProfit: ytd.net,
+            annualisedRunRate: Number(((netProfit / Math.max(1, periodDays)) * 365).toFixed(2)),
+            lifetimeIncome: lifetime.income,
+            lifetimeExpenses: lifetime.expenses,
+            lifetimeNet: lifetime.net,
             runningBalance: Number(account.runningBalance || 0),
             occupancyPercent,
             collectionPercent,
@@ -271,8 +284,12 @@ class IndividualWorkspaceService {
             maintenanceDue: property.status === 'maintenance' || property.propertyOperationalStatus === 'Under Maintenance'
         };
     }
-    getSummary(companyId) {
+    getSummary(companyId, periodBasis) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b;
+            const period = (0, individualReportingPeriod_1.resolveReportingPeriod)(periodBasis);
+            const ytd = (0, individualReportingPeriod_1.resolveReportingPeriod)('year_to_date');
+            const periodDays = (0, individualReportingPeriod_1.daysInRange)(period.start, period.end) || 30;
             const [properties, tenants, leases, payments, maintenance] = yield Promise.all([
                 this.getCompanyProperties(companyId),
                 Tenant_1.Tenant.find({ companyId: asObjectId(companyId) }).lean(),
@@ -281,22 +298,25 @@ class IndividualWorkspaceService {
                 MaintenanceRequest_1.MaintenanceRequest.find({ companyId: asObjectId(companyId) }).sort({ updatedAt: -1 }).limit(50).lean()
             ]);
             const rows = yield this.getAccounts(properties);
-            const { start, end } = monthBounds();
+            const collectStart = period.start || new Date(0);
+            const collectEnd = period.end || new Date();
             const activeLeaseCountByProperty = new Map();
             for (const lease of leases)
                 activeLeaseCountByProperty.set(String(lease.propertyId), (activeLeaseCountByProperty.get(String(lease.propertyId)) || 0) + 1);
             const collectedThisMonth = new Map();
             for (const payment of payments) {
                 const date = new Date(payment.paymentDate || payment.createdAt);
-                if (date >= start && date < end) {
+                if (date >= collectStart && date < collectEnd) {
                     const pid = String(payment.propertyId || '');
                     collectedThisMonth.set(pid, (collectedThisMonth.get(pid) || 0) + Number(payment.amount || 0));
                 }
             }
             const occupiedPropertyIds = collectOccupiedPropertyIds(tenants, leases);
-            const propertyMetrics = rows.map((row) => this.propertyMetrics(row, activeLeaseCountByProperty, collectedThisMonth, occupiedPropertyIds));
+            const propertyMetrics = rows.map((row) => this.propertyMetrics(row, activeLeaseCountByProperty, collectedThisMonth, occupiedPropertyIds, period.start, period.end, ytd.start, ytd.end, periodDays));
             const monthlyIncome = propertyMetrics.reduce((sum, p) => sum + p.monthlyIncome, 0);
             const monthlyExpenses = propertyMetrics.reduce((sum, p) => sum + p.monthlyExpenses, 0);
+            const yearToDateProfit = propertyMetrics.reduce((sum, p) => sum + p.yearToDateProfit, 0);
+            const annualisedRunRate = propertyMetrics.reduce((sum, p) => sum + p.annualisedRunRate, 0);
             const expectedRent = propertyMetrics.reduce((sum, p) => sum + p.expectedRent, 0);
             const collectedRent = propertyMetrics.reduce((sum, p) => sum + p.collectedRent, 0);
             const allTransactions = rows.flatMap((row) => row.account.transactions || []);
@@ -337,6 +357,12 @@ class IndividualWorkspaceService {
                 }))
             ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()).slice(0, 20);
             return {
+                period: {
+                    basis: period.basis,
+                    label: period.label,
+                    start: ((_a = period.start) === null || _a === void 0 ? void 0 : _a.toISOString()) || null,
+                    end: ((_b = period.end) === null || _b === void 0 ? void 0 : _b.toISOString()) || null
+                },
                 summary: {
                     totalProperties: properties.length,
                     totalTenants: tenants.length,
@@ -345,6 +371,10 @@ class IndividualWorkspaceService {
                     monthlyIncome,
                     monthlyExpenses,
                     netProfit: monthlyIncome - monthlyExpenses,
+                    yearToDateProfit,
+                    financialYearProfit: yearToDateProfit,
+                    annualisedRunRate: Number(annualisedRunRate.toFixed(2)),
+                    rentCollected: collectedRent,
                     outstandingRent: Math.max(0, expectedRent - collectedRent),
                     netMonthlyCashflow: monthlyIncome - monthlyExpenses,
                     rentCollectionRate: expectedRent > 0 ? Math.round((collectedRent / expectedRent) * 100) : 100
@@ -362,14 +392,16 @@ class IndividualWorkspaceService {
             };
         });
     }
-    getAccounting(companyId) {
+    getAccounting(companyId, periodBasis) {
         return __awaiter(this, void 0, void 0, function* () {
-            const data = yield this.getSummary(companyId);
+            const data = yield this.getSummary(companyId, periodBasis);
             const properties = [...data.properties].sort((a, b) => b.netProfit - a.netProfit);
             return Object.assign(Object.assign({}, data), { overview: {
+                    periodLabel: data.period.label,
                     incomeThisMonth: data.summary.monthlyIncome,
                     expensesThisMonth: data.summary.monthlyExpenses,
                     netProfit: data.summary.netProfit,
+                    yearToDateProfit: data.summary.yearToDateProfit,
                     outstandingRent: data.summary.outstandingRent
                 }, topPerformingProperties: properties.slice(0, 5), worstPerformingProperties: properties.slice(-5).reverse() });
         });
@@ -395,7 +427,7 @@ class IndividualWorkspaceService {
             const propertyList = properties.filter(Boolean);
             const rows = yield this.getAccounts(propertyList);
             const bounds = filters.month ? monthBounds(filters.month) : null;
-            return rows.flatMap(({ property, account }) => {
+            const mapped = rows.flatMap(({ property, account }) => {
                 return (account.transactions || [])
                     .filter((tx) => type === 'income' ? tx.type === 'income' : tx.type !== 'income' && tx.type !== 'opening_balance')
                     .filter((tx) => {
@@ -406,51 +438,101 @@ class IndividualWorkspaceService {
                 })
                     .map((tx) => { var _a, _b; return (Object.assign(Object.assign({}, ((_b = (_a = tx.toObject) === null || _a === void 0 ? void 0 : _a.call(tx)) !== null && _b !== void 0 ? _b : tx)), { propertyId: String(property._id), propertyName: property.name })); });
             }).sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+            const paIds = mapped.map((tx) => tx._id).filter(Boolean);
+            const canonical = paIds.length
+                ? yield LandlordFinancialTransaction_1.LandlordFinancialTransaction.find({
+                    companyId: asObjectId(companyId),
+                    propertyAccountTransactionId: { $in: paIds }
+                })
+                    .select('_id propertyAccountTransactionId taxPeriodKey taxCalculationStatus deductibility capitalOrRevenue')
+                    .lean()
+                : [];
+            const snapshots = canonical.length
+                ? yield TransactionTaxSnapshot_1.TransactionTaxSnapshot.find({
+                    companyId: asObjectId(companyId),
+                    sourceType: 'LandlordFinancialTransaction',
+                    sourceId: { $in: canonical.map((row) => row._id) }
+                })
+                    .select('sourceId taxPeriodKey taxPeriodId taxCalculationStatus vatTreatment rentalTaxTreatment taxTypesRelevant classificationSource reviewReasons')
+                    .lean()
+                : [];
+            const lftByPa = new Map(canonical.map((row) => [String(row.propertyAccountTransactionId), row]));
+            const snapBySource = new Map(snapshots.map((row) => [String(row.sourceId), row]));
+            return mapped
+                .map((tx) => {
+                const lft = lftByPa.get(String(tx._id));
+                const snap = lft ? snapBySource.get(String(lft._id)) : null;
+                return Object.assign(Object.assign({}, tx), { taxPeriodKey: (snap === null || snap === void 0 ? void 0 : snap.taxPeriodKey) || (lft === null || lft === void 0 ? void 0 : lft.taxPeriodKey) || null, taxPeriodId: (snap === null || snap === void 0 ? void 0 : snap.taxPeriodId) ? String(snap.taxPeriodId) : null, taxCalculationStatus: (snap === null || snap === void 0 ? void 0 : snap.taxCalculationStatus) || (lft === null || lft === void 0 ? void 0 : lft.taxCalculationStatus) || null, vatTreatment: (snap === null || snap === void 0 ? void 0 : snap.vatTreatment) || null, rentalTaxTreatment: (snap === null || snap === void 0 ? void 0 : snap.rentalTaxTreatment) || null, taxTypesRelevant: (snap === null || snap === void 0 ? void 0 : snap.taxTypesRelevant) || [], deductibility: (lft === null || lft === void 0 ? void 0 : lft.deductibility) || tx.deductibility || null, capitalOrRevenue: (lft === null || lft === void 0 ? void 0 : lft.capitalOrRevenue) || tx.capitalOrRevenue || null, taxAmount: null, vatAmount: null });
+            })
+                .filter((tx) => {
+                if (filters.taxPeriodKey && tx.taxPeriodKey !== filters.taxPeriodKey)
+                    return false;
+                if (filters.taxPeriodId && tx.taxPeriodId !== filters.taxPeriodId)
+                    return false;
+                if (filters.taxCalculationStatus && tx.taxCalculationStatus !== filters.taxCalculationStatus)
+                    return false;
+                if (filters.taxType && !(tx.taxTypesRelevant || []).includes(filters.taxType))
+                    return false;
+                if (filters.taxTreatment && tx.vatTreatment !== filters.taxTreatment && tx.rentalTaxTreatment !== filters.taxTreatment)
+                    return false;
+                return true;
+            });
         });
     }
     postEntry(companyId, userId, entryType, body, idempotencyKey) {
         return __awaiter(this, void 0, void 0, function* () {
             const propertyId = String(body.propertyId || body.property || '');
-            const property = yield Property_1.Property.findOne({ _id: asObjectId(propertyId), companyId: asObjectId(companyId), isDeleted: { $ne: true } }).lean();
-            if (!property)
-                throw new errorHandler_1.AppError('Property not found', 404);
-            const amount = Number(body.amount || 0);
-            if (!Number.isFinite(amount) || amount <= 0)
-                throw new errorHandler_1.AppError('Amount must be greater than zero', 400);
-            const isIncome = entryType === 'income';
-            const category = String(body.category || (isIncome ? 'Other Income' : entryType === 'maintenance' ? 'Maintenance' : 'Other'));
-            const allowed = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-            if (!allowed.includes(category))
-                throw new errorHandler_1.AppError(`Invalid ${isIncome ? 'income' : 'expense'} category`, 400);
-            const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(propertyId);
-            if (account.isArchived === true || account.isActive === false) {
-                throw new errorHandler_1.AppError(`Refusing to post ${entryType} to inactive or archived PropertyAccount`, 409);
-            }
-            const key = idempotencyKey || body.idempotencyKey || `${entryType}:${propertyId}:${Date.now()}`;
-            const existing = (account.transactions || []).find((tx) => tx.idempotencyKey === key);
-            if (existing)
-                return account;
-            account.transactions.push({
-                type: isIncome ? 'income' : entryType === 'maintenance' ? 'maintenance' : 'expense',
-                amount,
-                date: body.date ? new Date(body.date) : new Date(),
-                idempotencyKey: key,
-                description: String(body.description || category),
-                category,
-                referenceNumber: body.reference || body.referenceNumber,
-                status: 'completed',
-                processedBy: asObjectId(userId),
+            const canonical = yield individualAccountingService_1.default.postEntry({
+                companyId,
+                userId,
+                entryType: entryType === 'maintenance' ? 'maintenance' : entryType,
+                propertyId,
+                category: body.category,
+                description: body.description,
+                amount: Number(body.amount || 0),
+                date: body.date,
+                reference: body.reference || body.referenceNumber,
                 notes: body.notes,
-                attachments: Array.isArray(body.attachments) ? body.attachments : body.receiptUrl ? [String(body.receiptUrl)] : [],
-                createdAt: new Date(),
-                updatedAt: new Date()
+                receiptUrl: body.receiptUrl,
+                attachments: body.attachments,
+                supplier: body.supplier,
+                supplierTin: body.supplierTin,
+                supplierVatNumber: body.supplierVatNumber,
+                invoiceNumber: body.invoiceNumber,
+                paymentMethod: body.paymentMethod,
+                currency: body.currency,
+                vatMode: body.vatMode,
+                capitalOrRevenue: body.capitalOrRevenue,
+                deductibility: body.deductibility,
+                inputVatEligibility: body.inputVatEligibility,
+                sourceMaintenanceId: body.sourceMaintenanceId || body.maintenanceId,
+                overrideReason: body.overrideReason,
+                idempotencyKey: idempotencyKey || body.idempotencyKey
             });
-            yield account.save();
-            return account;
+            const account = yield propertyAccountService_1.default.getOrCreatePropertyAccount(propertyId);
+            const tax = yield individualTaxMetadataService_1.default.getForSource(companyId, 'LandlordFinancialTransaction', String(canonical._id));
+            return { account, tax };
         });
     }
     correctEntry(companyId, userId, propertyId, transactionId, body, mode) {
         return __awaiter(this, void 0, void 0, function* () {
+            try {
+                yield individualAccountingService_1.default.reverseEntry({
+                    companyId,
+                    userId,
+                    propertyId,
+                    transactionId,
+                    mode,
+                    replacement: mode === 'edit'
+                        ? Object.assign({ companyId,
+                            userId, entryType: body.entryType || (body.category && String(body.category).toUpperCase().includes('INCOME') ? 'income' : 'expense'), propertyId }, body) : undefined
+                });
+                return this.getLedger(companyId, propertyId);
+            }
+            catch (error) {
+                if (Number((error === null || error === void 0 ? void 0 : error.statusCode) || 0) !== 404)
+                    throw error;
+            }
             const ledger = yield this.getLedger(companyId, propertyId);
             const tx = (ledger.account.transactions || []).find((item) => String(item._id) === String(transactionId));
             if (!tx)
@@ -464,11 +546,11 @@ class IndividualWorkspaceService {
                 description: `${mode === 'delete' ? 'Delete' : 'Edit'} reversal: ${tx.description || tx.category || 'ledger entry'}`,
                 reference: `REV-${String(tx._id).slice(-8)}`,
                 notes: `Correction entry for ${tx._id}`
-            }, `${mode}:reversal:${transactionId}:${Date.now()}`);
+            }, `${mode}:reversal:${transactionId}`);
             if (mode === 'delete')
                 return this.getLedger(companyId, propertyId);
             const newType = tx.type === 'income' ? 'income' : 'expense';
-            yield this.postEntry(companyId, userId, newType, Object.assign(Object.assign({}, body), { propertyId }), `${mode}:replacement:${transactionId}:${Date.now()}`);
+            yield this.postEntry(companyId, userId, newType, Object.assign(Object.assign({}, body), { propertyId }), `${mode}:replacement:${transactionId}`);
             return this.getLedger(companyId, propertyId);
         });
     }
@@ -505,9 +587,16 @@ class IndividualWorkspaceService {
             return { request, account };
         });
     }
-    getReport(companyId, reportType, format) {
-        return __awaiter(this, void 0, void 0, function* () {
+    getReport(companyId_1, reportType_1, format_1) {
+        return __awaiter(this, arguments, void 0, function* (companyId, reportType, format, filters = {}) {
             const data = yield this.getAccounting(companyId);
+            const taxFilters = {
+                taxPeriodId: filters.taxPeriodId,
+                taxPeriodKey: filters.taxPeriodKey,
+                taxTreatment: filters.taxTreatment,
+                taxCalculationStatus: filters.taxCalculationStatus,
+                taxType: filters.taxType
+            };
             let rows;
             switch (reportType) {
                 case 'rent-collection':
@@ -521,7 +610,7 @@ class IndividualWorkspaceService {
                     }));
                     break;
                 case 'expense':
-                    rows = yield this.listEntries(companyId, 'expense', {});
+                    rows = yield this.listEntries(companyId, 'expense', taxFilters);
                     break;
                 case 'profit-loss':
                 case 'cashflow':
@@ -532,7 +621,8 @@ class IndividualWorkspaceService {
                         income: p.monthlyIncome,
                         expenses: p.monthlyExpenses,
                         netProfit: p.netProfit,
-                        annualProfit: p.annualProfit,
+                        yearToDateProfit: p.yearToDateProfit,
+                        annualisedRunRate: p.annualisedRunRate,
                         expenseRatio: p.expenseRatio,
                         profitabilityPercent: p.profitabilityPercent
                     }));
@@ -561,7 +651,7 @@ class IndividualWorkspaceService {
                     body: toCsv(rows)
                 };
             }
-            return { contentType: 'application/json', body: { reportType, rows, generatedAt: new Date().toISOString() } };
+            return { contentType: 'application/json', body: { reportType, rows, filters: taxFilters, generatedAt: new Date().toISOString() } };
         });
     }
 }

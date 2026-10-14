@@ -149,7 +149,11 @@ export const OperationalEmptyState: React.FC<{
   description: string;
   actionLabel?: string;
   onAction?: () => void;
-}> = ({ title, description, actionLabel, onAction }) => (
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+  tertiaryLabel?: string;
+  onTertiary?: () => void;
+}> = ({ title, description, actionLabel, onAction, secondaryLabel, onSecondary, tertiaryLabel, onTertiary }) => (
   <Box
     sx={{
       border: '1px dashed',
@@ -167,11 +171,23 @@ export const OperationalEmptyState: React.FC<{
     <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 520, mx: 'auto', my: 1 }}>
       {description}
     </Typography>
-    {actionLabel && onAction && (
-      <Button variant="contained" size="small" onClick={onAction} sx={{ mt: 1 }}>
-        {actionLabel}
-      </Button>
-    )}
+    <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+      {actionLabel && onAction && (
+        <Button variant="contained" size="small" onClick={onAction}>
+          {actionLabel}
+        </Button>
+      )}
+      {secondaryLabel && onSecondary && (
+        <Button variant="outlined" size="small" onClick={onSecondary}>
+          {secondaryLabel}
+        </Button>
+      )}
+      {tertiaryLabel && onTertiary && (
+        <Button variant="text" size="small" onClick={onTertiary}>
+          {tertiaryLabel}
+        </Button>
+      )}
+    </Stack>
   </Box>
 );
 

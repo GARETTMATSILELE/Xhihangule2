@@ -49,7 +49,11 @@ export const NAV_SECTIONS: NavSection[] = [
       { text: 'Rent Collection', icon: React.createElement(Receipt), path: '/individual-dashboard/rent-collection' },
       { text: 'Expenses', icon: React.createElement(TrendingDown), path: '/individual-dashboard/expenses' },
       { text: 'Bills & Levies', icon: React.createElement(Description), path: '/individual-dashboard/bills' },
-      { text: 'Accounting', icon: React.createElement(AccountBalance), path: '/individual-dashboard/accounting' }
+      { text: 'Accounting', icon: React.createElement(AccountBalance), path: '/individual-dashboard/accounting' },
+      { text: 'VAT', icon: React.createElement(Receipt), path: '/individual-dashboard/tax/vat' },
+      { text: 'Rental Tax', icon: React.createElement(AccountBalance), path: '/individual-dashboard/tax/rental' },
+      { text: 'Income Tax', icon: React.createElement(Assessment), path: '/individual-dashboard/tax/income' },
+      { text: 'Tax Compliance', icon: React.createElement(FactCheck), path: '/individual-dashboard/tax/compliance' }
     ]
   },
   {
@@ -60,6 +64,16 @@ export const NAV_SECTIONS: NavSection[] = [
     ]
   }
 ];
+
+export function getNavSections(base = '/individual-dashboard'): NavSection[] {
+  return NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.map((item) => ({
+      ...item,
+      path: item.path.replace('/individual-dashboard', base)
+    }))
+  }));
+}
 
 export const expenseCategories = [
   'Maintenance', 'Municipal', 'Levies', 'Security', 'Insurance',

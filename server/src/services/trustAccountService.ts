@@ -7,6 +7,13 @@ import { TrustAuditLog } from '../models/TrustAuditLog';
 import taxEngine from './taxEngine';
 import { Property } from '../models/Property';
 import { Payment } from '../models/Payment';
+import { loadCgtRates } from './vatPolicyService';
+import { upsertPaymentTaxObligation, openReview } from './taxObligationService';
+import { GL } from './tax/chartAccounts';
+import accountingService from './accountingService';
+import { buildWithholdingJournal } from './tax/principalAgentJournal';
+import { TaxOverride } from '../models/TaxOverride';
+import { AppError } from '../middleware/errorHandler';
 
 const money = (n: number): number => Number(Number(n || 0).toFixed(2));
 const toObjectId = (id: string): mongoose.Types.ObjectId => new mongoose.Types.ObjectId(id);
@@ -501,6 +508,11 @@ class TrustAccountService {
     applyVatOnCommission?: boolean;
     cgtRate?: number;
     cgtAmount?: number;
+    cgtOverrideReason?: string;
+    cgtNotApplicable?: boolean;
+    cgtNotApplicableReason?: string;
+    cgwtApplicability?: 'APPLICABLE' | 'NOT_APPLICABLE' | 'REVIEW_REQUIRED';
+    cgwtNotApplicableReason?: string;
     vatSaleRate?: number;
     vatOnCommissionRate?: number;
     createdBy?: string;
@@ -580,26 +592,64 @@ class TrustAccountService {
           typeof payment?.vatOnCommissionRate === 'number'
         );
 
+      const saleDate = settlementPayments[0]?.paymentDate
+        ? new Date((settlementPayments[0] as any).paymentDate)
+        : new Date();
+      const property = await Property.findById(account.propertyId)
+        .select('acquisitionCost acquisitionDate improvementCosts qualifyingExpenses sellingCosts')
+        .lean()
+        .session(session || null);
+      const rates = await loadCgtRates(input.companyId, saleDate);
       const resolvedCommission = derivedCommission > 0 ? derivedCommission : money(Number(input.commissionAmount || 0));
       const summaryBase = taxEngine.generateTaxSummary({
         salePrice: derivedSalePrice,
         commissionAmount: resolvedCommission,
-        vatOnCommissionAmount: hasExplicitVatOnCommission ? derivedVatOnCommission : undefined,
-        applyVatOnSale: input.applyVatOnSale,
-        applyVatOnCommission: input.applyVatOnCommission,
-        cgtRate: input.cgtRate,
-        vatSaleRate: input.vatSaleRate,
-        vatOnCommissionRate: input.vatOnCommissionRate
+        vatOnCommissionAmount: hasExplicitVatOnCommission ? derivedVatOnCommission : 0,
+        applyVatOnSale: Boolean(derivedVatOnSale > 0 || input.applyVatOnSale),
+        saleVatAmount: derivedVatOnSale,
+        saleVatRate: input.vatSaleRate,
+        acquisitionCost: (property as any)?.acquisitionCost,
+        improvementCosts: (property as any)?.improvementCosts,
+        qualifyingExpenses: (property as any)?.qualifyingExpenses,
+        sellingCosts: (property as any)?.sellingCosts,
+        cgtRate: input.cgtRate != null ? input.cgtRate : rates.cgtRate,
+        cgwtRate: rates.cgwtRate,
+        cgwtApplicability: input.cgwtApplicability || (rates.cgwtRate > 0 ? 'APPLICABLE' : undefined),
+        cgwtNotApplicableReason: input.cgwtNotApplicableReason,
+        cgtNotApplicable: input.cgtNotApplicable,
+        cgtNotApplicableReason: input.cgtNotApplicableReason,
+        cgtOverrideAmount: input.cgtAmount != null ? input.cgtAmount : null,
+        cgtOverrideReason: input.cgtOverrideReason,
+        cgtOverrideUser: input.createdBy
       });
-      const cgt = input.cgtAmount != null ? money(input.cgtAmount) : money(summaryBase.cgt);
+      const cgtLiability = money(summaryBase.cgt.cgtAmount);
+      const cgwt = money(summaryBase.cgwt.cgwtAmount);
       const vatOnSale = derivedVatOnSale > 0 ? derivedVatOnSale : money(summaryBase.vatOnSale);
       const vatOnCommission = hasExplicitVatOnCommission ? derivedVatOnCommission : money(summaryBase.vatOnCommission);
       const commission = money(summaryBase.commission);
-      const totalDeductions = money(cgt + commission + vatOnCommission + vatOnSale);
-      const sellerNetPayout = money(Math.max(0, derivedSalePrice - totalDeductions));
+      const sellerNetPayout = money(summaryBase.sellerNetPayout);
+      const totalDeductions = money(summaryBase.waterfall.totalDeductions);
+
+      if (summaryBase.cgt.reviewRequired && summaryBase.cgt.reviewReason) {
+        await openReview({
+          companyId: input.companyId,
+          kind: summaryBase.cgt.reviewReason,
+          title: 'CGT requires accountant review',
+          propertyId: String(account.propertyId),
+          detail: summaryBase.cgt.calculationBasis
+        });
+      }
+      if (summaryBase.cgwt.reviewRequired && summaryBase.cgwt.reviewReason) {
+        await openReview({
+          companyId: input.companyId,
+          kind: summaryBase.cgwt.reviewReason,
+          title: 'Capital Gains Withholding Tax rate is not configured',
+          propertyId: String(account.propertyId)
+        });
+      }
 
       const deductions = [
-        { type: 'CGT', amount: cgt },
+        { type: 'CAPITAL_GAINS_WITHHOLDING_TAX', amount: cgwt },
         { type: 'COMMISSION', amount: commission },
         { type: 'VAT_ON_COMMISSION', amount: vatOnCommission },
         { type: 'VAT', amount: vatOnSale }
@@ -613,12 +663,42 @@ class TrustAccountService {
             grossProceeds: derivedSalePrice,
             deductions,
             netPayout: sellerNetPayout,
-            settlementDate: new Date()
+            settlementDate: new Date(),
+            cgtSnapshot: {
+              ...summaryBase.cgt,
+              calculatedAt: new Date(),
+              calculatedBy: input.createdBy
+            },
+            cgwtSnapshot: {
+              ...summaryBase.cgwt,
+              calculatedAt: new Date(),
+              calculatedBy: input.createdBy
+            },
+            waterfall: summaryBase.waterfall,
+            settlementStatus: summaryBase.settlementStatus === 'REQUIRES_TAX_REVIEW' ? 'REQUIRES_TAX_REVIEW' : summaryBase.settlementStatus,
+            cgwtApplicability: summaryBase.cgwt.applicability,
+            calculatedAt: new Date(),
+            calculatedBy: input.createdBy ? toObjectId(input.createdBy) : undefined
           },
           $setOnInsert: { locked: false }
         },
         { upsert: true, new: true, session }
       );
+
+      if (input.cgtAmount != null && String(input.cgtOverrideReason || '').trim() && input.createdBy) {
+        await TaxOverride.create({
+          companyId: toObjectId(input.companyId),
+          entityType: 'TRUST_SETTLEMENT',
+          entityId: String(account._id),
+          field: 'cgtAmount',
+          originalValue: summaryBase.cgt.cgtAmount,
+          newValue: money(Number(input.cgtAmount)),
+          reason: String(input.cgtOverrideReason).trim(),
+          userId: toObjectId(input.createdBy),
+          timestamp: new Date(),
+          approvalStatus: 'PENDING'
+        });
+      }
 
       if (settlement) {
         await this.audit({
@@ -636,20 +716,26 @@ class TrustAccountService {
       return {
         settlement,
         taxSummary: {
-          ...summaryBase,
-          cgt,
+          cgt: cgtLiability,
+          cgwt,
+          capitalGain: summaryBase.cgt.capitalGain,
           vatOnSale,
           vatOnCommission,
           commission,
           totalDeductions,
           sellerNetPayout,
+          waterfall: summaryBase.waterfall,
+          cgtSnapshot: summaryBase.cgt,
+          cgwtSnapshot: summaryBase.cgwt,
           breakdown: {
             ...(summaryBase.breakdown || {}),
             sourceOfTruth: {
               salePrice: 'payments.sum(amount)',
               commission: 'payments.sum(commissionDetails.totalCommission)',
               vatOnCommission: derivedVatOnCommission > 0 ? 'payments.sum(commissionDetails.vatOnCommission)' : 'tax-engine',
-              vatOnSale: derivedVatOnSale > 0 ? 'payments.sum(vatOnSale)' : 'tax-engine'
+              vatOnSale: derivedVatOnSale > 0 ? 'payments.sum(vatAmount)' : 'tax-engine',
+              cgt: 'capital_gain',
+              cgwt: 'sale_consideration_withholding'
             }
           }
         }
@@ -677,9 +763,12 @@ class TrustAccountService {
       }).session(session || null);
       if (!settlement) throw new Error('Settlement must be calculated first');
       if (settlement.locked) throw new Error('Settlement is locked');
+      if (settlement.settlementStatus === 'REQUIRES_TAX_REVIEW' || settlement.settlementStatus === 'BLOCKED') {
+        throw new AppError('Settlement is blocked pending tax review. A missing Capital Gains Tax or Capital Gains Withholding Tax rate cannot settle at zero.', 409);
+      }
 
       const taxItems = settlement.deductions.filter((d) =>
-        ['CGT', 'VAT', 'VAT_ON_COMMISSION', 'COMMISSION'].includes(String(d.type || '').toUpperCase())
+        ['CGT', 'CAPITAL_GAINS_WITHHOLDING_TAX', 'VAT', 'VAT_ON_COMMISSION', 'COMMISSION'].includes(String(d.type || '').toUpperCase())
       );
       const settlementRefPrefix = `settlement:${settlement._id}:`;
       const existingSettlementDeductions = await TrustTransaction.find({
@@ -694,8 +783,8 @@ class TrustAccountService {
       const appliedByType = existingSettlementDeductions.reduce<Record<string, number>>((acc, tx: any) => {
         const txType = String(tx?.type || '').toUpperCase();
         const deductionType =
-          txType === 'CGT_DEDUCTION'
-            ? 'CGT'
+          txType === 'CGT_DEDUCTION' || txType === 'CGWT_DEDUCTION'
+            ? (txType === 'CGWT_DEDUCTION' ? 'CAPITAL_GAINS_WITHHOLDING_TAX' : 'CGT')
             : txType === 'VAT_DEDUCTION'
               ? 'VAT'
               : txType === 'VAT_ON_COMMISSION'
@@ -731,18 +820,52 @@ class TrustAccountService {
           continue;
         }
 
-        const taxType = normalizedType as 'CGT' | 'VAT' | 'VAT_ON_COMMISSION';
+        const taxType = normalizedType as 'CGT' | 'VAT' | 'VAT_ON_COMMISSION' | 'CAPITAL_GAINS_WITHHOLDING_TAX';
+        if (taxType === 'CGT') {
+          await upsertPaymentTaxObligation({
+            companyId: input.companyId,
+            taxType: 'CAPITAL_GAINS_TAX',
+            paymentId: String(settlement._id),
+            propertyId: String(account.propertyId),
+            taxPeriod: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
+            transactionDate: settlement.settlementDate || new Date(),
+            taxableAmount: Number((settlement as any).salePrice || 0),
+            taxRate: Number((settlement as any)?.cgtSnapshot?.cgtRate || 0),
+            taxAmount: deltaToApply,
+            calculationBasis: 'CAPITAL_GAIN',
+            status: 'PAYABLE',
+            glAccount: GL.ZIMRA_WITHHOLDING,
+            sourceLedger: 'company_journal',
+            createdBy: input.createdBy
+          });
+          postedAnyDeduction = true;
+          continue;
+        }
+        const trustLedgerType =
+          taxType === 'CAPITAL_GAINS_WITHHOLDING_TAX'
+            ? 'CGWT_DEDUCTION'
+            : taxType === 'VAT'
+              ? 'VAT_DEDUCTION'
+              : 'VAT_ON_COMMISSION';
+        const canonicalTaxType =
+          taxType === 'CAPITAL_GAINS_WITHHOLDING_TAX'
+            ? 'CAPITAL_GAINS_WITHHOLDING_TAX'
+            : taxType === 'VAT'
+              ? 'VAT_OUTPUT'
+              : 'VAT_ON_COMMISSION';
+
         await TaxRecord.create(
           [
             {
               companyId: toObjectId(input.companyId),
               trustAccountId: account._id,
-              taxType,
+              taxType: taxType === 'CAPITAL_GAINS_WITHHOLDING_TAX' ? 'CGWT' : (taxType as 'CGT' | 'VAT' | 'VAT_ON_COMMISSION' | 'CGWT'),
               amount: deltaToApply,
               calculationBreakdown: {
                 settlementId: String(settlement._id),
                 deductionType: d.type,
-                appliedDelta: deltaToApply
+                appliedDelta: deltaToApply,
+                canonicalTaxType
               },
               paidToZimra: false,
               paymentReference: input.zimraPaymentReference
@@ -755,10 +878,43 @@ class TrustAccountService {
           companyId: input.companyId,
           trustAccountId: input.trustAccountId,
           propertyId: String(account.propertyId),
-          type: taxType === 'CGT' ? 'CGT_DEDUCTION' : taxType === 'VAT' ? 'VAT_DEDUCTION' : 'VAT_ON_COMMISSION',
+          type: trustLedgerType as TrustTransactionType,
           debit: deltaToApply,
-          reference: `settlement:${settlement._id}:${taxType.toLowerCase()}`,
+          reference: `settlement:${settlement._id}:${String(canonicalTaxType).toLowerCase()}`,
           createdBy: input.createdBy
+        });
+
+        await upsertPaymentTaxObligation({
+          companyId: input.companyId,
+          taxType: canonicalTaxType as any,
+          paymentId: String(settlement._id),
+          propertyId: String(account.propertyId),
+          taxPeriod: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
+          transactionDate: new Date(),
+          taxableAmount: Number((settlement as any).salePrice || 0),
+          taxRate: 0,
+          taxAmount: deltaToApply,
+          calculationBasis: canonicalTaxType,
+          status: 'WITHHELD',
+          glAccount: canonicalTaxType === 'CAPITAL_GAINS_WITHHOLDING_TAX' ? GL.ZIMRA_WITHHOLDING : GL.VAT_PAYABLE,
+          sourceLedger: 'trust',
+          createdBy: input.createdBy
+        });
+
+        const withholdingLines = buildWithholdingJournal({
+          amount: deltaToApply,
+          fromPayableAccount: GL.SELLER_PAYABLE,
+          propertyId: String(account.propertyId)
+        });
+        await accountingService.postTransaction({
+          companyId: input.companyId,
+          reference: `TRUST-TAX-${settlement._id}-${canonicalTaxType}`,
+          description: `Withhold ${canonicalTaxType} from seller trust`,
+          sourceModule: 'trust',
+          sourceId: `trust-tax:${settlement._id}:${canonicalTaxType}`,
+          transactionDate: new Date(),
+          createdBy: input.createdBy,
+          lines: withholdingLines
         });
         postedAnyDeduction = true;
       }
@@ -807,6 +963,9 @@ class TrustAccountService {
       }).session(session || null);
       if (!settlement) throw new Error('Settlement must exist before transfer');
       if (settlement.locked) throw new Error('Settlement is locked');
+      if (settlement.settlementStatus === 'REQUIRES_TAX_REVIEW' || settlement.settlementStatus === 'BLOCKED') {
+        throw new AppError('Seller payout is blocked until Capital Gains Tax / Capital Gains Withholding Tax review is complete.', 409);
+      }
       if (money(input.amount) > money(settlement.netPayout)) throw new Error('Transfer amount exceeds settlement net payout');
 
       await this.postTransaction({
@@ -1021,7 +1180,8 @@ class TrustAccountService {
       TrustAccount.findOne({ _id: trustAccountObjectId, companyId: companyObjectId }).select('propertyId').lean()
     ]);
 
-    const cgt = money(records.filter((r) => r.taxType === 'CGT').reduce((s, r) => s + Number(r.amount || 0), 0));
+    const cgwt = money(records.filter((r) => r.taxType === 'CGWT').reduce((s, r) => s + Number(r.amount || 0), 0));
+    const cgtLiabilityRecords = money(records.filter((r) => r.taxType === 'CGT').reduce((s, r) => s + Number(r.amount || 0), 0));
     const vat = money(records.filter((r) => r.taxType === 'VAT').reduce((s, r) => s + Number(r.amount || 0), 0));
     const vatOnCommissionFromTaxRecords = money(
       records.filter((r) => r.taxType === 'VAT_ON_COMMISSION').reduce((s, r) => s + Number(r.amount || 0), 0)
@@ -1049,11 +1209,14 @@ class TrustAccountService {
       vatOnCommissionFromPayments !== null ? vatOnCommissionFromPayments : vatOnCommissionFromTaxRecords;
 
     return {
-      cgt,
+      cgt: cgtLiabilityRecords,
+      cgwt,
+      capitalGainsWithholdingTax: cgwt,
       vat,
       vatOnCommission,
-      total: money(cgt + vat + vatOnCommission),
+      total: money(cgwt + vat + vatOnCommission),
       paidToZimraCount: records.filter((r) => r.paidToZimra).length,
+      withheldNotRemitted: money(cgwt + vat + vatOnCommission),
       records
     };
   }

@@ -27,10 +27,10 @@ export function IndividualPropertyCreationSuccess({
   return (
     <Alert severity="success" sx={{ mb: 3, alignItems: 'flex-start' }} onClose={onDismiss}>
       <Typography variant="h6" sx={{ fontWeight: 700 }}>
-        Property Added Successfully
+        You&apos;re up and running.
       </Typography>
       <Typography variant="body2" sx={{ mt: 0.5 }}>
-        {property.name} is in your portfolio. Complete the landlord workflow below when you are ready.
+        {property.name} is now being tracked in Mantis.
       </Typography>
       <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
         Recommended Next Steps

@@ -105,6 +105,28 @@ export const canCreateProperty = (req: Request, res: Response, next: NextFunctio
   next();
 };
 
+export const isSystemAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.includes('system_admin')) {
+    throw new AppError('Access denied. System admin role required.', 403);
+  }
+  next();
+};
+
+export const isAdminOrSystemAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    throw new AppError('Authentication required', 401);
+  }
+  const roles = ((req.user as any).roles as string[] | undefined) || [req.user.role];
+  if (!roles.some((r) => ['admin', 'system_admin'].includes(r))) {
+    throw new AppError('Access denied. Admin or system admin role required.', 403);
+  }
+  next();
+};
+
 export const canManagePayments = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) {
     throw new AppError('Authentication required', 401);

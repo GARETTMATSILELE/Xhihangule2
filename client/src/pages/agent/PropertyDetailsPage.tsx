@@ -35,6 +35,7 @@ import { OperationalEmptyState, PropertyWorkflowSummary, WorkflowStatusChip } fr
 import { buildPropertyWorkflowState, buildWorkflowActivity } from '../../utils/rentalWorkflow';
 import { getLeaseLifecycleStatus, leaseStatusLabels } from '../../utils/leaseLifecycle';
 import PropertyMaintenanceHistory from '../../components/maintenance/PropertyMaintenanceHistory';
+import { AgencyPropertyWorkflow } from '../agency/AgencyPropertyWorkflow';
 
 const PropertyDetailsPage: React.FC = () => {
   const { propertyId } = useParams();
@@ -91,7 +92,7 @@ const PropertyDetailsPage: React.FC = () => {
           } catch {
           // Fall back to resolving via property.ownerId when available (authenticated)
           try {
-            const rawOwnerId: any = (p as any)?.ownerId;
+            const rawOwnerId: any = (p as any)?.propertyOwnerId;
             let ownerIdStr = '';
             if (typeof rawOwnerId === 'string') {
               ownerIdStr = rawOwnerId;
@@ -278,6 +279,7 @@ const PropertyDetailsPage: React.FC = () => {
               <PropertyWorkflowSummary state={workflowState} />
             </Box>
           )}
+          {isAgentRoute && propertyId && <AgencyPropertyWorkflow propertyId={propertyId} />}
           <Card>
             <CardContent>
               <Typography variant="h6" sx={{ mb: 2 }}>Property Information</Typography>

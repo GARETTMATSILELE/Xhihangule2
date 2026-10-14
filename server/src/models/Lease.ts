@@ -77,6 +77,10 @@ export interface ILease extends Document {
   rentDueDay: number;
   lateFee: number;
   gracePeriod: number;
+  agencyWorkflow?: boolean;
+  applicationId?: mongoose.Types.ObjectId;
+  tenantSignedAt?: Date;
+  ownerSignedAt?: Date;
   
   // Timestamps
   createdAt: Date;
@@ -167,6 +171,10 @@ const LeaseSchema: Schema = new Schema({
   rentDueDay: { type: Number, default: 1, min: 1, max: 31 },
   lateFee: { type: Number, default: 0, min: 0 },
   gracePeriod: { type: Number, default: 0, min: 0 },
+  agencyWorkflow: { type: Boolean, default: false },
+  applicationId: { type: Schema.Types.ObjectId, ref: 'RentalApplication' },
+  tenantSignedAt: { type: Date },
+  ownerSignedAt: { type: Date },
 }, {
   timestamps: true
 });

@@ -39,7 +39,7 @@ const ledgerMutationPolicy_1 = require("../services/ledgerMutationPolicy");
 const LedgerEventSchema = new mongoose_1.Schema({
     type: {
         type: String,
-        enum: ['owner_income', 'payment_reversal', 'agent_commission', 'company_commission', 'levy_collection', 'levy_payout'],
+        enum: ['owner_income', 'payment_reversal', 'agent_commission', 'company_commission', 'levy_collection', 'levy_payout', 'journal'],
         required: true
     },
     paymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment', required: false },

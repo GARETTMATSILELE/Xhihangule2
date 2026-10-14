@@ -22,6 +22,7 @@ const PropertyAccount_1 = __importDefault(require("../../models/PropertyAccount"
 const Payment_1 = require("../../models/Payment");
 const Property_1 = require("../../models/Property");
 const PropertyOwner_1 = require("../../models/PropertyOwner");
+const SalesOwner_1 = require("../../models/SalesOwner");
 const Tenant_1 = require("../../models/Tenant");
 const statementRent_1 = require("../statementRent");
 const isWithinPeriod = (date, from, to) => {
@@ -156,40 +157,124 @@ const propertyAccountToLedgerEntries = (account, context) => {
     }
     return entries;
 };
+const OWNER_NAME_FIELDS = '_id firstName lastName email phone properties companyId';
+const placeholderOwnerName = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return !normalized || normalized === 'unknown' || normalized === 'unknown owner' || normalized === 'owner not assigned' || normalized === 'n/a';
+};
+const ownerDisplayName = (owner) => {
+    if (!owner)
+        return '';
+    return `${owner.firstName || ''} ${owner.lastName || ''}`.replace(/\s+/g, ' ').trim();
+};
+const samePropertyReference = (value, propertyId, propertyObjectId) => {
+    if (!value)
+        return false;
+    if (value instanceof mongoose_1.default.Types.ObjectId)
+        return value.equals(propertyObjectId);
+    if (typeof value === 'string')
+        return value === propertyId || value === String(propertyObjectId);
+    if (typeof value === 'object') {
+        const record = value;
+        return samePropertyReference(record.$oid || record._id || record.id, propertyId, propertyObjectId);
+    }
+    return false;
+};
 class PropertyAccountReportingReadService {
-    getOwnerForProperty(companyId, propertyId) {
+    getOwnerForProperty(companyId, propertyId, ledgerType) {
         return __awaiter(this, void 0, void 0, function* () {
-            const [account, property] = yield Promise.all([
-                this.getAccount(companyId, propertyId),
-                this.getPropertyDocument(companyId, propertyId)
-            ]);
-            const ownerId = toId(account === null || account === void 0 ? void 0 : account.ownerId) || toId(property === null || property === void 0 ? void 0 : property.ownerId) || toId(property === null || property === void 0 ? void 0 : property.propertyOwnerId);
-            const owner = ownerId && mongoose_1.default.isValidObjectId(ownerId)
-                ? yield PropertyOwner_1.PropertyOwner.findById(ownerId).select('_id firstName lastName email phone').lean()
-                : yield PropertyOwner_1.PropertyOwner.findOne({ companyId, properties: { $in: [propertyId] } }).select('_id firstName lastName email phone').lean();
+            if (!mongoose_1.default.isValidObjectId(companyId) || !mongoose_1.default.isValidObjectId(propertyId))
+                return undefined;
+            const property = yield this.getPropertyDocument(companyId, propertyId);
+            if (!property)
+                return undefined;
+            const owner = yield this.findRegisteredOwner(companyId, propertyId, property, ledgerType);
+            const resolvedName = ownerDisplayName(owner);
+            if (owner && resolvedName) {
+                return {
+                    id: toId(owner._id),
+                    displayName: resolvedName,
+                    email: owner.email,
+                    phone: owner.phone
+                };
+            }
+            const storedName = yield this.storedAccountOwnerName(propertyId);
+            if (storedName)
+                return { displayName: storedName };
+            const linkedOwnerId = toId(property.propertyOwnerId);
             return {
-                id: owner ? toId(owner._id) : ownerId,
-                displayName: (account === null || account === void 0 ? void 0 : account.ownerName)
-                    || (owner ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() : '')
-                    || 'Unknown Owner',
-                email: owner === null || owner === void 0 ? void 0 : owner.email,
-                phone: owner === null || owner === void 0 ? void 0 : owner.phone
+                displayName: 'Owner not assigned',
+                unresolvedReason: linkedOwnerId
+                    ? 'The property owner link does not match a landlord in this company.'
+                    : 'No landlord is assigned to this property.'
             };
         });
     }
-    getProperty(companyId, propertyId) {
+    findRegisteredOwner(companyId, propertyId, property, ledgerType) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
+            const propertyObjectId = new mongoose_1.default.Types.ObjectId(propertyId);
+            const linkedOwnerId = toId(property.propertyOwnerId);
+            if (ledgerType === 'sale') {
+                const salesMember = yield this.ownerByMembership(SalesOwner_1.SalesOwner, companyObjectId, propertyId, propertyObjectId);
+                if (salesMember)
+                    return salesMember;
+            }
+            const propertyMember = yield this.ownerByMembership(PropertyOwner_1.PropertyOwner, companyObjectId, propertyId, propertyObjectId);
+            if (propertyMember)
+                return propertyMember;
+            const linkedLandlord = yield this.ownerByCompanyId(PropertyOwner_1.PropertyOwner, companyObjectId, linkedOwnerId);
+            if (linkedLandlord)
+                return linkedLandlord;
+            if (ledgerType === 'sale') {
+                return this.ownerByCompanyId(SalesOwner_1.SalesOwner, companyObjectId, linkedOwnerId);
+            }
+            return null;
+        });
+    }
+    ownerByMembership(model, companyId, propertyId, propertyObjectId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const owners = yield model.find({ companyId }).select(OWNER_NAME_FIELDS).lean();
+            const member = owners.find((owner) => Array.isArray(owner.properties) && owner.properties.some((value) => samePropertyReference(value, propertyId, propertyObjectId)));
+            return member || null;
+        });
+    }
+    ownerByCompanyId(model, companyId, ownerId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!ownerId || !mongoose_1.default.isValidObjectId(ownerId))
+                return null;
+            return model.findOne({ _id: ownerId, companyId }).select(OWNER_NAME_FIELDS).lean();
+        });
+    }
+    storedAccountOwnerName(propertyId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const accounts = yield PropertyAccount_1.default.find({
+                propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                isArchived: { $ne: true },
+                isActive: { $ne: false }
+            }).select('ownerName').lean();
+            for (const account of accounts) {
+                const name = String(account.ownerName || '').trim();
+                if (!placeholderOwnerName(name))
+                    return name;
+            }
+            return '';
+        });
+    }
+    getProperty(companyId, propertyId, ledgerType) {
         return __awaiter(this, void 0, void 0, function* () {
             const [account, property] = yield Promise.all([
-                this.getAccount(companyId, propertyId),
+                this.getAccount(companyId, propertyId, ledgerType),
                 this.getPropertyDocument(companyId, propertyId)
             ]);
             if (!account && !property)
                 return undefined;
+            const resolvedLedger = ledgerType || (account === null || account === void 0 ? void 0 : account.ledgerType);
             return {
                 id: propertyId,
                 name: (account === null || account === void 0 ? void 0 : account.propertyName) || (property === null || property === void 0 ? void 0 : property.name) || 'Property',
                 address: (account === null || account === void 0 ? void 0 : account.propertyAddress) || (property === null || property === void 0 ? void 0 : property.address),
-                ledgerType: (account === null || account === void 0 ? void 0 : account.ledgerType) || ((property === null || property === void 0 ? void 0 : property.rentalType) === 'sale' ? 'sale' : 'rental'),
+                ledgerType: resolvedLedger,
                 ownerId: toId(account === null || account === void 0 ? void 0 : account.ownerId) || toId(property === null || property === void 0 ? void 0 : property.ownerId) || toId(property === null || property === void 0 ? void 0 : property.propertyOwnerId),
                 ownerName: account === null || account === void 0 ? void 0 : account.ownerName
             };
@@ -198,7 +283,12 @@ class PropertyAccountReportingReadService {
     getLedgerEntries(query) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a;
-            const account = query.propertyId ? yield this.getAccount(query.companyId, query.propertyId) : undefined;
+            if (query.propertyId && query.ledgerType !== 'rental' && query.ledgerType !== 'sale') {
+                return [];
+            }
+            const account = query.propertyId
+                ? yield this.getAccount(query.companyId, query.propertyId, query.ledgerType)
+                : undefined;
             if (!account)
                 return [];
             const companyContext = yield new CompanyReportingReadService().getCompanyContext(query.companyId);
@@ -214,15 +304,18 @@ class PropertyAccountReportingReadService {
             return entries.filter((entry) => allowed.has(entry.eventType.toUpperCase()));
         });
     }
-    getAccount(companyId, propertyId) {
+    getAccount(companyId, propertyId, ledgerType) {
         return __awaiter(this, void 0, void 0, function* () {
             if (!mongoose_1.default.isValidObjectId(propertyId))
                 return undefined;
+            if (ledgerType !== 'rental' && ledgerType !== 'sale')
+                return undefined;
             const account = yield PropertyAccount_1.default.findOne({
                 propertyId: new mongoose_1.default.Types.ObjectId(propertyId),
+                ledgerType,
                 isArchived: { $ne: true },
                 isActive: { $ne: false }
-            }).sort({ updatedAt: -1 });
+            });
             return account || undefined;
         });
     }
@@ -282,7 +375,7 @@ class PaymentReportingReadService {
             }
             const rows = yield Payment_1.Payment.find(filter).select('paymentDate amount rentUsed rentAllocated levyAllocated levyUsed commissionDetails referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd vatOnCommissionRate vatCommissionTreatment').lean();
             return rows.map((row) => {
-                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
                 const cd = row.commissionDetails || {};
                 const levy = Number((_b = (_a = cd.levy) !== null && _a !== void 0 ? _a : row.levyAllocated) !== null && _b !== void 0 ? _b : 0);
                 const rentAmount = (0, statementRent_1.resolveStatementRentAmount)({
@@ -307,14 +400,16 @@ class PaymentReportingReadService {
                     vatOnCommission: Number((_g = (_f = cd.vatOnCommission) !== null && _f !== void 0 ? _f : cd.vatAmount) !== null && _g !== void 0 ? _g : 0),
                     vatRate: Number.isFinite(Number(vatRate)) ? Number(vatRate) : undefined,
                     vatTreatment: vatTreatment === 'inclusive' || vatTreatment === 'exclusive' ? vatTreatment : undefined,
-                    ownerPayable: Number(cd.ownerAmount != null ? Number(cd.ownerAmount) - levy : 0),
+                    ownerPayable: Number(((_h = cd.paymentAllocation) === null || _h === void 0 ? void 0 : _h.ownerPayable) != null
+                        ? cd.paymentAllocation.ownerPayable
+                        : (cd.ownerAmount != null ? Number(cd.ownerAmount) - levy : 0)),
                     rentalPeriodMonth: Number.isFinite(Number(row.rentalPeriodMonth)) ? Number(row.rentalPeriodMonth) : undefined,
                     rentalPeriodYear: Number.isFinite(Number(row.rentalPeriodYear)) ? Number(row.rentalPeriodYear) : undefined,
                     advanceMonthsPaid: Number.isFinite(Number(row.advanceMonthsPaid)) ? Number(row.advanceMonthsPaid) : undefined,
-                    advancePeriodStart: ((_h = row.advancePeriodStart) === null || _h === void 0 ? void 0 : _h.month) && ((_j = row.advancePeriodStart) === null || _j === void 0 ? void 0 : _j.year)
+                    advancePeriodStart: ((_j = row.advancePeriodStart) === null || _j === void 0 ? void 0 : _j.month) && ((_k = row.advancePeriodStart) === null || _k === void 0 ? void 0 : _k.year)
                         ? { month: Number(row.advancePeriodStart.month), year: Number(row.advancePeriodStart.year) }
                         : undefined,
-                    advancePeriodEnd: ((_k = row.advancePeriodEnd) === null || _k === void 0 ? void 0 : _k.month) && ((_l = row.advancePeriodEnd) === null || _l === void 0 ? void 0 : _l.year)
+                    advancePeriodEnd: ((_l = row.advancePeriodEnd) === null || _l === void 0 ? void 0 : _l.month) && ((_m = row.advancePeriodEnd) === null || _m === void 0 ? void 0 : _m.year)
                         ? { month: Number(row.advancePeriodEnd.month), year: Number(row.advancePeriodEnd.year) }
                         : undefined
                 };

@@ -252,7 +252,9 @@ const run = async () => {
   assert.strictEqual(test9.reason, 'not_eligible');
   assert.strictEqual(shouldSkipRecordIncomePosting(test9), false);
 
-  // TEST 10 — duplicate pass-through must not call getPropertyAccount
+  // TEST 10 — duplicate pass-through must return the already-loaded account
+  // Current writer uses atomic pushPassThroughTransactionAtomic → pushed === 'duplicate'.
+  // Older contract used `if (!inserted)`. Both must return `account` without getPropertyAccount.
   const srcTs = path.join(__dirname, '..', '..', 'src', 'services', 'propertyAccountService.ts');
   const distJs = path.join(__dirname, '..', 'services', 'propertyAccountService.js');
   const serviceSrc = fs.readFileSync(fs.existsSync(srcTs) ? srcTs : distJs, 'utf8');
@@ -260,12 +262,10 @@ const run = async () => {
   const collectionEnd = serviceSrc.indexOf('async recordPassThroughPayment');
   assert.ok(collectionStart >= 0 && collectionEnd > collectionStart, 'TEST 10: collection method located');
   const collectionFn = serviceSrc.slice(collectionStart, collectionEnd);
-  assert.ok(
-    /if\s*\(\s*!inserted\s*\)\s*\{[\s\S]*?return account;/.test(collectionFn),
-    'TEST 10: duplicate collection returns the already-loaded account'
-  );
-  const duplicateBranch = collectionFn.match(/if\s*\(\s*!inserted\s*\)\s*\{[\s\S]*?return account;[\s\S]*?\}/);
-  assert.ok(duplicateBranch, 'TEST 10: duplicate collection branch located');
+  const duplicateBranch =
+    collectionFn.match(/if\s*\(\s*pushed\s*===\s*['"]duplicate['"]\s*\)\s*\{[\s\S]*?return account;[\s\S]*?\}/) ||
+    collectionFn.match(/if\s*\(\s*!inserted\s*\)\s*\{[\s\S]*?return account;[\s\S]*?\}/);
+  assert.ok(duplicateBranch, 'TEST 10: duplicate collection returns the already-loaded account');
   assert.ok(
     !/this\.getPropertyAccount\s*\(/.test(duplicateBranch[0]),
     'TEST 10: duplicate collection must not call getPropertyAccount'
@@ -339,11 +339,21 @@ const run = async () => {
   assert.strictEqual(chargeLookupThrows.reason, 'completeness_error');
 
   const typeMismatch = await checkPaymentAccountingCompleteness(
-    { ...rentalPayment, paymentType: 'sale' },
+    { ...rentalPayment, paymentType: 'sale', transactionDomain: 'RENTAL' },
     rentalDeps()
   );
   assert.strictEqual(typeMismatch.complete, false, 'payment type mismatch must not skip');
   assert.strictEqual(typeMismatch.reason, 'payment_type_mismatch');
+
+  const historicalIgnoresCurrentProperty = await checkPaymentAccountingCompleteness(
+    rentalPayment,
+    rentalDeps({
+      resolveLedgerTypeForProperty: async () => {
+        throw new Error('current property type must not reclassify a payment');
+      }
+    })
+  );
+  assert.strictEqual(historicalIgnoresCurrentProperty.complete, true, 'persisted rental payment ignores current property type');
 
   const malformedTarget = await checkPaymentAccountingCompleteness(
     { ...salePayment, developmentUnitId: 'not-an-id', developmentId: undefined },

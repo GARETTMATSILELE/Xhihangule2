@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { PropertyOwner, IPropertyOwner } from '../models/PropertyOwner';
 import { AppError } from '../middleware/errorHandler';
+import { callerCanMutatePropertyOwner, callerCanReadPropertyOwner, propertyOwnerIdsForCaller } from '../utils/propertyAccess';
 import { JwtPayload } from '../types/auth';
 import { Property } from '../models/Property';
 
@@ -61,11 +62,13 @@ export const getPropertyOwners = async (req: Request, res: Response, next: NextF
       console.log('getPropertyOwners - Company ID not found');
       return next(new AppError('Company ID not found', 401));
     }
+    const visibleOwnerIds = await propertyOwnerIdsForCaller(req);
     const query: any = { companyId: req.user.companyId };
+    if (visibleOwnerIds !== 'company') query._id = { $in: visibleOwnerIds };
 
     console.log('getPropertyOwners - Query:', query);
 
-    const owners = await PropertyOwner.find(query);
+    const owners = await PropertyOwner.find(query).select('-password');
     res.json(owners);
   } catch (error) {
     next(error instanceof AppError ? error : new AppError('Error fetching property owners', 500));
@@ -85,9 +88,9 @@ export const getPropertyOwnerById = async (req: Request, res: Response, next: Ne
     }
     const query: any = { _id: id, companyId: req.user.companyId };
     
-    const owner = await PropertyOwner.findOne(query);
+    const owner = await PropertyOwner.findOne(query).select('-password');
     
-    if (!owner) {
+    if (!owner || !(await callerCanReadPropertyOwner(req, String(owner._id)))) {
       return next(new AppError('Property owner not found', 404));
     }
     
@@ -124,6 +127,10 @@ export const updatePropertyOwner = async (req: Request, res: Response, next: Nex
       }
     }
 
+    if (!(await callerCanMutatePropertyOwner(req, id))) {
+      return next(new AppError('Property owner not found', 404));
+    }
+
     const owner = await PropertyOwner.findOneAndUpdate(
       query,
       { 
@@ -131,7 +138,7 @@ export const updatePropertyOwner = async (req: Request, res: Response, next: Nex
         ...(email && { email })
       },
       { new: true, runValidators: true }
-    );
+    ).select('-password');
 
     if (!owner) {
       return next(new AppError('Property owner not found', 404));
@@ -153,6 +160,9 @@ export const deletePropertyOwner = async (req: Request, res: Response, next: Nex
     
     if (!req.user.companyId) {
       return next(new AppError('Company ID not found', 401));
+    }
+    if (!(await callerCanMutatePropertyOwner(req, id))) {
+      return res.status(404).json({ message: 'Property owner not found' });
     }
     const query: any = { _id: id, companyId: req.user.companyId };
     
@@ -231,7 +241,7 @@ export const getPropertyOwnerByIdPublic = async (req: Request, res: Response) =>
 
     const owner = await PropertyOwner.findOne(query).select('-password');
     
-    if (!owner) {
+    if (!owner || !(await callerCanReadPropertyOwner(req, String(owner._id)))) {
       return res.status(404).json({ 
         message: 'Property owner not found',
         id,

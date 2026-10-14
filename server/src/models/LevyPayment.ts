@@ -11,6 +11,11 @@ export interface ILevyPayment extends Document {
   amount: number;
   referenceNumber: string;
   notes: string;
+  receiptNumber?: string;
+  receiptFileUrl?: string;
+  levyAuthority?: string;
+  receiptUploadedBy?: mongoose.Types.ObjectId;
+  receiptUploadedAt?: Date;
   processedBy: mongoose.Types.ObjectId;
   status: 'pending' | 'completed' | 'failed' | 'paid_out';
   currency: 'USD' | 'ZWL';
@@ -81,6 +86,11 @@ const LevyPaymentSchema: Schema = new Schema({
   notes: {
     type: String,
   },
+  receiptNumber: { type: String, default: '' },
+  receiptFileUrl: { type: String },
+  levyAuthority: { type: String },
+  receiptUploadedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  receiptUploadedAt: { type: Date },
   processedBy: {
     type: Schema.Types.ObjectId,
     ref: 'User',

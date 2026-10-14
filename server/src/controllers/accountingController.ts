@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import accountingService from '../services/accountingService';
 import accountingIntegrationService from '../services/accountingIntegrationService';
+import {
+  isSystemAdminUser,
+  requireExplicitMigrationConfirmation,
+  startMigrationAudit,
+  finishMigrationAudit
+} from '../services/financialMigrationGuard';
+import { AppError } from '../middleware/errorHandler';
 
 const parseDate = (value: unknown): Date | undefined => {
   if (!value || typeof value !== 'string') return undefined;
@@ -239,9 +246,10 @@ export const postManualTransaction = async (req: Request, res: Response) => {
       reference,
       description,
       sourceModule: 'manual',
-      sourceId: `${reference}:${Date.now()}`,
+      sourceId: `manual:${reference}`,
       transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
       createdBy: req.user?.userId,
+      periodOverrideReason: req.body?.periodOverrideReason || req.body?.reason,
       lines
     });
     return res.status(201).json({ message: 'Transaction posted', ...result });
@@ -251,17 +259,35 @@ export const postManualTransaction = async (req: Request, res: Response) => {
 };
 
 export const backfillBalances = async (req: Request, res: Response) => {
+  let audit: Awaited<ReturnType<typeof startMigrationAudit>> = null;
   try {
-    const companyId = getCompanyId(req);
+    if (!isSystemAdminUser(req)) {
+      throw new AppError('Journal/VAT historical backfill requires system_admin', 403);
+    }
+    const { reason } = requireExplicitMigrationConfirmation(req);
+    const companyId = getCompanyId(req) || String(req.body?.companyId || req.query?.companyId || '').trim();
     if (!companyId) return res.status(400).json({ message: 'companyId is required' });
+    audit = await startMigrationAudit(req, 'migration:accounting_backfill_balances', {
+      companyId,
+      reason,
+      replayExisting: String(req.query.replayExisting || req.body?.replayExisting || '').toLowerCase() === 'true'
+    });
     const replayExisting = String(req.query.replayExisting || req.body?.replayExisting || '').toLowerCase() === 'true';
     let replay = { paymentsSynced: 0, expensesSynced: 0 };
     if (replayExisting) {
       replay = await accountingIntegrationService.backfillFromExistingData(companyId);
     }
     await accountingService.backfillCompanyBalances(companyId);
-    return res.json({ message: 'Backfill complete', replayExisting, ...replay });
+    await finishMigrationAudit(audit, true, { replayExisting, ...replay, reason });
+    return res.json({
+      message: 'Historical accounting backfill complete',
+      historicalBackfill: true,
+      replayExisting,
+      ...replay
+    });
   } catch (error: any) {
-    return res.status(500).json({ message: error?.message || 'Failed to backfill balances' });
+    await finishMigrationAudit(audit, false, undefined, error?.message || String(error));
+    const status = error instanceof AppError ? error.statusCode : 500;
+    return res.status(status).json({ message: error?.message || 'Failed to backfill balances' });
   }
 };

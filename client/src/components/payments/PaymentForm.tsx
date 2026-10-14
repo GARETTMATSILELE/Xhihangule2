@@ -21,10 +21,13 @@ import {
 import paymentService from '../../services/paymentService';
 import { usePropertyService } from '../../services/propertyService';
 import { useTenantService } from '../../services/tenantService';
+import { useLeaseService } from '../../services/leaseService';
 import { Payment, PAYMENT_METHODS, SUPPORTED_CURRENCIES } from '../../types/payment';
 import { Tenant } from '../../types/tenant';
 import { Property } from '../../types/property';
 import { PaymentFormData } from '../../types/payment';
+import { Lease } from '../../types/lease';
+import { formatPaymentApiError } from '../../utils/paymentApiError';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -69,7 +72,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const isIndividualMode = individualMode || company?.workspaceType === 'individual' || company?.plan === 'INDIVIDUAL';
   const propertyService = usePropertyService();
   const tenantService = useTenantService();
+  const leaseService = useLeaseService();
   const [error, setError] = useState<string | null>(null);
+  const [availableLeases, setAvailableLeases] = useState<Lease[]>([]);
+  const [leasesLoading, setLeasesLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
   const [internalProperties, setInternalProperties] = useState<Property[]>([]);
@@ -135,9 +141,52 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     const stillValid = linked.some((t: Tenant) => String(t._id) === String(formData.tenantId));
     if (!stillValid) {
       const preferred = linked.find((t: any) => t.status === 'Active') || linked[0];
-      setFormData(prev => ({ ...prev, tenantId: preferred ? String(preferred._id) : '' }));
+      setFormData(prev => ({ ...prev, tenantId: preferred ? String(preferred._id) : '', leaseId: '' }));
     }
   }, [formData.propertyId, internalTenants]);
+
+  const INTRODUCTION_LEASE_STATUSES = ['active', 'expiring_soon', 'pending_settlement'];
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLeases = async () => {
+      const propertyId = String(formData.propertyId || '');
+      const tenantId = String(formData.tenantId || '');
+      if (!propertyId || !tenantId || useManualProperty || useManualTenant || formData.paymentType !== 'rental') {
+        setAvailableLeases([]);
+        return;
+      }
+      setLeasesLoading(true);
+      try {
+        const leasesData = await leaseService.getAll();
+        const list = Array.isArray(leasesData) ? leasesData : [];
+        const matched = list.filter((lease) => {
+          const sameProperty = String(lease.propertyId || (lease as any).property?._id || '') === propertyId;
+          const sameTenant = String(lease.tenantId || (lease as any).tenant?._id || '') === tenantId;
+          const status = String(lease.status || '').toLowerCase();
+          return sameProperty && sameTenant && INTRODUCTION_LEASE_STATUSES.includes(status);
+        });
+        if (cancelled) return;
+        setAvailableLeases(matched);
+        setFormData((prev) => {
+          const stillSelected = matched.some((lease) => String(lease._id) === String(prev.leaseId));
+          if (stillSelected) return prev;
+          if (matched.length === 1) {
+            return { ...prev, leaseId: String(matched[0]._id) };
+          }
+          return { ...prev, leaseId: '' };
+        });
+      } catch {
+        if (!cancelled) setAvailableLeases([]);
+      } finally {
+        if (!cancelled) setLeasesLoading(false);
+      }
+    };
+    loadLeases();
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.propertyId, formData.tenantId, formData.paymentType, useManualProperty, useManualTenant]);
 
   const [isAdvance, setIsAdvance] = useState(false);
   const [advanceMonths, setAdvanceMonths] = useState(1);
@@ -587,7 +636,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
       await onSubmit(dataToSubmit);
     } catch (error) {
-      setError('Failed to save payment. Please try again later.');
+      setError(formatPaymentApiError(error, 'Failed to save payment. Please try again later.'));
       console.error('Error saving payment:', error);
     }
   };
@@ -782,6 +831,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                     ...prev,
                     propertyId: newPropertyId,
                     tenantId: newPropertyId ? autoTenantId : '',
+                    leaseId: '',
                     agentId: newPropertyId ? (isIndividualMode && user?._id ? String(user._id) : (agentExists ? autoAgentId : '')) : '',
                     propertyType: newPropertyType,
                     amount: (newRent ?? 0),
@@ -846,6 +896,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                   setFormData((prev) => ({
                     ...prev,
                     tenantId: newValue ? String(newValue._id) : '',
+                    leaseId: '',
                   }));
                 }}
                 renderInput={(params) => (
@@ -854,6 +905,42 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
                 disabled={loadingData}
                 fullWidth
               />
+            </Grid>
+          )}
+
+          {!useManualProperty && !useManualTenant && formData.paymentType === 'rental' && (
+            <Grid item xs={12}>
+              <FormControl fullWidth required={availableLeases.length !== 1}>
+                <InputLabel>Lease</InputLabel>
+                <Select
+                  name="leaseId"
+                  value={availableLeases.some((lease) => String(lease._id) === String(formData.leaseId)) ? formData.leaseId : ''}
+                  onChange={handleInputChange}
+                  label="Lease"
+                  disabled={loadingData || leasesLoading || !formData.propertyId || !formData.tenantId}
+                >
+                  {availableLeases.length === 0 && (
+                    <MenuItem value="" disabled>
+                      {leasesLoading ? 'Loading leases…' : 'No applicable lease found'}
+                    </MenuItem>
+                  )}
+                  {availableLeases.map((lease) => {
+                    const start = lease.startDate ? new Date(lease.startDate).toLocaleDateString() : '';
+                    const end = lease.endDate ? new Date(lease.endDate).toLocaleDateString() : '';
+                    const rent = Number((lease as any).rentAmount || (lease as any).monthlyRent || 0);
+                    return (
+                      <MenuItem key={String(lease._id)} value={String(lease._id)}>
+                        {`${start}${end ? ` – ${end}` : ''} · ${lease.status}${rent > 0 ? ` · ${rent}` : ''}`}
+                      </MenuItem>
+                    );
+                  })}
+                </Select>
+              </FormControl>
+              {availableLeases.length > 1 && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Multiple leases apply. Select the lease for this Introduction payment. The first lease is not chosen automatically.
+                </Typography>
+              )}
             </Grid>
           )}
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
+import { callerCanAccessProperty } from '../../utils/propertyAccess';
 import { Company } from '../../models/Company';
 import PropertyAccount from '../../models/PropertyAccount';
 import { auth } from '../../middleware/auth';
@@ -75,9 +76,20 @@ router.get('/owner/:propertyId', auth, async (req, res) => {
     if (!companyId) return res.status(400).json({ message: 'Company ID is required' });
     const company = await getCompanyBrand(companyId);
     const propertyId = await resolveStatementPropertyId(String(req.params.propertyId));
+    if (!(await callerCanAccessProperty(req, propertyId))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
+    const ledgerType = String(req.query.ledger || req.query.ledgerType || '').toLowerCase();
+    if (ledgerType !== 'rental' && ledgerType !== 'sale') {
+      return res.status(400).json({
+        code: 'LEDGER_REQUIRED',
+        message: 'Owner statement requires ledger=rental or ledger=sale.'
+      });
+    }
     const dto = await reportFactory.createOwnerStatement({
       companyId,
       propertyId,
+      ledgerType,
       period: toStatementPeriod(req.query),
       generatedBy: req.user?.userId,
       companyName: company.name,
@@ -98,10 +110,21 @@ router.get('/owner/:propertyId/:format', auth, async (req, res) => {
     if (!isReportFormat(format)) return res.status(400).json({ message: 'Unsupported report format' });
     const company = await getCompanyBrand(companyId);
     const propertyId = await resolveStatementPropertyId(String(req.params.propertyId));
+    if (!(await callerCanAccessProperty(req, propertyId))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
+    const ledgerType = String(req.query.ledger || req.query.ledgerType || '').toLowerCase();
+    if (ledgerType !== 'rental' && ledgerType !== 'sale') {
+      return res.status(400).json({
+        code: 'LEDGER_REQUIRED',
+        message: 'Owner statement requires ledger=rental or ledger=sale.'
+      });
+    }
     const result = await reportFactory.exportOwnerStatement(
       {
         companyId,
         propertyId,
+        ledgerType,
         period: toStatementPeriod(req.query),
         generatedBy: req.user?.userId,
         companyName: company.name,

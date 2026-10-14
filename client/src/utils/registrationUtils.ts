@@ -78,6 +78,7 @@ export interface OnboardingValidationData {
   phone?: string;
   registrationNumber?: string;
   tinNumber?: string;
+  country?: string;
 }
 
 export const validateOnboardingForm = (data: OnboardingValidationData): string[] => {
@@ -86,8 +87,12 @@ export const validateOnboardingForm = (data: OnboardingValidationData): string[]
   if (!data.email.trim()) errors.push('Email is required');
   else if (!/\S+@\S+\.\S+/.test(data.email)) errors.push('Email is invalid');
   if (!data.password) errors.push('Password is required');
+  else if (data.password.length < 8 || !/[A-Za-z]/.test(data.password) || !/\d/.test(data.password)) {
+    errors.push('Password must be at least 8 characters and include a letter and a number');
+  }
   if (data.password !== data.confirmPassword) errors.push('Passwords do not match');
   if (!data.companyName.trim()) errors.push('Company/workspace name is required');
+  if (!data.country?.trim()) errors.push('Country is required');
   if (data.companyEmail && !/\S+@\S+\.\S+/.test(data.companyEmail)) errors.push('Company email is invalid');
   if (data.companyType === 'REGISTERED_BUSINESS') {
     if (!data.address?.trim()) errors.push('Business address is required');
@@ -98,7 +103,7 @@ export const validateOnboardingForm = (data: OnboardingValidationData): string[]
   return errors;
 };
 
-export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant' | 'sales' | 'principal' | 'prea' | 'system_admin';
+export type UserRole = 'admin' | 'agent' | 'owner' | 'accountant' | 'sales' | 'principal' | 'prea' | 'system_admin' | 'tenant' | 'contractor';
 
 export const getDashboardPath = (role: UserRole, company?: { workspaceType?: 'agency' | 'individual'; plan?: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE' } | null): string => {
   const isIndividualWorkspace = company?.workspaceType === 'individual' || company?.plan === 'INDIVIDUAL';
@@ -119,6 +124,10 @@ export const getDashboardPath = (role: UserRole, company?: { workspaceType?: 'ag
       return '/accountant-dashboard';
     case 'sales':
       return '/sales-dashboard';
+    case 'tenant':
+      return '/tenant-dashboard';
+    case 'contractor':
+      return '/contractor-dashboard';
     default:
       return '/dashboard';
   }

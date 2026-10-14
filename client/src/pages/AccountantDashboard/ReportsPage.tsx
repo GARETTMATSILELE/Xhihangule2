@@ -252,6 +252,18 @@ const ReportsPage: React.FC = () => {
   const totalSales = useMemo(() => filteredRevenue.reduce((s, r: any) => s + r.sales, 0), [filteredRevenue]);
   const netTotal = totalManagement + totalSales;
 
+  const trustCollections = useMemo(() => {
+    const start = new Date(from);
+    const end = new Date(to);
+    end.setHours(23, 59, 59, 999);
+    return (Array.isArray(payments) ? payments : []).reduce((sum, p: any) => {
+      const d = new Date(p.paymentDate || p.createdAt || 0);
+      if (d < start || d > end) return sum;
+      if (String(p.status || '') !== 'completed') return sum;
+      return sum + Number(p.amount || 0);
+    }, 0);
+  }, [payments, from, to]);
+
   // Company expenses for the selected period (align with Revenue page logic)
   const expensesForPeriod = useMemo(() => {
     const txs = Array.isArray(companyTransactions) ? companyTransactions : [];
@@ -538,9 +550,9 @@ const ReportsPage: React.FC = () => {
             <div class="section">
               <h2>Seller Settlement</h2>
               <table>
-                <tr><td>Seller Amount (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
+                <tr><td>Seller proceeds (before VAT on commission)</td><td class="right">${currency(t.ownerBeforeVat)}</td></tr>
                 <tr><td>VAT on Commission</td><td class="right">${currency(t.vatOnCommission)}</td></tr>
-                <tr class="total"><td>Seller Amount (after VAT on commission)</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
+                <tr class="total"><td>Net seller proceeds</td><td class="right">${currency(t.ownerAfterVat)}</td></tr>
               </table>
             </div>
           </body>
@@ -995,16 +1007,23 @@ const ReportsPage: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
         <div className="col-span-1 lg:col-span-4 flex gap-4 flex-wrap">
           <div className="bg-white p-4 rounded-2xl shadow w-full md:w-1/3">
-            <h3 className="text-sm text-slate-500">Total Revenue</h3>
+            <h3 className="text-sm text-slate-500">Agency Revenue</h3>
             <div className="flex items-baseline justify-between">
               <div className="text-2xl font-bold">{currency(netTotal)}</div>
               <div className="text-xs text-slate-400">Period: {from} → {to}</div>
             </div>
-            <div className="text-sm text-slate-600 mt-2">Mgmt: {currency(totalManagement)} — Sales: {currency(totalSales)}</div>
+            <div className="text-sm text-slate-600 mt-2">Mgmt: {currency(totalManagement)} — Sales commission: {currency(totalSales)}</div>
+            <div className="text-xs text-slate-500 mt-2">Agency revenue is commission earned. Gross rent and sale proceeds are client/trust collections, not company revenue.</div>
           </div>
 
           <div className="bg-white p-4 rounded-2xl shadow w-full md:w-1/3">
-            <h3 className="text-sm text-slate-500">Average Monthly</h3>
+            <h3 className="text-sm text-slate-500">Client / Trust Collections</h3>
+            <div className="text-2xl font-bold">{currency(trustCollections)}</div>
+            <div className="text-xs text-slate-500 mt-2">Gross rent and sale proceeds received as agent. Not company revenue.</div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl shadow w-full md:w-1/3">
+            <h3 className="text-sm text-slate-500">Average Monthly Agency Revenue</h3>
             <div className="text-2xl font-bold">{currency(Math.round(netTotal / Math.max(filteredRevenue.length, 1)))}</div>
             <div className="text-sm text-slate-600 mt-2">Calculated over {filteredRevenue.length} months</div>
           </div>
@@ -1351,10 +1370,9 @@ const ReportsPage: React.FC = () => {
             </div>
           </div>
           <ul className="divide-y text-sm">
-            <li className="py-2 flex justify-between"><span>PAYE</span><span>{currency(620)}</span></li>
-            <li className="py-2 flex justify-between"><span>VAT</span><span>{currency(1450)}</span></li>
-            <li className="py-2 flex justify-between"><span>Corporate Tax (Provisional)</span><span>{currency(2100)}</span></li>
-            <li className="py-2 flex justify-between font-semibold"><span>Total Taxes</span><span>{currency(4170)}</span></li>
+            <li className="py-2 flex justify-between"><span>PAYE</span><span className="text-slate-500">Not configured — external compliance</span></li>
+            <li className="py-2 flex justify-between"><span>VAT</span><span className="text-slate-500">See Tax → VAT return</span></li>
+            <li className="py-2 flex justify-between"><span>Corporate Tax</span><span className="text-slate-500">Not configured — external compliance</span></li>
           </ul>
         </div>
 
@@ -1373,10 +1391,11 @@ const ReportsPage: React.FC = () => {
             </div>
           </div>
           <ul className="divide-y text-sm">
-            <li className="py-2 flex justify-between"><span>Income</span><span>{currency(22950)}</span></li>
-            <li className="py-2 flex justify-between"><span>Expenses</span><span>{currency(9950)}</span></li>
-            <li className="py-2 flex justify-between font-semibold"><span>Net Profit</span><span>{currency(13000)}</span></li>
+            <li className="py-2 flex justify-between"><span>Agency income (commission)</span><span>{currency(netTotal)}</span></li>
+            <li className="py-2 flex justify-between"><span>Expenses</span><span>{currency(expensesForPeriod)}</span></li>
+            <li className="py-2 flex justify-between font-semibold"><span>Net Profit</span><span>{currency(balance)}</span></li>
           </ul>
+          <p className="text-xs text-slate-500 mt-2">Agency income is commission earned. Client/trust collections are excluded.</p>
         </div>
 
         {/* Trust Accounts */}

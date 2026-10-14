@@ -79,6 +79,80 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+const RENT_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+interface TransactionPaymentBreakdown {
+  totalCommission: number;
+  vatOnCommission: number;
+  ownerAmount: number;
+  levy: number;
+  paymentAmount?: number;
+  rentUsed?: number;
+  rentAllocated?: number;
+  levyAllocated?: number;
+  commissionBase?: number;
+  rentalPeriodMonth?: number;
+  rentalPeriodYear?: number;
+  advanceMonthsPaid?: number;
+  advancePeriodStart?: { month?: number; year?: number };
+  advancePeriodEnd?: { month?: number; year?: number };
+  paymentType?: string;
+}
+
+const periodPoint = (month?: number, year?: number): { month: number; year: number } | undefined => {
+  const rentalMonth = Number(month);
+  const rentalYear = Number(year);
+  if (!Number.isInteger(rentalMonth) || !Number.isInteger(rentalYear) || rentalMonth < 1 || rentalMonth > 12 || rentalYear < 1900) {
+    return undefined;
+  }
+  return { month: rentalMonth, year: rentalYear };
+};
+
+const rentalPeriodDescription = (payment?: TransactionPaymentBreakdown): string | undefined => {
+  if (!payment) return undefined;
+  const start = periodPoint(payment.advancePeriodStart?.month, payment.advancePeriodStart?.year)
+    || periodPoint(payment.rentalPeriodMonth, payment.rentalPeriodYear);
+  if (!start) return undefined;
+  const monthsPaid = Number(payment.advanceMonthsPaid || 0);
+  const explicitEnd = periodPoint(payment.advancePeriodEnd?.month, payment.advancePeriodEnd?.year);
+  const end = explicitEnd || (monthsPaid > 1
+    ? {
+        year: Math.floor((start.year * 12 + (start.month - 1) + monthsPaid - 1) / 12),
+        month: ((start.year * 12 + (start.month - 1) + monthsPaid - 1) % 12) + 1
+      }
+    : start);
+  if (end.year === start.year && end.month === start.month) {
+    return `${RENT_MONTHS[start.month - 1]} ${start.year} Rent`;
+  }
+  if (end.year === start.year) {
+    return `${RENT_MONTHS[start.month - 1]}–${RENT_MONTHS[end.month - 1]} ${start.year} Rent`;
+  }
+  return `${RENT_MONTHS[start.month - 1]} ${start.year}–${RENT_MONTHS[end.month - 1]} ${end.year} Rent`;
+};
+
+const recordedRentAmount = (payment?: TransactionPaymentBreakdown): number | undefined => {
+  if (!payment) return undefined;
+  const rentAllocated = Number(payment.rentAllocated);
+  if (Number.isFinite(rentAllocated) && rentAllocated > 0) return rentAllocated;
+  const months = Math.max(1, Number(payment.advanceMonthsPaid || 1));
+  const rentUsed = Number(payment.rentUsed);
+  if (Number.isFinite(rentUsed) && rentUsed > 0) return Math.round(rentUsed * months * 100) / 100;
+  const commissionBase = Number(payment.commissionBase);
+  if (Number.isFinite(commissionBase) && commissionBase > 0) return commissionBase;
+  const levy = Number(payment.levy || payment.levyAllocated || 0);
+  const amount = Number(payment.paymentAmount);
+  if (Number.isFinite(amount) && amount > 0 && !(levy > 0)) return amount;
+  return undefined;
+};
+
+const moneyOrDash = (amount: number | undefined, format: (value: number) => string): string => {
+  if (amount == null || !Number.isFinite(amount) || Math.abs(amount) < 0.005) return '—';
+  return format(amount);
+};
+
 const PropertyAccountDetailPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
   const location = useLocation();
@@ -94,7 +168,7 @@ const PropertyAccountDetailPage: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [ownerMap, setOwnerMap] = useState<Record<string, string>>({});
   const [depositSummary, setDepositSummary] = useState<{ totalPaid: number; totalPayout: number; held: number } | null>(null);
-  const [paymentBreakdowns, setPaymentBreakdowns] = useState<Record<string, { totalCommission: number; vatOnCommission: number; ownerAmount: number; levy: number }>>({});
+  const [paymentBreakdowns, setPaymentBreakdowns] = useState<Record<string, TransactionPaymentBreakdown>>({});
   
   // Dialog states
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
@@ -175,21 +249,32 @@ const PropertyAccountDetailPage: React.FC = () => {
 
         // Fetch account and deposit summary in parallel
         const [accountData, depositSum] = await Promise.all([
-          propertyAccountService.getPropertyAccount(propertyId),
+          propertyAccountService.getPropertyAccount(propertyId, inferredLedger),
           paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
         ]);
         setAccount(accountData);
         if (depositSum) setDepositSummary(depositSum);
         try {
           const payments = await paymentService.getPayments({ propertyId });
-          const map: Record<string, { totalCommission: number; vatOnCommission: number; ownerAmount: number; levy: number }> = {};
+          const map: Record<string, TransactionPaymentBreakdown> = {};
           for (const p of Array.isArray(payments) ? payments : []) {
             const cd = (p as any)?.commissionDetails || {};
             map[String((p as any)._id)] = {
               totalCommission: Number(cd.totalCommission || 0),
               vatOnCommission: Number(cd.vatOnCommission || cd.vatAmount || 0),
               ownerAmount: Number(cd.ownerAmount || 0),
-              levy: Number(cd.levy || (p as any).levyAllocated || 0)
+              levy: Number(cd.levy || (p as any).levyAllocated || 0),
+              paymentAmount: Number((p as any).amount || 0),
+              rentUsed: (p as any).rentUsed,
+              rentAllocated: (p as any).rentAllocated,
+              levyAllocated: (p as any).levyAllocated,
+              commissionBase: cd.commissionBase,
+              rentalPeriodMonth: (p as any).rentalPeriodMonth,
+              rentalPeriodYear: (p as any).rentalPeriodYear,
+              advanceMonthsPaid: (p as any).advanceMonthsPaid,
+              advancePeriodStart: (p as any).advancePeriodStart,
+              advancePeriodEnd: (p as any).advancePeriodEnd,
+              paymentType: (p as any).paymentType
             };
           }
           setPaymentBreakdowns(map);
@@ -293,8 +378,12 @@ const PropertyAccountDetailPage: React.FC = () => {
       if (process.env.NODE_ENV !== 'production') {
         console.debug('Property account refresh triggered');
       }
+      const requested = new URLSearchParams(location.search).get('ledger');
+      const refreshLedger: 'rental' | 'sale' = requested === 'sale' || requested === 'rental'
+        ? requested
+        : (!property || (property as any).rentalType === 'sale' ? 'sale' : 'rental');
       const [accountData, depositSum] = await Promise.all([
-        propertyAccountService.getPropertyAccount(propertyId),
+        propertyAccountService.getPropertyAccount(propertyId, refreshLedger),
         paymentService.getPropertyDepositSummary(propertyId).catch(() => null)
       ]);
       setAccount(accountData);
@@ -311,7 +400,7 @@ const PropertyAccountDetailPage: React.FC = () => {
         void silentRefreshAccount();
       }
     }
-  }, [propertyId]);
+  }, [propertyId, location.search, property]);
 
   const scheduleAccountRefresh = useCallback(() => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -613,12 +702,14 @@ const PropertyAccountDetailPage: React.FC = () => {
   const toStatementDateParam = (date: Date) => date.toISOString().slice(0, 10);
 
   const getEnterpriseStatementQuery = () => {
+    const ledgerType = account?.ledgerType === 'sale' ? 'sale' as const : 'rental' as const;
     if (statementData.includeAllTransactions) {
-      return { includeAllTransactions: true };
+      return { includeAllTransactions: true, ledgerType };
     }
     return {
       from: toStatementDateParam(statementData.startDate),
-      to: toStatementDateParam(statementData.endDate)
+      to: toStatementDateParam(statementData.endDate),
+      ledgerType
     };
   };
 
@@ -675,31 +766,64 @@ const PropertyAccountDetailPage: React.FC = () => {
         <head>
           <title>Property Account Statement</title>
           <style>
-            html, body { margin: 0; padding: 0; width: auto; background: #ffffff; font-family: Arial, Helvetica, sans-serif; color: #0f172a; overflow: visible; }
-            body { padding: 0; }
-            .property-account-statement { width: 100%; max-width: none; overflow: visible; }
+            @page { size: A4 landscape; margin: 10mm; }
+            html, body { margin: 0; padding: 0; background: #ffffff; color: #0f172a; }
+            body { width: auto; }
+            .property-account-statement,
+            .property-account-statement.is-sheet {
+              width: 100% !important;
+              min-height: 0 !important;
+              max-width: none !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              box-shadow: none !important;
+              background: #fff !important;
+            }
             .statement-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+            .statement-table col:nth-child(1), .statement-table th:nth-child(1) { width: 8% !important; }
+            .statement-table col:nth-child(2), .statement-table th:nth-child(2) { width: 7% !important; }
+            .statement-table col:nth-child(3), .statement-table th:nth-child(3) { width: 11% !important; }
+            .statement-table col:nth-child(4), .statement-table th:nth-child(4) { width: 11% !important; }
+            .statement-table col:nth-child(5), .statement-table th:nth-child(5) { width: 10% !important; }
+            .statement-table col:nth-child(6), .statement-table th:nth-child(6) { width: 14% !important; }
+            .statement-table col:nth-child(7), .statement-table th:nth-child(7) { width: 9% !important; }
+            .statement-table col:nth-child(8), .statement-table th:nth-child(8) { width: 15% !important; }
+            .statement-table col:nth-child(9), .statement-table th:nth-child(9) { width: 15% !important; }
             .statement-table thead { display: table-header-group; }
             .statement-table tfoot { display: table-footer-group; }
-            .statement-table tr { page-break-inside: avoid; break-inside: avoid; }
-            .statement-table th, .statement-table td { overflow-wrap: anywhere; }
+            .statement-table tbody tr, .statement-table tfoot tr { break-inside: avoid; page-break-inside: avoid; }
             button, .no-print { display: none !important; }
-            @page { size: A4 landscape; margin: 10mm; }
-            @media print {
-              html, body { width: auto; margin: 0; padding: 0; background: #fff !important; overflow: visible !important; }
-              thead { display: table-header-group; }
-              tfoot { display: table-footer-group; }
-              tr { page-break-inside: avoid; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            }
           </style>
         </head>
         <body>${statementHtml}</body>
       </html>
     `);
     printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => printWindow.print(), 250);
+    const printWhenReady = () => {
+      const images = Array.from(printWindow.document.images || []);
+      if (!images.length) {
+        printWindow.focus();
+        printWindow.print();
+        return;
+      }
+      let pending = images.length;
+      const done = () => {
+        pending -= 1;
+        if (pending <= 0) {
+          printWindow.focus();
+          printWindow.print();
+        }
+      };
+      images.forEach((image) => {
+        if (image.complete) done();
+        else {
+          image.addEventListener('load', done, { once: true });
+          image.addEventListener('error', done, { once: true });
+        }
+      });
+    };
+    if (printWindow.document.readyState === 'complete') printWhenReady();
+    else printWindow.addEventListener('load', printWhenReady, { once: true });
   };
 
   const getStatusIcon = (status: string) => {
@@ -981,25 +1105,43 @@ const PropertyAccountDetailPage: React.FC = () => {
             label="Show audit rows"
           />
         </Box>
-        <TableContainer component={Paper}>
-          <Table>
+        <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
+          <Table size="small" sx={{ minWidth: 1080 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Description</TableCell>
-                <TableCell>Amount</TableCell>
-                <TableCell>Commission</TableCell>
-                <TableCell>VAT on Commission</TableCell>
-                <TableCell>Owner Amount</TableCell>
-                <TableCell>Balance</TableCell>
+                <TableCell align="right">Rent Amount</TableCell>
+                <TableCell align="right">Commission</TableCell>
+                <TableCell align="right">VAT on Commission</TableCell>
+                <TableCell align="right">Levy</TableCell>
+                <TableCell align="right">Owner Amount</TableCell>
+                <TableCell align="right">Balance</TableCell>
                 <TableCell>Status</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {visibleTransactions.map((transaction, index) => (
-                <TableRow key={String((transaction as any)?._id || (transaction as any)?.paymentId || index)}>
-                  <TableCell>{new Date(transaction.date).toLocaleDateString()}</TableCell>
+              {visibleTransactions.map((transaction, index) => {
+                const paymentId = String((transaction as any)?.paymentId || '');
+                const breakdown = paymentId ? paymentBreakdowns[paymentId] : undefined;
+                const isSaleIncome = transaction.category === 'sale_income' || breakdown?.paymentType === 'sale';
+                const isRentalIncome = transaction.type === 'income' && !isSaleIncome;
+                const format = (value: number) => propertyAccountService.formatCurrency(value);
+                const description = isRentalIncome
+                  ? (rentalPeriodDescription(breakdown) || transaction.description || transaction.referenceNumber || '—')
+                  : (transaction.description || transaction.referenceNumber || '—');
+                const reducesOwner = transaction.type === 'expense'
+                  || transaction.type === 'repair'
+                  || transaction.type === 'maintenance'
+                  || transaction.type === 'owner_payout'
+                  || (transaction.type === 'opening_balance' && transaction.direction === 'debit');
+                const ownerColor = transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit')
+                  ? 'text.primary'
+                  : (transaction.type === 'owner_payout' ? 'warning.main' : 'error.main');
+                return (
+                <TableRow key={String((transaction as any)?._id || paymentId || index)}>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{new Date(transaction.date).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <Chip
                       label={
@@ -1019,35 +1161,25 @@ const PropertyAccountDetailPage: React.FC = () => {
                       size="small"
                     />
                   </TableCell>
-                  <TableCell>{transaction.description}</TableCell>
-                  <TableCell>
-                    <Typography
-                      color={
-                        transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit')
-                          ? 'success.main'
-                          : (transaction.type === 'owner_payout' ? 'warning.main' : 'error.main')
-                      }
-                    >
-                      {transaction.type === 'income' || (transaction.type === 'opening_balance' && transaction.direction !== 'debit') ? '+' : '-'}
-                      {propertyAccountService.formatCurrency(transaction.amount)}
-                    </Typography>
+                  <TableCell sx={{ minWidth: 160 }}>{description}</TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'success.main' }}>
+                    {isRentalIncome ? moneyOrDash(recordedRentAmount(breakdown), format) : '—'}
                   </TableCell>
-                  <TableCell>
-                    {transaction.type === 'income' && (transaction as any)?.paymentId && paymentBreakdowns[String((transaction as any).paymentId)]
-                      ? propertyAccountService.formatCurrency(paymentBreakdowns[String((transaction as any).paymentId)].totalCommission)
-                      : (transaction.type === 'income' ? '-' : '')}
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
+                    {isRentalIncome ? moneyOrDash(breakdown?.totalCommission, format) : '—'}
                   </TableCell>
-                  <TableCell>
-                    {transaction.type === 'income' && (transaction as any)?.paymentId && paymentBreakdowns[String((transaction as any).paymentId)]
-                      ? propertyAccountService.formatCurrency(paymentBreakdowns[String((transaction as any).paymentId)].vatOnCommission)
-                      : (transaction.type === 'income' ? '-' : '')}
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
+                    {isRentalIncome ? moneyOrDash(breakdown?.vatOnCommission, format) : '—'}
                   </TableCell>
-                  <TableCell>
-                    {transaction.type === 'income' && (transaction as any)?.paymentId && paymentBreakdowns[String((transaction as any).paymentId)]
-                      ? propertyAccountService.formatCurrency(paymentBreakdowns[String((transaction as any).paymentId)].ownerAmount)
-                      : (transaction.type === 'income' ? '-' : '')}
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
+                    {isRentalIncome ? moneyOrDash(breakdown?.levy, format) : '—'}
                   </TableCell>
-                  <TableCell>{propertyAccountService.formatCurrency(transaction.runningBalance || 0)}</TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 700, color: ownerColor }}>
+                    {reducesOwner ? `-${format(transaction.amount)}` : format(transaction.amount)}
+                  </TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 700 }}>
+                    {propertyAccountService.formatCurrency(transaction.runningBalance || 0)}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       label={transaction.status}
@@ -1060,10 +1192,11 @@ const PropertyAccountDetailPage: React.FC = () => {
                     />
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
               {visibleTransactions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center">
+                  <TableCell colSpan={10} align="center">
                     <Typography variant="body2" color="text.secondary">
                       No active transactions to show.
                     </Typography>
@@ -1337,13 +1470,26 @@ const PropertyAccountDetailPage: React.FC = () => {
                     disabled={submitting}
                     onClick={async () => {
                       if (!propertyId) return;
+                      const ok = window.confirm(
+                        'This is explicit ledger maintenance: it merges duplicate property ledgers. Continue only if you are authorised.'
+                      );
+                      if (!ok) return;
+                      const reason = window.prompt('Enter a non-empty reason for this ledger merge:');
+                      if (!reason || !String(reason).trim()) return;
                       setSubmitting(true);
                       setSubmitError(null);
                       setSuccess(null);
                       try {
-                        const result = await propertyAccountService.mergeDuplicatesForProperty(propertyId);
+                        const result = await propertyAccountService.mergeDuplicatesForProperty(propertyId, {
+                          confirm: true,
+                          reason: String(reason).trim()
+                        });
                         // Refresh account after merge
-                        const refreshed = await propertyAccountService.getPropertyAccount(propertyId);
+                        const requested = new URLSearchParams(location.search).get('ledger');
+                        const refreshLedger: 'rental' | 'sale' = requested === 'sale' || requested === 'rental'
+                          ? requested
+                          : (!property || (property as any).rentalType === 'sale' ? 'sale' : 'rental');
+                        const refreshed = await propertyAccountService.getPropertyAccount(propertyId, refreshLedger);
                         setAccount(refreshed);
                         setSuccess(result?.merged ? 'Ledgers merged successfully.' : 'No merge needed; already unified.');
                       } catch (err: any) {
@@ -1652,8 +1798,19 @@ const PropertyAccountDetailPage: React.FC = () => {
                 </Button>
               </Box>
               {enterpriseStatement ? (
-                <Box ref={enterpriseStatementPrintRef} sx={{ width: '100%', overflowX: 'auto', bgcolor: '#fff', p: 1, '@media print': { overflow: 'visible', p: 0 } }}>
-                  <OwnerStatementPreview statement={enterpriseStatement} />
+                <Box
+                  ref={enterpriseStatementPrintRef}
+                  sx={{
+                    bgcolor: '#e6eeea',
+                    borderRadius: 1,
+                    p: 2,
+                    maxHeight: '70vh',
+                    overflow: 'auto',
+                    display: 'flex',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <OwnerStatementPreview statement={enterpriseStatement} layout="sheet" />
                 </Box>
               ) : (
                 <Alert severity="info">

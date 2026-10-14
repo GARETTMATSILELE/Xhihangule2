@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.canCreateProperty = exports.canViewAgentAccounts = exports.canViewPropertyDetailsReport = exports.canViewAccountantDashboard = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
+exports.isAdminOrSales = exports.canViewCommissions = exports.canViewSalesPayments = exports.canManagePayments = exports.isAdminOrSystemAdmin = exports.isSystemAdmin = exports.canCreateProperty = exports.canViewAgentAccounts = exports.canViewPropertyDetailsReport = exports.canViewAccountantDashboard = exports.isAccountant = exports.isOwner = exports.isAdmin = exports.isAgent = void 0;
 const errorHandler_1 = require("./errorHandler");
 const isAgent = (req, res, next) => {
     if (!req.user) {
@@ -92,6 +92,28 @@ const canCreateProperty = (req, res, next) => {
     next();
 };
 exports.canCreateProperty = canCreateProperty;
+const isSystemAdmin = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    const roles = req.user.roles || [req.user.role];
+    if (!roles.includes('system_admin')) {
+        throw new errorHandler_1.AppError('Access denied. System admin role required.', 403);
+    }
+    next();
+};
+exports.isSystemAdmin = isSystemAdmin;
+const isAdminOrSystemAdmin = (req, res, next) => {
+    if (!req.user) {
+        throw new errorHandler_1.AppError('Authentication required', 401);
+    }
+    const roles = req.user.roles || [req.user.role];
+    if (!roles.some((r) => ['admin', 'system_admin'].includes(r))) {
+        throw new errorHandler_1.AppError('Access denied. Admin or system admin role required.', 403);
+    }
+    next();
+};
+exports.isAdminOrSystemAdmin = isAdminOrSystemAdmin;
 const canManagePayments = (req, res, next) => {
     if (!req.user) {
         throw new errorHandler_1.AppError('Authentication required', 401);

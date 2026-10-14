@@ -1,11 +1,12 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Drawer,
   List,
   ListItem,
   ListItemIcon,
   ListItemText,
+  ListSubheader,
   Box,
   Avatar,
   CircularProgress,
@@ -16,6 +17,7 @@ import {
   AttachMoney as DollarSignIcon,
   Assessment as AssessmentIcon,
   Description as DescriptionIcon,
+  FactCheck as IntegrityIcon,
   Settings as SettingsIcon,
   AccountBalance as AccountBalanceIcon,
   RequestQuote as TaxIcon,
@@ -33,29 +35,45 @@ interface AccountantSidebarProps {
   onTabChange: (index: number) => void;
 }
 
-export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab, onTabChange }) => {
+const isSidebarItemSelected = (currentPath: string, itemPath: string) => {
+  const current = currentPath.replace(/\/+$/, '') || '/';
+  const target = itemPath.replace(/\/+$/, '') || '/';
+  if (target === '/accountant-dashboard') {
+    return current === '/accountant-dashboard';
+  }
+  return current === target || current.startsWith(`${target}/`);
+};
+
+export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ onTabChange }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { loading: authLoading, user } = useAuth();
   const { company } = useCompany();
   const userRoles = ((user as any)?.roles as string[] | undefined) || (user?.role ? [user.role] : []);
   const canManageSync = userRoles.includes('admin');
 
   const menuItems = [
-    { text: 'Dashboard', icon: <DashboardIcon />, path: '/accountant-dashboard' },
-    { text: 'Rent Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
-    { text: 'Sales Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/sales' },
-    { text: 'Ledger', icon: <LedgerIcon />, path: '/accountant-dashboard/ledger' },
-    { text: 'Levies', icon: <ReceiptIcon />, path: '/accountant-dashboard/levies' },
-    { text: 'Invoices', icon: <ReceiptIcon />, path: '/accountant-dashboard/written-invoices' },
-    { text: 'Property Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/property-accounts' },
-    { text: 'Agent Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/agent-accounts' },
-    { text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
-    { text: 'Tax', icon: <TaxIcon />, path: '/accountant-dashboard/tax' },
-    { text: 'Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },
-    { text: 'Trust A/c Reports', icon: <DescriptionIcon />, path: '/accountant-dashboard/trust-account-reports' },
-    { text: 'Data Sync', icon: <SyncIcon />, path: '/accountant-dashboard/data-sync' },
-    { text: 'Tasks', icon: <TaskIcon />, path: '/accountant-dashboard/tasks' },
-    { text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' }
+    { group: 'Overview', text: 'Dashboard', icon: <DashboardIcon />, path: '/accountant-dashboard' },
+    { group: 'Daily finance', text: 'Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/payments' },
+    { group: 'Daily finance', text: 'Sales Payments', icon: <ReceiptIcon />, path: '/accountant-dashboard/sales' },
+    { group: 'Daily finance', text: 'Property Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/property-accounts' },
+    { group: 'Daily finance', text: 'Agent Accounts', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/agent-accounts' },
+    { group: 'Daily finance', text: 'Levies', icon: <ReceiptIcon />, path: '/accountant-dashboard/levies' },
+    { group: 'Daily finance', text: 'Owner Collections', icon: <ReceiptIcon />, path: '/accountant-dashboard/owner-collections' },
+    { group: 'Daily finance', text: 'Work queue', icon: <TaskIcon />, path: '/accountant-dashboard/work-queue' },
+    { group: 'Daily finance', text: 'Rent collection', icon: <ReceiptIcon />, path: '/accountant-dashboard/rent-collection' },
+    { group: 'Revenue', text: 'Revenue', icon: <DollarSignIcon />, path: '/accountant-dashboard/revenue' },
+    { group: 'Revenue', text: 'Commissions', icon: <DollarSignIcon />, path: '/accountant-dashboard/commissions' },
+    { group: 'Revenue', text: 'Written Invoices', icon: <ReceiptIcon />, path: '/accountant-dashboard/written-invoices' },
+    { group: 'Reporting', text: 'Financial Reports', icon: <AssessmentIcon />, path: '/accountant-dashboard/reports' },
+    { group: 'Reporting', text: 'Ledger', icon: <LedgerIcon />, path: '/accountant-dashboard/ledger' },
+    { group: 'Tax', text: 'Tax', icon: <TaxIcon />, path: '/accountant-dashboard/tax' },
+    { group: 'Trust', text: 'Trust Account Reports', icon: <DescriptionIcon />, path: '/accountant-dashboard/trust-account-reports' },
+    { group: 'Control', text: 'Accounting Integrity', icon: <IntegrityIcon />, path: '/accountant-dashboard/accounting-integrity' },
+    { group: 'Control', text: 'Financial Controls', icon: <AccountBalanceIcon />, path: '/accountant-dashboard/financial-controls' },
+    { group: 'Control', text: 'Accounting Tasks', icon: <TaskIcon />, path: '/accountant-dashboard/tasks' },
+    { group: 'Admin', text: 'Data Sync', icon: <SyncIcon />, path: '/accountant-dashboard/data-sync' },
+    { group: 'Admin', text: 'Settings', icon: <SettingsIcon />, path: '/accountant-dashboard/settings' },
   ].map((item, index) => ({ ...item, index }))
     .filter((item) => item.path !== '/accountant-dashboard/data-sync' || canManageSync);
 
@@ -123,12 +141,19 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
         )}
 
         <List>
-          {menuItems.map((item) => (
+          {menuItems.map((item, index) => {
+            const showGroup = index === 0 || menuItems[index - 1].group !== item.group;
+            return (
+            <React.Fragment key={item.text}>
+            {showGroup && (
+              <ListSubheader sx={{ bgcolor: 'transparent', color: 'rgba(255,255,255,0.45)', lineHeight: '28px', fontSize: 11, letterSpacing: '0.08em', fontWeight: 800 }}>
+                {item.group.toUpperCase()}
+              </ListSubheader>
+            )}
             <ListItem
               button
-              key={item.text}
               onClick={() => handleNavigation(item.path, item.index)}
-              selected={activeTab === item.index}
+              selected={isSidebarItemSelected(location.pathname, item.path)}
               sx={{
                 borderRadius: 2,
                 mb: 0.5,
@@ -143,17 +168,19 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ activeTab,
                 },
               }}
             >
-              <ListItemIcon sx={{ color: activeTab === item.index ? 'primary.main' : 'inherit' }}>
+              <ListItemIcon sx={{ color: isSidebarItemSelected(location.pathname, item.path) ? 'primary.main' : 'inherit' }}>
                 {item.icon}
               </ListItemIcon>
               <ListItemText 
                 primary={item.text} 
                 primaryTypographyProps={{
-                  fontWeight: activeTab === item.index ? 600 : 400,
+                  fontWeight: isSidebarItemSelected(location.pathname, item.path) ? 600 : 400,
                 }}
               />
             </ListItem>
-          ))}
+            </React.Fragment>
+            );
+          })}
         </List>
       </Box>
     </Drawer>

@@ -101,6 +101,13 @@ const SettingsPage: React.FC = () => {
     registrationNumber: '',
     tinNumber: '',
     vatNumber: '',
+    taxProfile: {
+      vatRegistered: false,
+      vatRegistrationEffectiveDate: '',
+      vatRegistrationCancelledAt: '',
+      vatCategory: '',
+      fiscalisationEnabled: false
+    },
     companyAddress: '',
     companyPhone: '',
     companyEmail: '',
@@ -122,7 +129,7 @@ const SettingsPage: React.FC = () => {
     preaPercentOfTotal: 0.03,
     agentPercentOfRemaining: 0.6,
     agencyPercentOfRemaining: 0.4,
-    vatPercentOnCommission: 0.155,
+    vatPercentOnCommission: undefined as number | undefined,
     // Reporting Settings
     defaultReportPeriod: 'monthly',
     autoGenerateReports: false,
@@ -140,9 +147,13 @@ const SettingsPage: React.FC = () => {
   const [fiscalHealth, setFiscalHealth] = useState<any>(null);
   const [checkingFiscal, setCheckingFiscal] = useState<boolean>(false);
   const [taxRates, setTaxRates] = useState<TaxRateRecord[]>([]);
+  const [cgtRates, setCgtRates] = useState<TaxRateRecord[]>([]);
+  const [cgwtRates, setCgwtRates] = useState<TaxRateRecord[]>([]);
   const [taxRatesLoading, setTaxRatesLoading] = useState(false);
-  const [newVatRate, setNewVatRate] = useState('15.5');
-  const [newVatEffectiveFrom, setNewVatEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [centralVat, setCentralVat] = useState<{ rate?: number; effectiveFrom?: string; jurisdiction?: string } | null>(null);
+  const [newCgtRate, setNewCgtRate] = useState('20');
+  const [newCgwtRate, setNewCgwtRate] = useState('');
+  const [otherTaxEffectiveFrom, setOtherTaxEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
 
   const checkFiscalConnection = useCallback(async () => {
     if (!company?._id) return;
@@ -213,6 +224,17 @@ const SettingsPage: React.FC = () => {
         registrationNumber: company.registrationNumber || '',
         tinNumber: company.tinNumber || '',
         vatNumber: company.vatNumber || '',
+        taxProfile: {
+          vatRegistered: Boolean((company as any)?.taxProfile?.vatRegistered),
+          vatRegistrationEffectiveDate: (company as any)?.taxProfile?.vatRegistrationEffectiveDate
+            ? String((company as any).taxProfile.vatRegistrationEffectiveDate).slice(0, 10)
+            : '',
+          vatRegistrationCancelledAt: (company as any)?.taxProfile?.vatRegistrationCancelledAt
+            ? String((company as any).taxProfile.vatRegistrationCancelledAt).slice(0, 10)
+            : '',
+          vatCategory: (company as any)?.taxProfile?.vatCategory || '',
+          fiscalisationEnabled: Boolean((company as any)?.taxProfile?.fiscalisationEnabled)
+        },
         companyAddress: company.address || '',
         companyPhone: company.phone || '',
         companyEmail: company.email || '',
@@ -223,7 +245,7 @@ const SettingsPage: React.FC = () => {
         preaPercentOfTotal: company.commissionConfig?.preaPercentOfTotal ?? 0.03,
         agentPercentOfRemaining: company.commissionConfig?.agentPercentOfRemaining ?? 0.6,
         agencyPercentOfRemaining: company.commissionConfig?.agencyPercentOfRemaining ?? 0.4,
-        vatPercentOnCommission: (company as any).commissionConfig?.vatPercentOnCommission ?? 0.155,
+        vatPercentOnCommission: undefined,
         // Receivables cutover and opening balances (do not default if not set)
         receivablesCutoverYear: (company as any)?.receivablesCutover?.year ?? undefined,
         receivablesCutoverMonth: (company as any)?.receivablesCutover?.month ?? undefined,
@@ -260,9 +282,25 @@ const SettingsPage: React.FC = () => {
     if (activeTab !== 2 || !company?._id) return;
     let mounted = true;
     setTaxRatesLoading(true);
-    accountingService.getTaxRates('VAT')
-      .then((rows) => { if (mounted) setTaxRates(rows); })
-      .catch(() => { if (mounted) setTaxRates([]); })
+    Promise.all([
+      accountingService.getTaxRates('VAT'),
+      accountingService.getTaxRates('CGT'),
+      accountingService.getTaxRates('CGWT'),
+      accountingService.getCurrentVatRate().catch(() => null)
+    ])
+      .then(([vat, cgt, cgwt, current]) => {
+        if (!mounted) return;
+        setTaxRates(vat);
+        setCgtRates(cgt);
+        setCgwtRates(cgwt);
+        setCentralVat(current);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setTaxRates([]);
+        setCgtRates([]);
+        setCgwtRates([]);
+      })
       .finally(() => { if (mounted) setTaxRatesLoading(false); });
     return () => { mounted = false; };
   }, [activeTab, company?._id]);
@@ -342,6 +380,13 @@ const SettingsPage: React.FC = () => {
         registrationNumber: settings.registrationNumber,
         tinNumber: settings.tinNumber,
         vatNumber: settings.vatNumber,
+        taxProfile: {
+          vatRegistered: Boolean((settings as any).taxProfile?.vatRegistered),
+          vatRegistrationEffectiveDate: (settings as any).taxProfile?.vatRegistrationEffectiveDate || null,
+          vatRegistrationCancelledAt: (settings as any).taxProfile?.vatRegistrationCancelledAt || null,
+          vatCategory: (settings as any).taxProfile?.vatCategory || '',
+          fiscalisationEnabled: Boolean((settings as any).taxProfile?.fiscalisationEnabled)
+        },
         address: settings.companyAddress,
         phone: settings.companyPhone,
         email: settings.companyEmail,
@@ -392,6 +437,13 @@ const SettingsPage: React.FC = () => {
           registrationNumber: settings.registrationNumber,
           tinNumber: settings.tinNumber,
           vatNumber: settings.vatNumber,
+          taxProfile: {
+            vatRegistered: Boolean((settings as any).taxProfile?.vatRegistered),
+            vatRegistrationEffectiveDate: (settings as any).taxProfile?.vatRegistrationEffectiveDate || null,
+            vatRegistrationCancelledAt: (settings as any).taxProfile?.vatRegistrationCancelledAt || null,
+            vatCategory: (settings as any).taxProfile?.vatCategory || '',
+            fiscalisationEnabled: Boolean((settings as any).taxProfile?.fiscalisationEnabled)
+          },
           address: settings.companyAddress,
           phone: settings.companyPhone,
           email: settings.companyEmail,
@@ -401,8 +453,7 @@ const SettingsPage: React.FC = () => {
           commissionConfig: {
             preaPercentOfTotal: Number(settings.preaPercentOfTotal),
             agentPercentOfRemaining: Number(settings.agentPercentOfRemaining),
-            agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining),
-            vatPercentOnCommission: Number((settings as any).vatPercentOnCommission)
+            agencyPercentOfRemaining: Number(settings.agencyPercentOfRemaining)
           },
           rentReceivableOpeningBalance: Number((settings as any).rentReceivableOpeningBalance || 0),
           levyReceivableOpeningBalance: Number((settings as any).levyReceivableOpeningBalance || 0),
@@ -690,6 +741,61 @@ const SettingsPage: React.FC = () => {
                 name="vatNumber"
                 value={settings.vatNumber}
                 onChange={handleInputChange}
+                margin="normal"
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean((settings as any).taxProfile?.vatRegistered)}
+                    onChange={(e) => setSettings((prev: any) => ({
+                      ...prev,
+                      taxProfile: { ...(prev.taxProfile || {}), vatRegistered: e.target.checked }
+                    }))}
+                    name="taxProfile.vatRegistered"
+                  />
+                }
+                label="VAT registered"
+              />
+              {!(settings as any).taxProfile?.vatRegistered ? (
+                <Alert severity="warning" sx={{ mt: 1 }}>VAT NOT ACTIVE. Property VAT flags cannot create VAT until company registration is configured.</Alert>
+              ) : (
+                <Alert severity="success" sx={{ mt: 1 }}>
+                  VAT ACTIVE FROM {(settings as any).taxProfile?.vatRegistrationEffectiveDate || 'the registration effective date'}
+                </Alert>
+              )}
+              <TextField
+                fullWidth
+                type="date"
+                label="VAT registration effective date"
+                value={(settings as any).taxProfile?.vatRegistrationEffectiveDate || ''}
+                onChange={(e) => setSettings((prev: any) => ({
+                  ...prev,
+                  taxProfile: { ...(prev.taxProfile || {}), vatRegistrationEffectiveDate: e.target.value }
+                }))}
+                margin="normal"
+                InputLabelProps={{ shrink: true }}
+                helperText="VAT is 0 for transactions before this date. A VAT number alone does not register the company."
+              />
+              <TextField
+                fullWidth
+                type="date"
+                label="VAT registration cancellation date"
+                value={(settings as any).taxProfile?.vatRegistrationCancelledAt || ''}
+                onChange={(e) => setSettings((prev: any) => ({
+                  ...prev,
+                  taxProfile: { ...(prev.taxProfile || {}), vatRegistrationCancelledAt: e.target.value }
+                }))}
+                margin="normal"
+                InputLabelProps={{ shrink: true }}
+              />
+              <TextField
+                fullWidth
+                label="VAT category"
+                value={(settings as any).taxProfile?.vatCategory || ''}
+                onChange={(e) => setSettings((prev: any) => ({
+                  ...prev,
+                  taxProfile: { ...(prev.taxProfile || {}), vatCategory: e.target.value }
+                }))}
                 margin="normal"
               />
               <TextField
@@ -992,73 +1098,18 @@ const SettingsPage: React.FC = () => {
                 inputProps={{ step: 0.01, min: 0, max: 1 }}
                 helperText="Agent + Agency of remaining must equal 1.0"
               />
-          <TextField
-            fullWidth
-            type="number"
-            label="Current VAT on commission (0-1, read-only)"
-            name="vatPercentOnCommission"
-            value={(settings as any).vatPercentOnCommission}
-            margin="normal"
-            inputProps={{ step: 0.001, min: 0, max: 1, readOnly: true }}
-            helperText="Synced from the dated VAT tax rates below. Do not edit this field directly."
-          />
             </Grid>
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>VAT Rates</Typography>
+              <Typography variant="h6" gutterBottom>VAT rate</Typography>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <div>Jurisdiction: {centralVat?.jurisdiction === 'ZW' ? 'Zimbabwe' : (centralVat?.jurisdiction || 'Zimbabwe')}</div>
+                <div>Standard VAT rate: {centralVat?.rate != null ? `${Number(centralVat.rate)}%` : 'No rate is configured for today'}</div>
+                <div>Effective from: {centralVat?.effectiveFrom ? new Date(centralVat.effectiveFrom).toLocaleDateString() : '—'}</div>
+                <div>Rate source: Centrally managed by Mantis</div>
+              </Alert>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                VAT on commission uses the rate effective on the payment date. Historical payments keep the rate stored on the transaction.
+                The national VAT percentage cannot be edited here. New payments use the central rate effective on the payment date. Posted payments keep the rate stored on the transaction.
               </Typography>
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} sm={4}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="New VAT rate (%)"
-                    value={newVatRate}
-                    onChange={(e) => setNewVatRate(e.target.value)}
-                    inputProps={{ min: 0, step: 0.1 }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <TextField
-                    fullWidth
-                    type="date"
-                    label="Effective from"
-                    value={newVatEffectiveFrom}
-                    onChange={(e) => setNewVatEffectiveFrom(e.target.value)}
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Button
-                    variant="contained"
-                    disabled={taxRatesLoading}
-                    onClick={async () => {
-                      try {
-                        setTaxRatesLoading(true);
-                        await accountingService.createVatRate({
-                          rate: Number(newVatRate),
-                          effectiveFrom: newVatEffectiveFrom
-                        });
-                        const rows = await accountingService.getTaxRates('VAT');
-                        setTaxRates(rows);
-                        const current = await accountingService.getCurrentVatRate();
-                        if (current?.decimalRate != null) {
-                          setSettings(prev => ({ ...prev, vatPercentOnCommission: current.decimalRate } as any));
-                        }
-                        await refreshCompany();
-                        setMessage({ type: 'success', text: 'VAT rate saved. Previous rate was closed off.' });
-                      } catch (error: any) {
-                        setMessage({ type: 'error', text: error?.response?.data?.message || error?.message || 'Failed to save VAT rate' });
-                      } finally {
-                        setTaxRatesLoading(false);
-                      }
-                    }}
-                  >
-                    Add VAT Rate
-                  </Button>
-                </Grid>
-              </Grid>
               {taxRatesLoading && taxRates.length === 0 ? (
                 <CircularProgress size={24} />
               ) : (
@@ -1073,11 +1124,89 @@ const SettingsPage: React.FC = () => {
                   ))}
                   {taxRates.length === 0 && (
                     <ListItem>
-                      <ListItemText primary="No dated VAT rates yet. The company commission VAT setting will be used until a rate is added." />
+                      <ListItemText primary="No central VAT rate is available for this jurisdiction." />
                     </ListItem>
                   )}
                 </List>
               )}
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="h6" gutterBottom>Capital Gains Tax rates</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Applied to capital gain (sale proceeds less acquisition and allowable costs), not to gross sale price. Leave unset to queue accountant review.
+              </Typography>
+              <Grid container spacing={2} sx={{ mb: 1 }}>
+                <Grid item xs={12} sm={4}>
+                  <TextField fullWidth type="number" label="CGT rate (%)" value={newCgtRate} onChange={(e) => setNewCgtRate(e.target.value)} />
+                </Grid>
+                <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Button
+                    variant="outlined"
+                    disabled={taxRatesLoading}
+                    onClick={async () => {
+                      try {
+                        setTaxRatesLoading(true);
+                        await accountingService.createVatRate({ rate: Number(newCgtRate), effectiveFrom: otherTaxEffectiveFrom, taxType: 'CGT' });
+                        setCgtRates(await accountingService.getTaxRates('CGT'));
+                      } catch (error: any) {
+                        setMessage({ type: 'error', text: error?.response?.data?.message || error?.message || 'Failed to save CGT rate' });
+                      } finally {
+                        setTaxRatesLoading(false);
+                      }
+                    }}
+                  >
+                    Add CGT rate
+                  </Button>
+                </Grid>
+              </Grid>
+              <List>
+                {cgtRates.map((row) => (
+                  <ListItem key={row._id} divider>
+                    <ListItemText
+                      primary={`CGT ${Number(row.rate).toFixed(1)}%`}
+                      secondary={`From ${new Date(row.effectiveFrom).toLocaleDateString()}${row.effectiveTo ? ` to ${new Date(row.effectiveTo).toLocaleDateString()}` : ' — open'}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+              <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>Capital Gains Withholding Tax rates</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Independent of final CGT. Applied to sale consideration when configured. This is not labelled CGT on statements.
+              </Typography>
+              <Grid container spacing={2} sx={{ mb: 1 }}>
+                <Grid item xs={12} sm={4}>
+                  <TextField fullWidth type="number" label="CGWT rate (%)" value={newCgwtRate} onChange={(e) => setNewCgwtRate(e.target.value)} />
+                </Grid>
+                <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Button
+                    variant="outlined"
+                    disabled={taxRatesLoading || !newCgwtRate}
+                    onClick={async () => {
+                      try {
+                        setTaxRatesLoading(true);
+                        await accountingService.createVatRate({ rate: Number(newCgwtRate), effectiveFrom: otherTaxEffectiveFrom, taxType: 'CGWT' });
+                        setCgwtRates(await accountingService.getTaxRates('CGWT'));
+                      } catch (error: any) {
+                        setMessage({ type: 'error', text: error?.response?.data?.message || error?.message || 'Failed to save CGWT rate' });
+                      } finally {
+                        setTaxRatesLoading(false);
+                      }
+                    }}
+                  >
+                    Add CGWT rate
+                  </Button>
+                </Grid>
+              </Grid>
+              <List>
+                {cgwtRates.map((row) => (
+                  <ListItem key={row._id} divider>
+                    <ListItemText
+                      primary={`Capital Gains Withholding Tax ${Number(row.rate).toFixed(1)}%`}
+                      secondary={`From ${new Date(row.effectiveFrom).toLocaleDateString()}${row.effectiveTo ? ` to ${new Date(row.effectiveTo).toLocaleDateString()}` : ' — open'}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
             </Grid>
           </Grid>
           <Alert severity="info" sx={{ mt: 2 }}>
@@ -1227,7 +1356,8 @@ const SettingsPage: React.FC = () => {
                 Fiscalization (ZIMRA/Agent)
               </Typography>
               <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                Configure fiscalization provider or agent details to enable fiscal tax invoices.
+                This application does not submit invoices to ZIMRA FDMS. A locally generated QR code is not a fiscal invoice.
+                Printed invoices are labelled NOT FISCALISED unless fiscalisation status is FISCALISATION_SUCCESS.
               </Typography>
             </Grid>
             <Grid item xs={12} md={6}>

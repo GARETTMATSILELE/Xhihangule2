@@ -127,7 +127,8 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
   };
 
   const clientDetails = getClientDetails();
-  const isNonFiscalizedInvoice = invoice.fiscalize === false;
+  const isFiscalSuccess = String((invoice as any).fiscalisationStatus || '') === 'FISCALISATION_SUCCESS';
+  const isNonFiscalizedInvoice = !isFiscalSuccess;
 
   // Derive QR image source strictly from what the fiscal machine provided
   const qrImageSrc: string | undefined =
@@ -210,7 +211,7 @@ const InvoicePrint: React.FC<InvoicePrintProps> = ({ invoice }) => {
           {/* Invoice Details */}
           <div className="invoice-details">
             <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-              {isNonFiscalizedInvoice ? 'TAX INVOICE' : 'FISCAL TAX INVOICE'}
+              {isNonFiscalizedInvoice ? 'TAX INVOICE — NOT FISCALISED' : 'FISCAL TAX INVOICE'}
             </Typography>
             <div className="invoice-number">
               Invoice #: {invoice.fiscalData?.documentNumber ? invoice.fiscalData.documentNumber : invoice._id.slice(-8).toUpperCase()}

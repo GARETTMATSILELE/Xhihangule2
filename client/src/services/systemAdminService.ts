@@ -94,7 +94,10 @@ export const systemAdminService = {
   createSupportTicket: async (payload: { companyId: string; subject: string; description: string; priority?: string }) =>
     (await api.post('/system-admin/support-tickets', payload)).data,
   updateSupportTicket: async (id: string, payload: Record<string, any>) => (await api.patch(`/system-admin/support-tickets/${id}`, payload)).data,
-  getRevenueAnalytics: async () => (await api.get('/system-admin/revenue')).data
+  getRevenueAnalytics: async () => (await api.get('/system-admin/revenue')).data,
+  listVatRates: async (jurisdiction = 'ZW') => (await api.get('/system-admin/vat-rates', { params: { jurisdiction } })).data,
+  createVatRate: async (payload: { jurisdiction?: string; rate: number; effectiveFrom: string; sourceReference: string; notes?: string }) =>
+    (await api.post('/system-admin/vat-rates', payload)).data
 };
 
 export default systemAdminService;

@@ -319,35 +319,27 @@ class DatabaseSyncService extends events_1.EventEmitter {
         });
     }
     /**
-     * Poll for payment changes
+     * Poll for payment changes.
+     * Operational only: does not reconstruct accounting for historical payments.
+     * Live completion posting stays on the payment controller + orchestrator.
+     * Change-stream completion (status flip) is handled in handlePaymentChange.
      */
     pollPaymentChanges() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                // Get recent payments that might need syncing
                 const recentPayments = yield Payment_1.Payment.find({
-                    updatedAt: { $gte: new Date(Date.now() - 60000) }, // Last minute
+                    updatedAt: { $gte: new Date(Date.now() - 60000) },
                     status: 'completed',
                     paymentType: { $in: ['rental', 'sale', 'introduction'] },
                     isProvisional: { $ne: true },
                     isInSuspense: { $ne: true }
-                }).limit(100);
-                for (const payment of recentPayments) {
-                    if (payment.status === 'completed' &&
-                        (payment.paymentType === 'rental' ||
-                            payment.paymentType === 'sale' ||
-                            payment.paymentType === 'introduction') &&
-                        !payment.reversalOfPaymentId &&
-                        Number(payment.amount || 0) >= 0) {
-                        try {
-                            const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
-                            yield postPaymentAccounting(payment._id.toString());
-                        }
-                        catch (e) {
-                            logger_1.logger.warn('Polling payment accounting post failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
-                        }
-                    }
-                }
+                })
+                    .select('_id')
+                    .limit(100)
+                    .lean();
+                logger_1.logger.info('Operational payment poll observed recent completed payments without historical posting', {
+                    count: recentPayments.length
+                });
             }
             catch (error) {
                 logger_1.logger.error('Error polling payment changes:', error);
@@ -397,11 +389,16 @@ class DatabaseSyncService extends events_1.EventEmitter {
      */
     handlePaymentChange(change) {
         return __awaiter(this, void 0, void 0, function* () {
+            var _a;
             const { operationType, documentKey, fullDocument } = change;
             const documentId = documentKey._id.toString();
             try {
                 if (operationType === 'insert' || operationType === 'update') {
-                    if (fullDocument &&
+                    const updatedFields = ((_a = change.updateDescription) === null || _a === void 0 ? void 0 : _a.updatedFields) || {};
+                    const isLiveCompletion = operationType === 'insert' ||
+                        (operationType === 'update' && ('status' in updatedFields || 'postingStatus' in updatedFields));
+                    if (isLiveCompletion &&
+                        fullDocument &&
                         fullDocument.status === 'completed' &&
                         (fullDocument.paymentType === 'rental' ||
                             fullDocument.paymentType === 'sale' ||
@@ -410,13 +407,19 @@ class DatabaseSyncService extends events_1.EventEmitter {
                         fullDocument.isProvisional !== true &&
                         !fullDocument.reversalOfPaymentId &&
                         Number(fullDocument.amount || 0) >= 0) {
-                        try {
-                            const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
-                            yield postPaymentAccounting(documentId);
-                            yield this.clearFailureRecord('payment', documentId);
+                        const { isHistoricalUntrackedPayment } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingProjection')));
+                        if (isHistoricalUntrackedPayment(fullDocument)) {
+                            logger_1.logger.info('Skipping change-stream posting for historical untracked payment', { paymentId: documentId });
                         }
-                        catch (e) {
-                            logger_1.logger.warn('Change-stream payment accounting post failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                        else {
+                            try {
+                                const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingOrchestrator')));
+                                yield postPaymentAccounting(documentId);
+                                yield this.clearFailureRecord('payment', documentId);
+                            }
+                            catch (e) {
+                                logger_1.logger.warn('Change-stream payment accounting post failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
+                            }
                         }
                     }
                     else if (fullDocument && (fullDocument.status === 'reversed' || String(fullDocument.postingStatus || '') === 'reversed')) {
@@ -517,19 +520,16 @@ class DatabaseSyncService extends events_1.EventEmitter {
         });
     }
     /**
-     * Sync payment to accounting database
+     * Operational payment observation only.
+     * Must not post company commission, owner income, journals, VAT, or deposits.
+     * Authoritative posting is paymentAccountingOrchestrator on live completion.
      */
     syncPaymentToAccounting(payment) {
         return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const accountingIntegrationService = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
-                yield accountingIntegrationService.postCompanyCommission(payment);
-                this.recordSyncSuccess();
-            }
-            catch (error) {
-                logger_1.logger.error(`Failed to sync payment ${payment._id}:`, error);
-                throw error;
-            }
+            logger_1.logger.info('Operational payment sync does not post accounting', {
+                paymentId: String((payment === null || payment === void 0 ? void 0 : payment._id) || '')
+            });
+            this.recordSyncSuccess();
         });
     }
     /**
@@ -736,46 +736,33 @@ class DatabaseSyncService extends events_1.EventEmitter {
         });
     }
     /**
-     * Sync all completed payments
+     * FINANCIAL LOCKDOWN: scheduled/historical full sync is detection-only.
+     * Inspects tracked incomplete payments, reconciles, and flags exceptions.
+     * Must not invoke owner-income, orchestrator, repair, company-commission, or ledger enqueue writers.
      */
     syncAllPayments() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const payments = yield Payment_1.Payment.find({
-                    status: 'completed',
-                    paymentType: { $in: ['rental', 'sale', 'introduction'] },
-                    isProvisional: { $ne: true },
-                    isInSuspense: { $ne: true },
-                    reversalOfPaymentId: { $exists: false },
-                    amount: { $gte: 0 }
-                });
-                logger_1.logger.info(`Syncing ${payments.length} completed payments...`);
+                const { buildAccountingIntegrityCandidateFilter, isHistoricalUntrackedPayment } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingProjection')));
+                const { reconcilePayment, applyReconciliationOutcome } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingReconciliation')));
+                const payments = yield Payment_1.Payment.find(buildAccountingIntegrityCandidateFilter())
+                    .select('_id companyId accountingComplete accountingStatus')
+                    .limit(500)
+                    .lean();
+                logger_1.logger.info(`Detection-only payment sync inspecting ${payments.length} tracked incomplete payments`);
                 for (const payment of payments) {
                     try {
-                        yield this.syncPaymentToAccounting(payment);
-                        // Ensure owner income is posted to property/development ledgers as well (idempotent)
-                        try {
-                            yield propertyAccountService_1.default.recordIncomeFromPayment(payment._id.toString());
-                        }
-                        catch (ledgerErr) {
-                            // Queue for retry if immediate posting fails
-                            try {
-                                yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(payment._id.toString());
-                            }
-                            catch (_a) { }
-                            logger_1.logger.warn('Property ledger posting failed during full sync; enqueued for retry:', (ledgerErr === null || ledgerErr === void 0 ? void 0 : ledgerErr.message) || ledgerErr);
-                        }
-                        // Best-effort verification and reconciliation for this payment
-                        try {
-                            yield this.verifyAndReconcilePaymentPosting(payment._id.toString());
-                        }
-                        catch (verifyErr) {
-                            logger_1.logger.warn('Verification failed during full sync (non-fatal):', (verifyErr === null || verifyErr === void 0 ? void 0 : verifyErr.message) || verifyErr);
-                        }
+                        if (isHistoricalUntrackedPayment(payment))
+                            continue;
+                        const paymentId = String(payment._id);
+                        const recon = yield reconcilePayment(paymentId);
+                        yield applyReconciliationOutcome(paymentId, recon, {
+                            companyId: payment.companyId ? String(payment.companyId) : undefined
+                        });
                         this.syncStats.totalSynced++;
                     }
                     catch (error) {
-                        this.recordSyncError('payment', payment._id.toString(), error);
+                        this.recordSyncError('payment', String(payment._id), error);
                     }
                 }
             }
@@ -880,11 +867,10 @@ class DatabaseSyncService extends events_1.EventEmitter {
             try {
                 switch (type) {
                     case 'payment': {
-                        const payment = yield Payment_1.Payment.findById(documentId);
-                        if (payment) {
-                            yield this.syncPaymentToAccounting(payment);
-                            yield this.clearFailureRecord('payment', documentId);
-                        }
+                        logger_1.logger.warn('SyncFailure payment retry skipped: automatic accounting posting is disabled', {
+                            documentId
+                        });
+                        yield this.clearFailureRecord('payment', documentId);
                         break;
                     }
                     case 'property': {
@@ -1224,59 +1210,45 @@ class DatabaseSyncService extends events_1.EventEmitter {
         });
     }
     /**
-     * Verify that a specific payment has been posted to relevant ledgers and reconcile issues:
-     * - Ensures property/development ledger income exists (idempotent)
-     * - Ensures company commission is recorded when applicable (idempotent)
-     * - Dedupe duplicate postings in ledgers (best-effort)
+     * Read-only compare of expected vs actual accounting.
+     * Never posts, repairs, or enqueues ledger events.
      */
     verifyAndReconcilePaymentPosting(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const payment = yield Payment_1.Payment.findById(paymentId).lean();
-                if (!payment || payment.status !== 'completed')
-                    return;
-                const { evaluatePermanentAccountingPolicy } = yield Promise.resolve().then(() => __importStar(require('./accountingPostingPolicy')));
-                if (!evaluatePermanentAccountingPolicy(payment).allowed)
-                    return;
-                // Property/development ledgers: idempotent record and dedupe if needed
-                try {
-                    yield propertyAccountService_1.default.recordIncomeFromPayment(paymentId);
-                }
-                catch (e) {
-                    // Enqueue for retry if immediate fails
-                    try {
-                        yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(paymentId);
-                    }
-                    catch (_a) { }
-                    logger_1.logger.warn('verifyAndReconcile: property ledger post failed; enqueued for retry:', (e === null || e === void 0 ? void 0 : e.message) || e);
-                }
-                // Company commission via the same policy-gated writer as the orchestrator.
-                // Do not archive/dedupe historical rows here — that is Phase 5C repair.
-                if (payment === null || payment === void 0 ? void 0 : payment.companyId) {
-                    try {
-                        const accountingIntegration = (yield Promise.resolve().then(() => __importStar(require('./accountingIntegrationService')))).default;
-                        yield accountingIntegration.postCompanyCommission(payment);
-                    }
-                    catch (postErr) {
-                        logger_1.logger.warn('verifyAndReconcile: failed ensuring company commission posting:', (postErr === null || postErr === void 0 ? void 0 : postErr.message) || postErr);
-                    }
-                }
+            const { reconcilePayment, applyReconciliationOutcome } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingReconciliation')));
+            const { evaluatePermanentAccountingPolicy } = yield Promise.resolve().then(() => __importStar(require('./accountingPostingPolicy')));
+            const payment = yield Payment_1.Payment.findById(paymentId).lean();
+            if (!payment) {
+                return {
+                    paymentId,
+                    accountingComplete: false,
+                    missing: ['payment'],
+                    mismatched: [],
+                    deprecated: true,
+                    repairEndpoint: `/api/accountants/payments/${paymentId}/accounting/repair`
+                };
             }
-            catch (outer) {
-                // Non-fatal
-                logger_1.logger.warn('verifyAndReconcilePaymentPosting encountered an error:', (outer === null || outer === void 0 ? void 0 : outer.message) || outer);
-            }
+            evaluatePermanentAccountingPolicy(payment);
+            const recon = yield reconcilePayment(paymentId);
+            yield applyReconciliationOutcome(paymentId, recon, {
+                companyId: payment.companyId ? String(payment.companyId) : undefined
+            });
+            return {
+                paymentId,
+                accountingComplete: recon.accountingComplete,
+                missing: recon.missing,
+                mismatched: recon.mismatched,
+                deprecated: true,
+                repairEndpoint: `/api/accountants/payments/${paymentId}/accounting/repair`
+            };
         });
     }
     /**
-     * Public wrapper to reconcile postings for a given payment:
-     * - Ensures property/development ledger income exists
-     * - Ensures company commission is recorded when applicable
-     * - Attempts to dedupe related duplicates
+     * Deprecated public wrapper. Detection-only. Does not write ledgers.
      */
     reconcilePaymentPosting(paymentId) {
         return __awaiter(this, void 0, void 0, function* () {
-            yield this.verifyAndReconcilePaymentPosting(paymentId);
+            return this.verifyAndReconcilePaymentPosting(paymentId);
         });
     }
 }

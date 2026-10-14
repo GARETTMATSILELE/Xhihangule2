@@ -93,6 +93,7 @@ const getUserCommissionSummary = (req, res) => __awaiter(void 0, void 0, void 0,
 });
 exports.getUserCommissionSummary = getUserCommissionSummary;
 const User_1 = require("../models/User");
+const companyUserRoles_1 = require("../utils/companyUserRoles");
 const getCurrentUser = (userId) => __awaiter(void 0, void 0, void 0, function* () {
     if (!userId) {
         throw new errorHandler_1.AppError('User ID is required', 400);
@@ -113,29 +114,27 @@ const getCurrentUser = (userId) => __awaiter(void 0, void 0, void 0, function* (
 });
 exports.getCurrentUser = getCurrentUser;
 const createUser = (userData) => __awaiter(void 0, void 0, void 0, function* () {
-    console.log('Creating user with data:', userData);
-    // Check if user already exists
     const existingUser = yield User_1.User.findOne({ email: userData.email, companyId: userData.companyId, isArchived: { $ne: true } });
     if (existingUser) {
         throw new errorHandler_1.AppError('User already exists', 400);
     }
-    // Normalize roles: if roles array provided, ensure unique/valid and set primary role
-    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'];
-    let payload = Object.assign({}, userData);
-    if (Array.isArray(userData.roles) && userData.roles.length > 0) {
-        const roles = Array.from(new Set(userData.roles.map((r) => String(r)))).filter((r) => VALID_ROLES.includes(r));
-        if (roles.length === 0)
-            throw new errorHandler_1.AppError('At least one valid role is required', 400);
-        payload.roles = roles;
-        // Set primary role if not provided or not valid
-        if (!VALID_ROLES.includes(String(userData.role))) {
-            payload.role = roles[0];
-        }
+    const assignment = (0, companyUserRoles_1.assertCompanyAssignableRoleSet)(userData.role, userData.roles);
+    const payload = {
+        email: userData.email,
+        password: userData.password,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        companyId: userData.companyId,
+        isActive: true,
+    };
+    if (assignment.roles) {
+        payload.roles = assignment.roles;
+        payload.role = assignment.role;
     }
-    // Create new user
+    else if (assignment.role) {
+        payload.role = assignment.role;
+    }
     const user = yield User_1.User.create(payload);
-    console.log('User created successfully:', user);
-    // Return user without password
     const _a = user.toObject(), { password } = _a, userWithoutPassword = __rest(_a, ["password"]);
     return userWithoutPassword;
 });
@@ -151,30 +150,34 @@ const updateUserById = (id, updates, currentCompanyId) => __awaiter(void 0, void
     if (user.isArchived) {
         throw new errorHandler_1.AppError('Archived users cannot be updated', 400);
     }
-    // Enforce company scoping if provided
-    if (currentCompanyId && user.companyId && user.companyId.toString() !== currentCompanyId) {
+    // A missing company on the target is not a grant. Platform users are not editable here.
+    if (!currentCompanyId || !user.companyId || user.companyId.toString() !== String(currentCompanyId)) {
         throw new errorHandler_1.AppError('Forbidden: User does not belong to your company', 403);
     }
-    // Apply allowed updates
+    const targetRoles = [
+        String(user.role || ''),
+        ...(Array.isArray(user.roles) ? user.roles.map((role) => String(role)) : []),
+    ];
+    if (targetRoles.includes('system_admin')) {
+        throw new errorHandler_1.AppError('Forbidden', 403);
+    }
+    // Apply allowed updates. companyId, isActive, and platform roles are not accepted.
     if (typeof updates.firstName === 'string')
         user.firstName = updates.firstName;
     if (typeof updates.lastName === 'string')
         user.lastName = updates.lastName;
     if (typeof updates.email === 'string')
         user.email = updates.email;
-    if (typeof updates.role === 'string')
-        user.role = updates.role;
-    // Update roles array if provided
-    const VALID_ROLES = ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea'];
-    if (Array.isArray(updates.roles)) {
-        const roles = Array.from(new Set(updates.roles.map((r) => String(r)))).filter((r) => VALID_ROLES.includes(r));
-        if (roles.length === 0) {
-            throw new errorHandler_1.AppError('At least one valid role is required', 400);
+    if (updates.role !== undefined || updates.roles !== undefined) {
+        const assignment = (0, companyUserRoles_1.assertCompanyAssignableRoleSet)(updates.role !== undefined ? updates.role : undefined, updates.roles !== undefined ? updates.roles : undefined);
+        if (assignment.roles) {
+            user.roles = assignment.roles;
+            if (!assignment.roles.includes(user.role)) {
+                user.role = assignment.role;
+            }
         }
-        user.roles = roles;
-        // Ensure primary role is aligned with roles array
-        if (!roles.includes(user.role)) {
-            user.role = roles[0];
+        if (updates.role !== undefined && assignment.role) {
+            user.role = assignment.role;
         }
     }
     // If password provided and non-empty, set it so pre-save hook re-hashes

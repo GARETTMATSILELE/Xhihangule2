@@ -11,10 +11,13 @@ const DEFAULT_API_URL = isLocalDev
   : isBrowser
     ? `${window.location.origin}/api`
     : 'http://localhost:5000/api';
-const API_URL =
+const rawPublicApi =
   (typeof window !== 'undefined' && (window as any).__API_BASE__) ||
   import.meta.env?.VITE_API_URL ||
   DEFAULT_API_URL;
+const API_URL = process.env.NODE_ENV === 'production' && isBrowser && /localhost|127\.0\.0\.1/i.test(String(rawPublicApi))
+  ? `${window.location.origin}/api`
+  : rawPublicApi;
 const DEBUG_PUBLIC_API =
   Boolean((typeof window !== 'undefined' && (window as any).__DEBUG_PUBLIC_API__)) ||
   String(import.meta.env?.VITE_DEBUG_PUBLIC_API || '').toLowerCase() === 'true';

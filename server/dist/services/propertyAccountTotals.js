@@ -2,11 +2,16 @@
 /**
  * Deterministic PropertyAccount total calculation.
  * Cancelled, failed, and reversed-status rows are excluded.
- * PASS_THROUGH treatment is excluded from owner income/expense.
+ * PASS_THROUGH, LIABILITY (tenant deposits) and CAPITAL are excluded from owner P&L.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.computePropertyAccountTotals = computePropertyAccountTotals;
+exports.sumPropertyAccountPeriodPnl = sumPropertyAccountPeriodPnl;
 exports.computeAgentAccountTotals = computeAgentAccountTotals;
+const NON_PNL_TREATMENTS = new Set(['PASS_THROUGH', 'LIABILITY', 'CAPITAL']);
+function isPnlRow(t) {
+    return !NON_PNL_TREATMENTS.has(String((t === null || t === void 0 ? void 0 : t.accountingTreatment) || ''));
+}
 const ACTIVE = new Set(['completed']);
 function isActiveStatus(status) {
     return ACTIVE.has(String(status || ''));
@@ -16,13 +21,13 @@ function computePropertyAccountTotals(account) {
     const ownerPayouts = Array.isArray(account.ownerPayouts) ? account.ownerPayouts : [];
     const passThroughAccounts = Array.isArray(account.passThroughAccounts) ? account.passThroughAccounts : [];
     const totalIncome = transactions
-        .filter((t) => (t === null || t === void 0 ? void 0 : t.type) === 'income' && isActiveStatus(t.status) && t.accountingTreatment !== 'PASS_THROUGH')
+        .filter((t) => (t === null || t === void 0 ? void 0 : t.type) === 'income' && isActiveStatus(t.status) && isPnlRow(t))
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const totalExpenses = transactions
         .filter((t) => (t === null || t === void 0 ? void 0 : t.type) !== 'income' &&
         (t === null || t === void 0 ? void 0 : t.type) !== 'opening_balance' &&
         isActiveStatus(t.status) &&
-        t.accountingTreatment !== 'PASS_THROUGH')
+        isPnlRow(t))
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const totalOwnerPayouts = ownerPayouts
         .filter((p) => isActiveStatus(p.status))
@@ -51,6 +56,30 @@ function computePropertyAccountTotals(account) {
         passThroughCollected: Number(passThroughCollected.toFixed(2)),
         passThroughPaid: Number(passThroughPaid.toFixed(2)),
         passThroughOutstanding: Number((passThroughCollected - passThroughPaid).toFixed(2))
+    };
+}
+function sumPropertyAccountPeriodPnl(transactions, start, end) {
+    const rows = Array.isArray(transactions) ? transactions : [];
+    let income = 0;
+    let expenses = 0;
+    for (const t of rows) {
+        if (!isActiveStatus(t.status) || !isPnlRow(t))
+            continue;
+        const date = (t === null || t === void 0 ? void 0 : t.date) ? new Date(t.date) : null;
+        if (start && date && date < start)
+            continue;
+        if (end && date && date >= end)
+            continue;
+        const amount = Number(t.amount || 0);
+        if ((t === null || t === void 0 ? void 0 : t.type) === 'income')
+            income += amount;
+        else if ((t === null || t === void 0 ? void 0 : t.type) !== 'opening_balance')
+            expenses += amount;
+    }
+    return {
+        income: Number(income.toFixed(2)),
+        expenses: Number(expenses.toFixed(2)),
+        net: Number((income - expenses).toFixed(2))
     };
 }
 function computeAgentAccountTotals(account) {

@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OwnerStatementBuilder = void 0;
+const ownerWaterfall_1 = require("../ownerWaterfall");
 const engines_1 = require("../engines");
 const ledger_1 = require("../ledger");
 const rentalPeriod_1 = require("../rentalPeriod");
@@ -89,12 +90,16 @@ class OwnerStatementBuilder {
             var _a, _b, _c;
             const periodStart = parseDate(input.period.startDate);
             const periodEnd = parseEndDate(input.period.endDate);
+            if (input.ledgerType !== 'rental' && input.ledgerType !== 'sale') {
+                throw new Error('Owner statement requires an explicit ledgerType of rental or sale.');
+            }
             const [owner, property, entriesToDate, leaseContext, maintenanceContext, inspectionContext] = yield Promise.all([
-                this.readModels.owner.getOwnerForProperty(input.companyId, input.propertyId),
-                this.readModels.property.getProperty(input.companyId, input.propertyId),
+                this.readModels.owner.getOwnerForProperty(input.companyId, input.propertyId, input.ledgerType),
+                this.readModels.property.getProperty(input.companyId, input.propertyId, input.ledgerType),
                 this.readModels.ledger.getLedgerEntries({
                     companyId: input.companyId,
                     propertyId: input.propertyId,
+                    ledgerType: input.ledgerType,
                     from: LEDGER_ORIGIN,
                     to: periodEnd
                 }),
@@ -148,6 +153,33 @@ class OwnerStatementBuilder {
                 const rentAmount = rowType === 'Income' && snapshot && Number(snapshot.grossRent || 0) > 0
                     ? (0, engines_1.money)(snapshot.grossRent, currency)
                     : undefined;
+                const paymentId = paymentIdOf(entry);
+                const explained = rowType === 'Income' && snapshot
+                    ? (0, ownerWaterfall_1.explainOwnerWaterfall)({
+                        grossAmount: snapshot.grossRent,
+                        commissionAmount: snapshot.commission,
+                        levyAmount: snapshot.levy,
+                        vatOnCommission: snapshot.vatOnCommission,
+                        vatRate: snapshot.vatRate,
+                        recordedOwnerAmount: entry.credit
+                    })
+                    : undefined;
+                const ownerWaterfall = explained
+                    ? {
+                        grossAmount: (0, engines_1.money)(explained.grossAmount, currency),
+                        commissionAmount: (0, engines_1.money)(explained.commissionAmount, currency),
+                        levyAmount: (0, engines_1.money)(explained.levyAmount, currency),
+                        vatOnCommission: (0, engines_1.money)(explained.vatOnCommission, currency),
+                        vatRate: explained.vatRate,
+                        netOwnerAmount: (0, engines_1.money)(explained.netOwnerAmount, currency),
+                        recordedOwnerAmount: explained.recordedOwnerAmount == null
+                            ? undefined
+                            : (0, engines_1.money)(explained.recordedOwnerAmount, currency),
+                        difference: (0, engines_1.money)(explained.difference, currency),
+                        reviewRequired: explained.reviewRequired,
+                        formula: explained.formula
+                    }
+                    : undefined;
                 return {
                     id: entry.entryId,
                     date: entry.effectiveDate.toISOString(),
@@ -164,7 +196,9 @@ class OwnerStatementBuilder {
                     vatOnCommission: rowType === 'Income' && snapshot ? (0, engines_1.money)(snapshot.vatOnCommission, currency) : undefined,
                     levies: rowType === 'Income' && snapshot ? (0, engines_1.money)(snapshot.levy, currency) : undefined,
                     ownerAmount,
-                    vatRate: snapshot === null || snapshot === void 0 ? void 0 : snapshot.vatRate
+                    vatRate: snapshot === null || snapshot === void 0 ? void 0 : snapshot.vatRate,
+                    paymentId,
+                    ownerWaterfall
                 };
             });
             const ownerPayments = trustLedger.filter((row) => ownerPaymentEntries.some((entry) => entry.entryId === row.id));
@@ -283,6 +317,28 @@ class OwnerStatementBuilder {
             const totalOwnerAmount = trustLedger
                 .filter((row) => row.rowType === 'Income')
                 .reduce((sum, row) => { var _a; return sum + Number(((_a = row.ownerAmount) === null || _a === void 0 ? void 0 : _a.amount) || 0); }, 0);
+            const statementWaterfall = displayedSnapshots.length
+                ? (0, ownerWaterfall_1.explainOwnerWaterfall)({
+                    grossAmount: settlementGrossRent,
+                    commissionAmount: settlementCommission,
+                    levyAmount: settlementLevy,
+                    vatOnCommission: settlementVat,
+                    recordedOwnerAmount: totalOwnerAmount
+                })
+                : undefined;
+            const ownerMoneyWaterfall = statementWaterfall
+                ? {
+                    grossAmount: (0, engines_1.money)(statementWaterfall.grossAmount, currency),
+                    commissionAmount: (0, engines_1.money)(statementWaterfall.commissionAmount, currency),
+                    levyAmount: (0, engines_1.money)(statementWaterfall.levyAmount, currency),
+                    vatOnCommission: (0, engines_1.money)(statementWaterfall.vatOnCommission, currency),
+                    netOwnerAmount: (0, engines_1.money)(statementWaterfall.netOwnerAmount, currency),
+                    recordedOwnerAmount: (0, engines_1.money)(statementWaterfall.recordedOwnerAmount || 0, currency),
+                    difference: (0, engines_1.money)(statementWaterfall.difference, currency),
+                    reviewRequired: statementWaterfall.reviewRequired || trustLedger.some((row) => { var _a; return (_a = row.ownerWaterfall) === null || _a === void 0 ? void 0 : _a.reviewRequired; }),
+                    formula: statementWaterfall.formula
+                }
+                : undefined;
             const statementSummary = {
                 openingBalance: (0, engines_1.money)(openingBalanceAmount, currency),
                 totalRent: (0, engines_1.money)(settlementGrossRent, currency),
@@ -307,7 +363,9 @@ class OwnerStatementBuilder {
             };
             const dataWarnings = [
                 ...(periodRows.length === 0 && openingBalanceAmount === 0 ? ['No property account ledger entries found for this property and statement period.'] : []),
+                ...((ownerMoneyWaterfall === null || ownerMoneyWaterfall === void 0 ? void 0 : ownerMoneyWaterfall.reviewRequired) ? ['Review required. The stored payment allocation does not match the recorded owner income. No historical amount was changed.'] : []),
                 ...(!property ? ['Property metadata was not found for this property ID.'] : []),
+                ...((owner === null || owner === void 0 ? void 0 : owner.unresolvedReason) ? [owner.unresolvedReason] : []),
                 ...(!owner ? ['Owner metadata was not found for this property ID.'] : [])
             ];
             return {
@@ -329,7 +387,7 @@ class OwnerStatementBuilder {
                 },
                 owner: {
                     id: owner === null || owner === void 0 ? void 0 : owner.id,
-                    displayName: (owner === null || owner === void 0 ? void 0 : owner.displayName) || 'Unknown Owner',
+                    displayName: (owner === null || owner === void 0 ? void 0 : owner.displayName) || 'Owner not assigned',
                     email: owner === null || owner === void 0 ? void 0 : owner.email,
                     phone: owner === null || owner === void 0 ? void 0 : owner.phone,
                     type: 'owner'
@@ -340,6 +398,8 @@ class OwnerStatementBuilder {
                     address: property === null || property === void 0 ? void 0 : property.address
                 },
                 statementNumber: `OWNER-${input.period.label}`,
+                ledger: input.ledgerType,
+                currency,
                 period: input.period,
                 executiveSummary: {
                     openingBalance: (0, engines_1.money)(openingBalanceAmount, currency),
@@ -376,6 +436,7 @@ class OwnerStatementBuilder {
                 timeline,
                 pluginSections: [],
                 statementSummary,
+                ownerMoneyWaterfall,
                 rentalSettlement: displayedSnapshots.length
                     ? {
                         grossRent: (0, engines_1.money)(settlementGrossRent, currency),

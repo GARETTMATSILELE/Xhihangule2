@@ -120,6 +120,10 @@ const LeaseSchema = new mongoose_1.Schema({
     rentDueDay: { type: Number, default: 1, min: 1, max: 31 },
     lateFee: { type: Number, default: 0, min: 0 },
     gracePeriod: { type: Number, default: 0, min: 0 },
+    agencyWorkflow: { type: Boolean, default: false },
+    applicationId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'RentalApplication' },
+    tenantSignedAt: { type: Date },
+    ownerSignedAt: { type: Date },
 }, {
     timestamps: true
 });

@@ -34,6 +34,7 @@ import AdminAgentsPage from './admin/AdminAgentsPage';
 import AdminDevelopmentsPage from './admin/AdminDevelopmentsPage';
 import AdminNotificationsPage from './admin/AdminNotificationsPage';
 import ChargeTypesPage from './admin/ChargeTypesPage';
+import { AgentApplicationsPage, AgentQuotesPage, AgentBroadcastPage, AgencyEcosystemSettingsPage } from './ecosystem/AgencyEcosystemPages';
 
 const AdminDashboard: React.FC = () => {
   const location = useLocation();
@@ -78,6 +79,10 @@ const AdminDashboard: React.FC = () => {
             />
             <Route path="/inspections" element={<AdminInspectionsPage />} />
             <Route path="/viewings" element={<AdminViewingsPage />} />
+            <Route path="/rental-applications" element={<AgentApplicationsPage />} />
+            <Route path="/quote-workflow" element={<AgentQuotesPage />} />
+            <Route path="/broadcasts" element={<AgentBroadcastPage />} />
+            <Route path="/ecosystem" element={<AgencyEcosystemSettingsPage />} />
             <Route path="/duty-rosters" element={<AdminDutyRostersPage />} />
             <Route path="/vacancies" element={<AdminVacanciesPage />} />
             <Route

@@ -117,15 +117,27 @@ const getPropertyHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
     res.json(history);
 });
 exports.getPropertyHistory = getPropertyHistory;
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 const listContractors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const query = { companyId };
+    const query = (0, MaintenanceContractor_1.contractorDirectoryFilter)(companyId);
     if (req.query.active === 'true')
         query.active = true;
-    if (req.query.trade)
-        query.trade = req.query.trade;
-    const contractors = yield MaintenanceContractor_1.MaintenanceContractor.find(query).sort({ companyName: 1 });
-    res.json(contractors);
+    const category = String(req.query.category || req.query.trade || '').trim();
+    if (category) {
+        const pattern = new RegExp(`^${escapeRegex(category)}$`, 'i');
+        query.$and = [...(query.$and || []), { $or: [{ trade: pattern }, { skills: pattern }] }];
+    }
+    const contractors = yield MaintenanceContractor_1.MaintenanceContractor.find(query)
+        .populate('userId', 'avatar avatarMimeType')
+        .sort({ companyName: 1 })
+        .lean();
+    res.json(contractors.map((row) => {
+        const user = row.userId && typeof row.userId === 'object' ? row.userId : null;
+        return Object.assign(Object.assign({}, row), { userId: (user === null || user === void 0 ? void 0 : user._id) || row.userId || undefined, profileImage: (user === null || user === void 0 ? void 0 : user.avatar) || undefined, profileImageType: (user === null || user === void 0 ? void 0 : user.avatarMimeType) || undefined });
+    }));
 });
 exports.listContractors = listContractors;
 const createContractor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {

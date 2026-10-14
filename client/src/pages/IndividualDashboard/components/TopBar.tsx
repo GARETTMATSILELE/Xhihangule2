@@ -13,6 +13,7 @@ import {
 import { AttachMoney, Notifications as NotificationsIcon } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
+import { isDemoMode, notifyDemoBlocked, workspacePath } from '../../../demo/demoMode';
 import { INDIVIDUAL_THEME } from '../theme';
 import { ActionItem } from '../utils/actionCenter';
 
@@ -35,6 +36,7 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const demo = isDemoMode();
 
   const notifications: NotificationItem[] = useMemo(
     () => actionItems.slice(0, 8).map((a) => ({
@@ -64,7 +66,13 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
           size="small"
           startIcon={<AttachMoney />}
           component={RouterLink}
-          to="/individual-dashboard/rent-collection?record=1"
+          to={workspacePath('/individual-dashboard/rent-collection?record=1')}
+          onClick={(event) => {
+            if (demo) {
+              event.preventDefault();
+              notifyDemoBlocked();
+            }
+          }}
           sx={{
             bgcolor: INDIVIDUAL_THEME.primary,
             '&:hover': { bgcolor: INDIVIDUAL_THEME.primaryDark },
@@ -86,7 +94,7 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
           {notifications.map((n) => (
             <MenuItem
               key={n.id}
-              onClick={() => { setAnchorEl(null); navigate(n.link); }}
+              onClick={() => { setAnchorEl(null); navigate(workspacePath(n.link)); }}
               sx={{ maxWidth: 320, whiteSpace: 'normal' }}
             >
               <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: priorityDot[n.priority], mr: 1.5, flexShrink: 0 }} />
@@ -97,8 +105,18 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
             </MenuItem>
           ))}
         </Menu>
-        <Chip label="Individual Owner" size="small" sx={{ bgcolor: `${INDIVIDUAL_THEME.primary}15`, color: INDIVIDUAL_THEME.primary, fontWeight: 600 }} />
-        <Button variant="text" size="small" onClick={logout} sx={{ color: INDIVIDUAL_THEME.neutral }}>Log Out</Button>
+        <Chip label={demo ? 'SAMPLE WORKSPACE' : 'Individual Owner'} size="small" sx={{ bgcolor: `${INDIVIDUAL_THEME.primary}15`, color: INDIVIDUAL_THEME.primary, fontWeight: 600 }} />
+        <Button
+          variant="text"
+          size="small"
+          onClick={() => {
+            if (demo) navigate('/');
+            else logout();
+          }}
+          sx={{ color: INDIVIDUAL_THEME.neutral }}
+        >
+          {demo ? 'Exit demo' : 'Log Out'}
+        </Button>
       </Stack>
     </Box>
   );

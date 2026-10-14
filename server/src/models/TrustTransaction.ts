@@ -5,9 +5,11 @@ export type TrustTransactionType =
   | 'BUYER_PAYMENT'
   | 'TRANSFER_TO_SELLER'
   | 'CGT_DEDUCTION'
+  | 'CGWT_DEDUCTION'
   | 'COMMISSION_DEDUCTION'
   | 'VAT_DEDUCTION'
   | 'VAT_ON_COMMISSION'
+  | 'ZIMRA_REMITTANCE'
   | 'REFUND';
 
 export interface ITrustTransaction extends Document {
@@ -35,7 +37,7 @@ const TrustTransactionSchema: Schema<ITrustTransaction> = new Schema(
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', required: false, immutable: true, index: true },
     type: {
       type: String,
-      enum: ['BUYER_PAYMENT', 'TRANSFER_TO_SELLER', 'CGT_DEDUCTION', 'COMMISSION_DEDUCTION', 'VAT_DEDUCTION', 'VAT_ON_COMMISSION', 'REFUND'],
+      enum: ['BUYER_PAYMENT', 'TRANSFER_TO_SELLER', 'CGT_DEDUCTION', 'CGWT_DEDUCTION', 'COMMISSION_DEDUCTION', 'VAT_DEDUCTION', 'VAT_ON_COMMISSION', 'ZIMRA_REMITTANCE', 'REFUND'],
       required: true,
       index: true
     },

@@ -4,13 +4,23 @@ import SalesFile from '../models/SalesFile';
 import { Property } from '../models/Property';
 import { Deal } from '../models/Deal';
 import { ALLOWED_DOCS_BY_STAGE } from '../constants/salesDocs';
+import { callerCanAccessProperty, propertyIdsForCaller } from '../utils/propertyAccess';
+import { attachmentContentDisposition, safeAttachmentFilename } from '../utils/contentDisposition';
 
 export const listSalesFiles = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user?.companyId) return res.status(401).json({ message: 'Authentication required' });
     const { propertyId, dealId, stage } = req.query as { propertyId?: string; dealId?: string; stage?: string };
+    const scope = await propertyIdsForCaller(req);
     const query: any = { companyId: req.user.companyId };
-    if (propertyId) query.propertyId = propertyId;
+    if (scope !== 'company') {
+      if (propertyId && !scope.some((id) => String(id) === String(propertyId))) {
+        return res.json({ files: [] });
+      }
+      query.propertyId = propertyId || { $in: scope };
+    } else if (propertyId) {
+      query.propertyId = propertyId;
+    }
     if (dealId) query.dealId = dealId;
     if (stage) query.stage = stage;
     const files = await SalesFile.find(query).sort({ uploadedAt: -1 });
@@ -28,12 +38,19 @@ export const uploadSalesFile = async (req: AuthRequest, res: Response) => {
     if (!propertyId || !docType) return res.status(400).json({ message: 'Missing propertyId or docType' });
     const companyId = req.user.companyId;
     const prop = await Property.findOne({ _id: propertyId, companyId });
-    if (!prop) return res.status(404).json({ message: 'Property not found' });
+    if (!prop || !(await callerCanAccessProperty(req, String(propertyId)))) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
 
     // If uploading against a deal, validate ownership and stage/docType compatibility
     if (dealId) {
       const deal = await Deal.findOne({ _id: dealId, companyId });
-      if (!deal) return res.status(404).json({ message: 'Deal not found' });
+      if (!deal || String((deal as any).propertyId || '') !== String(propertyId)) {
+        return res.status(404).json({ message: 'Deal not found' });
+      }
+      if (!(await callerCanAccessProperty(req, String((deal as any).propertyId)))) {
+        return res.status(404).json({ message: 'Deal not found' });
+      }
       if (stage) {
         const allowed = ALLOWED_DOCS_BY_STAGE[stage] || [];
         if (!allowed.includes(docType)) {
@@ -46,7 +63,7 @@ export const uploadSalesFile = async (req: AuthRequest, res: Response) => {
       propertyId,
       dealId,
       companyId,
-      fileName: req.file.originalname,
+      fileName: safeAttachmentFilename(req.file.originalname),
       docType,
       fileUrl: req.file.buffer.toString('base64'),
       uploadedBy: req.user.userId,
@@ -63,10 +80,12 @@ export const downloadSalesFile = async (req: AuthRequest, res: Response) => {
     if (!req.user?.companyId) return res.status(401).json({ message: 'Authentication required' });
 
     const f = await SalesFile.findOne({ _id: req.params.id, companyId: req.user.companyId });
-    if (!f) return res.status(404).json({ message: 'File not found' });
+    if (!f || !(await callerCanAccessProperty(req, String(f.propertyId)))) {
+      return res.status(404).json({ message: 'File not found' });
+    }
     const buffer = Buffer.from(f.fileUrl, 'base64');
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${f.fileName}"`);
+    res.setHeader('Content-Disposition', attachmentContentDisposition(f.fileName));
     res.send(buffer);
   } catch (e) {
     res.status(500).json({ message: 'Failed to download sales file' });
@@ -78,7 +97,9 @@ export const deleteSalesFile = async (req: AuthRequest, res: Response) => {
     if (!req.user?.companyId) return res.status(401).json({ message: 'Authentication required' });
 
     const f = await SalesFile.findOne({ _id: req.params.id, companyId: req.user.companyId });
-    if (!f) return res.status(404).json({ message: 'File not found' });
+    if (!f || !(await callerCanAccessProperty(req, String(f.propertyId)))) {
+      return res.status(404).json({ message: 'File not found' });
+    }
     await f.deleteOne();
     res.json({ message: 'File deleted successfully' });
   } catch (e) {

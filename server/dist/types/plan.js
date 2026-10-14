@@ -15,7 +15,7 @@ exports.PLAN_CONFIG = {
             accounting: true,
             agents: false
         },
-        pricingUSD: { monthly: 100, yearly: 1200 },
+        pricingUSD: { monthly: 250, yearly: 3000 },
         workspaceType: 'individual'
     },
     SME: {
@@ -31,7 +31,7 @@ exports.PLAN_CONFIG = {
             accounting: true,
             agents: true
         },
-        pricingUSD: { monthly: 300, yearly: 3600 },
+        pricingUSD: { monthly: 600, yearly: 7200 },
         workspaceType: 'agency'
     },
     ENTERPRISE: {
@@ -47,7 +47,7 @@ exports.PLAN_CONFIG = {
             accounting: true,
             agents: true
         },
-        pricingUSD: { monthly: 600, yearly: 7200 },
+        pricingUSD: { monthly: 1200, yearly: 14400 },
         workspaceType: 'agency'
     }
 };

@@ -109,7 +109,10 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
           { text: 'Inspections', icon: <HomeWorkIcon />, path: '/admin-dashboard/inspections' },
           { text: 'Viewings', icon: <VisibilityIcon />, path: '/admin-dashboard/viewings' },
           { text: 'Duty Rosters', icon: <CalendarIcon />, path: '/admin-dashboard/duty-rosters' },
-          { text: 'Vacancies', icon: <CampaignIcon />, path: '/admin-dashboard/vacancies' },
+          { text: 'Quote Workflow', icon: <BuildIcon />, path: '/admin-dashboard/quote-workflow' },
+          { text: 'Applications', icon: <PeopleIcon />, path: '/admin-dashboard/rental-applications' },
+          { text: 'Broadcasts', icon: <CampaignIcon />, path: '/admin-dashboard/broadcasts' },
+          { text: 'Ecosystem', icon: <SettingsIcon />, path: '/admin-dashboard/ecosystem' },
         ],
       },
       {

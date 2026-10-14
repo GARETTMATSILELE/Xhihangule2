@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MaintenanceContractor = exports.CONTRACTOR_TRADES = void 0;
+exports.contractorDirectoryFilter = contractorDirectoryFilter;
 const mongoose_1 = __importStar(require("mongoose"));
 exports.CONTRACTOR_TRADES = [
     'Plumber',
@@ -57,7 +58,28 @@ const MaintenanceContractorSchema = new mongoose_1.Schema({
     notes: { type: String },
     rating: { type: Number, default: 0, min: 0, max: 5 },
     active: { type: Boolean, default: true, index: true },
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', index: true, sparse: true },
+    skills: [{ type: String, trim: true }],
+    serviceAreas: [{ type: String, trim: true }],
+    availability: { type: String, trim: true },
+    description: { type: String },
+    verificationStatus: {
+        type: String,
+        enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'SUSPENDED'],
+        default: 'UNVERIFIED',
+        index: true
+    },
 }, { timestamps: true, collection: 'maintenance_contractors' });
 MaintenanceContractorSchema.index({ companyId: 1, companyName: 1 });
 MaintenanceContractorSchema.index({ companyId: 1, trade: 1 });
 exports.MaintenanceContractor = mongoose_1.default.model('MaintenanceContractor', MaintenanceContractorSchema);
+/** Agency-owned vendors plus every active self-registered contractor, so any agency can offer them work. */
+function contractorDirectoryFilter(agencyCompanyId) {
+    return {
+        verificationStatus: { $ne: 'SUSPENDED' },
+        $or: [
+            ...(agencyCompanyId ? [{ companyId: agencyCompanyId }] : []),
+            { userId: { $exists: true, $ne: null }, active: true },
+        ],
+    };
+}

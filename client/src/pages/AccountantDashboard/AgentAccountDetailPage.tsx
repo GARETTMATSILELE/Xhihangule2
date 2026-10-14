@@ -301,13 +301,23 @@ const AgentAccountDetailPage: React.FC = () => {
 
   const handleSyncCommissions = async () => {
     if (!agentId) return;
+
+    const ok = window.confirm(
+      'This is an explicit historical commission catch-up from Payments, not live payment posting. Continue only if you are authorised to project missing agent commissions.'
+    );
+    if (!ok) return;
+    const reason = window.prompt('Enter a non-empty reason for this historical commission sync:');
+    if (!reason || !String(reason).trim()) return;
     
     setSubmitting(true);
     setSubmitError(null);
     setSuccess(null);
     
     try {
-      await agentAccountService.syncAgentCommissions(agentId);
+      await agentAccountService.syncAgentCommissions(agentId, {
+        confirm: true,
+        reason: String(reason).trim()
+      });
       
       // Refresh the account data
       const updatedAccount = await agentAccountService.getAgentAccount(agentId);
@@ -315,7 +325,7 @@ const AgentAccountDetailPage: React.FC = () => {
       
       setSuccess('Commission transactions synced successfully!');
     } catch (err: any) {
-      setSubmitError(err.message || 'Failed to sync commission transactions');
+      setSubmitError(err?.response?.data?.message || err.message || 'Failed to sync commission transactions');
     } finally {
       setSubmitting(false);
     }

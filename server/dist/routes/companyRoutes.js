@@ -32,8 +32,8 @@ const upload = (0, multer_1.default)({
 // Allow fetching current company even if none exists (returns 404 inside controller)
 router.get('/current', auth_1.auth, asyncRoute(companyController_1.getCurrentCompany));
 router.put('/current', auth_1.authWithCompany, asyncRoute(companyController_1.updateCurrentCompany));
-// Admin: change plan directly by company id (can be restricted later)
-router.put('/:id/plan', auth_1.authWithCompany, asyncRoute(companyController_1.updateCompany));
+// Plan entitlement changes belong to billing activation, not a profile update.
+router.put('/:id/plan', auth_1.authWithCompany, asyncRoute(companyController_1.rejectCompanyPlanChange));
 // Company metadata is tenant-sensitive. Keep /current for normal users and
 // restrict global/list-by-id access to platform admins.
 router.get('/', auth_1.auth, (0, auth_2.authorize)(['system_admin']), asyncRoute(companyController_1.getCompanies));

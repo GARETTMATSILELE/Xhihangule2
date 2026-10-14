@@ -6,6 +6,7 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
+  ListSubheader,
   Box,
   Typography,
   Avatar,
@@ -42,84 +43,34 @@ interface AgentSidebarProps {
 export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChange }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { company } = useAuth();
+  const { company, user } = useAuth();
+  const roleList = [user?.role, ...((user as any)?.roles || [])].filter(Boolean);
+  const canOverseePortfolio = roleList.some((role) => ['admin', 'principal', 'prea', 'accountant'].includes(String(role)));
 
   const menuItems = [
-    { 
-      text: 'Dashboard', 
-      icon: <DashboardIcon />, 
-      path: '/agent-dashboard' 
-    },
-    {
-      text: 'Workflow',
-      icon: <TimelineIcon />,
-      path: '/agent-dashboard/workflow'
-    },
-    { 
-      text: 'My Properties', 
-      icon: <BusinessIcon />, 
-      path: '/agent-dashboard/properties' 
-    },
-    { 
-      text: 'My Tenants', 
-      icon: <PeopleIcon />, 
-      path: '/agent-dashboard/tenants' 
-    },
-    { 
-      text: 'Leases', 
-      icon: <DescriptionIcon />, 
-      path: '/agent-dashboard/leases' 
-    },
-    { 
-      text: 'Property Owners', 
-      icon: <PersonIcon />, 
-      path: '/agent-dashboard/property-owners' 
-    },
-    { 
-      text: 'Payments', 
-      icon: <PaymentIcon />, 
-      path: '/agent-dashboard/payments' 
-    },
-    {
-      text: 'Levies',
-      icon: <ReceiptIcon />,
-      path: '/agent-dashboard/levies'
-    },
-    { 
-      text: 'Files', 
-      icon: <FolderIcon />, 
-      path: '/agent-dashboard/files' 
-    },
-    { 
-      text: 'Maintenance', 
-      icon: <BuildIcon />, 
-      path: '/agent-dashboard/maintenance' 
-    },
-    { 
-      text: 'Maintenance Vendors', 
-      icon: <EngineeringIcon />, 
-      path: '/agent-dashboard/maintenance-vendors' 
-    },
-    { 
-      text: 'Reports', 
-      icon: <BarChartIcon />, 
-      path: '/agent-dashboard/inspections' 
-    },
-    { 
-      text: 'Leads', 
-      icon: <AssignmentIcon />, 
-      path: '/agent-dashboard/tasks' 
-    },
-    { 
-      text: 'Schedule', 
-      icon: <CalendarIcon />, 
-      path: '/agent-dashboard/schedule' 
-    },
-    { 
-      text: 'Settings', 
-      icon: <SettingsIcon />, 
-      path: '/agent-dashboard/settings' 
-    },
+    { group: 'Overview', text: 'Dashboard', icon: <DashboardIcon />, path: '/agent-dashboard' },
+    { group: 'My work', text: 'Action Centre', icon: <TimelineIcon />, path: '/agent-dashboard/workflow' },
+    { group: 'My work', text: 'Tasks', icon: <AssignmentIcon />, path: '/agent-dashboard/tasks' },
+    { group: 'My work', text: 'Schedule', icon: <CalendarIcon />, path: '/agent-dashboard/schedule' },
+    { group: 'Rentals', text: 'Properties', icon: <BusinessIcon />, path: '/agent-dashboard/properties' },
+    { group: 'Rentals', text: 'Tenants', icon: <PeopleIcon />, path: '/agent-dashboard/tenants' },
+    { group: 'Rentals', text: 'Leases', icon: <DescriptionIcon />, path: '/agent-dashboard/leases' },
+    { group: 'Rentals', text: 'Viewings', icon: <AssignmentIcon />, path: '/agent-dashboard/viewings' },
+    { group: 'Rentals', text: 'Applications', icon: <PeopleIcon />, path: '/agent-dashboard/applications' },
+    { group: 'Owners', text: 'Owners', icon: <PersonIcon />, path: '/agent-dashboard/property-owners' },
+    { group: 'Owners', text: 'Collections', icon: <PaymentIcon />, path: '/agent-dashboard/owner-collections' },
+    { group: 'Operations', text: 'Maintenance', icon: <BuildIcon />, path: '/agent-dashboard/maintenance' },
+    { group: 'Operations', text: 'Quotes', icon: <BuildIcon />, path: '/agent-dashboard/quotes' },
+    { group: 'Operations', text: 'Contractors', icon: <EngineeringIcon />, path: '/agent-dashboard/contractors' },
+    { group: 'Operations', text: 'Levies', icon: <ReceiptIcon />, path: '/agent-dashboard/levies' },
+    { group: 'Operations', text: 'Inspections', icon: <AssignmentIcon />, path: '/agent-dashboard/inspections' },
+    { group: 'Operations', text: 'Files', icon: <FolderIcon />, path: '/agent-dashboard/files' },
+    { group: 'Finance', text: 'Payments', icon: <PaymentIcon />, path: '/agent-dashboard/payments' },
+    { group: 'Finance', text: 'Rent collection', icon: <ReceiptIcon />, path: '/agent-dashboard/rent-collection' },
+    { group: 'Overview', text: 'Search', icon: <AssignmentIcon />, path: '/agent-dashboard/search' },
+    ...(canOverseePortfolio ? [{ group: 'Overview', text: 'Portfolio oversight', icon: <BarChartIcon />, path: '/agent-dashboard/portfolio' }] : []),
+    { group: 'Reporting', text: 'Agent Reports', icon: <BarChartIcon />, path: '/agent-dashboard/property-details-report' },
+    { group: 'Settings', text: 'Settings', icon: <SettingsIcon />, path: '/agent-dashboard/settings' },
   ];
 
   const handleNavigation = (path: string, index: number) => {
@@ -181,16 +132,22 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
 
         {/* User details removed; name will be shown in header */}
 
-        <List sx={{ flex: 1 }}>
+        <List sx={{ flex: 1 }} subheader={<li />}>
           {menuItems.map((item, index) => (
             (() => {
               const isSelected = item.path === '/agent-dashboard'
                 ? location.pathname === item.path
                 : location.pathname.startsWith(item.path);
+              const showGroup = index === 0 || menuItems[index - 1].group !== item.group;
               return (
+            <React.Fragment key={item.text}>
+            {showGroup && (
+              <ListSubheader sx={{ bgcolor: 'transparent', color: 'rgba(226,232,240,0.45)', lineHeight: '28px', fontSize: 11, letterSpacing: '0.08em', fontWeight: 800 }}>
+                {item.group.toUpperCase()}
+              </ListSubheader>
+            )}
             <ListItem
               button
-              key={item.text}
               onClick={() => handleNavigation(item.path, index)}
               selected={isSelected || activeTab === index}
               sx={{
@@ -225,6 +182,7 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
                 }}
               />
             </ListItem>
+            </React.Fragment>
               );
             })()
           ))}

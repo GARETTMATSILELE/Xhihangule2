@@ -3,6 +3,7 @@ import { auth } from '../middleware/auth';
 import { enforcePropertyLimit } from '../middleware/limits';
 import { canViewPropertyDetailsReport, isAgent } from '../middleware/roles';
 import multer from 'multer';
+import { hasAllowedUploadExtension } from '../utils/contentDisposition';
 import {
   getAgentProperties,
   getAgentTenants,
@@ -28,6 +29,26 @@ import {
   restoreAgentProperty
 } from '../controllers/agentController';
 import { getAgentPropertyDetailsReport } from '../controllers/agentPropertyReportController';
+import { listOwnerCollections, createOwnerCollection, advanceOwnerCollection } from '../controllers/ownerCollectionController';
+import {
+  saveAssessment,
+  advanceAssessment,
+  saveMandate,
+  advanceMandate,
+  saveListing,
+  updateListing,
+  shortlistApplication,
+  ownerApplicationDecision,
+  prepareAgencyLease,
+  signAgencyLease,
+  activateAgencyLease,
+  rentCollectionBoard,
+  requestMaintenancePayment,
+  fileLevyReceipt,
+  propertyWorkspace,
+  agencySearch,
+  seniorPortfolio,
+} from '../agency/lettingController';
 import {
   ownersDashboard,
   ownerPortfolio,
@@ -61,7 +82,8 @@ const upload = multer({
       'image/png',
       'text/plain'
     ];
-    if (allowedTypes.includes(file.mimetype)) {
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'];
+    if (allowedTypes.includes(file.mimetype) && hasAllowedUploadExtension(file.originalname, allowedExtensions)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type. Only PDF, Word, images, and text files are allowed.'));
@@ -127,5 +149,26 @@ router.get('/property-owners/:id', getAgentPropertyOwnerById);
 router.post('/property-owners', createAgentPropertyOwner);
 router.put('/property-owners/:id', updateAgentPropertyOwner);
 router.delete('/property-owners/:id', deleteAgentPropertyOwner);
+
+router.post('/letting/assessments', saveAssessment);
+router.post('/letting/assessments/:id/status', advanceAssessment);
+router.post('/letting/mandates', saveMandate);
+router.post('/letting/mandates/:id/status', advanceMandate);
+router.post('/letting/listings', saveListing);
+router.post('/letting/listings/:id/status', updateListing);
+router.post('/letting/applications/:id/status', shortlistApplication);
+router.post('/letting/applications/:id/owner-decision', ownerApplicationDecision);
+router.post('/letting/leases', prepareAgencyLease);
+router.post('/letting/leases/:id/signature', signAgencyLease);
+router.post('/letting/leases/:id/activate', activateAgencyLease);
+router.get('/letting/rent-board', rentCollectionBoard);
+router.post('/letting/maintenance-payment-requests', requestMaintenancePayment);
+router.post('/letting/levies/:id/receipt', fileLevyReceipt);
+router.get('/letting/properties/:propertyId/workspace', propertyWorkspace);
+router.get('/letting/search', agencySearch);
+router.get('/letting/portfolio', seniorPortfolio);
+router.get('/owner-collections', listOwnerCollections);
+router.post('/owner-collections', createOwnerCollection);
+router.post('/owner-collections/:id/advance', advanceOwnerCollection);
 
 export default router; 

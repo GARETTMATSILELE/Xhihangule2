@@ -36,6 +36,21 @@ export interface IMaintenanceRequest extends Document {
     timestamp: Date;
   }[];
   companyId: mongoose.Types.ObjectId;
+  ecosystemWorkflow?: {
+    enabled?: boolean;
+    status?: string;
+    selectedQuoteId?: mongoose.Types.ObjectId;
+    approvedQuoteId?: mongoose.Types.ObjectId;
+    ownerApprovalId?: mongoose.Types.ObjectId;
+    authorisedBy?: mongoose.Types.ObjectId;
+    authorisedAt?: Date;
+    contractorJobId?: mongoose.Types.ObjectId;
+    tenantConfirmedAt?: Date;
+    category?: string;
+    urgency?: string;
+    preferredAccessTime?: string;
+    reportedByTenantId?: mongoose.Types.ObjectId;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -139,6 +154,21 @@ const MaintenanceRequestSchema: Schema = new Schema({
     type: Schema.Types.ObjectId,
     ref: 'Company',
     required: true
+  },
+  ecosystemWorkflow: {
+    enabled: { type: Boolean, default: false },
+    status: { type: String, index: true },
+    selectedQuoteId: { type: Schema.Types.ObjectId, ref: 'MaintenanceQuote' },
+    approvedQuoteId: { type: Schema.Types.ObjectId, ref: 'MaintenanceQuote' },
+    ownerApprovalId: { type: Schema.Types.ObjectId, ref: 'OwnerQuoteDecision' },
+    authorisedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    authorisedAt: { type: Date },
+    contractorJobId: { type: Schema.Types.ObjectId },
+    tenantConfirmedAt: { type: Date },
+    category: { type: String },
+    urgency: { type: String },
+    preferredAccessTime: { type: String },
+    reportedByTenantId: { type: Schema.Types.ObjectId, ref: 'Tenant' }
   }
 }, {
   timestamps: true

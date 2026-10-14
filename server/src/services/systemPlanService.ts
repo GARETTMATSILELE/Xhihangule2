@@ -61,10 +61,45 @@ export async function getPlanConfig(code: PlanCode) {
     code,
     monthlyPrice: Number(dbPlan.monthlyPrice || 0),
     annualPrice: Number(dbPlan.annualPrice || 0),
+    currency: dbPlan.currency || 'USD',
     propertyLimit: dbPlan.limits?.maxProperties ?? fallback.propertyLimit,
     featureFlags: {
       ...fallback.featureFlags,
       ...(dbPlan.featureFlags || {})
     }
   };
+}
+
+/** Price for a public plan. Uses the system-admin plan record and does not substitute the other billing frequency. */
+export async function chargeForPlan(code: string, cycle: 'monthly' | 'yearly'): Promise<number | null> {
+  if (code !== 'INDIVIDUAL' && code !== 'SME' && code !== 'ENTERPRISE') return null;
+  const dbPlan = await Plan.findOne({ code, isActive: true }).select('monthlyPrice annualPrice').lean();
+  const fallback = PLAN_CONFIG[code]?.pricingUSD;
+  const amount = dbPlan
+    ? Number(cycle === 'yearly' ? dbPlan.annualPrice : dbPlan.monthlyPrice)
+    : Number(cycle === 'yearly' ? fallback?.yearly : fallback?.monthly);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
+}
+
+export async function listDashboardPlans() {
+  await seedDefaultPlans();
+  const codes = ['INDIVIDUAL', 'SME', 'ENTERPRISE'] as PlanCode[];
+  const names: Record<PlanCode, string> = {
+    INDIVIDUAL: 'Landlord',
+    SME: 'Property Manager',
+    ENTERPRISE: 'Enterprise'
+  };
+  return Promise.all(codes.map(async (code) => {
+    const saved = await Plan.findOne({ code }).lean();
+    const cfg = await getPlanConfig(code);
+    return {
+      code,
+      name: saved?.name || names[code],
+      monthly: cfg.monthlyPrice > 0 ? cfg.monthlyPrice : null,
+      yearly: cfg.annualPrice > 0 ? cfg.annualPrice : null,
+      currency: saved?.currency || 'USD',
+      isActive: saved ? saved.isActive !== false : true
+    };
+  }));
 }

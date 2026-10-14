@@ -2,6 +2,7 @@ import express from 'express';
 import { authWithCompany } from '../middleware/auth';
 import multer from 'multer';
 import { listSalesFiles, uploadSalesFile, downloadSalesFile, deleteSalesFile } from '../controllers/salesFileController';
+import { hasAllowedUploadExtension } from '../utils/contentDisposition';
 
 const router = express.Router();
 
@@ -17,7 +18,8 @@ const upload = multer({
       'image/png',
       'text/plain'
     ];
-    if (allowedTypes.includes(file.mimetype)) {
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'];
+    if (allowedTypes.includes(file.mimetype) && hasAllowedUploadExtension(file.originalname, allowedExtensions)) {
       cb(null, true);
       return;
     }

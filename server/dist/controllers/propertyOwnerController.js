@@ -23,6 +23,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deletePropertyOwnerPublic = exports.updatePropertyOwnerPublic = exports.createPropertyOwnerPublic = exports.getPropertyOwnerByIdPublic = exports.getPropertyOwnersPublic = exports.deletePropertyOwner = exports.updatePropertyOwner = exports.getPropertyOwnerById = exports.getPropertyOwners = exports.createPropertyOwner = void 0;
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const errorHandler_1 = require("../middleware/errorHandler");
+const propertyAccess_1 = require("../utils/propertyAccess");
 const createPropertyOwner = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.user) {
@@ -74,9 +75,12 @@ const getPropertyOwners = (req, res, next) => __awaiter(void 0, void 0, void 0, 
             console.log('getPropertyOwners - Company ID not found');
             return next(new errorHandler_1.AppError('Company ID not found', 401));
         }
+        const visibleOwnerIds = yield (0, propertyAccess_1.propertyOwnerIdsForCaller)(req);
         const query = { companyId: req.user.companyId };
+        if (visibleOwnerIds !== 'company')
+            query._id = { $in: visibleOwnerIds };
         console.log('getPropertyOwners - Query:', query);
-        const owners = yield PropertyOwner_1.PropertyOwner.find(query);
+        const owners = yield PropertyOwner_1.PropertyOwner.find(query).select('-password');
         res.json(owners);
     }
     catch (error) {
@@ -94,8 +98,8 @@ const getPropertyOwnerById = (req, res, next) => __awaiter(void 0, void 0, void 
             return next(new errorHandler_1.AppError('Company ID not found', 401));
         }
         const query = { _id: id, companyId: req.user.companyId };
-        const owner = yield PropertyOwner_1.PropertyOwner.findOne(query);
-        if (!owner) {
+        const owner = yield PropertyOwner_1.PropertyOwner.findOne(query).select('-password');
+        if (!owner || !(yield (0, propertyAccess_1.callerCanReadPropertyOwner)(req, String(owner._id)))) {
             return next(new errorHandler_1.AppError('Property owner not found', 404));
         }
         res.json(owner);
@@ -127,7 +131,10 @@ const updatePropertyOwner = (req, res, next) => __awaiter(void 0, void 0, void 0
                 return next(new errorHandler_1.AppError('Email already in use by another property owner', 400));
             }
         }
-        const owner = yield PropertyOwner_1.PropertyOwner.findOneAndUpdate(query, Object.assign(Object.assign({}, updates), (email && { email })), { new: true, runValidators: true });
+        if (!(yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, id))) {
+            return next(new errorHandler_1.AppError('Property owner not found', 404));
+        }
+        const owner = yield PropertyOwner_1.PropertyOwner.findOneAndUpdate(query, Object.assign(Object.assign({}, updates), (email && { email })), { new: true, runValidators: true }).select('-password');
         if (!owner) {
             return next(new errorHandler_1.AppError('Property owner not found', 404));
         }
@@ -146,6 +153,9 @@ const deletePropertyOwner = (req, res, next) => __awaiter(void 0, void 0, void 0
         const { id } = req.params;
         if (!req.user.companyId) {
             return next(new errorHandler_1.AppError('Company ID not found', 401));
+        }
+        if (!(yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, id))) {
+            return res.status(404).json({ message: 'Property owner not found' });
         }
         const query = { _id: id, companyId: req.user.companyId };
         const owner = yield PropertyOwner_1.PropertyOwner.findOneAndDelete(query);
@@ -216,7 +226,7 @@ const getPropertyOwnerByIdPublic = (req, res) => __awaiter(void 0, void 0, void 
         }
         let query = { _id: id, companyId };
         const owner = yield PropertyOwner_1.PropertyOwner.findOne(query).select('-password');
-        if (!owner) {
+        if (!owner || !(yield (0, propertyAccess_1.callerCanReadPropertyOwner)(req, String(owner._id)))) {
             return res.status(404).json({
                 message: 'Property owner not found',
                 id,

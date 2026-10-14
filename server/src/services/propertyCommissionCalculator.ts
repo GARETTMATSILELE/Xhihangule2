@@ -1,4 +1,5 @@
 import { roundMoney } from '../utils/money';
+import { allocateRentalReceipt } from './tax/paymentAllocation';
 
 export type VatCommissionTreatment = 'inclusive' | 'exclusive';
 
@@ -22,6 +23,11 @@ export interface PropertyCommissionInput {
   preaPercentOfTotal?: number;
   agentPercentOfRemaining?: number;
   agencyPercentOfRemaining?: number;
+  /**
+   * Introduction is a one-time, one-month commission.
+   * When set, VAT is extracted from the commission amount (inclusive) and never added on top.
+   */
+  commissionType?: 'management' | 'introduction';
 }
 
 export interface PropertyCommissionResult extends CommissionResult {
@@ -37,6 +43,9 @@ export interface PropertyCommissionResult extends CommissionResult {
   vatAmount: number;
   totalDeductions: number;
   ownerPayable: number;
+  vatJurisdiction?: string;
+  vatRuleId?: string;
+  vatTaxPoint?: Date;
 }
 
 const clampUnit = (value: number | undefined, fallback: number): number =>
@@ -81,7 +90,10 @@ export const calculatePropertyCommission = (input: PropertyCommissionInput): Pro
   const commissionRate = Math.max(0, Number(input.commissionPercentage || 0));
   const commissionBase = roundMoney(Math.max(0, grossRent - levy));
   const vatOnCommission = Boolean(input.vatOnCommission);
-  const vatTreatment = normalizeVatCommissionTreatment(vatOnCommission, input.vatTreatment);
+  const isIntroduction = input.commissionType === 'introduction';
+  const vatTreatment = isIntroduction && vatOnCommission
+    ? 'inclusive'
+    : normalizeVatCommissionTreatment(vatOnCommission, input.vatTreatment);
   const vatRate = vatOnCommission ? Math.max(0, Number(input.vatRate || 0)) : 0;
 
   if (input.commissionEnabled === false) {
@@ -129,6 +141,9 @@ export const calculatePropertyCommission = (input: PropertyCommissionInput): Pro
   const ownerPayable = roundMoney(Math.max(0, commissionBase - ownerCommissionDeduction));
   const split = splitCommission(commissionNet, input);
   const totalDeductions = roundMoney(levy + ownerCommissionDeduction);
+  const totalCommission = isIntroduction
+    ? (vatOnCommission && vatRate > 0 ? commissionGross : calculatedCommission)
+    : commissionNet;
 
   return {
     grossRent,
@@ -137,7 +152,7 @@ export const calculatePropertyCommission = (input: PropertyCommissionInput): Pro
     commissionRate,
     commissionGross,
     commissionNet,
-    totalCommission: commissionNet,
+    totalCommission,
     preaFee: split.preaFee,
     agentShare: split.agentShare,
     agencyShare: split.agencyShare,
@@ -165,7 +180,18 @@ export const toPaymentCommissionSnapshot = (result: PropertyCommissionResult) =>
   commissionNet: result.commissionNet,
   vatTreatment: result.vatTreatment,
   vatRate: result.vatRate,
-  vatAmount: result.vatAmount
+  vatAmount: result.vatAmount,
+  vatJurisdiction: result.vatJurisdiction,
+  vatRuleId: result.vatRuleId,
+  vatTaxPoint: result.vatTaxPoint,
+  paymentAllocation: allocateRentalReceipt({
+    amount: roundMoney(result.grossRent + result.levy),
+    rent: result.grossRent,
+    levy: result.levy,
+    commissionBase: result.commissionBase,
+    commissionNet: result.commissionNet,
+    vatOnCommission: result.vatAmount
+  })
 });
 
 export const applyLevyPassThroughToSnapshot = (
@@ -179,5 +205,13 @@ export const applyLevyPassThroughToSnapshot = (
     : roundMoney(result.totalCommission + result.vatAmount);
   snapshot.levy = roundMoney(Math.max(0, levyPortion));
   snapshot.ownerAmount = roundMoney(Math.max(0, roundMoney(rentPortion) - ownerCommissionDeduction) + snapshot.levy);
+  (snapshot as any).paymentAllocation = allocateRentalReceipt({
+    amount: roundMoney(roundMoney(rentPortion) + snapshot.levy),
+    rent: roundMoney(rentPortion),
+    levy: snapshot.levy,
+    commissionBase: result.commissionBase,
+    commissionNet: result.commissionNet,
+    vatOnCommission: result.vatAmount
+  });
   return snapshot;
 };

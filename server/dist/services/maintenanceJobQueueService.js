@@ -156,21 +156,12 @@ class MaintenanceJobQueueService {
                 let result = {};
                 if (job.operation === 'sync_property_accounts') {
                     const companyId = job.companyId ? String(job.companyId).trim() : '';
-                    const syncStats = yield propertyAccountService_1.default.syncPropertyAccountsWithPayments({
-                        companyId: companyId || undefined,
-                        onProgress: () => this.renewClaimedLease(job)
-                    });
-                    let migrated = { moved: 0, propertiesAffected: 0 };
-                    if (companyId) {
-                        const entityIds = yield propertyAccountService_1.default.getLedgerEntityIdsForCompany(companyId);
-                        if (entityIds.length > 0) {
-                            migrated = yield propertyAccountService_1.default.migrateSalesLedgerForCompany(entityIds);
-                        }
-                    }
-                    else {
-                        migrated = yield propertyAccountService_1.default.migrateSalesLedgerForCompany();
-                    }
-                    result = { migrated, syncStats, companyScoped: Boolean(companyId) };
+                    result = {
+                        detectionOnly: true,
+                        historicalReplay: false,
+                        companyId: companyId || null,
+                        message: 'Property account sync no longer replays payments or migrates ledgers from the current property type.'
+                    };
                 }
                 else if (job.operation === 'ensure_development_ledgers') {
                     result = yield propertyAccountService_1.default.ensureDevelopmentLedgersAndBackfillPayments({

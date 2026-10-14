@@ -19,6 +19,7 @@ import {
   listSubscriptionBillingPayments,
   getSubscriptionPaymentReceipt
 } from '../controllers/systemAdminController';
+import { createCentralVatRate, listCentralVatRates } from '../controllers/taxRateController';
 import {
   getEnhancedStatus,
   getSystemAdminDashboard,
@@ -108,6 +109,9 @@ router.post('/support-tickets', createSupportTicket);
 router.patch('/support-tickets/:id', updateSupportTicket);
 
 router.get('/revenue', getRevenueAnalytics);
+
+router.get('/vat-rates', listCentralVatRates);
+router.post('/vat-rates', createCentralVatRate);
 
 export default router;
 

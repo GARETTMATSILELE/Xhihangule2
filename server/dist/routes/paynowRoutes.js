@@ -2,11 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const paynowController_1 = require("../controllers/paynowController");
+const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/status', paynowController_1.getStatus);
-router.post('/web/create', paynowController_1.createWebPayment);
-router.post('/mobile/create', paynowController_1.createMobilePayment);
-router.get('/poll', paynowController_1.pollTransaction);
+router.post('/web/create', auth_1.authWithCompany, paynowController_1.createWebPayment);
+router.post('/mobile/create', auth_1.authWithCompany, paynowController_1.createMobilePayment);
+router.get('/poll', auth_1.authWithCompany, paynowController_1.pollTransaction);
+router.post('/confirm', auth_1.authWithCompany, paynowController_1.confirmByReference);
 router.post('/result', paynowController_1.handleResult);
 router.get('/return', paynowController_1.handleReturn);
 exports.default = router;

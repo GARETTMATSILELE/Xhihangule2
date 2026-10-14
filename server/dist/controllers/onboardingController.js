@@ -18,38 +18,37 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const onboardingService_1 = require("../services/onboardingService");
 const authService_1 = require("../services/authService");
 const auditService_1 = require("../services/auditService");
+const publicSignupCompany_1 = require("../utils/publicSignupCompany");
 const onboardingService = onboardingService_1.OnboardingService.getInstance();
 const authService = authService_1.AuthService.getInstance();
-const isOnboardingV2Enabled = () => String(process.env.SAAS_ONBOARDING_V2 || '').toLowerCase() === 'true';
+function cookieDomain() {
+    const explicit = (process.env.COOKIE_DOMAIN || '').trim();
+    if (explicit)
+        return explicit;
+    const fromUrl = (process.env.CLIENT_URL || process.env.APP_BASE_URL || '').trim();
+    if (!fromUrl)
+        return undefined;
+    try {
+        const hostname = new URL(fromUrl).hostname;
+        return hostname.startsWith('www.') ? `.${hostname.slice(4)}` : `.${hostname}`;
+    }
+    catch (_a) {
+        return undefined;
+    }
+}
 function setAuthCookies(res, token, refreshToken) {
     const prod = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: prod,
-        sameSite: prod ? 'strict' : 'lax',
-        path: '/',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-    res.cookie('accessToken', token, {
-        httpOnly: true,
-        secure: prod,
-        sameSite: prod ? 'strict' : 'lax',
-        path: '/',
-        maxAge: 24 * 60 * 60 * 1000
-    });
-    res.cookie('refreshCsrf', crypto_1.default.randomBytes(32).toString('hex'), {
-        httpOnly: false,
-        secure: prod,
-        sameSite: prod ? 'strict' : 'lax',
-        path: '/',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    const domain = cookieDomain();
+    const scoped = prod && domain ? { domain } : {};
+    res.cookie('refreshToken', refreshToken, Object.assign(Object.assign({ httpOnly: true, secure: prod, sameSite: prod ? 'strict' : 'lax', path: '/' }, scoped), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
+    res.cookie('accessToken', token, Object.assign(Object.assign({ httpOnly: true, secure: prod, sameSite: prod ? 'strict' : 'lax', path: '/' }, scoped), { maxAge: 24 * 60 * 60 * 1000 }));
+    res.cookie('refreshCsrf', crypto_1.default.randomBytes(32).toString('hex'), Object.assign(Object.assign({ httpOnly: false, secure: prod, sameSite: prod ? 'strict' : 'lax', path: '/' }, scoped), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
 }
 const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     try {
-        if (!isOnboardingV2Enabled()) {
-            throw new errorHandler_1.AppError('New SaaS onboarding is not enabled', 404, 'ONBOARDING_DISABLED');
+        if (!(0, publicSignupCompany_1.isPublicSignupAllowed)(process.env)) {
+            throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
         }
         const idempotencyKey = req.get('idempotency-key') || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.idempotencyKey);
         const result = yield onboardingService.start(Object.assign(Object.assign({}, req.body), { idempotencyKey }));
@@ -69,6 +68,8 @@ const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
             entityId: (_j = (_h = result.onboardingSession._id) === null || _h === void 0 ? void 0 : _h.toString) === null || _j === void 0 ? void 0 : _j.call(_h),
             metadata: { plan: result.onboardingSession.plan, alreadyProcessed: result.alreadyProcessed }
         });
+        const resume = result.resume;
+        const nextStep = (resume === null || resume === void 0 ? void 0 : resume.nextStep) || (((_k = result.company) === null || _k === void 0 ? void 0 : _k.onboardingStatus) === 'PENDING_PAYMENT' ? 'payment' : 'dashboard');
         res.status(result.alreadyProcessed ? 200 : 201).json({
             onboardingSession: {
                 _id: result.onboardingSession._id,
@@ -84,16 +85,21 @@ const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
             company: result.company ? {
                 _id: result.company._id,
                 name: result.company.name,
+                plan: result.company.plan,
+                workspaceType: result.company.workspaceType,
                 tenantStatus: result.company.tenantStatus,
-                onboardingStatus: result.company.onboardingStatus
+                onboardingStatus: result.company.onboardingStatus,
+                onboardingCompleted: result.company.onboardingCompleted
             } : null,
             subscription: result.subscription ? {
                 _id: result.subscription._id,
                 plan: result.subscription.plan,
                 cycle: result.subscription.cycle,
-                status: result.subscription.status
+                status: result.subscription.status,
+                trialStartDate: result.subscription.trialStartDate,
+                trialEndDate: result.subscription.trialEndDate
             } : null,
-            paymentSession: result.paymentSession ? {
+            paymentSession: nextStep === 'payment' && result.paymentSession ? {
                 _id: result.paymentSession._id,
                 provider: result.paymentSession.provider,
                 providerRef: result.paymentSession.providerRef,
@@ -110,6 +116,13 @@ const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
                     onboardingSessionId: result.paymentSession.onboardingSessionId
                 }
             } : null,
+            registration: {
+                status: ((_l = result.company) === null || _l === void 0 ? void 0 : _l.onboardingStatus) || result.onboardingSession.status,
+                nextStep,
+                paymentRequired: nextStep === 'payment',
+                code: resume === null || resume === void 0 ? void 0 : resume.code,
+                message: resume === null || resume === void 0 ? void 0 : resume.message
+            },
             token
         });
     }

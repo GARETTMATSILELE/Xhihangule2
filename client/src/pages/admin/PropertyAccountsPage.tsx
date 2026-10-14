@@ -50,10 +50,16 @@ const PropertyAccountsPage: React.FC = () => {
   };
 
   const handleSyncAccounts = async () => {
+    const ok = window.confirm(
+      'This is an explicit historical backfill, not accounting reconciliation. Continue only if you are authorised to migrate historical payments.'
+    );
+    if (!ok) return;
+    const reason = window.prompt('Enter a non-empty reason for this historical backfill:');
+    if (!reason || !String(reason).trim()) return;
     try {
       setSyncing(true);
       setError(null);
-      await api.post('/accountants/property-accounts/sync');
+      await api.post('/accountants/property-accounts/sync', { confirm: true, reason: String(reason).trim() });
       const syncedData = await loadAccounts();
       setRows(syncedData);
     } catch (e: any) {
@@ -70,13 +76,6 @@ const PropertyAccountsPage: React.FC = () => {
         setError(null);
         // Company-scoped property accounts list
         let data = await loadAccounts();
-        // If none found, try syncing accounts from payments and retry once
-        if ((!data || data.length === 0)) {
-          try {
-            await api.post('/accountants/property-accounts/sync');
-            data = await loadAccounts();
-          } catch {}
-        }
         setRows(data);
       } catch (e: any) {
         setError(e?.response?.data?.message || e?.message || 'Failed to load property accounts');
@@ -171,7 +170,7 @@ const PropertyAccountsPage: React.FC = () => {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {rows.length === 0 && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No property accounts found. Click "Setup / Sync Accounts" to initialize accounts from existing properties and payments.
+          No property accounts found. Historical backfill is an authorised admin migration, not a normal sync.
         </Alert>
       )}
 
@@ -203,7 +202,7 @@ const PropertyAccountsPage: React.FC = () => {
                   <Chip label={`Expenses: $${Number(row.totalExpenses ?? 0).toLocaleString()}`} size="small" color="error" variant="outlined" />
                 </Box>
                 <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button size="small" onClick={() => navigate(`/admin-dashboard/property-accounts/${row.propertyId}/ledger`)}>
+                  <Button size="small" onClick={() => navigate(`/admin-dashboard/property-accounts/${row.propertyId}/ledger?ledger=${normalizeLedgerType(row.ledgerType) === 'sale' ? 'sale' : 'rental'}`)}>
                     View Ledger
                   </Button>
                 </Box>
@@ -239,7 +238,7 @@ const PropertyAccountsPage: React.FC = () => {
                   <Chip label={`Expenses: $${Number(row.totalExpenses ?? 0).toLocaleString()}`} size="small" color="error" variant="outlined" />
                 </Box>
                 <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button size="small" onClick={() => navigate(`/admin-dashboard/property-accounts/${row.propertyId}/ledger`)}>
+                  <Button size="small" onClick={() => navigate(`/admin-dashboard/property-accounts/${row.propertyId}/ledger?ledger=${normalizeLedgerType(row.ledgerType) === 'sale' ? 'sale' : 'rental'}`)}>
                     View Ledger
                   </Button>
                 </Box>

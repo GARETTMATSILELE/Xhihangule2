@@ -23,6 +23,7 @@ import { useCompany } from '../../contexts/CompanyContext';
 import { usePropertyService } from '../../services/propertyService';
 import { Property } from '../../types/property';
 import api from '../../api/axios';
+import accountingService from '../../services/accountingService';
 import { buyerService } from '../../services/buyerService';
 
 type Props = {
@@ -47,7 +48,7 @@ type Props = {
 
 const PAYMENT_METHODS: PaymentMethod[] = ['bank_transfer', 'cash', 'credit_card', 'mobile_money'];
 const CURRENCIES: Currency[] = ['USD', 'ZiG', 'ZAR'];
-const DEFAULT_SALE_VAT_RATE_PERCENT = 15.5;
+const DEFAULT_SALE_VAT_RATE_PERCENT = 0;
 
 const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment = false, initialData, submitLabel, prefill, onAgentChange }) => {
   const { user } = useAuth();
@@ -94,6 +95,18 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
     }
     return out;
   }, [properties]);
+
+  useEffect(() => {
+    const stored = Number((initialData as any)?.vatRate);
+    if (initialData && Number.isFinite(stored) && stored > 0) return;
+    let cancelled = false;
+    accountingService.getCurrentVatRate()
+      .then((current) => {
+        if (!cancelled && current?.rate != null) setVatRatePercent(Number(current.rate));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [initialData]);
 
   useEffect(() => {
     if (!initialData) return;
@@ -360,26 +373,23 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
   const sellerRevenue = useMemo(() => {
     const paid = Number(amountPaid) || 0;
     const taxableBase = Math.max(0, paid - vatAmountOnPayment);
-    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
-    const vatOnCommission = applyVatOnCommission ? vatRate * commissionOnPaid : 0;
+    const vatOnCommission = applyVatOnCommission ? vatRateDecimal * commissionOnPaid : 0;
     return Math.max(0, taxableBase - commissionOnPaid - vatOnCommission);
-  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission, applyVatOnCommission]);
+  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, vatRateDecimal, applyVatOnCommission]);
 
   const ownerAmountForThisPayment = useMemo(() => {
     const paid = Number(amountPaid) || 0;
     const taxableBase = Math.max(0, paid - vatAmountOnPayment);
-    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
-    const vatOnCommission = applyVatOnCommission ? vatRate * commissionOnPaid : 0;
+    const vatOnCommission = applyVatOnCommission ? vatRateDecimal * commissionOnPaid : 0;
     return Math.max(0, taxableBase - commissionOnPaid - vatOnCommission);
-  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission, applyVatOnCommission]);
+  }, [amountPaid, vatAmountOnPayment, commissionOnPaid, vatRateDecimal, applyVatOnCommission]);
 
-  const commissionVatRatePercent = Number(((company?.commissionConfig?.vatPercentOnCommission ?? 0.155) * 100).toFixed(2));
+  const commissionVatRatePercent = Number((vatRateDecimal * 100).toFixed(2));
 
   const vatOnCommissionAmount = useMemo(() => {
     if (!applyVatOnCommission) return 0;
-    const vatRate = Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)));
-    return Number((commissionOnPaid * vatRate).toFixed(2));
-  }, [applyVatOnCommission, commissionOnPaid, company?.commissionConfig?.vatPercentOnCommission]);
+    return Number((commissionOnPaid * vatRateDecimal).toFixed(2));
+  }, [applyVatOnCommission, commissionOnPaid, vatRateDecimal]);
 
   const handleSubmit = async () => {
     try {
@@ -436,9 +446,6 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
         vatRate: vatIncluded ? vatRateDecimal : undefined,
         vatAmount: vatIncluded ? Number(vatAmountOnPayment.toFixed(2)) : 0,
         applyVatOnCommission,
-        vatOnCommissionRate: applyVatOnCommission
-          ? Math.max(0, Math.min(1, Number(company?.commissionConfig?.vatPercentOnCommission ?? 0.155)))
-          : undefined,
         // Explicitly include buyer/seller fields for backend persistence
         buyerName,
         sellerName
@@ -630,10 +637,9 @@ const SalesPaymentForm: React.FC<Props> = ({ onSubmit, onCancel, isInstallment =
             label="VAT Rate %"
             type="number"
             value={vatRatePercent}
-            onChange={(e) => setVatRatePercent(Number(e.target.value))}
-            inputProps={{ min: 0, max: 100, step: '0.1' }}
-            helperText="Default 15.5%"
-            disabled={!vatIncluded}
+            inputProps={{ min: 0, max: 100, step: '0.1', readOnly: true }}
+            helperText="Centrally managed by Mantis. Posted payments keep their stored rate."
+            disabled
           />
         </Grid>
         <Grid item xs={12} md={4}>

@@ -24,10 +24,12 @@ import {
 } from '@mui/material';
 import { AttachMoney, TrendingDown, TrendingUp } from '@mui/icons-material';
 import { Link as RouterLink, useParams } from 'react-router-dom';
+import { workspacePath } from '../../../demo/demoMode';
 import individualWorkspaceService from '../../../services/individualWorkspaceService';
 import { propertyHealthScore } from '../utils/healthScore';
 import { BarChartPanel, CHART_COLORS } from '../components/Charts';
 import { CenteredLoader, HealthScoreBadge, StatCard } from '../components/shared';
+import { PropertyTaxProfileForm } from '../components/PropertyTaxProfileForm';
 import { money, formatDate } from '../utils/formatters';
 import { INDIVIDUAL_THEME } from '../theme';
 import {
@@ -40,7 +42,7 @@ import { getLeaseLifecycleStatus } from '../../../utils/leaseLifecycle';
 import { leaseStatusLabels } from '../../../utils/leaseLifecycle';
 import usePortfolioContext from '../hooks/usePortfolioContext';
 
-const TABS = ['Overview', 'Transactions', 'Income', 'Expenses', 'Bills', 'Maintenance', 'Inspections', 'Files', 'Performance', 'Reports'];
+const TABS = ['Overview', 'Transactions', 'Income', 'Expenses', 'Bills', 'Maintenance', 'Inspections', 'Files', 'Performance', 'Tax', 'Reports'];
 
 export function PropertyDetailPage() {
   const { propertyId = '' } = useParams<{ propertyId: string }>();
@@ -175,7 +177,7 @@ export function PropertyDetailPage() {
         </Box>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" onClick={() => window.open(individualWorkspaceService.getReportUrl('property-performance', 'pdf'), '_blank')}>Export PDF</Button>
-          <Button variant="contained" component={RouterLink} to={`/individual-dashboard/rent-collection?propertyId=${propertyId}`} sx={{ bgcolor: INDIVIDUAL_THEME.primary }}>Record Rent</Button>
+          <Button variant="contained" component={RouterLink} to={workspacePath(`/individual-dashboard/rent-collection?propertyId=${propertyId}`)} sx={{ bgcolor: INDIVIDUAL_THEME.primary }}>Record Rent</Button>
         </Stack>
       </Box>
 
@@ -256,10 +258,10 @@ export function PropertyDetailPage() {
             </Stack>
           )}
           {tabValue === 6 && (
-            <Button component={RouterLink} to="/individual-dashboard/inspections" variant="outlined">View Inspections Module</Button>
+            <Button component={RouterLink} to={workspacePath('/individual-dashboard/inspections')} variant="outlined">View Inspections Module</Button>
           )}
           {tabValue === 7 && (
-            <Button component={RouterLink} to={`/individual-dashboard/files?propertyId=${propertyId}`} variant="outlined">View Property Files</Button>
+            <Button component={RouterLink} to={workspacePath(`/individual-dashboard/files?propertyId=${propertyId}`)} variant="outlined">View Property Files</Button>
           )}
           {tabValue === 8 && (
             <Grid container spacing={2}>
@@ -269,6 +271,9 @@ export function PropertyDetailPage() {
             </Grid>
           )}
           {tabValue === 9 && (
+            <PropertyTaxProfileForm propertyId={propertyId} />
+          )}
+          {tabValue === 10 && (
             <Stack direction="row" spacing={1} flexWrap="wrap">
               <Button variant="outlined" onClick={() => window.open(individualWorkspaceService.getReportUrl('property-performance', 'pdf'), '_blank')}>Property Performance PDF</Button>
               <Button variant="outlined" onClick={() => window.open(individualWorkspaceService.getReportUrl('rent-collection', 'csv'), '_blank')}>Rent Collection CSV</Button>

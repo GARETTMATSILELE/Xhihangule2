@@ -86,7 +86,7 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
       status: 'available',
       occupiedUnits: 0,
       rentalType: 'management',
-      commission: 15,
+      commission: individualMode ? 0 : 15,
       vatOnCommission: false,
       vatCommissionTreatment: 'exclusive'
     };
@@ -120,9 +120,11 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
   });
 
   const [customAmenity, setCustomAmenity] = useState('');
+  const [advancedTaxOpen, setAdvancedTaxOpen] = useState(false);
 
   // Add effect to update commission default when rentalType or property.type changes
   React.useEffect(() => {
+    if (individualMode) return;
     let defaultCommission = 15;
     if (property.rentalType === 'management') {
       if (property.type === 'commercial') defaultCommission = 10;
@@ -133,7 +135,7 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
     setProperty(prev => ({ ...prev, commission: prev.commission !== undefined && prev.commission !== null && prev.commission !== 0 ? prev.commission : defaultCommission }));
     // Only set if not already set by user
     // eslint-disable-next-line
-  }, [property.rentalType, property.type]);
+  }, [property.rentalType, property.type, individualMode]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -737,16 +739,38 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
               <Divider sx={{ my: 1 }} />
               <Typography variant="h6" gutterBottom>VAT on Commission</Typography>
             </Grid>
+            {!(company as any)?.taxProfile?.vatRegistered && (
+              <Grid item xs={12}>
+                <Alert severity="warning">VAT NOT ACTIVE. This property checkbox cannot activate VAT until company VAT registration is configured.</Alert>
+              </Grid>
+            )}
+            {(company as any)?.taxProfile?.vatRegistered && (company as any)?.taxProfile?.vatRegistrationEffectiveDate && (
+              <Grid item xs={12}>
+                <Alert severity="info">
+                  VAT ACTIVE FROM {String((company as any).taxProfile.vatRegistrationEffectiveDate).slice(0, 10)}.
+                  {property.vatOnCommission && new Date() < new Date((company as any).taxProfile.vatRegistrationEffectiveDate) ? (
+                    <> Company VAT registration is not active on this transaction date.</>
+                  ) : null}
+                </Alert>
+              </Grid>
+            )}
             <Grid item xs={12} sm={6}>
               <FormControlLabel
                 control={
                   <Switch
                     checked={Boolean(property.vatOnCommission)}
-                    onChange={e => setProperty(prev => ({
-                      ...prev,
-                      vatOnCommission: e.target.checked,
-                      vatCommissionTreatment: e.target.checked ? (prev.vatCommissionTreatment || 'exclusive') : undefined
-                    }))}
+                    onChange={e => {
+                      const checked = e.target.checked;
+                      const effective = (company as any)?.taxProfile?.vatRegistrationEffectiveDate;
+                      if (checked && (company as any)?.taxProfile?.vatRegistered && effective && new Date() < new Date(effective)) {
+                        setError('Company VAT registration is not active on this transaction date.');
+                      }
+                      setProperty(prev => ({
+                        ...prev,
+                        vatOnCommission: checked,
+                        vatCommissionTreatment: checked ? (prev.vatCommissionTreatment || 'exclusive') : undefined
+                      }));
+                    }}
                   />
                 }
                 label={property.vatOnCommission ? 'VAT on Commission: ON' : 'VAT on Commission: OFF'}
@@ -772,8 +796,7 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
             )}
             <Grid item xs={12}>
               <Typography variant="body2" color="text.secondary">
-                Current VAT Rate: {Number(((company as any)?.commissionConfig?.vatPercentOnCommission || 0) * 100).toFixed(1)}%.
-                Managed under Accounting → Settings → Finance. The VAT rate cannot be edited on the property.
+                The national VAT percentage is centrally managed by Mantis and is applied from the payment date. It cannot be edited on the property.
               </Typography>
               {property.vatOnCommission && (
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
@@ -782,7 +805,214 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
                     : 'Exclusive: VAT is added on top of commission and deducted from the owner.'}
                 </Typography>
               )}
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                VAT is charged only if the company is VAT registered on the payment date and the supply is taxable. This flag alone does not create VAT.
+              </Typography>
             </Grid>
+          </>
+        )}
+
+        <Grid item xs={12}>
+          <Divider sx={{ my: 1 }} />
+          <Button
+            type="button"
+            variant="outlined"
+            onClick={() => setAdvancedTaxOpen((open) => !open)}
+            aria-expanded={advancedTaxOpen}
+            sx={{ textTransform: 'none' }}
+          >
+            Advanced tax settings
+          </Button>
+        </Grid>
+        {advancedTaxOpen && (
+          <>
+        <Grid item xs={12}>
+          <Typography variant="h6" gutterBottom>Property tax classification</Typography>
+          {individualMode && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              Commercial rental is not automatically VAT-exempt. If the treatment is uncertain, leave Accountant review. This is a working-paper classification, not a ZIMRA filing.
+            </Alert>
+          )}
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <FormControl fullWidth>
+            <InputLabel>Use class</InputLabel>
+            <Select
+              label="Use class"
+              value={property.propertyUseClass || (property.type === 'commercial' ? 'COMMERCIAL' : 'RESIDENTIAL_DWELLING')}
+              onChange={(e) => setProperty(prev => ({
+                ...prev,
+                propertyUseClass: e.target.value as PropertyFormData['propertyUseClass']
+              }))}
+            >
+              <MenuItem value="RESIDENTIAL_DWELLING">Residential dwelling rental</MenuItem>
+              <MenuItem value="COMMERCIAL">Commercial rental</MenuItem>
+              <MenuItem value="MIXED_USE">Mixed-use</MenuItem>
+              <MenuItem value="SHORT_TERM_ACCOMMODATION">Short-term accommodation</MenuItem>
+              {!individualMode && <MenuItem value="SALE">Property sale</MenuItem>}
+              {!individualMode && <MenuItem value="OTHER_SERVICE">Other service</MenuItem>}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <FormControl fullWidth>
+            <InputLabel>Rental / supply VAT treatment</InputLabel>
+            <Select
+              label="Rental / supply VAT treatment"
+              value={property.vatSupplyTreatment || 'ACCOUNTANT_REVIEW'}
+              onChange={(e) => setProperty(prev => ({
+                ...prev,
+                vatSupplyTreatment: e.target.value as PropertyFormData['vatSupplyTreatment']
+              }))}
+            >
+              <MenuItem value="EXEMPT">Exempt</MenuItem>
+              <MenuItem value="STANDARD_TAXABLE">Standard taxable</MenuItem>
+              <MenuItem value="ZERO_RATED">Zero-rated</MenuItem>
+              <MenuItem value="OUT_OF_SCOPE">Out of scope</MenuItem>
+              <MenuItem value="ACCOUNTANT_REVIEW">Accountant review</MenuItem>
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="date"
+            label="VAT treatment effective from"
+            value={property.vatEffectiveFrom ? String(property.vatEffectiveFrom).slice(0, 10) : ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, vatEffectiveFrom: e.target.value || undefined }))}
+            InputLabelProps={{ shrink: true }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="date"
+            label="VAT treatment effective to"
+            value={property.vatEffectiveTo ? String(property.vatEffectiveTo).slice(0, 10) : ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, vatEffectiveTo: e.target.value || undefined }))}
+            InputLabelProps={{ shrink: true }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <FormControl fullWidth>
+            <InputLabel>Rental tax treatment</InputLabel>
+            <Select
+              label="Rental tax treatment"
+              value={property.rentalTaxTreatment || 'ACCOUNTANT_REVIEW'}
+              onChange={(e) => setProperty(prev => ({
+                ...prev,
+                rentalTaxTreatment: e.target.value as PropertyFormData['rentalTaxTreatment']
+              }))}
+            >
+              <MenuItem value="ACCOUNTANT_REVIEW">Accountant review</MenuItem>
+              <MenuItem value="SELF_ASSESSMENT">Self-assessment</MenuItem>
+              <MenuItem value="PRESUMPTIVE_RENTAL">Presumptive rental income tax</MenuItem>
+              <MenuItem value="EXEMPT">Exempt</MenuItem>
+              <MenuItem value="NOT_APPLICABLE">Not applicable</MenuItem>
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="date"
+            label="Rental tax treatment effective from"
+            value={property.rentalTaxEffectiveFrom ? String(property.rentalTaxEffectiveFrom).slice(0, 10) : ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, rentalTaxEffectiveFrom: e.target.value || undefined }))}
+            InputLabelProps={{ shrink: true }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="number"
+            label="Ownership %"
+            value={property.ownershipPercentage ?? 100}
+            onChange={(e) => setProperty(prev => ({ ...prev, ownershipPercentage: e.target.value === '' ? undefined : Number(e.target.value) }))}
+            inputProps={{ min: 0, max: 100, step: 0.01 }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="number"
+            label={individualMode ? 'Acquisition cost' : 'Acquisition cost (CGT)'}
+            value={property.acquisitionCost ?? ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, acquisitionCost: e.target.value === '' ? undefined : Number(e.target.value) }))}
+            helperText={individualMode ? 'Record keeping only. Depreciation is not calculated automatically.' : 'Required for Capital Gains Tax. Missing cost queues accountant review; CGT is not estimated from sale price.'}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="date"
+            label="Acquisition date"
+            value={property.acquisitionDate ? String(property.acquisitionDate).slice(0, 10) : ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, acquisitionDate: e.target.value || undefined }))}
+            InputLabelProps={{ shrink: true }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            type="number"
+            label="Improvement costs"
+            value={property.improvementCosts ?? ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, improvementCosts: e.target.value === '' ? undefined : Number(e.target.value) }))}
+          />
+        </Grid>
+        <Grid item xs={12}>
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            label="Property tax notes"
+            value={property.taxNotes || ''}
+            onChange={(e) => setProperty(prev => ({ ...prev, taxNotes: e.target.value }))}
+          />
+        </Grid>
+
+        {!individualMode && (
+          <>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Sale VAT treatment</InputLabel>
+                <Select
+                  label="Sale VAT treatment"
+                  value={property.saleVatTreatment || 'ACCOUNTANT_REVIEW'}
+                  onChange={(e) => setProperty(prev => ({
+                    ...prev,
+                    saleVatTreatment: e.target.value as PropertyFormData['saleVatTreatment']
+                  }))}
+                >
+                  <MenuItem value="EXEMPT">Exempt</MenuItem>
+                  <MenuItem value="STANDARD_TAXABLE">Standard taxable</MenuItem>
+                  <MenuItem value="ZERO_RATED">Zero-rated</MenuItem>
+                  <MenuItem value="OUT_OF_SCOPE">Out of scope</MenuItem>
+                  <MenuItem value="ACCOUNTANT_REVIEW">Accountant review</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Qualifying expenses"
+                value={property.qualifyingExpenses ?? ''}
+                onChange={(e) => setProperty(prev => ({ ...prev, qualifyingExpenses: e.target.value === '' ? undefined : Number(e.target.value) }))}
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Selling costs"
+                value={property.sellingCosts ?? ''}
+                onChange={(e) => setProperty(prev => ({ ...prev, sellingCosts: e.target.value === '' ? undefined : Number(e.target.value) }))}
+              />
+            </Grid>
+          </>
+        )}
           </>
         )}
 

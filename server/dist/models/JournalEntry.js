@@ -42,7 +42,7 @@ const JournalEntrySchema = new mongoose_1.Schema({
     description: { type: String, required: false },
     sourceModule: {
         type: String,
-        enum: ['payment', 'expense', 'sale', 'commission', 'manual'],
+        enum: ['payment', 'expense', 'sale', 'commission', 'manual', 'tax', 'trust'],
         required: true
     },
     sourceId: { type: String, required: false },
@@ -69,5 +69,14 @@ JournalEntrySchema.pre('deleteMany', { document: false, query: true }, function 
 });
 JournalEntrySchema.pre('findOneAndDelete', function (next) {
     next(new Error('Hard delete is disabled for journal entries.'));
+});
+JournalEntrySchema.pre('findOneAndUpdate', function (next) {
+    next(new Error('Journal entries are immutable after posting.'));
+});
+JournalEntrySchema.pre('updateOne', { document: false, query: true }, function (next) {
+    next(new Error('Journal entries are immutable after posting.'));
+});
+JournalEntrySchema.pre('updateMany', { document: false, query: true }, function (next) {
+    next(new Error('Journal entries are immutable after posting.'));
 });
 exports.JournalEntry = mongoose_1.default.model('JournalEntry', JournalEntrySchema, collections_1.COLLECTIONS.JOURNAL_ENTRIES);

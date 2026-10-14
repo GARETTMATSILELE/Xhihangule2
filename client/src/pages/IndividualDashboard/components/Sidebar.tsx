@@ -1,15 +1,19 @@
 import React from 'react';
 import { Box, Divider, Drawer, List, ListItem, ListItemIcon, ListItemText, Typography } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { drawerWidth, NAV_SECTIONS } from '../constants';
+import { drawerWidth, getNavSections } from '../constants';
+import { getWorkspaceBasePath } from '../../../demo/demoMode';
 import { INDIVIDUAL_THEME } from '../theme';
 
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const base = getWorkspaceBasePath(location.pathname);
+  const sections = getNavSections(base);
+  const demo = base === '/demo';
 
   const isActive = (path: string) => {
-    if (path === '/individual-dashboard') return location.pathname === path;
+    if (path === base) return location.pathname === path || location.pathname === `${path}/`;
     return location.pathname.startsWith(path);
   };
 
@@ -30,12 +34,12 @@ export function Sidebar() {
     >
       <Box sx={{ p: 3, pb: 2 }}>
         <Typography variant="overline" sx={{ color: INDIVIDUAL_THEME.sidebarMuted, letterSpacing: 2 }}>MANTIS</Typography>
-        <Typography variant="h6" sx={{ fontWeight: 700 }}>Property Owner</Typography>
-        <Typography variant="caption" sx={{ color: INDIVIDUAL_THEME.sidebarMuted }}>Individual Workspace</Typography>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>{demo ? 'Sample Portfolio' : 'Property Owner'}</Typography>
+        <Typography variant="caption" sx={{ color: INDIVIDUAL_THEME.sidebarMuted }}>{demo ? 'Demo workspace' : 'Individual Workspace'}</Typography>
       </Box>
       <Divider sx={{ borderColor: 'rgba(255,255,255,0.12)' }} />
       <Box sx={{ py: 1.5, overflowY: 'auto' }}>
-        {NAV_SECTIONS.map((section, idx) => (
+        {sections.map((section, idx) => (
           <Box key={idx} sx={{ mb: 1 }}>
             {section.title && (
               <Typography variant="overline" sx={{ px: 2.5, color: INDIVIDUAL_THEME.sidebarMuted, fontSize: '0.65rem', letterSpacing: 1.2 }}>

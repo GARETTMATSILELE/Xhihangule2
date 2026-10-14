@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
-export type TaxType = 'CGT' | 'VAT' | 'VAT_ON_COMMISSION';
+export type TaxType = 'CGT' | 'VAT' | 'VAT_ON_COMMISSION' | 'CGWT';
 
 export interface ITaxRecord extends Document {
   companyId: mongoose.Types.ObjectId;
@@ -19,7 +19,7 @@ const TaxRecordSchema: Schema<ITaxRecord> = new Schema(
   {
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, immutable: true, index: true },
     trustAccountId: { type: Schema.Types.ObjectId, ref: 'TrustAccount', required: true, immutable: true, index: true },
-    taxType: { type: String, enum: ['CGT', 'VAT', 'VAT_ON_COMMISSION'], required: true, index: true },
+    taxType: { type: String, enum: ['CGT', 'VAT', 'VAT_ON_COMMISSION', 'CGWT'], required: true, index: true },
     amount: { type: Number, required: true, min: 0 },
     calculationBreakdown: { type: Schema.Types.Mixed, required: false },
     paidToZimra: { type: Boolean, required: true, default: false, index: true },

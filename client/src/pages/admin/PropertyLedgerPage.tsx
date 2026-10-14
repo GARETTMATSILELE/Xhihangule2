@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -52,6 +52,9 @@ interface AccountMeta {
 
 const PropertyLedgerPage: React.FC = () => {
   const { propertyId } = useParams<{ propertyId: string }>();
+  const location = useLocation();
+  const requestedLedger = new URLSearchParams(location.search).get('ledger');
+  const ledger = requestedLedger === 'sale' || requestedLedger === 'rental' ? requestedLedger : undefined;
   const { company } = useCompany();
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [summary, setSummary] = useState<{ totalPaid: number; totalPayout: number; held: number } | null>(null);
@@ -83,7 +86,8 @@ const PropertyLedgerPage: React.FC = () => {
     const [txRes, summaryRes] = await Promise.all([
       api.get(`/accountants/property-accounts/${propertyId}/transactions`, {
         params: {
-          includePayouts: 1
+          includePayouts: 1,
+          ...(ledger ? { ledger } : {})
         }
       }).catch(async () => api.get(`/accountants/property-accounts/${propertyId}/deposits`)),
       api.get(`/accountants/property-accounts/${propertyId}/deposits/summary`).catch(() => null)
@@ -105,7 +109,7 @@ const PropertyLedgerPage: React.FC = () => {
   const refreshAccountMeta = async () => {
     if (!propertyId) return;
     try {
-      const account = await propertyAccountService.getPropertyAccount(propertyId);
+      const account = await propertyAccountService.getPropertyAccount(propertyId, ledger);
       setAccountMeta(account as any);
     } catch {
       setAccountMeta(null);
@@ -128,7 +132,7 @@ const PropertyLedgerPage: React.FC = () => {
     if (company?.plan === 'INDIVIDUAL') run();
     else setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId, company?.plan]);
+  }, [propertyId, company?.plan, ledger]);
 
   const sortedEntries = useMemo(
     () => [...entries].sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0)),

@@ -7,6 +7,7 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const multer_1 = __importDefault(require("multer"));
 const salesFileController_1 = require("../controllers/salesFileController");
+const contentDisposition_1 = require("../utils/contentDisposition");
 const router = express_1.default.Router();
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
@@ -20,7 +21,8 @@ const upload = (0, multer_1.default)({
             'image/png',
             'text/plain'
         ];
-        if (allowedTypes.includes(file.mimetype)) {
+        const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.txt'];
+        if (allowedTypes.includes(file.mimetype) && (0, contentDisposition_1.hasAllowedUploadExtension)(file.originalname, allowedExtensions)) {
             cb(null, true);
             return;
         }

@@ -34,8 +34,10 @@ function activateSubscriptionFromPayment(input) {
         if (!paymentSession) {
             throw new errorHandler_1.AppError('Payment session not found', 404, 'PAYMENT_SESSION_NOT_FOUND');
         }
-        if (paymentSession.status === 'paid' || paymentSession.status === 'reconciled') {
-            return { paymentSession, alreadyProcessed: true };
+        if (paymentSession.status === 'reconciled') {
+            return { paymentSession, alreadyProcessed: true, subscription: paymentSession.subscriptionId
+                    ? yield Subscription_1.Subscription.findById(paymentSession.subscriptionId)
+                    : null };
         }
         paymentSession.status = 'paid';
         paymentSession.paidAt = paidAt;
@@ -82,10 +84,13 @@ function activateSubscriptionFromPayment(input) {
                 }
             });
         }
+        const company = yield Company_1.Company.findById(paymentSession.companyId).select('onboardingStatus onboardingCompleted');
+        const awaitingRegistration = ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP', 'PAYMENT_RECEIVED'].includes(String((company === null || company === void 0 ? void 0 : company.onboardingStatus) || ''));
         yield Company_1.Company.findByIdAndUpdate(paymentSession.companyId, {
             $set: {
                 tenantStatus: 'active',
-                onboardingStatus: 'INITIALIZING_WORKSPACE',
+                onboardingStatus: awaitingRegistration ? 'INITIALIZING_WORKSPACE' : ((company === null || company === void 0 ? void 0 : company.onboardingStatus) || 'ACTIVE'),
+                onboardingCompleted: awaitingRegistration ? false : (company === null || company === void 0 ? void 0 : company.onboardingCompleted) !== false,
                 subscriptionStatus: 'active',
                 subscriptionEndDate: periodEnd,
                 isActive: true

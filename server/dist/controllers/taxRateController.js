@@ -12,12 +12,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getVatOnCommissionSummary = exports.createCompanyVatRate = exports.getCurrentVatRate = exports.listCompanyTaxRates = void 0;
+exports.getVatOnCommissionSummary = exports.createCentralVatRate = exports.listCentralVatRates = exports.createCompanyVatRate = exports.getCurrentVatRate = exports.listCompanyTaxRates = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Payment_1 = require("../models/Payment");
 const taxRateService_1 = require("../services/taxRateService");
+const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
 const errorHandler_1 = require("../middleware/errorHandler");
 const access_1 = require("../utils/access");
+const AdminAuditLog_1 = __importDefault(require("../models/AdminAuditLog"));
 const getCompanyId = (req) => { var _a; return ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) ? String(req.user.companyId) : undefined; };
 const listCompanyTaxRates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -51,6 +53,9 @@ const getCurrentVatRate = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 decimalRate: rate.decimal,
                 source: rate.source,
                 taxRateId: rate.taxRateId,
+                jurisdiction: rate.jurisdiction,
+                effectiveFrom: rate.effectiveFrom,
+                managedBy: 'mantis',
                 asOf: onDate
             }
         });
@@ -61,16 +66,23 @@ const getCurrentVatRate = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.getCurrentVatRate = getCurrentVatRate;
 const createCompanyVatRate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const companyId = getCompanyId(req);
         if (!companyId)
             return res.status(400).json({ message: 'companyId is required' });
-        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
-            return res.status(403).json({ message: 'Only admin or accountant can configure VAT rates' });
+        const requestedType = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.taxType) || 'VAT').toUpperCase();
+        if (requestedType === 'VAT') {
+            return res.status(403).json({
+                message: 'Standard VAT rates are managed centrally by Mantis. Company users cannot set a VAT rate.',
+                code: 'VAT_RATE_CENTRALLY_MANAGED'
+            });
         }
-        const rate = Number((_a = req.body) === null || _a === void 0 ? void 0 : _a.rate);
-        const effectiveFrom = ((_b = req.body) === null || _b === void 0 ? void 0 : _b.effectiveFrom) ? new Date(req.body.effectiveFrom) : new Date();
+        if (!(0, access_1.hasAnyRole)(req, ['admin', 'accountant'])) {
+            return res.status(403).json({ message: 'Only admin or accountant can configure this tax rate' });
+        }
+        const rate = Number((_b = req.body) === null || _b === void 0 ? void 0 : _b.rate);
+        const effectiveFrom = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.effectiveFrom) ? new Date(req.body.effectiveFrom) : new Date();
         if (!Number.isFinite(rate) || rate < 0) {
             return res.status(400).json({ message: 'VAT rate must be a number greater than or equal to 0' });
         }
@@ -81,7 +93,10 @@ const createCompanyVatRate = (req, res) => __awaiter(void 0, void 0, void 0, fun
             companyId,
             rate,
             effectiveFrom,
-            createdBy: (_c = req.user) === null || _c === void 0 ? void 0 : _c.userId
+            createdBy: (_d = req.user) === null || _d === void 0 ? void 0 : _d.userId,
+            taxType: ['VAT', 'CGT', 'CGWT'].includes(String(((_e = req.body) === null || _e === void 0 ? void 0 : _e.taxType) || 'VAT'))
+                ? String(((_f = req.body) === null || _f === void 0 ? void 0 : _f.taxType) || 'VAT')
+                : 'VAT'
         });
         return res.status(201).json({ status: 'success', data: created });
     }
@@ -91,6 +106,64 @@ const createCompanyVatRate = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.createCompanyVatRate = createCompanyVatRate;
+const requireSystemAdmin = (req) => {
+    var _a, _b;
+    const roles = Array.isArray((_a = req.user) === null || _a === void 0 ? void 0 : _a.roles)
+        ? req.user.roles
+        : (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) ? [req.user.role] : []);
+    if (!roles.includes('system_admin')) {
+        throw new errorHandler_1.AppError('System admin required', 403);
+    }
+};
+const listCentralVatRates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        requireSystemAdmin(req);
+        const jurisdiction = String(req.query.jurisdiction || 'ZW');
+        const rows = yield (0, taxRuleRegistry_1.listStandardVatRates)(jurisdiction);
+        return res.json({ status: 'success', data: rows, managedBy: 'mantis' });
+    }
+    catch (error) {
+        const status = error instanceof errorHandler_1.AppError ? error.statusCode : 500;
+        return res.status(status).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to list central VAT rates' });
+    }
+});
+exports.listCentralVatRates = listCentralVatRates;
+const createCentralVatRate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    try {
+        requireSystemAdmin(req);
+        const rate = Number((_a = req.body) === null || _a === void 0 ? void 0 : _a.rate);
+        const effectiveFrom = ((_b = req.body) === null || _b === void 0 ? void 0 : _b.effectiveFrom) ? new Date(req.body.effectiveFrom) : null;
+        const sourceReference = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.sourceReference) || '').trim();
+        if (!effectiveFrom || Number.isNaN(effectiveFrom.getTime())) {
+            return res.status(400).json({ message: 'A valid effectiveFrom date is required' });
+        }
+        const created = yield (0, taxRuleRegistry_1.createCentralStandardVatRate)({
+            jurisdiction: ((_d = req.body) === null || _d === void 0 ? void 0 : _d.jurisdiction) || 'ZW',
+            rate,
+            effectiveFrom,
+            sourceReference,
+            notes: (_e = req.body) === null || _e === void 0 ? void 0 : _e.notes,
+            createdBy: (_f = req.user) === null || _f === void 0 ? void 0 : _f.userId
+        });
+        yield AdminAuditLog_1.default.create({
+            actorId: String(((_g = req.user) === null || _g === void 0 ? void 0 : _g.userId) || ''),
+            actorEmail: String(((_h = req.user) === null || _h === void 0 ? void 0 : _h.email) || ''),
+            action: 'central_vat_rate:create',
+            payload: { jurisdiction: created.jurisdiction, rate: created.rate, effectiveFrom: created.effectiveFrom, sourceReference },
+            result: { id: created.id, version: created.version },
+            success: true,
+            startedAt: new Date(),
+            completedAt: new Date()
+        });
+        return res.status(201).json({ status: 'success', data: created });
+    }
+    catch (error) {
+        const status = error instanceof errorHandler_1.AppError ? error.statusCode : 400;
+        return res.status(status >= 400 && status < 600 ? status : 400).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to create central VAT rate' });
+    }
+});
+exports.createCentralVatRate = createCentralVatRate;
 const getVatOnCommissionSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const companyId = getCompanyId(req);

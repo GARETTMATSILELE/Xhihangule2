@@ -83,6 +83,7 @@ export type TrustFundsAllocation = {
   vatLiability: number;
   vatOnCommission: number;
   cgtLiability: number;
+  cgwtLiability?: number;
   otherAdjustments: number;
   remainingUnallocated: number;
   totalTrustBalance: number;
@@ -95,6 +96,8 @@ export type TrustPaymentAllocation = {
     commission: number;
     vatCommission: number;
     vat: number;
+    capitalGainsTax?: number;
+    capitalGainsWithholdingTax?: number;
     cgt: number;
     other: number;
   };

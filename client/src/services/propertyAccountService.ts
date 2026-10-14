@@ -225,9 +225,11 @@ class PropertyAccountService {
   /**
    * Get property account by ID
    */
-  async getPropertyAccount(propertyId: string): Promise<PropertyAccount> {
+  async getPropertyAccount(propertyId: string, ledger?: 'rental' | 'sale'): Promise<PropertyAccount> {
     try {
-      const response = await api.get(`/accountants/property-accounts/${propertyId}`);
+      const response = await api.get(`/accountants/property-accounts/${propertyId}`, {
+        params: ledger ? { ledger } : undefined
+      });
       return response.data.data;
     } catch (error) {
       console.error('Error fetching property account:', error);
@@ -348,11 +350,15 @@ class PropertyAccountService {
   }
 
   /**
-   * Sync property accounts with payments
+   * Explicit historical backfill. Requires confirm=true and a non-empty reason.
+   * Not a reconciliation action.
    */
-  async syncPropertyAccounts(): Promise<void> {
+  async syncPropertyAccounts(opts: { confirm: true; reason: string }): Promise<void> {
     try {
-      await api.post('/accountants/property-accounts/sync');
+      await api.post('/accountants/property-accounts/sync', {
+        confirm: opts.confirm,
+        reason: opts.reason
+      });
     } catch (error) {
       console.error('Error syncing property accounts:', error);
       throw error;
@@ -387,11 +393,17 @@ class PropertyAccountService {
 
   /**
    * Merge legacy and new ledgers for a specific property into a single active ledger.
-   * Returns merge/reconciliation summary.
+   * Explicit maintenance: requires confirm=true and a non-empty reason.
    */
-  async mergeDuplicatesForProperty(propertyId: string): Promise<{ merged: boolean; reconciled: any }> {
+  async mergeDuplicatesForProperty(
+    propertyId: string,
+    opts: { confirm: true; reason: string }
+  ): Promise<{ merged: boolean; reconciled: any }> {
     try {
-      const response = await api.post(`/accountants/property-accounts/${propertyId}/merge-duplicates`, {});
+      const response = await api.post(`/accountants/property-accounts/${propertyId}/merge-duplicates`, {
+        confirm: opts.confirm,
+        reason: opts.reason
+      });
       return response.data?.data || { merged: false, reconciled: null };
     } catch (error) {
       console.error('Error merging property ledgers:', error);

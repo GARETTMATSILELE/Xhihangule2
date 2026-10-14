@@ -73,12 +73,12 @@ const userSchema = new Schema<IUser>({
   },
   role: {
     type: String,
-    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
+    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'] as UserRole[],
     default: 'agent'
   },
   roles: {
     type: [String],
-    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
+    enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'] as UserRole[],
     required: false,
     default: undefined
   },
@@ -116,12 +116,12 @@ const userSchema = new Schema<IUser>({
     lastName: { type: String, required: false },
     role: {
       type: String,
-      enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
+      enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'] as UserRole[],
       required: false
     },
     roles: {
       type: [String],
-      enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin'] as UserRole[],
+      enum: ['admin', 'agent', 'accountant', 'owner', 'sales', 'principal', 'prea', 'system_admin', 'tenant', 'contractor'] as UserRole[],
       required: false
     }
   },

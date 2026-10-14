@@ -21,12 +21,28 @@ import {
 } from '@mui/material';
 import { apiService } from '../../api';
 import { useCompany } from '../../contexts/CompanyContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { getDashboardPath } from '../../utils/registrationUtils';
+import { readOnboardingState, writeOnboardingState, type OnboardingRole } from '../../utils/onboardingState';
+import { ROUTES } from '../LandingPage/landingData';
 
 const steps = ['Company Basics', 'Preferences', 'Portfolio', 'Team', 'Initialize'];
 
 const WorkspaceSetup: React.FC = () => {
   const navigate = useNavigate();
   const { company, refreshCompany } = useCompany();
+  const { user } = useAuth();
+  const onboarding = readOnboardingState();
+  const role: OnboardingRole = onboarding.role || (company?.plan === 'INDIVIDUAL' ? 'landlord' : 'manager');
+  const isLandlordLike = role === 'landlord' || role === 'owner';
+  const checklist = isLandlordLike
+    ? ['Company/profile', 'Add or import properties', 'Add tenants', 'Add leases', 'Record first payment']
+    : role === 'accountant'
+      ? ['Company/profile', 'Properties', 'Property accounts', 'Payments', 'Reports']
+      : ['Company/profile', 'Add or import properties', 'Add tenants', 'Add leases', 'Configure financial settings', 'Invite team'];
+  const displaySteps = isLandlordLike
+    ? ['Company Basics', 'Preferences', 'Portfolio', 'Team (optional)', 'Initialize']
+    : steps;
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +80,10 @@ const WorkspaceSetup: React.FC = () => {
   }, [company?._id]);
 
   const completion = useMemo(() => Math.round(((activeStep + 1) / steps.length) * 100), [activeStep]);
+
+  useEffect(() => {
+    writeOnboardingState({ setupProgress: completion });
+  }, [completion]);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
@@ -117,7 +137,8 @@ const WorkspaceSetup: React.FC = () => {
     try {
       setLoading(true);
       await saveProgress(true);
-      navigate('/admin-dashboard', { replace: true });
+      const path = getDashboardPath((user?.role as any) || 'admin', company);
+      navigate(path, { replace: true });
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Workspace initialization failed');
     } finally {
@@ -129,19 +150,27 @@ const WorkspaceSetup: React.FC = () => {
     <Container maxWidth="md" sx={{ py: 6 }}>
       <Stack spacing={3}>
         <Box>
-          <Chip label={company?.plan || 'Workspace'} color="primary" size="small" sx={{ mb: 1 }} />
+          <Chip label={company?.plan || role || 'Workspace'} color="primary" size="small" sx={{ mb: 1 }} />
           <Typography variant="h4" fontWeight={800}>
-            Set up your property management workspace
+            Let&apos;s get your Mantis workspace ready.
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Complete the essentials now, then add properties and team members when you are ready.
+            Complete what you need now. Skip anything that can wait.
           </Typography>
+          <Stack spacing={1} sx={{ mt: 2 }}>
+            <Typography variant="subtitle2">Setup progress {completion}%</Typography>
+            {checklist.map((item, index) => (
+              <Typography key={item} variant="body2" color="text.secondary">
+                {index < Math.round((completion / 100) * checklist.length) ? '☑' : '☐'} {item}
+              </Typography>
+            ))}
+          </Stack>
         </Box>
 
         <Card>
           <CardContent>
             <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 3 }}>
-              {steps.map((label) => (
+              {displaySteps.map((label) => (
                 <Step key={label}>
                   <StepLabel>{label}</StepLabel>
                 </Step>
@@ -149,7 +178,15 @@ const WorkspaceSetup: React.FC = () => {
             </Stepper>
             <LinearProgress variant="determinate" value={completion} sx={{ mb: 3 }} />
 
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {error && (
+              <Alert
+                severity="error"
+                sx={{ mb: 2 }}
+                action={<Button color="inherit" size="small" onClick={() => { setError(null); void handleNext(); }}>Try again</Button>}
+              >
+                {error}
+              </Alert>
+            )}
 
             {activeStep === 0 && (
               <Grid container spacing={2}>
@@ -208,14 +245,32 @@ const WorkspaceSetup: React.FC = () => {
             )}
 
             {activeStep === 2 && (
-              <Alert severity="info">
-                Add your first property now from the dashboard, or skip and import your portfolio later.
-              </Alert>
+              <Stack spacing={2}>
+                <Alert severity="info">
+                  Add your first property to start tracking tenants, leases, rent and property finances. Import only validates a spreadsheet — nothing is posted automatically.
+                </Alert>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <Button
+                    variant="contained"
+                    onClick={() => navigate(
+                      company?.plan === 'INDIVIDUAL' || company?.workspaceType === 'individual'
+                        ? '/individual-dashboard/properties'
+                        : '/admin-dashboard/properties'
+                    )}
+                  >
+                    Add properties manually
+                  </Button>
+                  <Button variant="outlined" onClick={() => navigate(ROUTES.portfolioImport)}>Import spreadsheet</Button>
+                  <Button variant="text" onClick={() => navigate(ROUTES.demo)}>Explore sample data</Button>
+                </Stack>
+              </Stack>
             )}
 
             {activeStep === 3 && (
               <Alert severity="info">
-                Invite staff from User Management when ready. Solo landlords can continue without a team.
+                {isLandlordLike
+                  ? 'Invite staff later if you need help. Solo landlords can continue without a team.'
+                  : 'Invite staff from User Management when ready. You can skip this and add people later.'}
               </Alert>
             )}
 

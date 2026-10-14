@@ -439,8 +439,10 @@ export const Tenants: React.FC = () => {
                 <TableRow>
                   <TableCell colSpan={7} align="center">
                     <OperationalEmptyState
-                      title={search ? 'No tenants match your search' : 'Start by adding your first tenant'}
-                      description="Tenants can later be linked to properties, leases, rent billing, maintenance history, communications, and files."
+                      title={search ? 'No tenants match your search' : 'No tenants yet.'}
+                      description={search
+                        ? 'Try a different name, email, phone or status.'
+                        : 'Add your first tenant so you can create a lease and start recording rent against the property.'}
                       actionLabel="Add Tenant"
                       onAction={handleAddTenant}
                     />

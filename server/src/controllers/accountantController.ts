@@ -158,12 +158,15 @@ interface TaxLedgerResponse {
   VAT: TaxPropertyLedger[];
   VAT_ON_COMMISSION: TaxPropertyLedger[];
   CGT: TaxPropertyLedger[];
+  CGWT: TaxPropertyLedger[];
 }
 
-const TAX_TYPES: TaxType[] = ['VAT', 'VAT_ON_COMMISSION', 'CGT'];
+const TAX_TYPES: TaxType[] = ['VAT', 'VAT_ON_COMMISSION', 'CGT', 'CGWT'];
 
 const formatTaxTypeLabel = (taxType: TaxType): string => {
   if (taxType === 'VAT_ON_COMMISSION') return 'VAT on Commission';
+  if (taxType === 'CGWT') return 'Capital Gains Withholding Tax';
+  if (taxType === 'CGT') return 'Capital Gains Tax';
   return taxType;
 };
 
@@ -1192,7 +1195,7 @@ export const getTaxLedgers = async (req: Request, res: Response) => {
     );
 
     if (trustAccountIds.length === 0) {
-      const emptyPayload: TaxLedgerResponse = { VAT: [], VAT_ON_COMMISSION: [], CGT: [] };
+      const emptyPayload: TaxLedgerResponse = { VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] };
       return res.json(emptyPayload);
     }
 
@@ -1274,7 +1277,7 @@ export const getTaxLedgers = async (req: Request, res: Response) => {
       creditTotals.set(key, Number((creditTotals.get(key) || 0) + amount));
     }
 
-    const response: TaxLedgerResponse = { VAT: [], VAT_ON_COMMISSION: [], CGT: [] };
+    const response: TaxLedgerResponse = { VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] };
     for (const [key, entries] of groupedEntries.entries()) {
       const [trustAccountId, taxTypeRaw] = key.split(':');
       const taxType = taxTypeRaw as TaxType;
@@ -1317,6 +1320,7 @@ export const getTaxLedgers = async (req: Request, res: Response) => {
     response.VAT.sort((a, b) => b.closingBalance - a.closingBalance);
     response.VAT_ON_COMMISSION.sort((a, b) => b.closingBalance - a.closingBalance);
     response.CGT.sort((a, b) => b.closingBalance - a.closingBalance);
+    response.CGWT.sort((a, b) => b.closingBalance - a.closingBalance);
 
     return res.json(response);
   } catch (error) {

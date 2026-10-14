@@ -89,7 +89,17 @@ const ProtectedRoute = ({ children, requiredRoles }: ProtectedRouteProps) => {
     return <Navigate to="/admin/company-setup" replace />;
   }
 
-  const pendingWorkspaceStatuses = ['PENDING_SETUP', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'FAILED_SETUP'];
+  if (
+    company?.onboardingStatus &&
+    (company.onboardingStatus === 'PENDING_PAYMENT' || company.onboardingStatus === 'PENDING_SETUP' || company.onboardingStatus === 'FAILED_SETUP') &&
+    !location.pathname.startsWith('/checkout') &&
+    !location.pathname.startsWith('/billing')
+  ) {
+    const plan = company.plan || 'INDIVIDUAL';
+    return <Navigate to={`/checkout/paypal?plan=${encodeURIComponent(plan)}`} replace />;
+  }
+
+  const pendingWorkspaceStatuses = ['PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE'];
   if (
     roles.includes('admin') &&
     isAuthenticated &&

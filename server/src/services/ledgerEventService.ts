@@ -21,6 +21,10 @@ class LedgerEventService {
     return LedgerEventService.instance;
   }
 
+  /**
+   * Retry owner-income posting for a Payment that failed during live completion.
+   * Invokes paymentAccountingOrchestrator. Do not enqueue from historical full-sync.
+   */
   async enqueueOwnerIncomeEvent(paymentId: string): Promise<void> {
     await this.enqueueEvent('owner_income', paymentId);
   }
@@ -109,6 +113,18 @@ class LedgerEventService {
           ev.lastError = undefined;
           ev.updatedAt = new Date();
           await ev.save();
+          const eventPaymentId = ev.paymentId ? String(ev.paymentId) : '';
+          if (eventPaymentId) {
+            try {
+              const { refreshPaymentAccountingStatus } = await import('./paymentAccountingReconciliation');
+              await refreshPaymentAccountingStatus(eventPaymentId);
+            } catch (refreshErr: any) {
+              logger.warn('LedgerEvent accounting status refresh failed', {
+                paymentId: eventPaymentId,
+                error: refreshErr?.message || refreshErr
+              });
+            }
+          }
         } catch (err: any) {
           const attempts = (ev.attemptCount || 0) + 1;
           ev.attemptCount = attempts;
@@ -132,8 +148,20 @@ class LedgerEventService {
 
   private async execute(ev: ILedgerEvent): Promise<void> {
     const paymentId = ev.paymentId ? ev.paymentId.toString() : '';
-    if (ev.type === 'owner_income' && paymentId) {
-      await propertyAccountService.recordIncomeFromPayment(paymentId);
+    if (ev.type === 'journal' && paymentId) {
+      const { Payment } = await import('../models/Payment');
+      const accountingIntegrationService = (await import('./accountingIntegrationService')).default;
+      const payment = await Payment.findById(paymentId);
+      if (!payment) throw new Error(`Payment not found: ${paymentId}`);
+      await accountingIntegrationService.syncPaymentReceived(payment as any);
+      return;
+    }
+    if ((ev.type === 'owner_income' || ev.type === 'agent_commission' || ev.type === 'company_commission') && paymentId) {
+      const { postPaymentAccounting } = await import('./paymentAccountingOrchestrator');
+      const result = await postPaymentAccounting(paymentId);
+      if (result.status === 'partial' || result.status === 'failed') {
+        throw new Error(result.errors.join('; ') || 'accounting projection still incomplete');
+      }
       return;
     }
     if (ev.type === 'payment_reversal' && paymentId) {
@@ -147,19 +175,6 @@ class LedgerEventService {
       if (result.status === 'partial' || result.status === 'failed') {
         throw new Error(result.errors.join('; ') || 'reversal still incomplete');
       }
-      return;
-    }
-    if (ev.type === 'agent_commission' && paymentId) {
-      const agentAccountService = (await import('./agentAccountService')).default;
-      await agentAccountService.syncCommissionForPayment(paymentId);
-      return;
-    }
-    if (ev.type === 'company_commission' && paymentId) {
-      const { Payment } = await import('../models/Payment');
-      const accountingIntegrationService = (await import('./accountingIntegrationService')).default;
-      const payment = await Payment.findById(paymentId);
-      if (!payment) return;
-      await accountingIntegrationService.postCompanyCommission(payment as any);
       return;
     }
     if (ev.type === 'levy_collection') {

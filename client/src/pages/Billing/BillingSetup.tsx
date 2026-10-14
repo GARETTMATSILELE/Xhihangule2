@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Button, Container, Tab, Tabs, TextField, Typography, Alert, CircularProgress } from '@mui/material';
 import { apiService } from '../../api';
+import PaynowBadge from '../../components/payments/PaynowBadge';
 
 const BillingSetup: React.FC = () => {
   const [tab, setTab] = useState(0);
@@ -60,27 +61,11 @@ const BillingSetup: React.FC = () => {
           </TextField>
           <Button variant="contained" onClick={handleCheckout} disabled={loading}>{loading ? <CircularProgress size={20} /> : 'Proceed to Paynow'}</Button>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            You will be redirected to Paynow to complete your payment.
+            You will be redirected to Paynow to pay by Visa, Mastercard, EcoCash, Zimswitch or Telecash.
           </Typography>
-
-					{/* Alternate: Direct Paynow Payment Link */}
-					<Box sx={{ mt: 3 }}>
-						<Typography variant="overline" color="text.secondary">
-							Alternate method
-						</Typography>
-						<Box sx={{ mt: 1 }}>
-							<a
-								href="https://www.paynow.co.zw/Payment/Link/?q=c2VhcmNoPWdhcmV0Lm1hdHNpJTQwZ21haWwuY29tJmFtb3VudD0xMC4wMCZyZWZlcmVuY2U9Jmw9MQ%3d%3d"
-								target="_blank"
-								rel="noopener noreferrer"
-							>
-								<img
-									src="https://www.paynow.co.zw/Content/Buttons/Medium_buttons/button_pay-now_medium.png"
-									style={{ border: 0 }}
-								/>
-							</a>
-						</Box>
-					</Box>
+          <Box sx={{ mt: 3 }}>
+            <PaynowBadge />
+          </Box>
         </Box>
       )}
       {tab === 1 && (

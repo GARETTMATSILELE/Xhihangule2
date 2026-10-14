@@ -16,6 +16,7 @@ exports.getMaintenanceRequests = exports.getMaintenanceRequestsPublic = exports.
 const MaintenanceRequest_1 = require("../models/MaintenanceRequest");
 const Property_1 = require("../models/Property");
 const errorHandler_1 = require("../middleware/errorHandler");
+const propertyAccess_1 = require("../utils/propertyAccess");
 const mongoose_1 = __importDefault(require("mongoose"));
 const maintenanceManagementService_1 = require("../services/maintenanceManagementService");
 const maintenanceStatus_1 = require("../utils/maintenanceStatus");
@@ -38,7 +39,7 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
         }
         // Fetch the property to get ownerId and companyId
         const property = yield Property_1.Property.findOne({ _id: propertyId, companyId });
-        if (!property) {
+        if (!property || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))) {
             throw new errorHandler_1.AppError('Property not found', 404);
         }
         if (!property.ownerId) {
@@ -83,13 +84,17 @@ const createMaintenanceRequest = (req, res) => __awaiter(void 0, void 0, void 0,
 exports.createMaintenanceRequest = createMaintenanceRequest;
 // Get maintenance requests for a property
 const getPropertyMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId;
+        const companyId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId;
         const { propertyId } = req.params;
+        if (!companyId || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+            throw new errorHandler_1.AppError('Maintenance request not found', 404);
+        }
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find({
             propertyId,
-            requestedBy: userId
+            companyId,
         })
             .populate('requestedBy', 'firstName lastName email')
             .populate('propertyId', 'name address')
@@ -97,10 +102,9 @@ const getPropertyMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, v
         res.json(maintenanceRequests);
     }
     catch (error) {
-        if (error instanceof errorHandler_1.AppError) {
-            throw error;
-        }
-        throw new errorHandler_1.AppError('Error fetching maintenance requests', 500);
+        const statusCode = error instanceof errorHandler_1.AppError ? error.statusCode : 500;
+        const message = error instanceof errorHandler_1.AppError ? error.message : 'Error fetching maintenance requests';
+        return res.status(statusCode).json({ message });
     }
 });
 exports.getPropertyMaintenanceRequests = getPropertyMaintenanceRequests;
@@ -465,24 +469,24 @@ const getMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, f
         if (propertyId) {
             query.propertyId = propertyId;
         }
-        const elevatedRoles = ['admin', 'agent', 'accountant', 'principal', 'prea'];
-        const canViewCompanyMaintenance = userRole && elevatedRoles.includes(userRole);
+        const companyWide = (0, propertyAccess_1.hasCompanyWidePropertyAccess)(req);
         // If role is specified as 'owner', filter by properties owned by the user
-        if (role === 'owner') {
-            const properties = yield Property_1.Property.find({ ownerId: userId, companyId });
-            const propertyIds = properties.map((p) => p._id);
-            query.propertyId = { $in: propertyIds };
+        if (role === 'owner' || (!companyWide && userRole === 'owner')) {
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            query.propertyId = { $in: ids === 'company' ? [] : ids };
         }
         // If role is specified as 'tenant', filter by maintenance requests created by the user
         else if (role === 'tenant') {
             query.requestedBy = userId;
         }
-        else if (!canViewCompanyMaintenance) {
-            // Non-elevated users can only see records tied directly to them.
-            query.$or = [
-                { requestedBy: userId },
-                { ownerId: userId }
-            ];
+        else if (!companyWide) {
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            const allowed = ids === 'company' ? [] : ids.map((id) => String(id));
+            if (propertyId && !allowed.includes(String(propertyId))) {
+                return res.json([]);
+            }
+            if (!propertyId)
+                query.propertyId = { $in: allowed };
         }
         const maintenanceRequests = yield MaintenanceRequest_1.MaintenanceRequest.find(query)
             .populate('requestedBy', 'firstName lastName email')
@@ -493,10 +497,9 @@ const getMaintenanceRequests = (req, res) => __awaiter(void 0, void 0, void 0, f
         res.json(maintenanceRequests);
     }
     catch (error) {
-        if (error instanceof errorHandler_1.AppError) {
-            throw error;
-        }
-        throw new errorHandler_1.AppError('Error fetching maintenance requests', 500);
+        const statusCode = error instanceof errorHandler_1.AppError ? error.statusCode : 500;
+        const message = error instanceof errorHandler_1.AppError ? error.message : 'Error fetching maintenance requests';
+        return res.status(statusCode).json({ message });
     }
 });
 exports.getMaintenanceRequests = getMaintenanceRequests;

@@ -69,6 +69,39 @@ function EntryDialog({ open, title, categories, properties, initial, onClose, on
           <TextField label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} fullWidth required />
           <TextField label="Amount" type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} fullWidth required />
           <TextField label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} fullWidth InputLabelProps={{ shrink: true }} />
+          <TextField select label="Tax treatment" value={form.vatMode || 'ACCOUNTANT_REVIEW'} onChange={(e) => setForm({ ...form, vatMode: e.target.value })} fullWidth>
+            <MenuItem value="ACCOUNTANT_REVIEW">Accountant review</MenuItem>
+            <MenuItem value="NO_VAT">No VAT / not applicable</MenuItem>
+            <MenuItem value="VAT_INCLUSIVE">VAT inclusive</MenuItem>
+            <MenuItem value="VAT_EXCLUSIVE">VAT exclusive</MenuItem>
+            <MenuItem value="UNKNOWN">Unknown</MenuItem>
+          </TextField>
+          <TextField label="Supplier VAT number" value={form.supplierVatNumber || ''} onChange={(e) => setForm({ ...form, supplierVatNumber: e.target.value })} fullWidth />
+          <TextField label="Invoice number" value={form.invoiceNumber || ''} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} fullWidth />
+          <TextField select label="Input VAT eligibility" value={form.inputVatEligibility || 'REVIEW_REQUIRED'} onChange={(e) => setForm({ ...form, inputVatEligibility: e.target.value })} fullWidth>
+            <MenuItem value="REVIEW_REQUIRED">Accountant review</MenuItem>
+            <MenuItem value="RECOVERABLE">Recoverable</MenuItem>
+            <MenuItem value="NON_RECOVERABLE">Non-recoverable</MenuItem>
+            <MenuItem value="PARTIALLY_RECOVERABLE">Partially recoverable</MenuItem>
+            <MenuItem value="NOT_APPLICABLE">Not applicable</MenuItem>
+          </TextField>
+          <Typography variant="caption" color="text.secondary">
+            VAT is calculated on the server from the tax snapshot. Missing supplier invoice details stay as review — they are not shown as VAT = 0.
+          </Typography>
+          <TextField select label="Deductibility" value={form.deductibility || 'ACCOUNTANT_REVIEW'} onChange={(e) => setForm({ ...form, deductibility: e.target.value })} fullWidth>
+            <MenuItem value="ACCOUNTANT_REVIEW">Accountant review</MenuItem>
+            <MenuItem value="DEDUCTIBLE">Deductible</MenuItem>
+            <MenuItem value="NON_DEDUCTIBLE">Non-deductible</MenuItem>
+            <MenuItem value="PARTIALLY_DEDUCTIBLE">Partially deductible</MenuItem>
+            <MenuItem value="CAPITAL">Capital</MenuItem>
+            <MenuItem value="NOT_APPLICABLE">Not applicable</MenuItem>
+          </TextField>
+          <TextField select label="Capital / Revenue" value={form.capitalOrRevenue || 'REVENUE'} onChange={(e) => setForm({ ...form, capitalOrRevenue: e.target.value })} fullWidth>
+            <MenuItem value="REVENUE">Revenue</MenuItem>
+            <MenuItem value="CAPITAL">Capital</MenuItem>
+            <MenuItem value="MIXED">Mixed</MenuItem>
+            <MenuItem value="ACCOUNTANT_REVIEW">Accountant review</MenuItem>
+          </TextField>
           <TextField label="Reference" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} fullWidth />
           <TextField label="Receipt URL" value={form.receiptUrl} onChange={(e) => setForm({ ...form, receiptUrl: e.target.value })} fullWidth />
         </Stack>
@@ -124,6 +157,11 @@ export function ExpensesPage() {
                 <Box>
                   <Typography fontWeight={600}>{entry.description || entry.category}</Typography>
                   <Typography variant="body2" color="text.secondary">{entry.propertyName} | {entry.category} | {new Date(entry.date).toLocaleDateString()}</Typography>
+                  {(entry.taxPeriodKey || entry.taxCalculationStatus) && (
+                    <Typography variant="caption" color="text.secondary">
+                      Tax period {entry.taxPeriodKey || 'not opened'} · {String(entry.vatTreatment || entry.deductibility || 'Review')} · {String(entry.taxCalculationStatus || 'NOT_CALCULATED').replace(/_/g, ' ').toLowerCase()}
+                    </Typography>
+                  )}
                 </Box>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Typography fontWeight={700}>{money(entry.amount)}</Typography>

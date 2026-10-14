@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -13,13 +13,15 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../api';
 import { validateOnboardingForm, handleRegistrationError } from '../../utils/registrationUtils';
+import { billingPlanFromOnboarding, readOnboardingState, workspaceTypeFromOnboarding, writeOnboardingState } from '../../utils/onboardingState';
+import { getDashboardPath } from '../../utils/registrationUtils';
 
-const useOnboardingV2 = process.env.REACT_APP_SAAS_ONBOARDING_V2 === 'true';
+const useOnboardingV2 = true;
 
-function getOnboardingIdempotencyKey(email: string, plan: string) {
+function getOnboardingIdempotencyKey(email: string, plan: string, mode: string, cycle: string) {
   // Keep stable across quick retries / reloads to avoid duplicate onboarding sessions.
   // 10 minutes is enough for a normal signup attempt.
-  const storageKey = `onboarding:idempotency:${email}:${plan}`;
+  const storageKey = `onboarding:idempotency:${email}:${mode}:${plan}:${cycle}`;
   try {
     const raw = sessionStorage.getItem(storageKey);
     if (raw) {
@@ -28,11 +30,11 @@ function getOnboardingIdempotencyKey(email: string, plan: string) {
         return String(parsed.key);
       }
     }
-    const key = `signup:${email}:${plan}:${Math.random().toString(36).slice(2)}`;
+    const key = `signup:${email}:${mode}:${plan}:${cycle}:${Math.random().toString(36).slice(2)}`;
     sessionStorage.setItem(storageKey, JSON.stringify({ key, createdAt: Date.now() }));
     return key;
   } catch {
-    return `signup:${email}:${plan}:${Math.random().toString(36).slice(2)}`;
+    return `signup:${email}:${mode}:${plan}:${cycle}:${Math.random().toString(36).slice(2)}`;
   }
 }
 
@@ -40,14 +42,34 @@ const Signup: React.FC = () => {
   const navigate = useNavigate();
   const { signup } = useAuth();
   const location = useLocation();
+  const savedOnboarding = readOnboardingState();
+  const searchParams = new URLSearchParams(location.search);
+  const checkoutParam = searchParams.get('checkout');
+  const planParam = searchParams.get('plan');
+  const registrationMode: 'trial' | 'paid' = checkoutParam === 'paid' || (!checkoutParam && planParam && planParam !== 'TRIAL') || (!checkoutParam && !planParam && savedOnboarding.registrationMode === 'paid')
+    ? 'paid'
+    : checkoutParam === 'trial'
+      ? 'trial'
+      : savedOnboarding.registrationMode === 'paid'
+        ? 'paid'
+        : 'trial';
+  const cycleParam = searchParams.get('cycle');
+  const billingCycle: 'monthly' | 'yearly' = cycleParam === 'yearly'
+    ? 'yearly'
+    : cycleParam === 'monthly'
+      ? 'monthly'
+      : savedOnboarding.billingCycle === 'yearly'
+        ? 'yearly'
+        : 'monthly';
+  const planLocked = registrationMode === 'trial' || Boolean(savedOnboarding.selectedPlan || searchParams.get('plan'));
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     confirmPassword: '',
     name: '',
-    plan: 'INDIVIDUAL' as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
-    companyType: 'INDIVIDUAL_LANDLORD' as 'INDIVIDUAL_LANDLORD' | 'REGISTERED_BUSINESS',
-    workspaceType: 'individual' as 'agency' | 'individual',
+    plan: billingPlanFromOnboarding(savedOnboarding) as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE',
+    companyType: savedOnboarding.role === 'landlord' || savedOnboarding.role === 'owner' ? 'INDIVIDUAL_LANDLORD' as const : 'REGISTERED_BUSINESS' as const,
+    workspaceType: workspaceTypeFromOnboarding(savedOnboarding),
     companyName: '',
     companyEmail: '',
     address: '',
@@ -55,8 +77,10 @@ const Signup: React.FC = () => {
     registrationNumber: '',
     tinNumber: '',
     vatNumber: '',
+    country: 'Zimbabwe',
   });
   const [error, setError] = useState('');
+  const [accountHelp, setAccountHelp] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.name === 'plan') {
@@ -76,15 +100,35 @@ const Signup: React.FC = () => {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const requestedPlan = params.get('plan');
+    const checkout = params.get('checkout') === 'paid' || (!params.get('checkout') && requestedPlan && requestedPlan !== 'TRIAL')
+      ? 'paid'
+      : 'trial';
+    const cycle = params.get('cycle') === 'yearly' ? 'yearly' : 'monthly';
     const plan = params.get('plan');
-    if (plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) {
-      setFormData(prev => ({ ...prev, plan: plan as any, workspaceType: plan === 'INDIVIDUAL' ? 'individual' : 'agency' }));
-    }
+    const onboarding = readOnboardingState();
+    const nextPlan = (checkout === 'trial'
+      ? 'INDIVIDUAL'
+      : plan && ['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)
+      ? plan
+      : billingPlanFromOnboarding(onboarding)) as 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
+    setFormData(prev => ({
+      ...prev,
+      plan: nextPlan,
+      workspaceType: nextPlan === 'INDIVIDUAL' ? 'individual' : 'agency',
+      companyType: checkout === 'trial' || onboarding.role === 'landlord' || onboarding.role === 'owner' ? 'INDIVIDUAL_LANDLORD' : prev.companyType
+    }));
+    writeOnboardingState({
+      selectedPlan: checkout === 'trial' ? 'TRIAL' : nextPlan,
+      registrationMode: checkout,
+      billingCycle: cycle
+    });
   }, [location.search]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setAccountHelp(false);
 
     const validationErrors = useOnboardingV2
       ? validateOnboardingForm(formData)
@@ -96,13 +140,14 @@ const Signup: React.FC = () => {
 
     try {
       if (useOnboardingV2) {
-        const idempotencyKey = getOnboardingIdempotencyKey(formData.email, formData.plan);
+        const idempotencyKey = getOnboardingIdempotencyKey(formData.email, registrationMode === 'trial' ? 'INDIVIDUAL' : formData.plan, registrationMode, billingCycle);
         const response = await apiService.startOnboarding({
           email: formData.email,
           password: formData.password,
           name: formData.name,
-          plan: formData.plan,
-          billingCycle: 'monthly',
+          plan: registrationMode === 'trial' ? 'INDIVIDUAL' : formData.plan,
+          billingCycle,
+          registrationMode,
           company: {
             name: formData.companyName,
             email: formData.companyEmail || formData.email,
@@ -111,14 +156,28 @@ const Signup: React.FC = () => {
             registrationNumber: formData.registrationNumber,
             tinNumber: formData.tinNumber,
             vatNumber: formData.vatNumber,
+            country: formData.country,
             companyType: formData.companyType,
             workspaceType: formData.workspaceType
           }
         }, idempotencyKey);
-        const paymentSessionId = response.data?.paymentSession?._id;
-        navigate(`/checkout/paypal?plan=${encodeURIComponent(formData.plan)}&cycle=monthly${paymentSessionId ? `&paymentSessionId=${encodeURIComponent(paymentSessionId)}` : ''}`, {
-          state: { message: 'Workspace created. Please complete payment to activate your subscription.' }
-        });
+        const paymentSession = response.data?.paymentSession;
+        const nextStep = response.data?.registration?.nextStep;
+        if (nextStep === 'payment') {
+          if (!paymentSession?._id) {
+            setError('Checkout could not be started for this registration.');
+            return;
+          }
+          const sessionPlan = paymentSession.plan || formData.plan;
+          const sessionCycle = paymentSession.billingCycle || billingCycle;
+          window.location.assign(`/checkout/paypal?plan=${encodeURIComponent(sessionPlan)}&cycle=${encodeURIComponent(sessionCycle)}&paymentSessionId=${encodeURIComponent(paymentSession._id)}`);
+          return;
+        }
+        const company = response.data?.company;
+        window.location.assign(getDashboardPath('admin', {
+          workspaceType: company?.workspaceType,
+          plan: company?.plan || 'INDIVIDUAL'
+        }));
         return;
       }
       await signup(formData.email, formData.password, formData.name, undefined, formData.plan, { skipNavigate: true });
@@ -127,6 +186,7 @@ const Signup: React.FC = () => {
         state: { message: 'Account created. Please complete payment to activate your subscription.' }
       });
     } catch (err: any) {
+      setAccountHelp(err?.response?.data?.code === 'REGISTRATION_SIGN_IN_REQUIRED');
       setError(handleRegistrationError(err));
     }
   };
@@ -146,11 +206,20 @@ const Signup: React.FC = () => {
             Set Up Your Property Management Workspace
           </Typography>
           <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
-            Create your admin account first. Your selected plan will shape the workspace setup.
+            {savedOnboarding.role
+              ? `Continuing as ${savedOnboarding.role.replace('-', ' ')}${savedOnboarding.intent ? ` · ${savedOnboarding.intent.replace(/-/g, ' ')}` : ''}. Create your admin account to finish setup.`
+              : 'Create your admin account first. Your selected plan will shape the workspace setup.'}
           </Typography>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
+              {accountHelp && (
+                <Box sx={{ mt: 1 }}>
+                  <Link component={RouterLink} to="/login" color="inherit">Sign in</Link>
+                  {' · '}
+                  <Link component={RouterLink} to="/forgot-password" color="inherit">Forgot password</Link>
+                </Box>
+              )}
             </Alert>
           )}
           <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1 }}>
@@ -166,20 +235,43 @@ const Signup: React.FC = () => {
               value={formData.name}
               onChange={handleChange}
             />
-            <TextField
-              margin="normal"
-              select
-              fullWidth
-              name="plan"
-              label="Plan"
-              value={formData.plan}
-              onChange={handleChange}
-              SelectProps={{ native: true }}
-            >
-              <option value="INDIVIDUAL">Individual (up to 10 properties)</option>
-              <option value="SME">SME (up to 120 properties)</option>
-              <option value="ENTERPRISE">Enterprise (unlimited)</option>
-            </TextField>
+            {registrationMode === 'trial' ? (
+              <TextField
+                margin="normal"
+                fullWidth
+                label="Plan"
+                value="14-day free trial"
+                disabled
+                helperText="No payment required to get started."
+              />
+            ) : (
+              <>
+                <TextField
+                  margin="normal"
+                  select
+                  fullWidth
+                  name="plan"
+                  label="Plan"
+                  value={formData.plan}
+                  onChange={handleChange}
+                  disabled={planLocked}
+                  helperText={planLocked ? 'Plan selected from Mantis pricing.' : undefined}
+                  SelectProps={{ native: true }}
+                >
+                  <option value="INDIVIDUAL">Landlord</option>
+                  <option value="SME">Property Manager</option>
+                  {formData.plan === 'ENTERPRISE' && <option value="ENTERPRISE">Enterprise</option>}
+                </TextField>
+                <TextField
+                  margin="normal"
+                  fullWidth
+                  label="Billing"
+                  value={billingCycle === 'yearly' ? 'Yearly' : 'Monthly'}
+                  disabled
+                  helperText="Secure checkout via Paynow. The amount is confirmed by Mantis."
+                />
+              </>
+            )}
             <TextField
               margin="normal"
               select
@@ -216,6 +308,15 @@ const Signup: React.FC = () => {
                   name="companyName"
                   label="Workspace / Company Name"
                   value={formData.companyName}
+                  onChange={handleChange}
+                />
+                <TextField
+                  margin="normal"
+                  required
+                  fullWidth
+                  name="country"
+                  label="Country"
+                  value={formData.country}
                   onChange={handleChange}
                 />
                 <TextField
@@ -317,7 +418,7 @@ const Signup: React.FC = () => {
               variant="contained"
               sx={{ mt: 3, mb: 2 }}
             >
-              {useOnboardingV2 ? 'Create Workspace & Continue' : 'Proceed to Checkout'}
+              {registrationMode === 'trial' ? 'Start 14-Day Free Trial' : 'Continue to Paynow checkout'}
             </Button>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary">

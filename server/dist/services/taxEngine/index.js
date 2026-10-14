@@ -1,73 +1,87 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateTaxSummary = exports.calculateSellerNetPayout = exports.calculateCommissionVAT = exports.calculateVATOnSale = exports.calculateCGT = void 0;
-const DEFAULT_CONFIG = {
-    cgtRate: 0.2,
-    vatSaleRate: 0.15,
-    vatOnCommissionRate: 0.155,
-    applyVatOnSale: false
-};
-const money = (n) => Number(Number(n || 0).toFixed(2));
-const calculateCGT = (salePrice, cgtRate = DEFAULT_CONFIG.cgtRate) => {
-    return money(Math.max(0, salePrice) * Math.max(0, cgtRate));
-};
-exports.calculateCGT = calculateCGT;
-const calculateVATOnSale = (salePrice, applyVatOnSale = DEFAULT_CONFIG.applyVatOnSale, vatSaleRate = DEFAULT_CONFIG.vatSaleRate) => {
-    if (!applyVatOnSale)
-        return 0;
-    return money(Math.max(0, salePrice) * Math.max(0, vatSaleRate));
-};
-exports.calculateVATOnSale = calculateVATOnSale;
-const calculateCommissionVAT = (commissionAmount, vatOnCommissionRate = DEFAULT_CONFIG.vatOnCommissionRate) => {
-    return money(Math.max(0, commissionAmount) * Math.max(0, vatOnCommissionRate));
-};
-exports.calculateCommissionVAT = calculateCommissionVAT;
-const calculateSellerNetPayout = (salePrice, deductions) => {
-    const totalDeductions = money(deductions.reduce((sum, d) => sum + money(d), 0));
-    return money(Math.max(0, money(salePrice) - totalDeductions));
-};
-exports.calculateSellerNetPayout = calculateSellerNetPayout;
+exports.generateTaxSummary = void 0;
+const cgtCalculation_1 = require("../tax/cgtCalculation");
+const vatCalculation_1 = require("../tax/vatCalculation");
+const settlementWaterfall_1 = require("../tax/settlementWaterfall");
+const money_1 = require("../../utils/money");
+const money = (n) => (0, money_1.roundMoney)(n);
 const generateTaxSummary = (input) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
     const salePrice = money(input.salePrice);
     const commissionAmount = money(input.commissionAmount);
-    const cgt = (0, exports.calculateCGT)(salePrice, (_a = input.cgtRate) !== null && _a !== void 0 ? _a : DEFAULT_CONFIG.cgtRate);
-    const vatOnSale = (0, exports.calculateVATOnSale)(salePrice, (_b = input.applyVatOnSale) !== null && _b !== void 0 ? _b : DEFAULT_CONFIG.applyVatOnSale, (_c = input.vatSaleRate) !== null && _c !== void 0 ? _c : DEFAULT_CONFIG.vatSaleRate);
     const vatOnCommission = input.vatOnCommissionAmount != null
         ? money(input.vatOnCommissionAmount)
-        : input.applyVatOnCommission === false
-            ? 0
-            : (0, exports.calculateCommissionVAT)(commissionAmount, (_d = input.vatOnCommissionRate) !== null && _d !== void 0 ? _d : DEFAULT_CONFIG.vatOnCommissionRate);
-    const deductions = [cgt, vatOnSale, commissionAmount, vatOnCommission];
-    const totalDeductions = money(deductions.reduce((sum, d) => sum + d, 0));
-    const sellerNetPayout = (0, exports.calculateSellerNetPayout)(salePrice, deductions);
+        : 0;
+    let vatOnSale = 0;
+    if (input.saleVatAmount != null && Number(input.saleVatAmount) > 0) {
+        vatOnSale = money(input.saleVatAmount);
+    }
+    else if (input.applyVatOnSale && Number(input.saleVatRate) > 0) {
+        vatOnSale = (0, vatCalculation_1.extractInclusiveVat)(salePrice, Number(input.saleVatRate)).vatAmount;
+    }
+    let cgt = (0, cgtCalculation_1.calculateCapitalGain)({
+        salePrice,
+        acquisitionCost: input.acquisitionCost,
+        improvementCosts: input.improvementCosts,
+        qualifyingExpenses: input.qualifyingExpenses,
+        sellingCosts: input.sellingCosts,
+        otherAdjustments: input.otherAdjustments,
+        cgtRate: input.cgtRate,
+        cgtNotApplicable: input.cgtNotApplicable,
+        cgtNotApplicableReason: input.cgtNotApplicableReason
+    });
+    if (input.cgtOverrideAmount != null) {
+        const reason = String(input.cgtOverrideReason || '').trim();
+        if (!reason) {
+            cgt = Object.assign(Object.assign({}, cgt), { calculationBasis: 'MANUAL_OVERRIDE', reviewRequired: true, reviewReason: 'MANUAL_TAX_OVERRIDE_REASON_REQUIRED', settlementBlocked: true, isFinal: false, isProvisional: true });
+        }
+        else {
+            cgt = Object.assign(Object.assign({}, cgt), { cgtAmount: money(Math.max(0, Number(input.cgtOverrideAmount))), calculationBasis: 'MANUAL_OVERRIDE', reviewRequired: true, reviewReason: 'MANUAL_TAX_OVERRIDE', settlementBlocked: false, isFinal: true, isProvisional: false });
+        }
+    }
+    const cgwt = (0, cgtCalculation_1.calculateCapitalGainsWithholding)({
+        saleConsideration: salePrice,
+        cgwtRate: input.cgwtRate,
+        applicability: input.cgwtApplicability,
+        notApplicableReason: input.cgwtNotApplicableReason
+    });
+    const waterfall = (0, settlementWaterfall_1.buildSettlementWaterfall)({
+        grossSaleProceeds: salePrice,
+        saleVat: vatOnSale,
+        cgwt: cgwt.settlementBlocked ? 0 : cgwt.cgwtAmount,
+        agencyCommission: commissionAmount,
+        vatOnCommission,
+        otherDeductions: input.otherDeductions
+    });
+    const settlementBlocked = Boolean(cgt.settlementBlocked || cgwt.settlementBlocked);
+    const settlementStatus = settlementBlocked
+        ? 'REQUIRES_TAX_REVIEW'
+        : (cgt.isProvisional ? 'PROVISIONAL' : 'CALCULATED');
     return {
         cgt,
+        cgwt,
         vatOnSale,
         vatOnCommission,
         commission: commissionAmount,
-        totalDeductions,
-        sellerNetPayout,
+        waterfall,
+        sellerNetPayout: waterfall.sellerNetProceeds,
+        settlementBlocked,
+        settlementStatus,
         breakdown: {
-            configuredRates: {
-                cgtRate: (_e = input.cgtRate) !== null && _e !== void 0 ? _e : DEFAULT_CONFIG.cgtRate,
-                vatSaleRate: (_f = input.vatSaleRate) !== null && _f !== void 0 ? _f : DEFAULT_CONFIG.vatSaleRate,
-                vatOnCommissionRate: (_g = input.vatOnCommissionRate) !== null && _g !== void 0 ? _g : DEFAULT_CONFIG.vatOnCommissionRate
-            },
+            cgtIsNotPercentOfSalePrice: true,
+            cgwtIndependentOfCgt: true,
+            settlementBlocked,
             appliedRules: {
-                cgtFirst: true,
-                vatOnSaleApplied: (_h = input.applyVatOnSale) !== null && _h !== void 0 ? _h : DEFAULT_CONFIG.applyVatOnSale,
-                vatOnCommissionApplied: input.applyVatOnCommission !== false,
-                vatOnCommissionSource: input.vatOnCommissionAmount != null ? 'payment' : 'calculated'
+                saleVatFromSnapshotOrInclusiveExtract: vatOnSale > 0,
+                withholdingIsNotFinalCgt: true,
+                missingRateDoesNotSettleAtZero: true
             }
         }
     };
 };
 exports.generateTaxSummary = generateTaxSummary;
 exports.default = {
-    calculateCGT: exports.calculateCGT,
-    calculateVATOnSale: exports.calculateVATOnSale,
-    calculateCommissionVAT: exports.calculateCommissionVAT,
-    calculateSellerNetPayout: exports.calculateSellerNetPayout,
-    generateTaxSummary: exports.generateTaxSummary
+    generateTaxSummary: exports.generateTaxSummary,
+    calculateCapitalGain: cgtCalculation_1.calculateCapitalGain,
+    calculateCapitalGainsWithholding: cgtCalculation_1.calculateCapitalGainsWithholding
 };

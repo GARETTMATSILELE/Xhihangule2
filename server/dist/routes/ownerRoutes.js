@@ -23,6 +23,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Tenant_1 = require("../models/Tenant");
 const Lease_1 = require("../models/Lease");
 const Payment_1 = require("../models/Payment");
+const lettingController_1 = require("../agency/lettingController");
 const router = express_1.default.Router();
 console.log('OwnerRoutes: Registering owner routes...');
 // Only protect property routes, not maintenance-requests
@@ -567,5 +568,9 @@ router.get('/financial-data', auth_1.propertyOwnerAuth, (req, res) => __awaiter(
         });
     }
 }));
+router.get('/letting/properties/:propertyId/workspace', auth_1.propertyOwnerAuth, (req, res) => (0, lettingController_1.ownerLettingWorkspace)(req, res));
+router.post('/letting/assessments/:id/decision', auth_1.propertyOwnerAuth, (req, res) => (0, lettingController_1.advanceAssessment)(req, res));
+router.post('/letting/applications/:id/decision', auth_1.propertyOwnerAuth, (req, res) => (0, lettingController_1.ownerApplicationDecision)(req, res));
+router.post('/letting/leases/:id/signature', auth_1.propertyOwnerAuth, (req, res) => (0, lettingController_1.signAgencyLease)(req, res));
 console.log('OwnerRoutes: All owner routes registered');
 exports.default = router;

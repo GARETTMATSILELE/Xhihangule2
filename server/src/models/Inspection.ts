@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
 export type InspectionFrequency = 'monthly' | 'quarterly' | 'biannual' | 'annual' | 'custom' | 'ad_hoc';
-export type InspectionType = 'move_in' | 'routine' | 'follow_up' | 'move_out' | 'emergency';
+export type InspectionType = 'move_in' | 'routine' | 'follow_up' | 'move_out' | 'emergency' | 'maintenance';
 export type InspectionStatus = 'scheduled' | 'upcoming' | 'due_today' | 'overdue' | 'in_progress' | 'draft' | 'completed' | 'reviewed' | 'follow_up_required' | 'missed' | 'rescheduled' | 'cancelled';
 export type ConditionRating = 'excellent' | 'good' | 'needs_attention' | 'critical';
 export type InspectionItemStatus = 'pending' | 'ok' | 'attention_required' | 'damaged' | 'missing' | 'not_working' | 'repaired' | 'na' | 'pass' | 'fail' | 'not_applicable';
@@ -114,7 +114,7 @@ const InspectionSchema: Schema = new Schema({
   notes: { type: String, default: '' },
   frequency: { type: String, enum: ['monthly', 'quarterly', 'biannual', 'annual', 'custom', 'ad_hoc'], default: 'quarterly' },
   customIntervalDays: { type: Number, min: 1 },
-  type: { type: String, enum: ['move_in', 'routine', 'follow_up', 'move_out', 'emergency'], default: 'routine' },
+  type: { type: String, enum: ['move_in', 'routine', 'follow_up', 'move_out', 'emergency', 'maintenance'], default: 'routine' },
   status: { type: String, enum: ['scheduled', 'upcoming', 'due_today', 'overdue', 'in_progress', 'draft', 'completed', 'reviewed', 'follow_up_required', 'missed', 'rescheduled', 'cancelled'], default: 'scheduled' },
   generatedBy: { type: String, enum: ['manual', 'lease_activation', 'lease_termination', 'recurrence', 'follow_up'], default: 'manual' },
   recurrenceGroupId: { type: Schema.Types.ObjectId },

@@ -7,7 +7,8 @@ export type OnboardingStatus =
   | 'INITIALIZING_WORKSPACE'
   | 'ACTIVE'
   | 'FAILED_SETUP'
-  | 'SUSPENDED';
+  | 'SUSPENDED'
+  | 'EXPIRED';
 
 export interface IOnboardingSession extends Document {
   userId?: Types.ObjectId;
@@ -38,7 +39,7 @@ const OnboardingSessionSchema = new Schema<IOnboardingSession>(
     idempotencyKey: { type: String, required: true, trim: true, index: true },
     status: {
       type: String,
-      enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED'],
+      enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED', 'EXPIRED'],
       default: 'PENDING_SETUP',
       index: true
     },

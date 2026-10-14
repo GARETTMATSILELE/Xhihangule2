@@ -13,6 +13,13 @@ export interface ITrustSettlement extends Document {
   grossProceeds: number;
   deductions: ITrustSettlementDeduction[];
   netPayout: number;
+  cgtSnapshot?: Record<string, unknown>;
+  cgwtSnapshot?: Record<string, unknown>;
+  waterfall?: Record<string, unknown>;
+  settlementStatus?: 'CALCULATED' | 'REQUIRES_TAX_REVIEW' | 'PROVISIONAL' | 'BLOCKED';
+  cgwtApplicability?: 'APPLICABLE' | 'NOT_APPLICABLE' | 'REVIEW_REQUIRED';
+  calculatedAt?: Date;
+  calculatedBy?: mongoose.Types.ObjectId;
   settlementDate: Date;
   locked: boolean;
   createdAt: Date;
@@ -32,6 +39,21 @@ const TrustSettlementSchema = new Schema<ITrustSettlement>(
       }
     ],
     netPayout: { type: Number, required: true, min: 0 },
+    cgtSnapshot: { type: Schema.Types.Mixed, required: false },
+    cgwtSnapshot: { type: Schema.Types.Mixed, required: false },
+    waterfall: { type: Schema.Types.Mixed, required: false },
+    settlementStatus: {
+      type: String,
+      enum: ['CALCULATED', 'REQUIRES_TAX_REVIEW', 'PROVISIONAL', 'BLOCKED'],
+      required: false
+    },
+    cgwtApplicability: {
+      type: String,
+      enum: ['APPLICABLE', 'NOT_APPLICABLE', 'REVIEW_REQUIRED'],
+      required: false
+    },
+    calculatedAt: { type: Date, required: false },
+    calculatedBy: { type: Schema.Types.ObjectId, ref: 'User', required: false },
     settlementDate: { type: Date, required: true, default: () => new Date() },
     locked: { type: Boolean, required: true, default: false, index: true }
   },

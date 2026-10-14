@@ -5,6 +5,7 @@ import { User } from '../models/User';
 import { runDatabaseBackup, listBackups } from '../services/backupService';
 import { reconcileDuplicates } from '../services/reconciliationService';
 import { runPropertyLedgerMaintenance } from '../services/propertyAccountService';
+import { requireExplicitMigrationConfirmation } from '../services/financialMigrationGuard';
 import DatabaseSyncService from '../services/databaseSyncService';
 import AdminAuditLog from '../models/AdminAuditLog';
 import { Company } from '../models/Company';
@@ -139,8 +140,9 @@ export const reconcile = async (req: Request, res: Response) => {
 
 export const ledgerMaintenance = async (req: Request, res: Response) => {
   requireSystemAdmin(req);
+  const { reason } = requireExplicitMigrationConfirmation(req);
   const { companyId, dryRun } = req.body || {};
-  const audit = await startAudit(req, 'maintenance:ledger', { companyId, dryRun: Boolean(dryRun) });
+  const audit = await startAudit(req, 'maintenance:ledger', { companyId, dryRun: Boolean(dryRun), reason });
   try {
     const result = await runPropertyLedgerMaintenance({ companyId, dryRun: Boolean(dryRun) });
     await finishAudit(audit, true, result);

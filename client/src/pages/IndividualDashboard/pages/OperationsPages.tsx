@@ -6,11 +6,17 @@ import {
   Card,
   CardContent,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
   Stack,
+  TextField,
   Typography
 } from '@mui/material';
 import { Build, TrendingDown } from '@mui/icons-material';
+import { isDemoMode, notifyDemoBlocked } from '../../../demo/demoMode';
 import { apiService } from '../../../api';
 import individualWorkspaceService from '../../../services/individualWorkspaceService';
 import { BarChartPanel, CHART_COLORS, LineChartPanel } from '../components/Charts';
@@ -73,8 +79,12 @@ export function MaintenancePage() {
                     </Stack>
                   </Box>
                   <Stack direction="row" spacing={1}>
-                    <Button size="small" onClick={async () => { await individualWorkspaceService.approveMaintenance(item._id); await reload(); }}>Approve</Button>
+                    <Button size="small" onClick={async () => {
+                      if (isDemoMode()) { notifyDemoBlocked(); return; }
+                      await individualWorkspaceService.approveMaintenance(item._id); await reload();
+                    }}>Approve</Button>
                     <Button size="small" variant="contained" sx={{ bgcolor: INDIVIDUAL_THEME.primary }} onClick={async () => {
+                      if (isDemoMode()) { notifyDemoBlocked(); return; }
                       await individualWorkspaceService.recordMaintenanceExpense(item._id, { amount: item.paidAmount || item.estimatedCost || item.requestedAmount || 0 });
                       await reload();
                     }}>Convert To Expense</Button>
@@ -93,6 +103,9 @@ export function MaintenancePage() {
 export function AccountingPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [applyForm, setApplyForm] = useState({ propertyId: '', amount: 0, date: new Date().toISOString().slice(0, 10), rentalDepositId: '', notes: '' });
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   useEffect(() => {
     individualWorkspaceService.getAccounting()
@@ -115,11 +128,16 @@ export function AccountingPage() {
   const recentTx = (data.recentActivity || []).slice(0, 8);
 
   return (
-    <PageShell title="Accounting" subtitle="Landlord accounting center — income, expenses, and cashflow at a glance.">
+    <PageShell title="Accounting" subtitle={`Landlord accounting — ${data.period?.label || data.overview?.periodLabel || 'selected period'}.`}>
+      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+        <Button variant="outlined" onClick={() => setApplyOpen(true)}>Apply deposit to rent</Button>
+      </Stack>
+      {applyError && <Alert severity="error" sx={{ mb: 2 }}>{applyError}</Alert>}
       <Grid container spacing={2}>
-        <Grid item xs={6} md={4} lg={2}><StatCard title="Income" value={money(data.overview.incomeThisMonth)} /></Grid>
-        <Grid item xs={6} md={4} lg={2}><StatCard title="Expenses" value={money(data.overview.expensesThisMonth)} /></Grid>
-        <Grid item xs={6} md={4} lg={2}><StatCard title="Profit" value={money(data.overview.netProfit)} /></Grid>
+        <Grid item xs={6} md={4} lg={2}><StatCard title={`Income — ${data.period?.label || 'period'}`} value={money(data.overview.incomeThisMonth)} /></Grid>
+        <Grid item xs={6} md={4} lg={2}><StatCard title={`Expenses — ${data.period?.label || 'period'}`} value={money(data.overview.expensesThisMonth)} /></Grid>
+        <Grid item xs={6} md={4} lg={2}><StatCard title="Period result" value={money(data.overview.netProfit)} /></Grid>
+        <Grid item xs={6} md={4} lg={2}><StatCard title="Year to date" value={money(data.overview.yearToDateProfit || 0)} /></Grid>
         <Grid item xs={6} md={4} lg={2}><StatCard title="Outstanding Rent" value={money(data.overview.outstandingRent)} /></Grid>
         <Grid item xs={6} md={4} lg={2}><StatCard title="Cash Balance" value={money(data.summary?.netMonthlyCashflow || 0)} /></Grid>
       </Grid>
@@ -168,6 +186,42 @@ export function AccountingPage() {
           </Stack>
         </CardContent>
       </Card>
+      <Dialog open={applyOpen} onClose={() => setApplyOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Apply deposit to rent</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info">Creates a new rental-income transaction. The original deposit receipt is not changed.</Alert>
+            <TextField label="Property ID" value={applyForm.propertyId} onChange={(e) => setApplyForm({ ...applyForm, propertyId: e.target.value })} required />
+            <TextField label="Amount" type="number" value={applyForm.amount} onChange={(e) => setApplyForm({ ...applyForm, amount: Number(e.target.value) })} required />
+            <TextField label="Date" type="date" value={applyForm.date} onChange={(e) => setApplyForm({ ...applyForm, date: e.target.value })} InputLabelProps={{ shrink: true }} />
+            <TextField label="Original deposit ID" value={applyForm.rentalDepositId} onChange={(e) => setApplyForm({ ...applyForm, rentalDepositId: e.target.value })} required helperText="Required. The original deposit receipt is not changed." />
+            <TextField label="Notes" value={applyForm.notes} onChange={(e) => setApplyForm({ ...applyForm, notes: e.target.value })} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setApplyOpen(false)}>Cancel</Button>
+          <Button onClick={async () => {
+            try {
+              setApplyError(null);
+              if (isDemoMode()) { notifyDemoBlocked(); return; }
+              if (!applyForm.rentalDepositId.trim()) {
+                setApplyError('rentalDepositId is required to apply a deposit to rent');
+                return;
+              }
+              await individualWorkspaceService.applyDepositToRent({
+                propertyId: applyForm.propertyId,
+                amount: applyForm.amount,
+                date: applyForm.date,
+                rentalDepositId: applyForm.rentalDepositId,
+                notes: applyForm.notes
+              });
+              setApplyOpen(false);
+            } catch (err: any) {
+              setApplyError(err?.message || 'Unable to apply deposit');
+            }
+          }}>Post application</Button>
+        </DialogActions>
+      </Dialog>
     </PageShell>
   );
 }

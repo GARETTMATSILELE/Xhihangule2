@@ -32,16 +32,32 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Payment = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
 const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTrigger");
+const paymentFinancialImmutability_1 = require("../services/paymentFinancialImmutability");
 const PaymentSchema = new mongoose_1.Schema({
     paymentType: {
         type: String,
         enum: ['sale', 'rental', 'introduction'],
         required: true,
+    },
+    transactionDomain: {
+        type: String,
+        enum: ['RENTAL', 'SALE'],
+        required: false,
+        immutable: true
     },
     saleMode: {
         type: String,
@@ -57,12 +73,18 @@ const PaymentSchema = new mongoose_1.Schema({
     propertyId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Property',
-        required: true,
+        required: function requiredProperty() {
+            if (this.paymentType === 'sale' && (this.developmentId || this.developmentUnitId))
+                return false;
+            return true;
+        },
     },
     tenantId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Tenant',
-        required: true,
+        required: function requiredTenant() {
+            return this.paymentType !== 'sale';
+        },
     },
     agentId: {
         type: mongoose_1.Schema.Types.ObjectId,
@@ -87,7 +109,7 @@ const PaymentSchema = new mongoose_1.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['cash', 'bank_transfer', 'credit_card', 'mobile_money'],
+        enum: ['cash', 'bank_transfer', 'credit_card', 'mobile_money', 'online_payment', 'other'],
         required: true,
     },
     amount: {
@@ -229,6 +251,9 @@ const PaymentSchema = new mongoose_1.Schema({
         vatTreatment: { type: String, enum: ['inclusive', 'exclusive'], required: false },
         vatRate: { type: Number, required: false, min: 0, max: 1 },
         vatAmount: { type: Number, required: false, default: 0 },
+        vatJurisdiction: { type: String, required: false },
+        vatRuleId: { type: String, required: false },
+        vatTaxPoint: { type: Date, required: false },
         agentSplit: {
             ownerAgentShare: { type: Number, required: false, default: 0 },
             collaboratorAgentShare: { type: Number, required: false, default: 0 },
@@ -284,6 +309,24 @@ const PaymentSchema = new mongoose_1.Schema({
         default: 'draft',
         index: true,
     },
+    accountingComplete: {
+        type: Boolean,
+        required: false,
+        index: true
+    },
+    accountingStatus: {
+        type: String,
+        enum: ['pending', 'posted', 'partial', 'failed', 'not_applicable', 'incomplete'],
+        required: false,
+        index: true
+    },
+    accountingLastAttemptAt: { type: Date, required: false },
+    accountingPostedAt: { type: Date, required: false },
+    accountingRetryCount: { type: Number, required: false, default: undefined },
+    accountingLastError: { type: String, required: false },
+    accountingMissing: { type: [String], required: false },
+    accountingMismatched: { type: [String], required: false },
+    accountingNextAttemptAt: { type: Date, required: false },
     currency: {
         type: String,
         enum: ['USD', 'ZWL'],
@@ -396,6 +439,20 @@ const PaymentSchema = new mongoose_1.Schema({
         ref: 'Payment',
         required: false,
     },
+    reversalState: {
+        type: String,
+        enum: ['reversal_in_progress', 'reversal_incomplete', 'reversed'],
+        required: false,
+    },
+    reversalLockAt: {
+        type: Date,
+        required: false,
+    },
+    reversalLockBy: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+    },
     correctedPaymentId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Payment',
@@ -457,7 +514,14 @@ PaymentSchema.index({ developmentId: 1 });
 PaymentSchema.index({ developmentUnitId: 1 });
 PaymentSchema.index({ isProvisional: 1 });
 PaymentSchema.index({ reversalOfPaymentId: 1 });
+PaymentSchema.index({ reversalOfPaymentId: 1 }, {
+    name: 'one_full_reversal_per_payment',
+    unique: true,
+    partialFilterExpression: { reversalOfPaymentId: { $exists: true }, amount: { $lt: 0 } }
+});
 PaymentSchema.index({ companyId: 1, postingStatus: 1, paymentDate: -1 });
+PaymentSchema.index({ accountingComplete: 1, accountingLastAttemptAt: 1 });
+PaymentSchema.index({ accountingStatus: 1, accountingNextAttemptAt: 1 });
 PaymentSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $exists: true, $type: 'string' } } });
 PaymentSchema.index({ companyId: 1, externalProvider: 1, externalTransactionId: 1 }, {
     unique: true,
@@ -493,7 +557,9 @@ function isIllegalPaymentUpdate(update) {
                 'status', 'isProvisional', 'isInSuspense', 'commissionFinalized', 'provisionalRelationshipType',
                 'finalizedAt', 'finalizedBy', 'idempotencyKey', 'manualPropertyAddress', 'manualTenantName',
                 'buyerName', 'sellerName', 'saleId', 'developmentId', 'developmentUnitId', 'notes',
-                'postingStatus', 'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate', 'vatCommissionTreatment',
+                'postingStatus', 'accountingComplete', 'accountingStatus', 'accountingLastAttemptAt', 'accountingPostedAt', 'accountingRetryCount',
+                'accountingLastError', 'accountingMissing', 'accountingMismatched', 'accountingNextAttemptAt',
+                'vatIncluded', 'vatRate', 'vatAmount', 'applyVatOnCommission', 'vatOnCommissionRate', 'vatCommissionTreatment',
                 'reversalOfPaymentId', 'reversalPaymentId', 'correctedPaymentId',
                 'reversedBy', 'reversedAt', 'reversalReason', 'voidedBy', 'voidedAt', 'voidReason', 'isCorrectionEntry'
             ].includes(key))
@@ -506,6 +572,17 @@ function isIllegalPaymentUpdate(update) {
 }
 PaymentSchema.pre('save', function (next) {
     try {
+        if (!this.isNew) {
+            const stillProvisional = this.isProvisional === true || this.isInSuspense === true;
+            const finalizing = this.isModified('isProvisional') || this.isModified('isInSuspense');
+            const statusChanging = this.isModified('status');
+            if (!stillProvisional && !finalizing && !statusChanging && (0, paymentFinancialImmutability_1.isCompletedFinancialPayment)(this)) {
+                const modifiedFinancial = paymentFinancialImmutability_1.PAYMENT_FINANCIAL_FIELDS.filter((field) => this.isModified(field));
+                if (modifiedFinancial.length) {
+                    return next(new Error(paymentFinancialImmutability_1.COMPLETED_PAYMENT_IMMUTABLE_MESSAGE));
+                }
+            }
+        }
         const lines = Array.isArray(this.paymentLines) ? this.paymentLines : [];
         if (lines.length > 0) {
             this.amount = Number(lines.reduce((sum, line) => sum + Number((line === null || line === void 0 ? void 0 : line.amount) || 0), 0).toFixed(2));
@@ -527,18 +604,25 @@ PaymentSchema.pre('save', function (next) {
         return next(e);
     }
 });
-PaymentSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], function (next) {
-    var _a, _b;
-    try {
+PaymentSchema.pre(['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne'], function () {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         const update = ((_b = (_a = this).getUpdate) === null || _b === void 0 ? void 0 : _b.call(_a)) || {};
         if (isIllegalPaymentUpdate(update)) {
-            return next(new Error('Payment records are immutable. Create a correcting payment instead of editing core fields.'));
+            throw new Error('Payment records are immutable. Create a correcting payment instead of editing core fields.');
         }
-        return next();
-    }
-    catch (e) {
-        return next(e);
-    }
+        const attemptedFinancial = (0, paymentFinancialImmutability_1.financialFieldsInQueryUpdate)(update);
+        if (attemptedFinancial.length === 0)
+            return;
+        const query = ((_d = (_c = this).getQuery) === null || _d === void 0 ? void 0 : _d.call(_c)) || {};
+        const matched = yield this.model.find(query)
+            .select('status postingStatus isProvisional isInSuspense')
+            .limit(50)
+            .lean();
+        if (matched.some((doc) => (0, paymentFinancialImmutability_1.isCompletedFinancialPayment)(doc))) {
+            throw new Error(paymentFinancialImmutability_1.COMPLETED_PAYMENT_IMMUTABLE_MESSAGE);
+        }
+    });
 });
 const resolveCompanyId = (value) => {
     if (!value)

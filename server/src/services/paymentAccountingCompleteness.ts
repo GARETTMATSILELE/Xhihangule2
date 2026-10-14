@@ -1,5 +1,10 @@
 import mongoose from 'mongoose';
 import { isRecordIncomeEarlyExit } from './paymentReconciliationQuery';
+import {
+  domainFromPaymentType,
+  historicalTransactionDomain,
+  ledgerForDomain
+} from './transactionDomain';
 
 export type LedgerType = 'rental' | 'sale';
 
@@ -61,6 +66,7 @@ export type OwnerIncomeCompletenessPayment = {
   depositAmount?: number;
   reversalOfPaymentId?: unknown;
   paymentType?: string;
+  transactionDomain?: string;
   developmentId?: unknown;
   developmentUnitId?: unknown;
   commissionDetails?: { ownerAmount?: number };
@@ -272,19 +278,23 @@ export async function provePaymentAccountingCompleteness(
   if (!paymentId || !mongoose.Types.ObjectId.isValid(paymentId)) {
     return incomplete('malformed_payment');
   }
-  if (!propertyId || !mongoose.Types.ObjectId.isValid(propertyId)) {
+
+  const domain = historicalTransactionDomain(payment);
+  if (!domain) return incomplete('missing_transaction_domain');
+  const typed = payment.paymentType ? domainFromPaymentType(payment.paymentType) : null;
+  if (typed && typed !== domain) return incomplete('payment_type_mismatch');
+  const isSale = domain === 'SALE';
+  const ledgerType = ledgerForDomain(domain);
+  if (!isSale && (!propertyId || !mongoose.Types.ObjectId.isValid(propertyId))) {
     return incomplete('missing_property');
   }
-
-  const resolution = await deps.resolveLedgerTypeForProperty(propertyId);
-  const isSale = resolution.ledgerType === 'sale';
-  if (payment.paymentType && ((payment.paymentType === 'sale') !== isSale)) {
-    return incomplete('payment_type_mismatch');
+  if (isSale && (!propertyId || !mongoose.Types.ObjectId.isValid(propertyId)) && !payment.developmentId && !payment.developmentUnitId) {
+    return incomplete('missing_sale_context');
   }
 
   const targets = await buildOwnerIncomeLedgerTargets({
     isSale,
-    ledgerType: resolution.ledgerType,
+    ledgerType,
     propertyId,
     developmentId: payment.developmentId,
     developmentUnitId: payment.developmentUnitId,

@@ -19,6 +19,7 @@ const AgentAccount_1 = require("../models/AgentAccount");
 const agentAccountService_1 = __importDefault(require("../services/agentAccountService"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
+const financialMigrationGuard_1 = require("../services/financialMigrationGuard");
 /**
  * Compare User.commission vs AgentAccount totals for the current company
  */
@@ -420,16 +421,21 @@ const updatePayoutStatus = (req, res) => __awaiter(void 0, void 0, void 0, funct
 });
 exports.updatePayoutStatus = updatePayoutStatus;
 /**
- * Sync agent accounts from payments
+ * Historical catch-up of agent commission projections from Payments.
+ * Not a live payment-posting path. Requires confirm=true and a non-empty reason.
  */
 const syncAgentAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
+    let audit = null;
     try {
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
         if (!companyId) {
             throw new errorHandler_1.AppError('Company ID not found', 404);
         }
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'migration:agent_accounts_sync', { companyId, reason });
         yield agentAccountService_1.default.syncFromPayments(companyId);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, { companyId });
         res.json({
             success: true,
             message: 'Agent accounts synced successfully from payments'
@@ -437,6 +443,7 @@ const syncAgentAccounts = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
     catch (error) {
         logger_1.logger.error('Error in syncAgentAccounts:', error);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, (error === null || error === void 0 ? void 0 : error.message) || String(error));
         if (error instanceof errorHandler_1.AppError) {
             return res.status(error.statusCode).json({
                 success: false,
@@ -451,9 +458,11 @@ const syncAgentAccounts = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.syncAgentAccounts = syncAgentAccounts;
 /**
- * Sync commission transactions for a specific agent
+ * Historical catch-up of commission transactions for a specific agent.
+ * Uses the orchestrator writer (syncCommissionForPayment). Requires confirm+reason.
  */
 const syncAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    let audit = null;
     try {
         const { agentId } = req.params;
         if (!agentId) {
@@ -463,14 +472,16 @@ const syncAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!mongoose_1.default.Types.ObjectId.isValid(agentId)) {
             return res.status(400).json({ message: 'Invalid agent ID format' });
         }
+        const { reason } = (0, financialMigrationGuard_1.requireExplicitMigrationConfirmation)(req);
+        audit = yield (0, financialMigrationGuard_1.startMigrationAudit)(req, 'migration:agent_commissions_sync', { agentId, reason });
         yield agentAccountService_1.default.syncCommissionTransactions(agentId);
-        // Ensure any payment visible in summary is projected to the ledger (idempotent)
         try {
             yield agentAccountService_1.default.backfillMissingForAgent(agentId);
         }
         catch (e) {
-            // swallow; core sync already done
+            logger_1.logger.warn('Agent commission backfill after sync failed:', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, true, { agentId });
         res.json({
             success: true,
             message: 'Agent commission transactions synced successfully'
@@ -478,6 +489,7 @@ const syncAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
     catch (error) {
         logger_1.logger.error('Error in syncAgentCommissions:', error);
+        yield (0, financialMigrationGuard_1.finishMigrationAudit)(audit, false, undefined, (error === null || error === void 0 ? void 0 : error.message) || String(error));
         if (error instanceof errorHandler_1.AppError) {
             return res.status(error.statusCode).json({
                 success: false,

@@ -16,6 +16,7 @@ const authService_1 = require("../services/authService");
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
 const Subscription_1 = require("../models/Subscription");
+const registrationPaymentPolicy_1 = require("../services/registrationPaymentPolicy");
 const authService = authService_1.AuthService.getInstance();
 const COMPANY_CONTEXT_CACHE_TTL_MS = Number(process.env.COMPANY_CONTEXT_CACHE_TTL_MS || 60000);
 const companyContextCache = new Map();
@@ -218,6 +219,29 @@ const authWithCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
             });
         }
         attachUser(req, userData, context);
+        // Do not use the 60-second company cache for suspension. A suspended company
+        // must lose access on the next request, and reactivation must not wait for cache expiry.
+        const freshCompany = yield Company_1.Company.findById(context.companyId).select('tenantStatus isActive onboardingStatus').lean();
+        const tenantStatus = freshCompany
+            ? String(freshCompany.tenantStatus || (freshCompany.isActive === false ? 'suspended' : 'active'))
+            : (context.tenantStatus || 'active');
+        const onboardingStatus = String((freshCompany === null || freshCompany === void 0 ? void 0 : freshCompany.onboardingStatus) || context.onboardingStatus || 'ACTIVE');
+        const url = String(req.originalUrl || req.url || '');
+        const suspensionExempt = (0, registrationPaymentPolicy_1.isRegistrationPaymentExemptPath)(url);
+        if (!suspensionExempt && (0, registrationPaymentPolicy_1.companyAwaitingRegistrationPayment)(onboardingStatus)) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Complete registration payment before using the workspace',
+                code: 'PAYMENT_REQUIRED'
+            });
+        }
+        if (!suspensionExempt && tenantStatus !== 'active' && tenantStatus !== 'pending') {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Company workspace is not active',
+                code: 'TENANT_INACTIVE'
+            });
+        }
         next();
     }
     catch (error) {

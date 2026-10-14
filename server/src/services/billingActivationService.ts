@@ -31,8 +31,10 @@ export async function activateSubscriptionFromPayment(input: ActivationInput) {
     throw new AppError('Payment session not found', 404, 'PAYMENT_SESSION_NOT_FOUND');
   }
 
-  if (paymentSession.status === 'paid' || paymentSession.status === 'reconciled') {
-    return { paymentSession, alreadyProcessed: true };
+  if (paymentSession.status === 'reconciled') {
+    return { paymentSession, alreadyProcessed: true, subscription: paymentSession.subscriptionId
+      ? await Subscription.findById(paymentSession.subscriptionId)
+      : null };
   }
 
   paymentSession.status = 'paid';
@@ -88,10 +90,15 @@ export async function activateSubscriptionFromPayment(input: ActivationInput) {
     });
   }
 
+  const company = await Company.findById(paymentSession.companyId).select('onboardingStatus onboardingCompleted');
+  const awaitingRegistration = ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP', 'PAYMENT_RECEIVED'].includes(
+    String(company?.onboardingStatus || '')
+  );
   await Company.findByIdAndUpdate(paymentSession.companyId, {
     $set: {
       tenantStatus: 'active',
-      onboardingStatus: 'INITIALIZING_WORKSPACE',
+      onboardingStatus: awaitingRegistration ? 'INITIALIZING_WORKSPACE' : (company?.onboardingStatus || 'ACTIVE'),
+      onboardingCompleted: awaitingRegistration ? false : company?.onboardingCompleted !== false,
       subscriptionStatus: 'active',
       subscriptionEndDate: periodEnd,
       isActive: true

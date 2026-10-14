@@ -81,6 +81,16 @@ const tenantSchema = new mongoose_1.Schema({
     },
     emergencyContact: {
         type: String
+    },
+    userId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'User',
+        required: false,
+        index: true
+    },
+    address: {
+        type: String,
+        required: false
     }
 }, {
     timestamps: true
@@ -89,4 +99,5 @@ const tenantSchema = new mongoose_1.Schema({
 tenantSchema.index({ email: 1, companyId: 1 }, { unique: true });
 // Add index for ownerId for faster filtering
 tenantSchema.index({ ownerId: 1 });
+tenantSchema.index({ userId: 1 }, { sparse: true });
 exports.Tenant = mongoose_1.default.model('Tenant', tenantSchema, collections_1.COLLECTIONS.TENANTS);

@@ -45,12 +45,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handlePaymentConfirmationWebhook = void 0;
+exports.handlePaymentConfirmationWebhook = exports.resolveWebhookCreatedPaymentFinancials = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const Payment_1 = require("../models/Payment");
+const Property_1 = require("../models/Property");
 const eventBus_1 = require("../events/eventBus");
 const WebhookEventReceipt_1 = require("../models/WebhookEventReceipt");
+const commissionService_1 = require("../services/commissionService");
+const salePaymentCompleteness_1 = require("../services/salePaymentCompleteness");
+const introductionCommissionService_1 = require("../services/introductionCommissionService");
+const vatPolicyService_1 = require("../services/vatPolicyService");
+const taxObligationService_1 = require("../services/taxObligationService");
+const introductionLeaseContext_1 = require("../services/introductionLeaseContext");
+const transactionDomain_1 = require("../services/transactionDomain");
 const toSafeString = (v) => String(v || '').trim();
 const normalizeStatus = (raw) => {
     const s = String(raw || '').toLowerCase();
@@ -60,6 +68,148 @@ const normalizeStatus = (raw) => {
         return 'failed';
     return 'pending';
 };
+/**
+ * Classify from Property.rentalType only. Unknown must not be guessed as a sale.
+ * Incomplete sales are rejected — never created with a zero commission snapshot.
+ */
+const resolveWebhookCreatedPaymentFinancials = (input) => __awaiter(void 0, void 0, void 0, function* () {
+    const property = yield Property_1.Property.findById(input.propertyId)
+        .select('rentalType commission vatOnCommission vatCommissionTreatment agentId rent')
+        .lean();
+    const kind = (0, salePaymentCompleteness_1.classifyPropertyFinancialKind)(property === null || property === void 0 ? void 0 : property.rentalType);
+    if (!property || kind === 'unknown') {
+        return {
+            ok: false,
+            code: salePaymentCompleteness_1.WEBHOOK_PAYMENT_TYPE_UNKNOWN_CODE,
+            message: 'Webhook payment type cannot be classified from Property.rentalType.',
+            missing: ['property.rentalType']
+        };
+    }
+    const propertyAgent = (property === null || property === void 0 ? void 0 : property.agentId)
+        ? new mongoose_1.default.Types.ObjectId(String(property.agentId))
+        : undefined;
+    if (!propertyAgent && !input.payerObjectId) {
+        return {
+            ok: false,
+            code: 'WEBHOOK_ACTOR_REQUIRED',
+            message: 'Webhook payment requires a valid payerId or a property agent.',
+            missing: ['payerId']
+        };
+    }
+    const agentId = propertyAgent || input.payerObjectId;
+    const amount = Number(input.amount || 0);
+    if (kind === 'sale') {
+        const percent = Number((property === null || property === void 0 ? void 0 : property.commission) || 0);
+        const computed = yield commissionService_1.CommissionService.calculate(amount, percent, new mongoose_1.default.Types.ObjectId(String(input.companyId)));
+        const completeness = (0, salePaymentCompleteness_1.validateSalePaymentCompleteness)({
+            amount,
+            commissionDetails: computed
+        });
+        if (!completeness.ok) {
+            return {
+                ok: false,
+                code: salePaymentCompleteness_1.SALE_PAYMENT_INCOMPLETE_CODE,
+                message: 'Sale payment is missing required financial data.',
+                missing: completeness.missing
+            };
+        }
+        return {
+            ok: true,
+            paymentType: 'sale',
+            agentId,
+            commissionDetails: computed,
+            applyVatOnCommission: false,
+            vatOnCommissionRate: 0,
+            vatCommissionTreatment: undefined,
+            emitTrustEvent: true
+        };
+    }
+    const rentalType = String((property === null || property === void 0 ? void 0 : property.rentalType) || '').toLowerCase();
+    const propertyVatRequested = Boolean(property === null || property === void 0 ? void 0 : property.vatOnCommission);
+    const isIntroduction = rentalType === 'introduction';
+    const commissionVatPolicy = yield (0, vatPolicyService_1.resolveCommissionVatPolicy)({
+        companyId: String(input.companyId),
+        paymentDate: input.paymentDate,
+        property: {
+            vatOnCommission: propertyVatRequested,
+            vatCommissionTreatment: property === null || property === void 0 ? void 0 : property.vatCommissionTreatment
+        },
+        requestedVatOnCommission: propertyVatRequested,
+        requestedTreatment: property === null || property === void 0 ? void 0 : property.vatCommissionTreatment,
+        commissionType: isIntroduction ? 'introduction' : 'management'
+    });
+    const blockedVatRate = (0, vatPolicyService_1.centralVatRateBlock)(commissionVatPolicy);
+    if (blockedVatRate) {
+        return { ok: false, code: blockedVatRate.code, message: blockedVatRate.message };
+    }
+    const commissionVat = (0, vatPolicyService_1.commissionVatFlagsFromPolicy)(commissionVatPolicy);
+    if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+        yield (0, taxObligationService_1.openReview)({
+            companyId: String(input.companyId),
+            kind: commissionVatPolicy.reviewReason,
+            title: 'VAT on commission requires review',
+            detail: commissionVatPolicy.reason,
+            propertyId: String(input.propertyId)
+        });
+    }
+    if (isIntroduction) {
+        const prepared = yield (0, introductionCommissionService_1.prepareIntroductionRentalCommission)({
+            companyId: input.companyId,
+            propertyId: input.propertyId,
+            tenantId: input.tenantId,
+            leaseId: input.leaseId,
+            rentAllocated: amount,
+            levyAllocated: 0,
+            vatOnCommission: commissionVat.vatOnCommission,
+            vatTreatment: commissionVat.vatTreatment,
+            vatRate: commissionVat.vatRate,
+            paymentDate: input.paymentDate,
+            propertyRent: Number((property === null || property === void 0 ? void 0 : property.rent) || 0)
+        });
+        if (!prepared.ok) {
+            return {
+                ok: false,
+                code: prepared.code,
+                message: prepared.message,
+                missing: prepared.missing,
+                mismatches: prepared.mismatches
+            };
+        }
+        return {
+            ok: true,
+            paymentType: 'rental',
+            agentId,
+            commissionDetails: prepared.snapshot,
+            applyVatOnCommission: prepared.result.vatOnCommission,
+            vatOnCommissionRate: Number(prepared.result.vatRate || 0),
+            vatCommissionTreatment: prepared.result.vatTreatment,
+            emitTrustEvent: false,
+            tenantId: new mongoose_1.default.Types.ObjectId(prepared.context.tenantId),
+            leaseId: new mongoose_1.default.Types.ObjectId(prepared.context.leaseId)
+        };
+    }
+    const commissionResult = yield commissionService_1.CommissionService.calculateForProperty({
+        companyId: input.companyId,
+        grossRent: amount,
+        levy: 0,
+        commissionPercentage: Number((property === null || property === void 0 ? void 0 : property.commission) || 0),
+        vatOnCommission: commissionVat.vatOnCommission,
+        vatTreatment: commissionVat.vatTreatment,
+        vatRate: commissionVat.vatRate,
+        paymentDate: input.paymentDate
+    });
+    return {
+        ok: true,
+        paymentType: 'rental',
+        agentId,
+        commissionDetails: (0, commissionService_1.applyLevyPassThroughToSnapshot)(commissionResult, amount, 0),
+        applyVatOnCommission: commissionResult.vatOnCommission,
+        vatOnCommissionRate: Number(commissionResult.vatRate || 0),
+        vatCommissionTreatment: commissionResult.vatTreatment,
+        emitTrustEvent: false
+    };
+});
+exports.resolveWebhookCreatedPaymentFinancials = resolveWebhookCreatedPaymentFinancials;
 const isSignatureValid = (body, signature) => {
     const secret = process.env.WEBHOOK_SHARED_SECRET || '';
     if (!secret)
@@ -80,7 +230,7 @@ const handlePaymentConfirmationWebhook = (req, res) => __awaiter(void 0, void 0,
         if (!isSignatureValid(req.body, signature)) {
             return res.status(401).json({ message: 'Invalid webhook signature' });
         }
-        const { provider, eventId, externalTransactionId, paymentId, companyId, propertyId, payerId, amount, reference, date, status, paymentMethod, currency } = req.body || {};
+        const { provider, eventId, externalTransactionId, paymentId, companyId, propertyId, payerId, tenantId, leaseId, amount, reference, date, status, paymentMethod, currency } = req.body || {};
         const normalizedStatus = normalizeStatus(String(status || 'pending'));
         if (!companyId || !propertyId || amount == null || !reference) {
             return res.status(400).json({ message: 'Missing required fields: companyId, propertyId, amount, reference' });
@@ -101,12 +251,29 @@ const handlePaymentConfirmationWebhook = (req, res) => __awaiter(void 0, void 0,
             $setOnInsert: {
                 provider: providerName,
                 eventId: providerEventId,
-                status: 'processing',
                 companyId: new mongoose_1.default.Types.ObjectId(String(companyId))
             },
             $set: { status: 'processing', lastError: '' }
         }, { upsert: true });
+        const failWebhook = (failure) => __awaiter(void 0, void 0, void 0, function* () {
+            yield WebhookEventReceipt_1.WebhookEventReceipt.updateOne({ provider: providerName, eventId: providerEventId }, {
+                $set: {
+                    status: 'failed',
+                    lastError: `${failure.code}: ${(failure.missing || failure.mismatches || []).join(', ') || failure.message}`
+                }
+            });
+            const body = failure.code === salePaymentCompleteness_1.SALE_PAYMENT_INCOMPLETE_CODE
+                ? (0, salePaymentCompleteness_1.salePaymentIncompleteResponse)(failure.missing || [])
+                : (0, introductionLeaseContext_1.introductionContextErrorResponse)({
+                    code: failure.code,
+                    message: failure.message,
+                    missing: failure.missing,
+                    mismatches: failure.mismatches
+                });
+            return res.status(400).json(body);
+        });
         let payment = null;
+        let emitTrustEvent = true;
         if (paymentId && mongoose_1.default.Types.ObjectId.isValid(String(paymentId))) {
             payment = yield Payment_1.Payment.findOne({ _id: new mongoose_1.default.Types.ObjectId(String(paymentId)), companyId: new mongoose_1.default.Types.ObjectId(String(companyId)) });
         }
@@ -124,42 +291,78 @@ const handlePaymentConfirmationWebhook = (req, res) => __awaiter(void 0, void 0,
             });
         }
         if (payment) {
+            const previousStatus = String(payment.status || '');
+            const alreadyCompleted = previousStatus === 'completed' && payment.isProvisional !== true;
             payment.status = normalizedStatus;
-            payment.paymentDate = date ? new Date(String(date)) : payment.paymentDate;
-            payment.amount = Number(amount);
-            payment.paymentMethod = (paymentMethod || payment.paymentMethod || 'bank_transfer');
-            payment.currency = (currency || payment.currency || 'USD');
             payment.externalProvider = providerName;
             payment.externalTransactionId = toSafeString(externalTransactionId || providerEventId);
+            if (!alreadyCompleted) {
+                payment.paymentDate = date ? new Date(String(date)) : payment.paymentDate;
+                payment.amount = Number(amount);
+                payment.paymentMethod = (paymentMethod || payment.paymentMethod || 'bank_transfer');
+                payment.currency = (currency || payment.currency || 'USD');
+            }
+            if (normalizedStatus === 'completed' && previousStatus !== 'completed') {
+                const { activateAccountingTrackingForCompletion } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingReconciliation')));
+                activateAccountingTrackingForCompletion(payment);
+            }
             yield payment.save();
         }
         else {
             const payerObjectId = payerId && mongoose_1.default.Types.ObjectId.isValid(String(payerId))
                 ? new mongoose_1.default.Types.ObjectId(String(payerId))
-                : new mongoose_1.default.Types.ObjectId();
+                : undefined;
+            const paymentDateValue = date ? new Date(String(date)) : new Date();
+            const createdFinancials = yield (0, exports.resolveWebhookCreatedPaymentFinancials)({
+                companyId: String(companyId),
+                propertyId: String(propertyId),
+                amount: Number(amount),
+                paymentDate: paymentDateValue,
+                payerObjectId,
+                tenantId,
+                leaseId
+            });
+            if (!createdFinancials.ok) {
+                return failWebhook(createdFinancials);
+            }
+            emitTrustEvent = createdFinancials.emitTrustEvent;
+            const requestedTenant = tenantId && mongoose_1.default.Types.ObjectId.isValid(String(tenantId))
+                ? new mongoose_1.default.Types.ObjectId(String(tenantId))
+                : undefined;
+            const tenantForPayment = createdFinancials.tenantId
+                || requestedTenant
+                || (createdFinancials.paymentType === 'sale' ? undefined : payerObjectId);
+            if (createdFinancials.paymentType !== 'sale' && !tenantForPayment) {
+                return failWebhook({
+                    code: 'WEBHOOK_TENANT_REQUIRED',
+                    message: 'A rental webhook payment requires a valid tenantId or payerId.',
+                    missing: ['tenantId']
+                });
+            }
+            const processedBy = payerObjectId || createdFinancials.agentId;
             payment = new Payment_1.Payment({
-                paymentType: 'sale',
+                paymentType: createdFinancials.paymentType,
+                transactionDomain: createdFinancials.paymentType === 'sale' ? 'SALE' : 'RENTAL',
                 propertyType: 'residential',
                 propertyId: new mongoose_1.default.Types.ObjectId(String(propertyId)),
-                tenantId: payerObjectId,
-                agentId: payerObjectId,
+                tenantId: tenantForPayment,
+                leaseId: createdFinancials.leaseId,
+                agentId: createdFinancials.agentId,
                 companyId: new mongoose_1.default.Types.ObjectId(String(companyId)),
-                paymentDate: date ? new Date(String(date)) : new Date(),
+                paymentDate: paymentDateValue,
                 paymentMethod: (paymentMethod || 'bank_transfer'),
                 amount: Number(amount),
                 depositAmount: 0,
                 referenceNumber: toSafeString(reference),
                 notes: 'Created from payment confirmation webhook',
-                processedBy: payerObjectId,
-                commissionDetails: {
-                    totalCommission: 0,
-                    preaFee: 0,
-                    agentShare: 0,
-                    agencyShare: 0,
-                    vatOnCommission: 0,
-                    ownerAmount: Number(amount)
-                },
+                processedBy,
+                commissionDetails: createdFinancials.commissionDetails,
+                applyVatOnCommission: createdFinancials.applyVatOnCommission,
+                vatOnCommissionRate: createdFinancials.vatOnCommissionRate,
+                vatCommissionTreatment: createdFinancials.vatCommissionTreatment,
                 status: normalizedStatus,
+                accountingStatus: normalizedStatus === 'completed' ? 'pending' : undefined,
+                accountingComplete: normalizedStatus === 'completed' ? false : undefined,
                 currency: (currency || 'USD'),
                 externalProvider: providerName,
                 externalTransactionId: toSafeString(externalTransactionId || providerEventId),
@@ -170,25 +373,27 @@ const handlePaymentConfirmationWebhook = (req, res) => __awaiter(void 0, void 0,
         }
         if (normalizedStatus === 'completed') {
             try {
-                const { postPaymentAccounting } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingOrchestrator')));
-                yield postPaymentAccounting(String(payment._id));
+                const { ensurePaymentAccountingPosted } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingReconciliation')));
+                yield ensurePaymentAccountingPosted(String(payment._id));
             }
             catch (postErr) {
                 console.warn('Webhook payment accounting post failed:', (postErr === null || postErr === void 0 ? void 0 : postErr.message) || postErr);
             }
-            const updateResult = yield Payment_1.Payment.updateOne({ _id: payment._id, companyId: payment.companyId, trustEventEmittedAt: { $exists: false } }, { $set: { trustEventEmittedAt: new Date(), lastTrustEventSource: 'webhook.payment-confirmation' } });
-            if (Number(updateResult.modifiedCount || 0)) {
-                yield (0, eventBus_1.emitEvent)('payment.confirmed', {
-                    eventId: `payment.confirmed:${String(payment._id)}`,
-                    paymentId: String(payment._id),
-                    propertyId: String(payment.propertyId),
-                    payerId: String(payment.tenantId || ''),
-                    amount: Number(payment.amount || 0),
-                    reference: String(payment.referenceNumber || ''),
-                    date: new Date(payment.paymentDate || new Date()).toISOString(),
-                    companyId: String(payment.companyId),
-                    performedBy: String(payerId || payment.processedBy || '')
-                });
+            if ((0, transactionDomain_1.mayPostSaleTrust)(payment)) {
+                const updateResult = yield Payment_1.Payment.updateOne({ _id: payment._id, companyId: payment.companyId, trustEventEmittedAt: { $exists: false } }, { $set: { trustEventEmittedAt: new Date(), lastTrustEventSource: 'webhook.payment-confirmation' } });
+                if (Number(updateResult.modifiedCount || 0)) {
+                    yield (0, eventBus_1.emitEvent)('payment.confirmed', {
+                        eventId: `payment.confirmed:${String(payment._id)}`,
+                        paymentId: String(payment._id),
+                        propertyId: String(payment.propertyId),
+                        payerId: String(payment.tenantId || ''),
+                        amount: Number(payment.amount || 0),
+                        reference: String(payment.referenceNumber || ''),
+                        date: new Date(payment.paymentDate || new Date()).toISOString(),
+                        companyId: String(payment.companyId),
+                        performedBy: String(payerId || payment.processedBy || '')
+                    });
+                }
             }
         }
         yield WebhookEventReceipt_1.WebhookEventReceipt.updateOne({ provider: providerName, eventId: providerEventId }, {

@@ -44,6 +44,20 @@ export interface IProperty extends Document {
   commission?: number;
   vatOnCommission?: boolean;
   vatCommissionTreatment?: 'inclusive' | 'exclusive';
+  vatSupplyTreatment?: 'EXEMPT' | 'STANDARD_TAXABLE' | 'ZERO_RATED' | 'OUT_OF_SCOPE' | 'ACCOUNTANT_REVIEW';
+  propertyUseClass?: 'RESIDENTIAL_DWELLING' | 'COMMERCIAL' | 'MIXED_USE' | 'SHORT_TERM_ACCOMMODATION' | 'SALE' | 'AGENCY_COMMISSION' | 'OTHER_SERVICE';
+  saleVatTreatment?: 'EXEMPT' | 'STANDARD_TAXABLE' | 'ZERO_RATED' | 'OUT_OF_SCOPE' | 'ACCOUNTANT_REVIEW';
+  vatEffectiveFrom?: Date;
+  vatEffectiveTo?: Date;
+  rentalTaxTreatment?: 'SELF_ASSESSMENT' | 'PRESUMPTIVE_RENTAL' | 'EXEMPT' | 'NOT_APPLICABLE' | 'ACCOUNTANT_REVIEW';
+  rentalTaxEffectiveFrom?: Date;
+  ownershipPercentage?: number;
+  taxNotes?: string;
+  acquisitionCost?: number;
+  acquisitionDate?: Date;
+  improvementCosts?: number;
+  qualifyingExpenses?: number;
+  sellingCosts?: number;
   // New fields for levy/municipal fees
   levyOrMunicipalType?: 'levy' | 'municipal';
   levyOrMunicipalAmount?: number;
@@ -58,6 +72,13 @@ export interface IProperty extends Document {
   deletedBy?: mongoose.Types.ObjectId | null;
   archivedAt?: Date | null;
   archivedBy?: mongoose.Types.ObjectId | null;
+  publicListingEnabled?: boolean;
+  listingPublishedAt?: Date;
+  availableFrom?: Date;
+  deposit?: number;
+  paymentTerms?: string;
+  leaseRequirements?: string;
+  videos?: string[];
 }
 
 const PropertySchema: Schema = new Schema({
@@ -249,6 +270,36 @@ const PropertySchema: Schema = new Schema({
     enum: ['inclusive', 'exclusive'],
     required: false
   },
+  vatSupplyTreatment: {
+    type: String,
+    enum: ['EXEMPT', 'STANDARD_TAXABLE', 'ZERO_RATED', 'OUT_OF_SCOPE', 'ACCOUNTANT_REVIEW'],
+    required: false
+  },
+  propertyUseClass: {
+    type: String,
+    enum: ['RESIDENTIAL_DWELLING', 'COMMERCIAL', 'MIXED_USE', 'SHORT_TERM_ACCOMMODATION', 'SALE', 'AGENCY_COMMISSION', 'OTHER_SERVICE'],
+    required: false
+  },
+  saleVatTreatment: {
+    type: String,
+    enum: ['EXEMPT', 'STANDARD_TAXABLE', 'ZERO_RATED', 'OUT_OF_SCOPE', 'ACCOUNTANT_REVIEW'],
+    required: false
+  },
+  vatEffectiveFrom: { type: Date, required: false },
+  vatEffectiveTo: { type: Date, required: false },
+  rentalTaxTreatment: {
+    type: String,
+    enum: ['SELF_ASSESSMENT', 'PRESUMPTIVE_RENTAL', 'EXEMPT', 'NOT_APPLICABLE', 'ACCOUNTANT_REVIEW'],
+    required: false
+  },
+  rentalTaxEffectiveFrom: { type: Date, required: false },
+  ownershipPercentage: { type: Number, required: false, min: 0, max: 100, default: 100 },
+  taxNotes: { type: String, required: false, trim: true },
+  acquisitionCost: { type: Number, required: false, min: 0 },
+  acquisitionDate: { type: Date, required: false },
+  improvementCosts: { type: Number, required: false, min: 0 },
+  qualifyingExpenses: { type: Number, required: false, min: 0 },
+  sellingCosts: { type: Number, required: false, min: 0 },
   commissionPreaPercent: {
     type: Number,
     min: [0, 'PREA percent cannot be negative'],
@@ -304,7 +355,18 @@ const PropertySchema: Schema = new Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
-  }
+  },
+  publicListingEnabled: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  listingPublishedAt: { type: Date, required: false },
+  availableFrom: { type: Date, required: false },
+  deposit: { type: Number, min: 0, required: false },
+  paymentTerms: { type: String, required: false },
+  leaseRequirements: { type: String, required: false },
+  videos: [{ type: String }]
 }, {
   timestamps: true
 });
@@ -315,7 +377,7 @@ PropertySchema.index({ companyId: 1 });
 PropertySchema.index({ status: 1 });
 // Speed up name/address searches within a company
 PropertySchema.index({ companyId: 1, name: 1 });
-PropertySchema.index({ companyId: 1, address: 1 });
+PropertySchema.index({ publicListingEnabled: 1, status: 1, isDeleted: 1 });
 
 const resolveCompanyId = (value: any): string | null => {
   if (!value) return null;

@@ -7,7 +7,7 @@ const dashboardKpiRefreshTrigger_1 = require("../services/dashboardKpiRefreshTri
 const InvoiceItemSchema = new mongoose_1.Schema({
     code: { type: String, required: true },
     description: { type: String, required: true },
-    taxPercentage: { type: Number, required: true, default: 15 },
+    taxPercentage: { type: Number, required: true },
     netPrice: { type: Number, required: true },
     quantity: { type: Number, required: false, default: 1 },
     unitPrice: { type: Number, required: false, default: 0 }
@@ -35,7 +35,10 @@ const InvoiceSchema = new mongoose_1.Schema({
     subtotal: { type: Number, required: true, default: 0 },
     discount: { type: Number, required: true, default: 0 },
     amountExcludingTax: { type: Number, required: true, default: 0 },
-    taxPercentage: { type: Number, required: true, default: 15 },
+    taxPercentage: { type: Number, required: true },
+    vatJurisdiction: { type: String, required: false },
+    vatRuleId: { type: String, required: false },
+    vatTaxPoint: { type: Date, required: false },
     taxAmount: { type: Number, required: true, default: 0 },
     totalAmount: { type: Number, required: true, default: 0 },
     dueDate: { type: Date, required: true },
@@ -43,6 +46,11 @@ const InvoiceSchema = new mongoose_1.Schema({
     type: { type: String, enum: ['rental', 'sale'], required: true },
     saleDetails: { type: String },
     fiscalize: { type: Boolean, default: true },
+    fiscalisationStatus: {
+        type: String,
+        enum: ['INVOICE', 'FISCALISATION_ATTEMPT', 'FISCALISATION_SUCCESS', 'FISCALISATION_FAILURE', 'NOT_FISCALISED'],
+        default: 'NOT_FISCALISED'
+    },
     status: { type: String, enum: ['paid', 'unpaid', 'overdue'], default: 'unpaid' },
     selectedBankAccount: { type: BankAccountSchema, required: false },
     fiscalData: {

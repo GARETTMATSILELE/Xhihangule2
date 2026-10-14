@@ -11,6 +11,8 @@ import { sendMail } from '../services/emailService';
 import { SubscriptionService } from '../services/subscriptionService';
 import { recordAuditEvent } from '../services/auditService';
 import { normalizeEmail, normalizeWorkspaceType } from '../utils/normalization';
+import { isPublicSignupAllowed, publicSignupCompanyFields } from '../utils/publicSignupCompany';
+import { OnboardingService } from '../services/onboardingService';
 
 const authService = AuthService.getInstance();
 const subscriptionService = SubscriptionService.getInstance();
@@ -49,8 +51,7 @@ function clearAuthCookies(res: Response) {
 // Signup with company details
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const allowPublicSignup = String(process.env.ALLOW_PUBLIC_SIGNUP || '').toLowerCase() === 'true';
-    if (process.env.NODE_ENV === 'production' && !allowPublicSignup) {
+    if (!isPublicSignupAllowed(process.env)) {
       throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
     }
 
@@ -64,8 +65,77 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      console.log('Signup failed - Email already registered:', email);
-      throw new AppError('Email already registered', 400);
+      throw new AppError('Email already registered', 400, 'DUPLICATE_EMAIL');
+    }
+
+    const selectedPlan = (inputPlan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(inputPlan)) ? inputPlan : 'ENTERPRISE';
+    const wantsCompany = Boolean(company) || selectedPlan === 'INDIVIDUAL';
+    if (process.env.NODE_ENV === 'production' && wantsCompany) {
+      const companyPayload = company ? {
+        ...publicSignupCompanyFields(company),
+        companyType: (company as any).companyType,
+        workspaceType: (company as any).workspaceType
+      } : {
+        name: String(name).trim() || 'Individual Owner',
+        email,
+        address: 'N/A',
+        phone: '0000000000',
+        registrationNumber: `REG-${Date.now().toString().slice(-6)}`,
+        tinNumber: `TIN-${Date.now().toString().slice(-6)}`,
+        country: 'Zimbabwe',
+        companyType: 'INDIVIDUAL_LANDLORD' as const,
+        workspaceType: 'individual' as const
+      };
+      const result = await OnboardingService.getInstance().start({
+        email,
+        password,
+        name,
+        plan: selectedPlan as any,
+        billingCycle: 'monthly',
+        company: {
+          name: String((companyPayload as any).name || ''),
+          email: (companyPayload as any).email,
+          address: (companyPayload as any).address,
+          phone: (companyPayload as any).phone,
+          website: (companyPayload as any).website,
+          registrationNumber: (companyPayload as any).registrationNumber,
+          tinNumber: (companyPayload as any).tinNumber,
+          vatNumber: (companyPayload as any).vatNumber,
+          country: (companyPayload as any).country,
+          companyType: (companyPayload as any).companyType,
+          workspaceType: (companyPayload as any).workspaceType
+        },
+        idempotencyKey: req.get('idempotency-key') || undefined
+      });
+      const { token, refreshToken } = await authService.login(email, password);
+      const cookieDomain = getCookieDomain();
+      const prod = process.env.NODE_ENV === 'production';
+      const scoped = prod && cookieDomain ? { domain: cookieDomain } : {};
+      res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: prod, sameSite: 'strict', path: '/', ...scoped, maxAge: 7 * 24 * 60 * 60 * 1000 });
+      res.cookie('accessToken', token, { httpOnly: true, secure: prod, sameSite: 'strict', path: '/', ...scoped, maxAge: 24 * 60 * 60 * 1000 });
+      res.cookie('refreshCsrf', crypto.randomBytes(32).toString('hex'), { httpOnly: false, secure: prod, sameSite: 'strict', path: '/', ...scoped, maxAge: 7 * 24 * 60 * 60 * 1000 });
+      return res.status(result.alreadyProcessed ? 200 : 201).json({
+        user: {
+          _id: result.user?._id,
+          email: result.user?.email,
+          name: `${result.user?.firstName || ''} ${result.user?.lastName || ''}`.trim(),
+          role: result.user?.role,
+          companyId: result.user?.companyId
+        },
+        company: result.company,
+        paymentSession: result.paymentSession ? {
+          _id: result.paymentSession._id,
+          amount: result.paymentSession.amount,
+          currency: result.paymentSession.currency,
+          status: result.paymentSession.status
+        } : null,
+        registration: {
+          status: (result.company as any)?.onboardingStatus || 'INITIALIZING_WORKSPACE',
+          nextStep: (result.company as any)?.onboardingStatus === 'PENDING_PAYMENT' ? 'payment' : 'workspace',
+          paymentRequired: (result.company as any)?.onboardingStatus === 'PENDING_PAYMENT'
+        },
+        token
+      });
     }
 
     // Determine role: ALWAYS create admin accounts on signup
@@ -103,7 +173,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
           const requiredCompanyFields = ['name', 'address', 'phone', 'email', 'registrationNumber', 'tinNumber'] as const;
           const baseName = `${firstName} ${lastName}`.trim();
           const nowSuffix = `${Date.now()}`.slice(-6);
-          const autoCompany: any = company || {
+          const autoCompany: any = company ? publicSignupCompanyFields(company) : {
             name: baseName || 'Individual Owner',
             description: 'Auto-created individual plan company',
             email: email,
@@ -188,7 +258,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
               const lastName2 = lastParts2.join(' ') || firstNameRaw || 'Admin';
               const baseName2 = `${firstName2} ${lastName2}`.trim();
               const nowSuffix2 = `${Date.now()}`.slice(-6);
-              const autoCompany2: any = company || {
+              const autoCompany2: any = company ? publicSignupCompanyFields(company) : {
                 name: baseName2 || 'Individual Owner',
                 description: 'Auto-created individual plan company',
                 email: email,
@@ -225,6 +295,15 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
               );
               console.log('Trial subscription created successfully (fallback)');
             } catch (fallbackCompanyError: any) {
+              if (companyId) {
+                await Company.deleteOne({ _id: companyId });
+                companyId = undefined;
+                companyData = null;
+              }
+              if (createdUser?._id) {
+                await User.deleteOne({ _id: createdUser._id });
+                createdUser = null;
+              }
               if (fallbackCompanyError?.code === 11000) {
                 const dupMsg = String(fallbackCompanyError?.message || 'Duplicate key error');
                 if (dupMsg.includes('tinNumber') || dupMsg.includes('taxNumber')) {
@@ -232,8 +311,9 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
                 }
                 return next(new AppError('Duplicate key error', 400, 'DUPLICATE_KEY'));
               }
-              // Do not rollback user creation if optional company creation fails
-              console.warn('Optional company creation failed; proceeding with user only');
+              return next(fallbackCompanyError instanceof AppError
+                ? fallbackCompanyError
+                : new AppError('Registration could not be completed', 500, 'REGISTRATION_FAILED'));
             }
           }
         } catch (fallbackUserError: any) {

@@ -31,6 +31,7 @@ exports.provePaymentAccountingCompleteness = provePaymentAccountingCompleteness;
 exports.checkPaymentAccountingCompleteness = checkPaymentAccountingCompleteness;
 const mongoose_1 = __importDefault(require("mongoose"));
 const paymentReconciliationQuery_1 = require("./paymentReconciliationQuery");
+const transactionDomain_1 = require("./transactionDomain");
 const COMPLETED_STATUS = 'completed';
 function passThroughCollectionIdempotencyKey(paymentId, chargeTypeCode) {
     return `payment:${paymentId}:pass-through:${chargeTypeCode}`;
@@ -190,17 +191,23 @@ function provePaymentAccountingCompleteness(payment, deps) {
         if (!paymentId || !mongoose_1.default.Types.ObjectId.isValid(paymentId)) {
             return incomplete('malformed_payment');
         }
-        if (!propertyId || !mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
+        const domain = (0, transactionDomain_1.historicalTransactionDomain)(payment);
+        if (!domain)
+            return incomplete('missing_transaction_domain');
+        const typed = payment.paymentType ? (0, transactionDomain_1.domainFromPaymentType)(payment.paymentType) : null;
+        if (typed && typed !== domain)
+            return incomplete('payment_type_mismatch');
+        const isSale = domain === 'SALE';
+        const ledgerType = (0, transactionDomain_1.ledgerForDomain)(domain);
+        if (!isSale && (!propertyId || !mongoose_1.default.Types.ObjectId.isValid(propertyId))) {
             return incomplete('missing_property');
         }
-        const resolution = yield deps.resolveLedgerTypeForProperty(propertyId);
-        const isSale = resolution.ledgerType === 'sale';
-        if (payment.paymentType && ((payment.paymentType === 'sale') !== isSale)) {
-            return incomplete('payment_type_mismatch');
+        if (isSale && (!propertyId || !mongoose_1.default.Types.ObjectId.isValid(propertyId)) && !payment.developmentId && !payment.developmentUnitId) {
+            return incomplete('missing_sale_context');
         }
         const targets = yield buildOwnerIncomeLedgerTargets({
             isSale,
-            ledgerType: resolution.ledgerType,
+            ledgerType,
             propertyId,
             developmentId: payment.developmentId,
             developmentUnitId: payment.developmentUnitId,

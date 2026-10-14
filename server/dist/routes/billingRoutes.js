@@ -7,6 +7,8 @@ const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const billingController_1 = require("../controllers/billingController");
 const router = express_1.default.Router();
+router.get('/plans', billingController_1.listPublicPlans);
+router.get('/sessions/:id', auth_1.authWithCompany, billingController_1.getCheckoutSession);
 router.post('/checkout', auth_1.authWithCompany, billingController_1.createCheckout);
 router.get('/payments/:id/status', auth_1.authWithCompany, billingController_1.getPaymentStatus);
 router.post('/vouchers/redeem', auth_1.authWithCompany, billingController_1.redeemVoucher);

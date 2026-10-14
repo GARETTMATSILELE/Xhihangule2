@@ -11,37 +11,54 @@ import { TransformedMaintenanceRequest, PopulatedMaintenanceRequest } from '../t
 import mongoose from 'mongoose';
 
 // Helper function to get property owner context (from either PropertyOwner or User collection)
-const getPropertyOwnerContext = async (ownerId: string): Promise<{ _id: mongoose.Types.ObjectId; properties: mongoose.Types.ObjectId[]; companyId?: mongoose.Types.ObjectId }> => {
+const getPropertyOwnerContext = async (ownerId: string, companyHint?: string): Promise<{ _id: mongoose.Types.ObjectId; properties: mongoose.Types.ObjectId[]; companyId?: mongoose.Types.ObjectId }> => {
+  const companyClause = companyHint && mongoose.Types.ObjectId.isValid(companyHint)
+    ? { companyId: companyHint }
+    : {};
   // First, try to find the property owner document (this is the primary source)
-  let propertyOwner = await PropertyOwner.findById(ownerId);
+  let propertyOwner = await PropertyOwner.findOne({ _id: ownerId, ...companyClause });
   
   if (propertyOwner) {
-    console.log(`Found PropertyOwner record: ${propertyOwner.email} with companyId: ${propertyOwner.companyId}`);
+    const linked = await Property.find({
+      companyId: propertyOwner.companyId,
+      isDeleted: { $ne: true },
+      $or: [
+        { propertyOwnerId: propertyOwner._id },
+        ...((propertyOwner.properties || []).length ? [{ _id: { $in: propertyOwner.properties } }] : []),
+      ],
+    }).select('_id');
     return {
       _id: propertyOwner._id,
-      properties: propertyOwner.properties || [],
+      properties: linked.map((row) => row._id),
       companyId: propertyOwner.companyId
     };
   }
   
   // If not found in PropertyOwner collection, try User collection as fallback
-  console.log(`PropertyOwner not found for ID: ${ownerId}, checking User collection...`);
   const user = await User.findById(ownerId);
   
   if (!user || user.role !== 'owner') {
     throw new AppError('Property owner not found', 404);
   }
-  
-  console.log(`Found owner user in User collection: ${user.email}`);
 
-  // Additional fallback: try to find PropertyOwner by email (common when accounts are linked by email but have different IDs)
+  // Match the landlord record in the same company. Email alone is not a company boundary.
   try {
-    const ownerByEmail = await PropertyOwner.findOne({ email: user.email });
+    const ownerByEmail = await PropertyOwner.findOne({
+      email: user.email,
+      ...(user.companyId ? { companyId: user.companyId } : companyClause),
+    });
     if (ownerByEmail) {
-      console.log(`Matched PropertyOwner by email: ${ownerByEmail.email} with properties: ${(ownerByEmail.properties || []).length}`);
+      const linked = await Property.find({
+        companyId: ownerByEmail.companyId,
+        isDeleted: { $ne: true },
+        $or: [
+          { propertyOwnerId: ownerByEmail._id },
+          ...((ownerByEmail.properties || []).length ? [{ _id: { $in: ownerByEmail.properties } }] : []),
+        ],
+      }).select('_id');
       return {
         _id: ownerByEmail._id,
-        properties: ownerByEmail.properties || [],
+        properties: linked.map((row) => row._id),
         companyId: ownerByEmail.companyId
       };
     }
@@ -65,7 +82,7 @@ export const getOwnerProperties = async (req: Request, res: Response) => {
     }
 
     const ownerId = req.user.userId;
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
 
     // Get properties using the properties array from PropertyOwner, or fallback to ownerId
     let properties;
@@ -155,7 +172,7 @@ export const getOwnerPropertyById = async (req: Request, res: Response, next: an
     if (!propertyId || !mongoose.isValidObjectId(propertyId)) {
       throw new AppError('Invalid property ID', 400);
     }
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
 
     // Check if the property is in the owner's properties array
     const isOwnerProperty = propertyOwnerContext.properties?.some(
@@ -273,7 +290,7 @@ export const getOwnerMaintenanceRequests = async (req: Request, res: Response) =
 
     // Get property owner context
     console.log('getOwnerMaintenanceRequests: Getting property owner context for', ownerId);
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
     console.log('getOwnerMaintenanceRequests: Property owner context retrieved', {
       hasProperties: propertyOwnerContext.properties?.length > 0,
       companyId: propertyOwnerContext.companyId
@@ -421,7 +438,7 @@ export const getOwnerMaintenanceRequestById = async (req: Request, res: Response
 
     // Get property owner context
     console.log('getOwnerMaintenanceRequestById: Getting property owner context for', ownerId);
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
     console.log('getOwnerMaintenanceRequestById: Property owner context retrieved', {
       hasProperties: propertyOwnerContext.properties?.length > 0,
       companyId: propertyOwnerContext.companyId
@@ -508,7 +525,7 @@ export const updateOwnerMaintenanceRequest = async (req: Request, res: Response)
 
     const requestId = req.params.id;
     const updates = req.body;
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
 
     let propertyIds: mongoose.Types.ObjectId[] = [];
 
@@ -578,7 +595,7 @@ export const approveOwnerMaintenanceRequest = async (req: Request, res: Response
       throw new AppError('Maintenance request ID is required', 400);
     }
 
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
 
     let propertyIds: mongoose.Types.ObjectId[] = [];
 
@@ -674,7 +691,7 @@ export const rejectOwnerMaintenanceRequest = async (req: Request, res: Response)
       throw new AppError('Maintenance request ID is required', 400);
     }
 
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
 
     let propertyIds: mongoose.Types.ObjectId[] = [];
 
@@ -769,7 +786,7 @@ export const addOwnerMaintenanceMessage = async (req: Request, res: Response) =>
 
     const requestId = req.params.id;
     const { content } = req.body;
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
 
     if (!content) {
       throw new AppError('Message content is required', 400);
@@ -853,7 +870,7 @@ export const getOwnerNetIncome = async (req: Request, res: Response) => {
 
     // Get property owner context
     console.log('getOwnerNetIncome: Getting property owner context for', ownerId);
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
     console.log('getOwnerNetIncome: Property owner context retrieved', {
       hasProperties: propertyOwnerContext.properties?.length > 0,
       companyId: propertyOwnerContext.companyId
@@ -935,7 +952,7 @@ export const getOwnerMaintenanceSummaryReport = async (req: Request, res: Respon
       }
     }
 
-    const propertyOwnerContext = await getPropertyOwnerContext(ownerId);
+    const propertyOwnerContext = await getPropertyOwnerContext(ownerId, req.user?.companyId);
     let propertyIds: string[] = [];
 
     if (propertyOwnerContext.properties?.length) {

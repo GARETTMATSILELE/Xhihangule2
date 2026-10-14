@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import { createIndexes } from '../models/indexes';
 
 const LOCAL_MAIN_URI = 'mongodb://localhost:27017/property-management';
 const LOCAL_ACCOUNTING_URI = 'mongodb://localhost:27017/accounting';
@@ -200,6 +199,8 @@ export const connectDatabase = async (): Promise<void> => {
     // Create indexes only when primary connection is still healthy.
     if (Number(mongoose.connection.readyState) === 1) {
       try {
+        // Lazy-load so model modules can import accountingConnection after this file finishes initializing.
+        const { createIndexes } = await import('../models/indexes');
         await createIndexes();
       } catch (error: any) {
         if (error.code === 85) { // Index already exists
@@ -270,6 +271,24 @@ export const connectDatabase = async (): Promise<void> => {
         console.warn('Dropping legacy companies index taxNumber_1');
         await companies.dropIndex('taxNumber_1');
       }
+
+      // A non-sparse unique index treats a missing registrationNumber as null and
+      // allows only one such company. Portal signups (individual landlords and
+      // contractors) omit the field, so replace it with a sparse unique index.
+      const registrationIndex = existingIndexes.find((idx: any) => idx.name === 'registrationNumber_1');
+      if (registrationIndex?.unique && !registrationIndex.sparse) {
+        console.warn('Replacing non-sparse unique companies index registrationNumber_1 with a sparse unique index');
+        await companies.updateMany(
+          { $or: [{ registrationNumber: null }, { registrationNumber: '' }] },
+          { $unset: { registrationNumber: '' } }
+        );
+        await companies.dropIndex('registrationNumber_1');
+        await companies.createIndex(
+          { registrationNumber: 1 },
+          { unique: true, sparse: true, name: 'registrationNumber_1' }
+        );
+      }
+
       // Cosmos DB (Mongo API) compatible unique index on tinNumber.
       // Strategy:
       // 1) Normalize documents where tinNumber is an empty string to null (or unset),
@@ -288,6 +307,15 @@ export const connectDatabase = async (): Promise<void> => {
           { tinNumber: 1 },
           { unique: true, sparse: true }
         );
+      }
+      try {
+        const { ensurePaymentSessionProviderRefIndex } = await import('../services/paymentSessionReferenceIndex');
+        const sessionIndex = await ensurePaymentSessionProviderRefIndex();
+        if (sessionIndex.duplicateGroups > 0 && !sessionIndex.alreadyPresent) {
+          console.warn(`payment_sessions provider reference index was not created; ${sessionIndex.duplicateGroups} duplicate groups exist`);
+        }
+      } catch (sessionIdxErr) {
+        console.error('Payment session reference index check failed (non-fatal):', sessionIdxErr);
       }
     } catch (idxError: any) {
       // Suppress noisy logs when collection truly does not exist yet

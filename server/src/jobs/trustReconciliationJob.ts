@@ -3,8 +3,13 @@ import mongoose from 'mongoose';
 import { Payment } from '../models/Payment';
 import { TrustTransaction } from '../models/TrustTransaction';
 import { TrustReconciliationResult } from '../models/TrustReconciliationResult';
-import { emitEvent } from '../events/eventBus';
 import trustAccountService from '../services/trustAccountService';
+
+/**
+ * TRUST ACCOUNTING: this job is DETECTION-ONLY.
+ * It must not emit payment.confirmed or rewrite TrustAccount balances.
+ * Live trust posting remains payment.confirmed from sale completion + trustEventRetryService.
+ */
 
 let job: CronJob | null = null;
 
@@ -35,21 +40,6 @@ const runCompanyReconciliation = async (companyId: string) => {
     if (!exists) {
       missingPostings += 1;
       details.push({ type: 'missing_posting', paymentId: String(payment._id) });
-      try {
-        await emitEvent('payment.confirmed', {
-          eventId: `payment.confirmed:${String(payment._id)}`,
-          paymentId: String(payment._id),
-          propertyId: String(payment.propertyId),
-          payerId: String(payment.tenantId || ''),
-          amount: Number(payment.amount || 0),
-          reference: String(payment.referenceNumber || ''),
-          date: new Date(payment.paymentDate || new Date()).toISOString(),
-          companyId
-        });
-        autoRepairs += 1;
-      } catch (error: any) {
-        details.push({ type: 'repair_failed', paymentId: String(payment._id), error: error?.message || 'emit failed' });
-      }
     }
   }
 
@@ -68,14 +58,6 @@ const runCompanyReconciliation = async (companyId: string) => {
     if (expected !== actual) {
       balanceMismatches += 1;
       details.push({ type: 'balance_mismatch', trustAccountId: String(account._id), expected, actual });
-      // Safe repair: update only if account is not closed.
-      if (String(account.status) !== 'CLOSED') {
-        await (await import('../models/TrustAccount')).TrustAccount.updateOne(
-          { _id: account._id, companyId: new mongoose.Types.ObjectId(companyId), status: { $ne: 'CLOSED' } },
-          { $set: { runningBalance: expected, closingBalance: expected } }
-        );
-        autoRepairs += 1;
-      }
     }
   }
 

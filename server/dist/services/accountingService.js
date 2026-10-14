@@ -24,18 +24,13 @@ const AccountingEventLog_1 = require("../models/AccountingEventLog");
 const Payment_1 = require("../models/Payment");
 const dashboardKpiService_1 = __importDefault(require("./dashboardKpiService"));
 const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
-const DEFAULT_ACCOUNTS = [
-    { code: '1001', name: 'Main Bank Account', type: 'asset' },
-    { code: '1002', name: 'Cash On Hand', type: 'asset' },
-    { code: '2101', name: 'VAT Payable', type: 'liability' },
-    { code: '2102', name: 'Commission Liability', type: 'liability' },
-    { code: '3001', name: 'Retained Earnings', type: 'equity' },
-    { code: '4001', name: 'Rental Income', type: 'revenue' },
-    { code: '4002', name: 'Sales Income', type: 'revenue' },
-    { code: '5001', name: 'Operating Expense', type: 'expense' },
-    { code: '5002', name: 'Commission Expense', type: 'expense' },
-    { code: '5003', name: 'VAT Expense', type: 'expense' }
-];
+const chartAccounts_1 = require("./tax/chartAccounts");
+const accountingPeriodService_1 = require("./accountingPeriodService");
+const DEFAULT_ACCOUNTS = chartAccounts_1.PHASE8_CHART_SEEDS.map((row) => ({
+    code: row.code,
+    name: row.name,
+    type: row.type
+}));
 const toMoney = (value) => Number(Number(value || 0).toFixed(2));
 const defaultFilingPeriod = (date) => {
     const y = date.getUTCFullYear();
@@ -97,11 +92,10 @@ class AccountingService {
             const companyObjectId = toObjectId(companyId);
             for (const account of DEFAULT_ACCOUNTS) {
                 yield ChartOfAccount_1.ChartOfAccount.updateOne({ companyId: companyObjectId, code: account.code }, {
+                    $set: { name: account.name, type: account.type },
                     $setOnInsert: {
                         companyId: companyObjectId,
                         code: account.code,
-                        name: account.name,
-                        type: account.type,
                         balance: 0,
                         currency: 'USD',
                         isActive: true,
@@ -132,6 +126,15 @@ class AccountingService {
     postTransaction(input) {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.ensureIndexes();
+            const transactionDate = input.transactionDate || new Date();
+            yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                companyId: input.companyId,
+                transactionDate,
+                overrideReason: input.periodOverrideReason,
+                actorId: input.createdBy,
+                sourceModule: input.sourceModule,
+                sourceId: input.sourceId
+            });
             const run = (session) => __awaiter(this, void 0, void 0, function* () {
                 yield this.ensureDefaultChartOfAccounts(input.companyId, session);
                 yield this.ensureCompanyBalance(input.companyId, session);
@@ -402,17 +405,7 @@ class AccountingService {
                 const totalRevenue = toMoney(paymentRevenueCount > 0 ? paymentRevenue : ledgerRevenue);
                 const totalExpenses = toMoney((balance === null || balance === void 0 ? void 0 : balance.totalExpenses) || 0);
                 const netProfit = toMoney(totalRevenue - totalExpenses);
-                // Self-heal stale dashboard snapshots so subsequent calls stay stable.
-                if (totalRevenue !== ledgerRevenue || netProfit !== toMoney((balance === null || balance === void 0 ? void 0 : balance.netProfit) || 0)) {
-                    yield CompanyBalance_1.CompanyBalance.updateOne({ companyId: companyObjectId }, {
-                        $set: {
-                            _id: (0, CompanyBalance_1.getCompanyBalanceId)(companyId),
-                            totalRevenue,
-                            netProfit,
-                            lastUpdated: new Date()
-                        }
-                    }, { upsert: true });
-                }
+                // GET remains read-only: do not persist computed totals onto CompanyBalance.
                 const summary = {
                     totalRevenue,
                     totalExpenses,

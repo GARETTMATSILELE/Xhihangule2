@@ -17,7 +17,7 @@ import { Tenant } from '../../types/tenant';
 import { developmentService } from '../../services/developmentService';
 import api from '../../api/axios';
 import { developmentUnitService } from '../../services/developmentUnitService';
-import { PropertyCreationSuccess } from '../../components/rentalWorkflow';
+import { OperationalEmptyState, PropertyCreationSuccess } from '../../components/rentalWorkflow';
 import { buildPropertyWorkflowState, getWorkflowId, PropertyWorkflowState } from '../../utils/rentalWorkflow';
 
 const notifyRentalWorkflowChanged = (entity: string) => {
@@ -601,6 +601,19 @@ export const Properties: React.FC = () => {
             propertyName={lastCreatedProperty.name}
             onAction={(path) => navigate(path)}
             onDismiss={() => setLastCreatedProperty(null)}
+          />
+        )}
+
+        {propertiesForList.length === 0 && !showForm && (
+          <OperationalEmptyState
+            title="No properties yet."
+            description="Add your first property to start tracking tenants, leases, rent and property finances."
+            actionLabel="Add property"
+            onAction={() => setShowForm(true)}
+            secondaryLabel="Import properties"
+            onSecondary={() => navigate('/onboarding/import')}
+            tertiaryLabel="Explore sample data"
+            onTertiary={() => navigate('/demo')}
           />
         )}
 

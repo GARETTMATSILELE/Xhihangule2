@@ -1,112 +1,144 @@
-export interface TaxEngineConfig {
-  cgtRate: number;
-  vatSaleRate: number;
-  vatOnCommissionRate: number;
-  applyVatOnSale: boolean;
-}
+import { calculateCapitalGain, calculateCapitalGainsWithholding, type CapitalGainResult, type CgwtApplicability, type CgwtResult } from '../tax/cgtCalculation';
+import { extractInclusiveVat } from '../tax/vatCalculation';
+import { buildSettlementWaterfall, type SettlementWaterfallResult } from '../tax/settlementWaterfall';
+import { roundMoney } from '../../utils/money';
 
 export interface SettlementInput {
   salePrice: number;
   commissionAmount: number;
   vatOnCommissionAmount?: number;
   applyVatOnSale?: boolean;
-  applyVatOnCommission?: boolean;
-  cgtRate?: number;
-  vatSaleRate?: number;
-  vatOnCommissionRate?: number;
+  saleVatAmount?: number;
+  saleVatRate?: number;
+  acquisitionCost?: number | null;
+  improvementCosts?: number | null;
+  qualifyingExpenses?: number | null;
+  sellingCosts?: number | null;
+  otherAdjustments?: number | null;
+  cgtRate?: number | null;
+  cgwtRate?: number | null;
+  cgwtApplicability?: CgwtApplicability | null;
+  cgwtNotApplicableReason?: string | null;
+  cgtNotApplicable?: boolean;
+  cgtNotApplicableReason?: string | null;
+  cgtOverrideAmount?: number | null;
+  cgtOverrideReason?: string | null;
+  cgtOverrideUser?: string | null;
+  otherDeductions?: Array<{ type?: string; amount: number; reason?: string }>;
 }
 
 export interface TaxSummary {
-  cgt: number;
+  cgt: CapitalGainResult;
+  cgwt: CgwtResult;
   vatOnSale: number;
   vatOnCommission: number;
   commission: number;
-  totalDeductions: number;
+  waterfall: SettlementWaterfallResult;
   sellerNetPayout: number;
+  settlementBlocked: boolean;
+  settlementStatus: 'CALCULATED' | 'REQUIRES_TAX_REVIEW' | 'PROVISIONAL';
   breakdown: Record<string, unknown>;
 }
 
-const DEFAULT_CONFIG: TaxEngineConfig = {
-  cgtRate: 0.2,
-  vatSaleRate: 0.15,
-  vatOnCommissionRate: 0.155,
-  applyVatOnSale: false
-};
-
-const money = (n: number): number => Number(Number(n || 0).toFixed(2));
-
-export const calculateCGT = (salePrice: number, cgtRate = DEFAULT_CONFIG.cgtRate): number => {
-  return money(Math.max(0, salePrice) * Math.max(0, cgtRate));
-};
-
-export const calculateVATOnSale = (
-  salePrice: number,
-  applyVatOnSale = DEFAULT_CONFIG.applyVatOnSale,
-  vatSaleRate = DEFAULT_CONFIG.vatSaleRate
-): number => {
-  if (!applyVatOnSale) return 0;
-  return money(Math.max(0, salePrice) * Math.max(0, vatSaleRate));
-};
-
-export const calculateCommissionVAT = (
-  commissionAmount: number,
-  vatOnCommissionRate = DEFAULT_CONFIG.vatOnCommissionRate
-): number => {
-  return money(Math.max(0, commissionAmount) * Math.max(0, vatOnCommissionRate));
-};
-
-export const calculateSellerNetPayout = (salePrice: number, deductions: number[]): number => {
-  const totalDeductions = money(deductions.reduce((sum, d) => sum + money(d), 0));
-  return money(Math.max(0, money(salePrice) - totalDeductions));
-};
+const money = (n: number): number => roundMoney(n);
 
 export const generateTaxSummary = (input: SettlementInput): TaxSummary => {
   const salePrice = money(input.salePrice);
   const commissionAmount = money(input.commissionAmount);
-  const cgt = calculateCGT(salePrice, input.cgtRate ?? DEFAULT_CONFIG.cgtRate);
-  const vatOnSale = calculateVATOnSale(
-    salePrice,
-    input.applyVatOnSale ?? DEFAULT_CONFIG.applyVatOnSale,
-    input.vatSaleRate ?? DEFAULT_CONFIG.vatSaleRate
-  );
-  const vatOnCommission =
-    input.vatOnCommissionAmount != null
-      ? money(input.vatOnCommissionAmount)
-      : input.applyVatOnCommission === false
-        ? 0
-        : calculateCommissionVAT(commissionAmount, input.vatOnCommissionRate ?? DEFAULT_CONFIG.vatOnCommissionRate);
+  const vatOnCommission = input.vatOnCommissionAmount != null
+    ? money(input.vatOnCommissionAmount)
+    : 0;
 
-  const deductions = [cgt, vatOnSale, commissionAmount, vatOnCommission];
-  const totalDeductions = money(deductions.reduce((sum, d) => sum + d, 0));
-  const sellerNetPayout = calculateSellerNetPayout(salePrice, deductions);
+  let vatOnSale = 0;
+  if (input.saleVatAmount != null && Number(input.saleVatAmount) > 0) {
+    vatOnSale = money(input.saleVatAmount);
+  } else if (input.applyVatOnSale && Number(input.saleVatRate) > 0) {
+    vatOnSale = extractInclusiveVat(salePrice, Number(input.saleVatRate)).vatAmount;
+  }
+
+  let cgt = calculateCapitalGain({
+    salePrice,
+    acquisitionCost: input.acquisitionCost,
+    improvementCosts: input.improvementCosts,
+    qualifyingExpenses: input.qualifyingExpenses,
+    sellingCosts: input.sellingCosts,
+    otherAdjustments: input.otherAdjustments,
+    cgtRate: input.cgtRate,
+    cgtNotApplicable: input.cgtNotApplicable,
+    cgtNotApplicableReason: input.cgtNotApplicableReason
+  });
+  if (input.cgtOverrideAmount != null) {
+    const reason = String(input.cgtOverrideReason || '').trim();
+    if (!reason) {
+      cgt = {
+        ...cgt,
+        calculationBasis: 'MANUAL_OVERRIDE',
+        reviewRequired: true,
+        reviewReason: 'MANUAL_TAX_OVERRIDE_REASON_REQUIRED',
+        settlementBlocked: true,
+        isFinal: false,
+        isProvisional: true
+      };
+    } else {
+      cgt = {
+        ...cgt,
+        cgtAmount: money(Math.max(0, Number(input.cgtOverrideAmount))),
+        calculationBasis: 'MANUAL_OVERRIDE',
+        reviewRequired: true,
+        reviewReason: 'MANUAL_TAX_OVERRIDE',
+        settlementBlocked: false,
+        isFinal: true,
+        isProvisional: false
+      };
+    }
+  }
+
+  const cgwt = calculateCapitalGainsWithholding({
+    saleConsideration: salePrice,
+    cgwtRate: input.cgwtRate,
+    applicability: input.cgwtApplicability,
+    notApplicableReason: input.cgwtNotApplicableReason
+  });
+
+  const waterfall = buildSettlementWaterfall({
+    grossSaleProceeds: salePrice,
+    saleVat: vatOnSale,
+    cgwt: cgwt.settlementBlocked ? 0 : cgwt.cgwtAmount,
+    agencyCommission: commissionAmount,
+    vatOnCommission,
+    otherDeductions: input.otherDeductions
+  });
+
+  const settlementBlocked = Boolean(cgt.settlementBlocked || cgwt.settlementBlocked);
+  const settlementStatus = settlementBlocked
+    ? 'REQUIRES_TAX_REVIEW'
+    : (cgt.isProvisional ? 'PROVISIONAL' : 'CALCULATED');
 
   return {
     cgt,
+    cgwt,
     vatOnSale,
     vatOnCommission,
     commission: commissionAmount,
-    totalDeductions,
-    sellerNetPayout,
+    waterfall,
+    sellerNetPayout: waterfall.sellerNetProceeds,
+    settlementBlocked,
+    settlementStatus,
     breakdown: {
-      configuredRates: {
-        cgtRate: input.cgtRate ?? DEFAULT_CONFIG.cgtRate,
-        vatSaleRate: input.vatSaleRate ?? DEFAULT_CONFIG.vatSaleRate,
-        vatOnCommissionRate: input.vatOnCommissionRate ?? DEFAULT_CONFIG.vatOnCommissionRate
-      },
+      cgtIsNotPercentOfSalePrice: true,
+      cgwtIndependentOfCgt: true,
+      settlementBlocked,
       appliedRules: {
-        cgtFirst: true,
-        vatOnSaleApplied: input.applyVatOnSale ?? DEFAULT_CONFIG.applyVatOnSale,
-        vatOnCommissionApplied: input.applyVatOnCommission !== false,
-        vatOnCommissionSource: input.vatOnCommissionAmount != null ? 'payment' : 'calculated'
+        saleVatFromSnapshotOrInclusiveExtract: vatOnSale > 0,
+        withholdingIsNotFinalCgt: true,
+        missingRateDoesNotSettleAtZero: true
       }
     }
   };
 };
 
 export default {
-  calculateCGT,
-  calculateVATOnSale,
-  calculateCommissionVAT,
-  calculateSellerNetPayout,
-  generateTaxSummary
+  generateTaxSummary,
+  calculateCapitalGain,
+  calculateCapitalGainsWithholding
 };

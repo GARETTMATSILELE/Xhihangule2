@@ -1,0 +1,50 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.TAX_PACK_DISCLAIMER = exports.TAX_PACK_STATUSES = exports.EVIDENCE_STATUSES = exports.EVIDENCE_DOCUMENT_TYPES = exports.COMPLIANCE_ISSUE_TYPES = exports.COMPLIANCE_REVIEW_STATUSES = exports.COMPLIANCE_SEVERITIES = exports.COMPLIANCE_STATUSES = void 0;
+exports.COMPLIANCE_STATUSES = [
+    'NOT_STARTED',
+    'IN_PROGRESS',
+    'REVIEW_REQUIRED',
+    'READY_FOR_ACCOUNTANT',
+    'READY_FOR_TAX_PREPARATION',
+    'FINALIZED'
+];
+exports.COMPLIANCE_SEVERITIES = ['BLOCKER', 'WARNING', 'INFORMATION'];
+exports.COMPLIANCE_REVIEW_STATUSES = ['OPEN', 'IN_REVIEW', 'RESOLVED', 'WAIVED'];
+exports.COMPLIANCE_ISSUE_TYPES = [
+    'MISSING_TAX_CLASSIFICATION',
+    'MISSING_TAX_RULE',
+    'MISSING_TAX_PERIOD',
+    'MIXED_CURRENCY',
+    'MISSING_DOCUMENT',
+    'CAPITAL_REVENUE_REVIEW',
+    'PRIVATE_USE_REVIEW',
+    'VAT_REVIEW',
+    'PRESUMPTIVE_RENTAL_REVIEW',
+    'INCOME_TAX_REVIEW',
+    'AIDS_LEVY_REVIEW',
+    'CAPITAL_ALLOWANCE_REVIEW',
+    'DUPLICATE_OR_RECONCILIATION_REVIEW',
+    'NOT_YET_TAX_CLASSIFIED',
+    'OWNERSHIP_ALLOCATION_UNCLEAR',
+    'CURRENCY_CONVERSION_REQUIRED',
+    'TAX_PAYMENT_UNMATCHED'
+];
+exports.EVIDENCE_DOCUMENT_TYPES = [
+    'RENTAL_RECEIPT',
+    'TENANCY_AGREEMENT',
+    'INVOICE',
+    'SUPPLIER_INVOICE',
+    'MAINTENANCE_INVOICE',
+    'RATES_STATEMENT',
+    'BANK_EVIDENCE',
+    'TAX_PAYMENT_PROOF',
+    'VAT_DOCUMENT',
+    'CONTRACTOR_QUOTE',
+    'CAPITAL_EXPENDITURE_DOCUMENT',
+    'OTHER_INCOME_EVIDENCE',
+    'OTHER'
+];
+exports.EVIDENCE_STATUSES = ['MISSING', 'UPLOADED', 'REVIEWED', 'ACCEPTED', 'REQUIRES_REVIEW', 'NOT_REQUIRED'];
+exports.TAX_PACK_STATUSES = ['GENERATED', 'FINALIZED', 'SUPERSEDED'];
+exports.TAX_PACK_DISCLAIMER = 'This tax pack is a record-keeping and tax-preparation working paper based on information recorded in Mantis and the tax rules configured for the relevant period. It is not a ZIMRA assessment, filing confirmation, tax clearance certificate, or legal/tax opinion. Taxpayers should obtain professional advice where required.';

@@ -7,6 +7,7 @@ import { createDefaultReportingReadModels, ReportingReadModels } from '../readMo
 export interface OwnerStatementRequest {
   companyId: string;
   propertyId: string;
+  ledgerType: 'rental' | 'sale';
   period: ReportPeriodDTO;
   generatedBy?: string;
   companyName?: string;

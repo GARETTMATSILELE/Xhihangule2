@@ -3,6 +3,7 @@ import { Box, Card, CardContent, Chip, Stack, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { INDIVIDUAL_THEME } from '../theme';
 import { ActionItem } from '../utils/actionCenter';
+import { workspacePath } from '../../../demo/demoMode';
 import { SectionHeader } from './shared';
 
 const priorityColors: Record<string, string> = {
@@ -25,7 +26,7 @@ export function ActionCenter({ items }: { items: ActionItem[] }) {
           {items.map((item) => (
             <Box
               key={item.id}
-              onClick={() => navigate(item.link)}
+              onClick={() => navigate(workspacePath(item.link))}
               sx={{
                 display: 'flex',
                 alignItems: 'center',

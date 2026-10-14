@@ -107,7 +107,7 @@ export interface CommissionReportsData {
   properties: PropertyCommissionReport[];
 }
 
-export type TaxType = 'VAT' | 'VAT_ON_COMMISSION' | 'CGT';
+export type TaxType = 'VAT' | 'VAT_ON_COMMISSION' | 'CGT' | 'CGWT';
 
 export interface TaxLedgerEntry {
   entryId: string;
@@ -139,6 +139,7 @@ export interface TaxLedgersResponse {
   VAT: TaxPropertyLedger[];
   VAT_ON_COMMISSION: TaxPropertyLedger[];
   CGT: TaxPropertyLedger[];
+  CGWT: TaxPropertyLedger[];
 }
 
 export const accountantService = {

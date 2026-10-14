@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_1 = require("../middleware/auth");
 const systemAdminController_1 = require("../controllers/systemAdminController");
+const taxRateController_1 = require("../controllers/taxRateController");
 const systemAdminExpansionController_1 = require("../controllers/systemAdminExpansionController");
 const router = express_1.default.Router();
 // Require auth; restrict to system_admin via middleware check inside controller
@@ -55,4 +56,6 @@ router.get('/support-tickets', systemAdminExpansionController_1.listSupportTicke
 router.post('/support-tickets', systemAdminExpansionController_1.createSupportTicket);
 router.patch('/support-tickets/:id', systemAdminExpansionController_1.updateSupportTicket);
 router.get('/revenue', systemAdminExpansionController_1.getRevenueAnalytics);
+router.get('/vat-rates', taxRateController_1.listCentralVatRates);
+router.post('/vat-rates', taxRateController_1.createCentralVatRate);
 exports.default = router;

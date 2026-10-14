@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadCompanyLogo = exports.getCompanyById = exports.updateCurrentCompany = exports.getCurrentCompany = exports.deleteCompany = exports.updateCompany = exports.createCompany = exports.getCompany = exports.getCompanies = void 0;
+exports.uploadCompanyLogo = exports.getCompanyById = exports.updateCurrentCompany = exports.getCurrentCompany = exports.deleteCompany = exports.updateCompany = exports.rejectCompanyPlanChange = exports.createCompany = exports.getCompany = exports.getCompanies = void 0;
 const Company_1 = require("../models/Company");
 const plan_1 = require("../types/plan");
 const PropertyOwner_1 = require("../models/PropertyOwner");
@@ -22,7 +22,20 @@ const chartController_1 = require("./chartController");
 const User_1 = require("../models/User");
 const subscriptionService_1 = require("../services/subscriptionService");
 const normalization_1 = require("../utils/normalization");
+const registrationPaymentPolicy_1 = require("../services/registrationPaymentPolicy");
+const systemPlanService_1 = require("../services/systemPlanService");
+const Subscription_1 = require("../models/Subscription");
+const PaymentSession_1 = require("../models/PaymentSession");
+const BillingPayment_1 = require("../models/BillingPayment");
 const subscriptionService = subscriptionService_1.SubscriptionService.getInstance();
+function assertCallerCompany(req, companyId) {
+    var _a;
+    if (isSuperAdmin(req))
+        return;
+    if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || String(req.user.companyId) !== String(companyId)) {
+        throw new errorHandler_1.AppError('Company not found', 404);
+    }
+}
 function isSuperAdmin(req) {
     var _a, _b;
     const roles = Array.isArray((_a = req.user) === null || _a === void 0 ? void 0 : _a.roles)
@@ -153,11 +166,64 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
         console.log('Initializing chart data for company:', company._id);
         yield (0, chartController_1.updateChartMetrics)(company._id.toString());
         console.log('Chart data initialized successfully');
-        // Create trial subscription for the new company
-        console.log('Creating trial subscription for company:', company._id);
-        yield subscriptionService.createTrialSubscription(company._id.toString(), plan, 14 // 14-day trial
-        );
-        console.log('Trial subscription created successfully');
+        const holdForPayment = (0, registrationPaymentPolicy_1.registrationCreatesPaymentHold)(process.env) && !isSuperAdmin(req);
+        if (holdForPayment) {
+            const amount = yield (0, systemPlanService_1.chargeForPlan)(plan, 'monthly');
+            if (amount == null) {
+                yield Company_1.Company.deleteOne({ _id: company._id });
+                yield User_1.User.updateOne({ _id: currentUserId, companyId: company._id }, { $unset: { companyId: '' } });
+                throw new errorHandler_1.AppError('This plan does not have a configured price', 503, 'REGISTRATION_PRICE_NOT_CONFIGURED');
+            }
+            company.tenantStatus = 'pending';
+            company.onboardingStatus = 'PENDING_PAYMENT';
+            company.onboardingCompleted = false;
+            company.isActive = false;
+            company.subscriptionStatus = 'inactive';
+            yield company.save();
+            const subscription = yield Subscription_1.Subscription.create({
+                companyId: company._id,
+                userId: currentUserId,
+                plan,
+                cycle: 'monthly',
+                status: 'past_due'
+            });
+            const paymentSession = yield PaymentSession_1.PaymentSession.create({
+                companyId: company._id,
+                userId: currentUserId,
+                subscriptionId: subscription._id,
+                idempotencyKey: `company-create:${company._id.toString()}`,
+                provider: 'paynow',
+                providerRef: `SUBS-${company._id.toString()}`,
+                plan,
+                billingCycle: 'monthly',
+                amount,
+                currency: 'USD',
+                status: 'pending',
+                metadata: { source: 'company_create' }
+            });
+            const billingPayment = yield BillingPayment_1.BillingPayment.create({
+                companyId: company._id,
+                userId: currentUserId,
+                subscriptionId: subscription._id,
+                paymentSessionId: paymentSession._id,
+                plan,
+                cycle: 'monthly',
+                amount,
+                currency: 'USD',
+                method: 'card',
+                provider: 'paynow',
+                providerRef: `SUBS-${company._id.toString()}`,
+                idempotencyKey: `company-create:${company._id.toString()}:billing`,
+                status: 'pending'
+            });
+            paymentSession.billingPaymentId = billingPayment._id;
+            yield paymentSession.save();
+        }
+        else {
+            console.log('Creating trial subscription for company:', company._id);
+            yield subscriptionService.createTrialSubscription(company._id.toString(), plan, 14);
+            console.log('Trial subscription created successfully');
+        }
         // Verify the company was saved
         const savedCompany = yield Company_1.Company.findById(company._id);
         console.log('Verified saved company:', savedCompany);
@@ -189,28 +255,64 @@ const createCompany = (req, res, next) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.createCompany = createCompany;
-function pickWorkspaceFields(body) {
+function pickWorkspaceFields(body, currentTenantStatus, currentOnboardingStatus) {
     const updateData = {};
+    const locked = currentTenantStatus === 'suspended' || currentTenantStatus === 'archived';
+    const onboardingStatus = String(currentOnboardingStatus || 'ACTIVE');
+    const awaitingPayment = onboardingStatus === 'PENDING_PAYMENT' || onboardingStatus === 'PENDING_SETUP' || onboardingStatus === 'FAILED_SETUP';
+    const paidEnoughToFinishSetup = onboardingStatus === 'INITIALIZING_WORKSPACE' || onboardingStatus === 'PAYMENT_RECEIVED' || onboardingStatus === 'ACTIVE';
     if (body.workspacePreferences !== undefined)
         updateData.workspacePreferences = body.workspacePreferences;
-    if (body.onboardingStatus !== undefined)
-        updateData.onboardingStatus = body.onboardingStatus;
-    if (body.onboardingCompleted !== undefined)
+    if (!locked && !awaitingPayment && body.onboardingStatus !== undefined && paidEnoughToFinishSetup && String(body.onboardingStatus) === 'ACTIVE') {
+        updateData.onboardingStatus = 'ACTIVE';
+    }
+    if (!locked && !awaitingPayment && body.onboardingCompleted !== undefined && paidEnoughToFinishSetup) {
         updateData.onboardingCompleted = Boolean(body.onboardingCompleted);
+    }
     if (body.companyType !== undefined)
         updateData.companyType = (0, normalization_1.normalizeCompanyType)(body.companyType);
     if (body.workspaceType !== undefined)
         updateData.workspaceType = (0, normalization_1.normalizeWorkspaceType)(body.workspaceType);
-    if (body.tenantStatus !== undefined && isSafeTenantStatus(body.tenantStatus))
-        updateData.tenantStatus = body.tenantStatus;
+    if (!locked && !awaitingPayment && body.tenantStatus !== undefined && isSafeTenantStatus(body.tenantStatus)) {
+        if (body.tenantStatus !== 'suspended' && body.tenantStatus !== 'archived' && body.tenantStatus !== 'active') {
+            updateData.tenantStatus = body.tenantStatus;
+        }
+        if (body.tenantStatus === 'active' && paidEnoughToFinishSetup) {
+            updateData.tenantStatus = 'active';
+        }
+    }
     return updateData;
 }
 function isSafeTenantStatus(value) {
     return ['active', 'suspended', 'pending', 'archived'].includes(String(value));
 }
+/** Profile edits must not grant or rewrite the billed subscription. */
+function stripSubscriptionAuthority(updateData) {
+    const blocked = updateData;
+    delete blocked.plan;
+    delete blocked.propertyLimit;
+    delete blocked.featureFlags;
+    delete blocked.subscriptionStatus;
+    delete blocked.subscriptionEndDate;
+}
+const rejectCompanyPlanChange = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    res.status(403).json({
+        status: 'error',
+        message: 'Plan changes require a verified billing event',
+        code: 'PLAN_CHANGE_REQUIRES_BILLING',
+    });
+});
+exports.rejectCompanyPlanChange = rejectCompanyPlanChange;
 const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
+        assertCallerCompany(req, String(req.params.id || ''));
+        const existing = yield Company_1.Company.findById(req.params.id).select('tenantStatus onboardingStatus');
+        if (!existing) {
+            throw new errorHandler_1.AppError('Company not found', 404);
+        }
+        const currentTenantStatus = String(existing.tenantStatus || '');
+        const currentOnboardingStatus = String(existing.onboardingStatus || 'ACTIVE');
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -236,24 +338,21 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             updateData.bankAccounts = bankAccounts;
         if (fiscalConfig !== undefined)
             updateData.fiscalConfig = fiscalConfig;
-        if (commissionConfig !== undefined)
-            updateData.commissionConfig = commissionConfig;
-        Object.assign(updateData, pickWorkspaceFields(req.body));
+        if (req.body.taxProfile !== undefined)
+            updateData.taxProfile = req.body.taxProfile;
+        if (commissionConfig !== undefined) {
+            const nextCommission = Object.assign({}, commissionConfig);
+            delete nextCommission.vatPercentOnCommission;
+            updateData.commissionConfig = nextCommission;
+        }
+        Object.assign(updateData, pickWorkspaceFields(req.body, currentTenantStatus, currentOnboardingStatus));
         if (receivablesCutover !== undefined)
             updateData.receivablesCutover = receivablesCutover;
         if (rentReceivableOpeningBalance !== undefined)
             updateData.rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
         if (levyReceivableOpeningBalance !== undefined)
             updateData.levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
-        if (plan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan)) {
-            const cfg = plan_1.PLAN_CONFIG[plan];
-            updateData.plan = plan;
-            updateData.propertyLimit = cfg.propertyLimit;
-            updateData.featureFlags = cfg.featureFlags;
-            if (req.body.workspaceType === undefined) {
-                updateData.workspaceType = cfg.workspaceType;
-            }
-        }
+        stripSubscriptionAuthority(updateData);
         const company = yield Company_1.Company.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true, runValidators: true });
         if (!company) {
             throw new errorHandler_1.AppError('Company not found', 404);
@@ -270,6 +369,7 @@ const updateCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.updateCompany = updateCompany;
 const deleteCompany = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        assertCallerCompany(req, String(req.params.id || ''));
         const company = yield Company_1.Company.findByIdAndDelete(req.params.id);
         if (!company) {
             throw new errorHandler_1.AppError('Company not found', 404);
@@ -412,7 +512,7 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             throw new errorHandler_1.AppError('Company not found', 404);
         }
         // Update the company
-        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, plan, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
+        const { name, description, email, address, phone, website, registrationNumber, tinNumber, vatNumber, logo, bankAccounts, fiscalConfig, receivablesCutover, rentReceivableOpeningBalance, levyReceivableOpeningBalance, commissionConfig } = req.body;
         const updateData = {};
         if (name !== undefined)
             updateData.name = name;
@@ -438,24 +538,21 @@ const updateCurrentCompany = (req, res) => __awaiter(void 0, void 0, void 0, fun
             updateData.bankAccounts = bankAccounts;
         if (fiscalConfig !== undefined)
             updateData.fiscalConfig = fiscalConfig;
-        if (commissionConfig !== undefined)
-            updateData.commissionConfig = commissionConfig;
-        Object.assign(updateData, pickWorkspaceFields(req.body));
+        if (req.body.taxProfile !== undefined)
+            updateData.taxProfile = req.body.taxProfile;
+        if (commissionConfig !== undefined) {
+            const nextCommission = Object.assign({}, commissionConfig);
+            delete nextCommission.vatPercentOnCommission;
+            updateData.commissionConfig = nextCommission;
+        }
+        Object.assign(updateData, pickWorkspaceFields(req.body, String(company.tenantStatus || ''), String(company.onboardingStatus || 'ACTIVE')));
         if (receivablesCutover !== undefined)
             updateData.receivablesCutover = receivablesCutover;
         if (rentReceivableOpeningBalance !== undefined)
             updateData.rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
         if (levyReceivableOpeningBalance !== undefined)
             updateData.levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
-        if (plan && ['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan)) {
-            const cfg = plan_1.PLAN_CONFIG[plan];
-            updateData.plan = plan;
-            updateData.propertyLimit = cfg.propertyLimit;
-            updateData.featureFlags = cfg.featureFlags;
-            if (req.body.workspaceType === undefined) {
-                updateData.workspaceType = cfg.workspaceType;
-            }
-        }
+        stripSubscriptionAuthority(updateData);
         const updatedCompany = yield Company_1.Company.findByIdAndUpdate(company._id, { $set: updateData }, { new: true, runValidators: true });
         if (!updatedCompany) {
             throw new errorHandler_1.AppError('Error updating company', 500);

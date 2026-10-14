@@ -27,6 +27,7 @@ import { usePropertyService } from '../services/propertyService';
 import { useTenantService } from '../services/tenantService';
 import { usePropertyOwnerService } from '../services/propertyOwnerService';
 import paymentService from '../services/paymentService';
+import { formatPaymentApiError } from '../utils/paymentApiError';
 import { agentService } from '../services/agentService';
 import paymentRequestService, { PaymentRequest as PaymentRequestType } from '../services/paymentRequestService';
 import { Payment, PaymentStatus, PaymentFormData, PaymentFilter } from '../types/payment';
@@ -377,7 +378,7 @@ const PaymentsPage: React.FC = () => {
       if (err.response?.status === 401) {
         redirectToLogin('Session expired. Please log in.');
       } else {
-        setError(err.response?.data?.message || 'Failed to create payment');
+        setError(formatPaymentApiError(err, 'Failed to create payment'));
       }
     } finally {
       setLoading(false);
@@ -407,7 +408,7 @@ const PaymentsPage: React.FC = () => {
       if (err.response?.status === 401) {
         redirectToLogin('Session expired. Please log in.');
       } else {
-        setError(err.response?.data?.message || 'Failed to update payment');
+        setError(formatPaymentApiError(err, 'Failed to update payment'));
       }
     } finally {
       setLoading(false);
@@ -486,7 +487,7 @@ const PaymentsPage: React.FC = () => {
       } else if (err.response?.status === 409) {
         setError('This month is fully paid.');
       } else {
-        setError(err.response?.data?.message || 'Failed to save payment. Please try again.');
+        setError(formatPaymentApiError(err, 'Failed to save payment. Please try again.'));
       }
     }
   }, [selectedPayment, user?.companyId, user?.role, properties]);

@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../api/axios';
+import { getDemoCompany } from '../demo/demoData';
+import { isDemoMode } from '../demo/demoMode';
 import { useAuth } from './AuthContext';
 
 interface BankAccount {
@@ -89,10 +91,10 @@ interface CompanyContextType {
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 
 export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [company, setCompany] = useState<Company | null>(null);
+  const [company, setCompany] = useState<Company | null>(() => (isDemoMode() ? (getDemoCompany() as Company) : null));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasCompany, setHasCompany] = useState(false);
+  const [hasCompany, setHasCompany] = useState(() => isDemoMode());
   const { isAuthenticated, user } = useAuth();
   const inFlightRef = React.useRef<Promise<void> | null>(null);
   const lastFetchKeyRef = React.useRef<string | null>(null);
@@ -152,6 +154,13 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const fetchCompany = async () => {
+    if (isDemoMode()) {
+      setCompany(getDemoCompany() as Company);
+      setHasCompany(true);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!isAuthenticated || !user) {
       setLoading(false);
       setCompany(null);
@@ -260,6 +269,13 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Initial fetch when authenticated
   useEffect(() => {
+    if (isDemoMode()) {
+      setCompany(getDemoCompany() as Company);
+      setHasCompany(true);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     // Always attempt to fetch the "current" company when authenticated.
     // New signups/onboarding can have a company without user.companyId being populated yet.
     if (isAuthenticated && user) {

@@ -37,9 +37,11 @@ import companyAccountService from '../../services/companyAccountService';
 import { apiService } from '../../api';
 import { Payment } from '../../types/payment';
 import accountingService, {
+  AccountingIntegritySummary,
   DashboardOutstandingBreakdown,
   DashboardSummary,
-  OutstandingPropertyBreakdown
+  OutstandingPropertyBreakdown,
+  TaxComplianceDashboard
 } from '../../services/accountingService';
 
 type DashboardPeriod = 'month' | 'quarter' | 'year';
@@ -82,6 +84,8 @@ const DashboardOverview: React.FC = () => {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [outstandingBreakdown, setOutstandingBreakdown] = useState<DashboardOutstandingBreakdown | null>(null);
+  const [integritySummary, setIntegritySummary] = useState<AccountingIntegritySummary | null>(null);
+  const [taxCompliance, setTaxCompliance] = useState<TaxComplianceDashboard | null>(null);
   const [companySummary, setCompanySummary] = useState<{ runningBalance: number; totalIncome: number; totalExpenses: number } | null>(null);
   const [companyTransactions, setCompanyTransactions] = useState<any[]>([]);
   const [showOutstandingRentals, setShowOutstandingRentals] = useState(false);
@@ -108,18 +112,22 @@ const DashboardOverview: React.FC = () => {
     try {
       if (isFirstLoad) setLoading(true);
       const { start, end } = getDashboardPeriodRange(period);
-      const [prRes, paymentsData, summary, acctSummary, outstanding] = await Promise.all([
+      const [prRes, paymentsData, summary, acctSummary, outstanding, integrity, taxDash] = await Promise.all([
         paymentRequestService.getPaymentRequests(),
         paymentService.getPayments({ startDate: start, endDate: end }),
         (async () => { try { return await companyAccountService.getSummary(); } catch { return null; } })(),
         (async () => { try { return await accountingService.getDashboardSummary(); } catch { return null; } })(),
-        accountingService.getDashboardOutstanding()
+        accountingService.getDashboardOutstanding(),
+        (async () => { try { return await accountingService.getAccountingIntegritySummary(); } catch { return null; } })(),
+        (async () => { try { return await accountingService.getTaxComplianceDashboard(); } catch { return null; } })()
       ]);
       setPaymentRequests(prRes.data || []);
       setPayments(Array.isArray(paymentsData) ? paymentsData : []);
       if (summary) setCompanySummary(summary);
       if (acctSummary) setDashboardSummary(acctSummary);
       setOutstandingBreakdown(outstanding);
+      if (integrity) setIntegritySummary(integrity);
+      if (taxDash) setTaxCompliance(taxDash);
       hasLoadedCoreRef.current = true;
     } catch (err: any) {
       console.error('Error loading core dashboard data:', err);
@@ -343,6 +351,39 @@ const DashboardOverview: React.FC = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {taxCompliance && (
+        <Alert
+          severity={Number(taxCompliance.vatOutstanding || 0) > 0 || Number(taxCompliance.cgwtOutstanding || 0) > 0 || Number(taxCompliance.openReviews || 0) > 0 ? 'warning' : 'info'}
+          sx={{ mb: 3, cursor: 'pointer' }}
+          action={
+            <Button color="inherit" size="small" onClick={() => navigate('/accountant-dashboard/tax')}>
+              Tax
+            </Button>
+          }
+          onClick={() => navigate('/accountant-dashboard/tax')}
+        >
+          Tax Compliance — VAT outstanding {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(taxCompliance.vatOutstanding || 0))};
+          {' '}Capital Gains Withholding Tax outstanding {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(taxCompliance.cgwtOutstanding || 0))};
+          {' '}{Number(taxCompliance.openReviews || 0)} review item(s). PAYE and corporate tax are not calculated here.
+        </Alert>
+      )}
+      {integritySummary && (
+        <Alert
+          severity={Number(integritySummary.exceptions || 0) > 0 || Number(integritySummary.incomplete || 0) > 0 ? 'warning' : 'success'}
+          sx={{ mb: 3, cursor: 'pointer' }}
+          action={
+            <Button color="inherit" size="small" onClick={() => navigate('/accountant-dashboard/accounting-integrity')}>
+              Accounting Integrity
+            </Button>
+          }
+          onClick={() => navigate('/accountant-dashboard/accounting-integrity')}
+        >
+          {Number(integritySummary.exceptions || 0) > 0 || Number(integritySummary.incomplete || 0) > 0
+            ? `${Number(integritySummary.exceptions || integritySummary.incomplete || 0)} accounting inconsistencies require attention`
+            : 'Accounting is fully reconciled'}
         </Alert>
       )}
 

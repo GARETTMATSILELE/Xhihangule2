@@ -9,6 +9,7 @@ import {
   type CommissionResult
 } from './propertyCommissionCalculator';
 import { getVatRateForDate } from './taxRateService';
+import { AppError } from '../middleware/errorHandler';
 
 export type { CommissionResult, PropertyCommissionInput, PropertyCommissionResult };
 export { calculatePropertyCommission, toPaymentCommissionSnapshot, applyLevyPassThroughToSnapshot };
@@ -44,17 +45,25 @@ export class CommissionService {
     vatTreatment?: 'inclusive' | 'exclusive' | null;
     vatRate?: number;
     paymentDate?: Date;
+    commissionType?: 'management' | 'introduction';
   }): Promise<PropertyCommissionResult> {
     const company = input.companyId ? await Company.findById(input.companyId).lean() : null;
     const vatOnCommission = Boolean(input.vatOnCommission);
     let vatRate = Number(input.vatRate);
-    if (vatOnCommission && !Number.isFinite(vatRate) && input.companyId) {
+    let vatRuleId: string | undefined;
+    let vatJurisdiction: string | undefined;
+    if (vatOnCommission && input.companyId) {
       const lookedUp = await getVatRateForDate(input.companyId, input.paymentDate || new Date());
+      if (lookedUp.source === 'none' || !(lookedUp.decimal > 0)) {
+        throw new AppError('No centrally managed VAT rate applies on the payment date. The payment was not saved.', 400);
+      }
       vatRate = lookedUp.decimal;
+      vatRuleId = lookedUp.taxRateId;
+      vatJurisdiction = lookedUp.jurisdiction;
     }
     if (!Number.isFinite(vatRate) || vatRate < 0) vatRate = 0;
 
-    return calculatePropertyCommission({
+    const result = calculatePropertyCommission({
       grossRent: input.grossRent,
       levy: input.levy,
       commissionPercentage: input.commissionPercentage,
@@ -64,7 +73,12 @@ export class CommissionService {
       commissionEnabled: company?.featureFlags?.commissionEnabled !== false,
       preaPercentOfTotal: company?.commissionConfig?.preaPercentOfTotal,
       agentPercentOfRemaining: company?.commissionConfig?.agentPercentOfRemaining,
-      agencyPercentOfRemaining: company?.commissionConfig?.agencyPercentOfRemaining
+      agencyPercentOfRemaining: company?.commissionConfig?.agencyPercentOfRemaining,
+      commissionType: input.commissionType
     });
+    if (vatRuleId) (result as PropertyCommissionResult & { vatRuleId?: string }).vatRuleId = vatRuleId;
+    if (vatJurisdiction) (result as PropertyCommissionResult & { vatJurisdiction?: string }).vatJurisdiction = vatJurisdiction;
+    if (input.paymentDate) (result as PropertyCommissionResult & { vatTaxPoint?: Date }).vatTaxPoint = input.paymentDate;
+    return result;
   }
 }

@@ -137,6 +137,7 @@ const SystemAdminLayout: React.FC = () => {
               <NavButton to="/system-admin/invoices" label="Invoices" />
               <NavButton to="/system-admin/vouchers" label="Vouchers" />
               <NavButton to="/system-admin/plans" label="Plans" />
+              <NavButton to="/system-admin/vat-rates" label="VAT Rates" />
               <NavButton to="/system-admin/audit-logs" label="Audit Logs" />
               <NavButton to="/system-admin/support-tickets" label="Support Desk" />
               <NavButton to="/system-admin/revenue" label="Revenue Analytics" />

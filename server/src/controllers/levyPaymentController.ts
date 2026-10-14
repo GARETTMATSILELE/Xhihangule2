@@ -7,6 +7,7 @@ import { Tenant } from '../models/Tenant';
 import { Company } from '../models/Company';
 import { Property } from '../models/Property';
 import propertyAccountService from '../services/propertyAccountService';
+import { callerCanAccessProperty, propertyIdsForCaller } from '../utils/propertyAccess';
 
 export const createLevyPayment = async (req: Request, res: Response) => {
   try {
@@ -41,6 +42,11 @@ export const createLevyPayment = async (req: Request, res: Response) => {
     
     if (!amount || amount <= 0) {
       throw new AppError('Valid amount is required', 400);
+    }
+
+    const propertyInCompany = await Property.findOne({ _id: propertyId, companyId: req.user.companyId }).select('_id');
+    if (!propertyInCompany || !(await callerCanAccessProperty(req, String(propertyId)))) {
+      throw new AppError('Property was not found in this company', 404);
     }
 
     const levyPaymentData: any = {
@@ -191,7 +197,10 @@ export const getLevyPayments = async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(401).json({ message: 'Authentication required' });
     }
-    const levyPayments = await LevyPayment.find({ companyId })
+    const visibleIds = await propertyIdsForCaller(req);
+    const levyQuery: any = { companyId };
+    if (visibleIds !== 'company') levyQuery.propertyId = { $in: visibleIds };
+    const levyPayments = await LevyPayment.find(levyQuery)
       .populate('propertyId', 'name address')
       .populate('processedBy', 'firstName lastName email')
       .sort({ paymentDate: -1 });
@@ -219,6 +228,10 @@ export const getLevyReceiptPublic = async (req: Request, res: Response) => {
       .populate('processedBy', 'firstName lastName email');
 
     if (!levy) {
+      return res.status(404).json({ status: 'error', message: 'Payment not found' });
+    }
+    const levyPropertyId = String((levy.propertyId as any)?._id || levy.propertyId || '');
+    if (!(await callerCanAccessProperty(req, levyPropertyId))) {
       return res.status(404).json({ status: 'error', message: 'Payment not found' });
     }
 
@@ -286,6 +299,9 @@ export const initiateLevyPayout = async (req: Request, res: Response) => {
     const { paidToName, paidToAccount, paidToContact, payoutDate, payoutMethod, payoutReference, notes } = req.body;
     const levy = await LevyPayment.findOne({ _id: id, companyId: req.user.companyId });
     if (!levy) throw new AppError('Levy payment not found', 404);
+    if (!(await callerCanAccessProperty(req, String(levy.propertyId)))) {
+      throw new AppError('Levy payment not found', 404);
+    }
     const normalizedMethod = typeof payoutMethod === 'string'
       ? payoutMethod.trim().toLowerCase().replace(/\s+/g, '_')
       : undefined;
@@ -353,6 +369,10 @@ export const getLevyPayoutAcknowledgement = async (req: Request, res: Response) 
       .populate('propertyId', 'name address')
       .populate('processedBy', 'firstName lastName email');
     if (!levy) throw new AppError('Levy payment not found', 404);
+    const ackPropertyId = String((levy.propertyId as any)?._id || levy.propertyId || '');
+    if (!(await callerCanAccessProperty(req, ackPropertyId))) {
+      throw new AppError('Levy payment not found', 404);
+    }
     const company = levy.companyId ? await Company.findById(levy.companyId).select('name address phone email logo') : null;
     const html = `<!DOCTYPE html>
       <html>
@@ -438,6 +458,10 @@ export const getLevyReceiptDownload = async (req: Request, res: Response) => {
       .populate('processedBy', 'firstName lastName email');
 
     if (!levy) {
+      return res.status(404).send('Levy payment not found');
+    }
+    const downloadPropertyId = String((levy.propertyId as any)?._id || levy.propertyId || '');
+    if (!(await callerCanAccessProperty(req, downloadPropertyId))) {
       return res.status(404).send('Levy payment not found');
     }
 

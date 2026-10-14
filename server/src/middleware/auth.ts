@@ -4,6 +4,7 @@ import { AuthService } from '../services/authService';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
 import { Subscription } from '../models/Subscription';
+import { companyAwaitingRegistrationPayment, isRegistrationPaymentExemptPath } from '../services/registrationPaymentPolicy';
 
 const authService = AuthService.getInstance();
 const COMPANY_CONTEXT_CACHE_TTL_MS = Number(process.env.COMPANY_CONTEXT_CACHE_TTL_MS || 60000);
@@ -261,6 +262,30 @@ export const authWithCompany = async (req: AuthRequest, res: Response, next: Nex
     }
 
     attachUser(req, userData, context);
+
+    // Do not use the 60-second company cache for suspension. A suspended company
+    // must lose access on the next request, and reactivation must not wait for cache expiry.
+    const freshCompany = await Company.findById(context.companyId).select('tenantStatus isActive onboardingStatus').lean();
+    const tenantStatus = freshCompany
+      ? String((freshCompany as any).tenantStatus || ((freshCompany as any).isActive === false ? 'suspended' : 'active'))
+      : (context.tenantStatus || 'active');
+    const onboardingStatus = String((freshCompany as any)?.onboardingStatus || context.onboardingStatus || 'ACTIVE');
+    const url = String(req.originalUrl || req.url || '');
+    const suspensionExempt = isRegistrationPaymentExemptPath(url);
+    if (!suspensionExempt && companyAwaitingRegistrationPayment(onboardingStatus)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Complete registration payment before using the workspace',
+        code: 'PAYMENT_REQUIRED'
+      });
+    }
+    if (!suspensionExempt && tenantStatus !== 'active' && tenantStatus !== 'pending') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Company workspace is not active',
+        code: 'TENANT_INACTIVE'
+      });
+    }
 
     next();
   } catch (error) {

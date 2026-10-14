@@ -51,7 +51,6 @@ export class ExportEngine {
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const green = rgb(0, 0.27, 0.18);
-    const white = rgb(1, 1, 1);
     const paleGreen = rgb(0.84, 0.95, 0.87);
     const red = rgb(0.7, 0.14, 0.1);
     const ink = rgb(0.06, 0.09, 0.16);
@@ -78,31 +77,85 @@ export class ExportEngine {
       return moneyText(amount, currency, deduction);
     };
     const dashOrMoney = (amount?: number, currency = 'USD', asDeduction = false): string => {
-      if (amount == null || Math.abs(amount) < 0.005) return '—';
+      if (amount == null || Math.abs(amount) < 0.005) return '-';
       return asDeduction || amount < 0 ? moneyText(amount, currency, true) : moneyText(amount, currency);
     };
     const periodLabel = dto.period.label === 'All Transactions'
       ? 'All Transactions'
-      : `${dto.period.startDate} – ${dto.period.endDate}`;
+      : `${dto.period.startDate} - ${dto.period.endDate}`;
     const columns = [
-      { x: 28, width: 68, label: 'Date' },
-      { x: 96, width: 58, label: 'Type' },
-      { x: 154, width: 168, label: 'Description' },
-      { x: 322, width: 78, label: 'Rent Amount' },
-      { x: 400, width: 82, label: 'Less Commission' },
-      { x: 482, width: 88, label: 'Less VAT on Comm.' },
-      { x: 570, width: 72, label: 'Less Levies' },
-      { x: 642, width: 82, label: 'Owner Amount' },
-      { x: 724, width: 90, label: 'Balance' }
+      { x: 28, width: 63, label: 'Date', align: 'left' as const },
+      { x: 91, width: 55, label: 'Type', align: 'left' as const },
+      { x: 146, width: 86, label: 'Description', align: 'left' as const },
+      { x: 232, width: 86, label: 'Amount Received', align: 'right' as const },
+      { x: 318, width: 78, label: 'Commission', align: 'right' as const },
+      { x: 396, width: 110, label: 'VAT on Commission', align: 'right' as const },
+      { x: 506, width: 70, label: 'Levy', align: 'right' as const },
+      { x: 576, width: 122, label: 'Net Owner Amount', align: 'right' as const },
+      { x: 698, width: 115, label: 'Balance', align: 'right' as const }
     ];
+    const wrapText = (text: string, maxWidth: number, size: number, usedFont: typeof font): string[] => {
+      const words = String(text || '').split(/\s+/).filter(Boolean);
+      if (!words.length) return [''];
+      const lines: string[] = [];
+      let current = '';
+      const pushLongWord = (word: string) => {
+        let chunk = '';
+        for (const character of word) {
+          const next = chunk + character;
+          if (usedFont.widthOfTextAtSize(next, size) <= maxWidth) chunk = next;
+          else {
+            if (chunk) lines.push(chunk);
+            chunk = character;
+          }
+        }
+        current = chunk;
+      };
+      words.forEach((word) => {
+        const next = current ? `${current} ${word}` : word;
+        if (usedFont.widthOfTextAtSize(next, size) <= maxWidth) {
+          current = next;
+          return;
+        }
+        if (current) lines.push(current);
+        if (usedFont.widthOfTextAtSize(word, size) <= maxWidth) current = word;
+        else pushLongWord(word);
+      });
+      if (current) lines.push(current);
+      return lines.length ? lines : [''];
+    };
 
+    const longDate = (value?: string) => {
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''));
+      if (match) return `${Number(match[3])} ${months[Number(match[2]) - 1]} ${match[1]}`;
+      const parsed = value ? new Date(value) : new Date();
+      if (Number.isNaN(parsed.getTime())) return String(value || '');
+      return `${parsed.getDate()} ${months[parsed.getMonth()]} ${parsed.getFullYear()}`;
+    };
+    const generatedLabel = `Generated ${longDate(dto.audit.generatedAt)}`;
     let page = pdfDoc.addPage(pageSize);
     let pageNumber = 1;
     const drawFooter = (current: typeof page, number: number) => {
       current.drawLine({ start: { x: 28, y: 28 }, end: { x: 814, y: 28 }, thickness: 0.6, color: line });
-      current.drawText(dto.company.displayName, { x: 28, y: 16, size: 8, font, color: muted });
-      current.drawText('Property Account Statement', { x: 330, y: 16, size: 8, font, color: muted });
-      current.drawText(`Page ${number}`, { x: 760, y: 16, size: 8, font, color: muted });
+      current.drawText(dto.company.displayName, { x: 28, y: 14, size: 8, font, color: muted });
+      current.drawText('Property Account Statement', { x: 280, y: 14, size: 8, font, color: muted });
+      const pageLabel = `Page ${number}  ·  ${generatedLabel}`;
+      const pageWidth = font.widthOfTextAtSize(pageLabel, 8);
+      current.drawText(pageLabel, { x: 814 - pageWidth, y: 14, size: 8, font, color: muted });
+    };
+    const drawTableHeader = (target: typeof page, top: number) => {
+      target.drawRectangle({ x: 28, y: top - 18, width: 785, height: 28, color: paleGreen });
+      target.drawLine({ start: { x: 28, y: top - 18 }, end: { x: 813, y: top - 18 }, thickness: 1.4, color: green });
+      columns.forEach((column) => {
+        const lines = wrapText(column.label, column.width - 4, 7, bold).slice(0, 2);
+        lines.forEach((text, index) => {
+          const width = bold.widthOfTextAtSize(text, 7);
+          const x = column.align === 'right' ? column.x + column.width - width - 2 : column.x;
+          target.drawText(text, { x, y: top - index * 8, size: 7, font: bold, color: green });
+        });
+      });
+      return top - 32;
     };
     const addPage = () => {
       drawFooter(page, pageNumber);
@@ -110,67 +163,138 @@ export class ExportEngine {
       pageNumber += 1;
       page.drawText(`${dto.company.displayName}  ·  Property Account Statement  ·  ${periodLabel}`, {
         x: 28,
-        y: 570,
+        y: 568,
         size: 8,
         font: bold,
         color: green
       });
-      const headerY = 548;
-      page.drawRectangle({ x: 28, y: headerY - 4, width: 786, height: 16, color: green });
-      columns.forEach((column) => {
-        page.drawText(column.label, { x: column.x, y: headerY, size: 7, font: bold, color: white });
-      });
-      return headerY - 18;
+      return drawTableHeader(page, 548);
     };
 
-    page.drawRectangle({ x: 0, y: 552, width: 841.89, height: 44, color: green });
-    page.drawText(dto.company.displayName, { x: 28, y: 578, size: 12, font: bold, color: white });
-    page.drawText('PROPERTY ACCOUNT STATEMENT', { x: 28, y: 562, size: 16, font: bold, color: white });
-    page.drawText(`Generated ${new Date(dto.audit.generatedAt).toLocaleDateString()}`, { x: 640, y: 572, size: 9, font, color: paleGreen });
+    const logoRaw = String(dto.company.logo || '').trim();
+    let logoDrawn = false;
+    if (logoRaw) {
+      try {
+        const payload = logoRaw.includes(',') ? logoRaw.split(',').pop() || '' : logoRaw;
+        const logoBytes = Buffer.from(payload, 'base64');
+        const image = logoRaw.includes('image/jp') ? await pdfDoc.embedJpg(logoBytes) : await pdfDoc.embedPng(logoBytes);
+        const scaled = image.scale(28 / image.height);
+        const width = Math.min(scaled.width, 72);
+        page.drawImage(image, { x: 28, y: 548, width, height: 28 });
+        logoDrawn = true;
+        page.drawText(dto.company.displayName, { x: 28 + width + 8, y: 556, size: 10, font: bold, color: green });
+      } catch {
+        logoDrawn = false;
+      }
+    }
+    if (!logoDrawn) {
+      page.drawText(dto.company.displayName, { x: 28, y: 556, size: 11, font: bold, color: green });
+    }
+    const title = 'PROPERTY ACCOUNT STATEMENT';
+    const titleWidth = bold.widthOfTextAtSize(title, 13);
+    page.drawText(title, { x: (841.89 - titleWidth) / 2, y: 560, size: 13, font: bold, color: green });
+    const propertyHeading = dto.property.name || dto.property.address || '';
+    const propertyHeadingWidth = font.widthOfTextAtSize(propertyHeading, 9);
+    page.drawText(propertyHeading, { x: (841.89 - propertyHeadingWidth) / 2, y: 546, size: 9, font, color: ink });
+    const generatedWidth = font.widthOfTextAtSize(generatedLabel, 8);
+    page.drawText(generatedLabel, { x: 814 - generatedWidth, y: 560, size: 8, font, color: ink });
+    const periodText = `Period ${periodLabel}`;
+    const periodWidth = font.widthOfTextAtSize(periodText, 8);
+    page.drawText(periodText, { x: 814 - periodWidth, y: 548, size: 8, font, color: ink });
+    page.drawLine({ start: { x: 28, y: 536 }, end: { x: 814, y: 536 }, thickness: 1.4, color: green });
 
-    page.drawText(`Property: ${dto.property.name}`, { x: 28, y: 536, size: 9, font: bold, color: ink });
-    page.drawText(`Address: ${dto.property.address || '—'}`, { x: 28, y: 522, size: 9, font, color: ink });
-    page.drawText(`Owner: ${dto.owner.displayName}`, { x: 520, y: 536, size: 9, font, color: ink });
-    page.drawText(`Statement Period: ${periodLabel}`, { x: 520, y: 522, size: 9, font, color: ink });
+    const meta = [
+      ['Property', dto.property.name],
+      ['Address', dto.property.address || '-'],
+      ['Owner', dto.owner.displayName],
+      ['Ledger', dto.ledger === 'sale' ? 'Sale' : dto.ledger === 'rental' ? 'Rental' : '-'],
+      ['Currency', dto.currency || summary.openingBalance.currency]
+    ];
+    meta.forEach((item, index) => {
+      const x = 28 + index * 157;
+      page.drawText(item[0].toUpperCase(), { x, y: 522, size: 7, font: bold, color: green });
+      const metaValue = wrapText(String(item[1] || '-'), 150, 8, font)[0] || '-';
+      page.drawText(metaValue, { x, y: 510, size: 8, font, color: ink });
+    });
 
     const summaryItems = [
-      ['Opening Balance', summaryMoney(summary.openingBalance.amount, summary.openingBalance.currency)],
-      ['Total Rent', summaryMoney(summary.totalRent.amount, summary.totalRent.currency)],
-      ['Total Commission', summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true)],
-      ['Total VAT', summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true)],
-      ['Total Levies', summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true)],
-      ['Total Owner Amount', summaryMoney(summary.totalOwnerAmount.amount, summary.totalOwnerAmount.currency)],
-      ['Total Payouts', summaryMoney(summary.totalPayouts.amount, summary.totalPayouts.currency, true)],
-      ['Closing Balance', summaryMoney(summary.closingBalance.amount, summary.closingBalance.currency)]
-    ];
+      ['Opening Balance', summaryMoney(summary.openingBalance.amount, summary.openingBalance.currency), false],
+      ['Amount Received', summaryMoney(summary.totalRent.amount, summary.totalRent.currency), false],
+      ['Less Commission', summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true), false],
+      ['Less VAT on Commission', summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true), false],
+      ['Less Levy', summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true), false],
+      ['Net Owner Amount', summaryMoney(summary.totalOwnerAmount.amount, summary.totalOwnerAmount.currency), false],
+      ['Owner Payouts', summaryMoney(summary.totalPayouts.amount, summary.totalPayouts.currency, true), false],
+      ['Balance Due to Owner', summaryMoney(summary.closingBalance.amount, summary.closingBalance.currency), true]
+    ] as const;
     summaryItems.forEach((item, index) => {
-      const x = 28 + (index % 4) * 200;
-      const y = 498 - Math.floor(index / 4) * 28;
-      page.drawText(item[0], { x, y: y + 10, size: 7, font: bold, color: green });
-      page.drawText(item[1], { x, y, size: 10, font: bold, color: ink });
+      const y = 490 - index * 13;
+      if (item[2]) {
+        page.drawRectangle({ x: 28, y: y - 3, width: 250, height: 12, color: paleGreen });
+        page.drawLine({ start: { x: 28, y: y - 3 }, end: { x: 278, y: y - 3 }, thickness: 1.2, color: green });
+        page.drawLine({ start: { x: 28, y: y + 9 }, end: { x: 278, y: y + 9 }, thickness: 1.2, color: green });
+      }
+      page.drawText(item[0], { x: 32, y, size: 8, font: item[2] ? bold : font, color: item[2] ? green : ink });
+      const amountWidth = bold.widthOfTextAtSize(item[1], 8);
+      page.drawText(item[1], { x: 274 - amountWidth, y, size: 8, font: bold, color: item[2] ? green : ink });
     });
 
-    let rowY = 432;
-    page.drawRectangle({ x: 28, y: rowY - 4, width: 786, height: 16, color: green });
-    columns.forEach((column) => {
-      page.drawText(column.label, { x: column.x, y: rowY, size: 7, font: bold, color: white });
-    });
-    rowY -= 18;
-
-    const drawRow = (values: string[], options?: { bold?: boolean; ownerNegative?: boolean }) => {
-      if (rowY < 48) rowY = addPage();
-      values.forEach((value, index) => {
-        const column = columns[index];
-        const color = index === 7 && options?.ownerNegative ? red : ink;
-        page.drawText(String(value || '').slice(0, column.width > 100 ? 42 : 18), {
-          x: column.x,
-          y: rowY,
-          size: 7,
-          font: options?.bold ? bold : font,
-          color
+    let contentBottom = 490 - summaryItems.length * 13;
+    const waterfall = dto.ownerMoneyWaterfall;
+    if (waterfall) {
+      const vatRate = waterfall.vatRate == null
+        ? ''
+        : ` at ${(waterfall.vatRate <= 1 ? waterfall.vatRate * 100 : waterfall.vatRate).toFixed(1)}%`;
+      const lines = [
+        { text: 'HOW THE OWNER AMOUNT IS CALCULATED', strong: true, color: green },
+        { text: `Amount received ${moneyText(waterfall.grossAmount.amount, waterfall.grossAmount.currency)}`, strong: false, color: ink },
+        { text: `Less commission ${summaryMoney(waterfall.commissionAmount.amount, waterfall.commissionAmount.currency, true)}`, strong: false, color: ink },
+        { text: `Less levy ${summaryMoney(waterfall.levyAmount.amount, waterfall.levyAmount.currency, true)}`, strong: false, color: ink },
+        { text: `Less VAT on commission ${summaryMoney(waterfall.vatOnCommission.amount, waterfall.vatOnCommission.currency, true)}${vatRate}`, strong: false, color: ink },
+        { text: `Net owner amount ${moneyText(waterfall.netOwnerAmount.amount, waterfall.netOwnerAmount.currency)}`, strong: true, color: ink },
+        {
+          text: waterfall.reviewRequired
+            ? `Review required. Recorded owner income is ${waterfall.recordedOwnerAmount ? moneyText(waterfall.recordedOwnerAmount.amount, waterfall.recordedOwnerAmount.currency) : 'missing'}. Difference ${moneyText(waterfall.difference.amount, waterfall.difference.currency)}. No amount was changed.`
+            : 'Recorded owner income matches this allocation.',
+          strong: false,
+          color: ink
+        }
+      ];
+      let waterfallY = 490;
+      lines.forEach((line) => {
+        const usedFont = line.strong ? bold : font;
+        wrapText(line.text, 500, 8, usedFont).forEach((lineText) => {
+          page.drawText(lineText, { x: 300, y: waterfallY, size: 8, font: usedFont, color: line.color });
+          waterfallY -= 10;
         });
       });
-      rowY -= 14;
+      contentBottom = Math.min(contentBottom, waterfallY);
+    }
+
+    let rowY = drawTableHeader(page, contentBottom - 8);
+
+    const drawRow = (values: string[], options?: { bold?: boolean; ownerNegative?: boolean }) => {
+      const usedFont = options?.bold ? bold : font;
+      const size = 8;
+      const wrapped = values.map((value, index) => (
+        index === 2 ? wrapText(value, columns[index].width - 4, size, usedFont) : [value]
+      ));
+      const lineCount = Math.max(1, ...wrapped.map((lines) => lines.length));
+      const rowHeight = lineCount * 10 + 3;
+      if (rowY - rowHeight < 40) rowY = addPage();
+      if (options?.bold) {
+        page.drawRectangle({ x: 28, y: rowY - rowHeight + 8, width: 785, height: rowHeight, color: paleGreen });
+      }
+      wrapped.forEach((lines, index) => {
+        const column = columns[index];
+        lines.forEach((text, lineIndex) => {
+          const color = index === 7 && options?.ownerNegative ? red : ink;
+          const textWidth = usedFont.widthOfTextAtSize(text, size);
+          const x = column.align === 'right' ? column.x + column.width - textWidth - 2 : column.x;
+          page.drawText(text, { x, y: rowY - lineIndex * 10, size, font: usedFont, color });
+        });
+      });
+      rowY -= rowHeight;
     };
 
     dto.trustLedger.forEach((row) => {
@@ -183,7 +307,7 @@ export class ExportEngine {
         dashOrMoney(row.commission?.amount, row.runningBalance.currency, true),
         dashOrMoney(row.vatOnCommission?.amount, row.runningBalance.currency, true),
         dashOrMoney(row.levies?.amount, row.runningBalance.currency, true),
-        row.ownerAmount ? moneyText(row.ownerAmount.amount, row.ownerAmount.currency, ownerNegative) : '—',
+        row.ownerAmount ? moneyText(row.ownerAmount.amount, row.ownerAmount.currency, ownerNegative) : '-',
         moneyText(row.runningBalance.amount, row.runningBalance.currency)
       ], { ownerNegative });
     });

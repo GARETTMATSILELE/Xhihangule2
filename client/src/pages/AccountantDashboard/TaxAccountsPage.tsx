@@ -39,7 +39,8 @@ type PayoutDialogState = {
 const taxLabelByType: Record<TaxType, string> = {
   VAT: 'VAT',
   VAT_ON_COMMISSION: 'VAT on Commission',
-  CGT: 'CGT'
+  CGT: 'Capital Gains Tax',
+  CGWT: 'Capital Gains Withholding Tax'
 };
 
 const formatMoney = (value: number) =>
@@ -59,7 +60,7 @@ const defaultDialogState: PayoutDialogState = {
 };
 
 const TaxAccountsPage: React.FC = () => {
-  const [taxLedgers, setTaxLedgers] = useState<TaxLedgersResponse>({ VAT: [], VAT_ON_COMMISSION: [], CGT: [] });
+  const [taxLedgers, setTaxLedgers] = useState<TaxLedgersResponse>({ VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -74,10 +75,10 @@ const TaxAccountsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       const response = await accountantService.getTaxLedgers();
-      setTaxLedgers(response || { VAT: [], VAT_ON_COMMISSION: [], CGT: [] });
+      setTaxLedgers(response || { VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] });
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to load tax ledgers');
-      setTaxLedgers({ VAT: [], VAT_ON_COMMISSION: [], CGT: [] });
+      setTaxLedgers({ VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] });
     } finally {
       setLoading(false);
     }
@@ -101,7 +102,8 @@ const TaxAccountsPage: React.FC = () => {
     return {
       VAT: calc(taxLedgers.VAT),
       VAT_ON_COMMISSION: calc(taxLedgers.VAT_ON_COMMISSION),
-      CGT: calc(taxLedgers.CGT)
+      CGT: calc(taxLedgers.CGT),
+      CGWT: calc(taxLedgers.CGWT || [])
     };
   }, [taxLedgers]);
 
@@ -312,10 +314,10 @@ const TaxAccountsPage: React.FC = () => {
     <Box sx={{ width: '100%' }}>
       <Box sx={{ mb: 3 }}>
         <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          Tax
+          Property tax ledgers
         </Typography>
         <Typography color="text.secondary">
-          Property-level ledgers for VAT, VAT on Commission, and CGT with debit opening balances and payout credits.
+          Existing property-level tax books. A receipt upload is not the same as tax paid. Use Tax → ZIMRA payments to clear GL liabilities.
         </Typography>
       </Box>
 
@@ -332,6 +334,9 @@ const TaxAccountsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12}>
             {renderTaxSection('CGT', taxLedgers.CGT)}
+          </Grid>
+          <Grid item xs={12}>
+            {renderTaxSection('CGWT', taxLedgers.CGWT || [])}
           </Grid>
         </Grid>
       )}

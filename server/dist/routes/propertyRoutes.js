@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const propertyController_1 = require("../controllers/propertyController");
 const auth_1 = require("../middleware/auth");
+const propertyAccess_1 = require("../utils/propertyAccess");
 const roles_1 = require("../middleware/roles");
 const limits_1 = require("../middleware/limits");
 const logger_1 = require("../utils/logger");
@@ -32,12 +33,17 @@ router.use((req, res, next) => {
     next();
 });
 // Debug route to list all properties (disabled in production)
-router.get('/debug/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+router.get('/debug/all', auth_1.authWithCompany, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (process.env.NODE_ENV === 'production') {
         return res.status(404).json({ message: 'Not found' });
     }
     try {
-        const properties = yield Property_1.Property.find({}).populate('ownerId', 'firstName lastName email');
+        const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        const query = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId };
+        if (ids !== 'company')
+            query._id = { $in: ids };
+        const properties = yield Property_1.Property.find(query).populate('ownerId', 'firstName lastName email');
         console.log('All properties in database:', {
             count: properties.length,
             properties: properties.map((p) => ({
@@ -74,12 +80,17 @@ router.post('/public', auth_1.authWithCompany, roles_1.canCreateProperty, limits
 // Legacy public-filtered endpoint now requires authenticated company context.
 router.get('/public-filtered', auth_1.authWithCompany, propertyController_1.getPublicProperties);
 // MVP: Comprehensive public endpoints for all property operations (disabled in production)
-router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+router.get('/public/all', auth_1.authWithCompany, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (process.env.NODE_ENV === 'production') {
         return res.status(404).json({ message: 'Not found' });
     }
     try {
-        const properties = yield Property_1.Property.find({})
+        const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        const scoped = { companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId };
+        if (ids !== 'company')
+            scoped._id = { $in: ids };
+        const properties = yield Property_1.Property.find(scoped)
             .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status rentAmount bedrooms bathrooms amenities propertySpecifications')
             .limit(50);
         res.json(properties);
@@ -89,9 +100,14 @@ router.get('/public/all', (req, res) => __awaiter(void 0, void 0, void 0, functi
         res.status(500).json({ message: 'Error fetching properties' });
     }
 }));
-router.get('/public/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+router.get('/public/:id', auth_1.authWithCompany, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const property = yield Property_1.Property.findById(req.params.id)
+        const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        const query = { _id: req.params.id, companyId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId };
+        if (ids !== 'company')
+            query._id = { $in: ids.filter((id) => String(id) === String(req.params.id)) };
+        const property = yield Property_1.Property.findOne(query)
             .select('name address type propertyCategory propertySubtype propertyOperationalStatus propertyUse status rentAmount bedrooms bathrooms amenities description propertySpecifications');
         if (!property) {
             return res.status(404).json({ message: 'Property not found' });
@@ -104,7 +120,7 @@ router.get('/public/:id', (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 }));
 // Admin dashboard route (disabled in production)
-router.get('/admin-dashboard', (req, res, next) => {
+router.get('/admin-dashboard', auth_1.authWithCompany, (req, res, next) => {
     if (process.env.NODE_ENV === 'production') {
         return res.status(404).json({ message: 'Not found' });
     }

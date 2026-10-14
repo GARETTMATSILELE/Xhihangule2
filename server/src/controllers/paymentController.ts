@@ -11,14 +11,28 @@ import { User } from '../models/User';
 import { Company } from '../models/Company';
 import { SalesContract } from '../models/SalesContract';
 import { Tenant } from '../models/Tenant';
+import { callerCanAccessProperty } from '../utils/propertyAccess';
 import { PaymentAuditLog } from '../models/PaymentAuditLog';
 import propertyAccountService from '../services/propertyAccountService';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
+import { notifyOwnerOfRentPayment } from '../services/ownerRentNotificationService';
 import accountingIntegrationService from '../services/accountingIntegrationService';
-import { postPaymentAccounting, reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
+import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
+import { resolveCommissionVatPolicy, resolveSaleVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock } from '../services/vatPolicyService';
+import { assertVatPeriodOpen } from '../services/vatReturnService';
+import { openReview } from '../services/taxObligationService';
+import { throwOnceIfArmed } from '../services/testFailureSeam';
+import { activateAccountingTrackingForCompletion, ensureDepositLedgerFromPayment, ensurePaymentAccountingPosted, initialAccountingIntegrityFields, reconcilePayment, repairPaymentAccounting } from '../services/paymentAccountingReconciliation';
+import { COMPLETED_PAYMENT_IMMUTABLE_MESSAGE, isCompletedFinancialPayment } from '../services/paymentFinancialImmutability';
 import { emitEvent } from '../events/eventBus';
 import trustEventRetryService from '../services/trustEventRetryService';
+import {
+  AccountingClassificationConflictError,
+  historicalTransactionDomain,
+  mayPostSaleTrust,
+  resolveCreateTransactionDomain
+} from '../services/transactionDomain';
 import chargeTypeService from '../services/chargeTypeService';
 import {
   resolveCombinedRentalAllocation,
@@ -31,6 +45,17 @@ import { buildPaymentReceiptPdf } from '../utils/paymentReceiptPdf';
 import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
 import { getVatRateForDate } from '../services/taxRateService';
 import { roundMoney } from '../utils/money';
+import {
+  SALE_PAYMENT_INCOMPLETE_CODE,
+  SALE_PAYMENT_INCOMPLETE_MESSAGE,
+  salePaymentIncompleteResponse,
+  validateSalePaymentCompleteness
+} from '../services/salePaymentCompleteness';
+import { prepareIntroductionRentalCommission } from '../services/introductionCommissionService';
+import {
+  introductionContextErrorResponse,
+  type IntroductionContextError
+} from '../services/introductionLeaseContext';
 
 const isConfirmedStatus = (status?: string): boolean => {
   const s = String(status || '').toLowerCase();
@@ -69,6 +94,7 @@ const sumPaymentLines = (lines?: Array<{ amount: number }>): number | undefined 
 
 const emitPaymentConfirmedIfNeeded = async (payment: any, sourceEvent: string): Promise<void> => {
   if (!payment || !payment._id || !isConfirmedStatus(payment.status)) return;
+  if (!mayPostSaleTrust(payment)) return;
   const updateResult = await Payment.updateOne(
     {
       _id: payment._id,
@@ -136,7 +162,7 @@ const buildSaleCommissionDetails = async (input: {
   commissionPercentOverride?: number;
 }) => {
   const grossAmount = Math.max(0, Number(input.amount || 0));
-  const saleVatRate = Math.max(0, Math.min(1, Number(input.vatRate ?? 0.155)));
+  const saleVatRate = Math.max(0, Math.min(1, Number(input.vatRate || 0)));
   const saleVatAmount = input.vatIncluded
     ? Number((grossAmount - grossAmount / (1 + saleVatRate)).toFixed(2))
     : 0;
@@ -342,6 +368,14 @@ export const getCompanySalesPayments = async (req: Request, res: Response) => {
         buyerName: 1,
         sellerName: 1,
         commissionDetails: 1,
+        rentalPeriodMonth: 1,
+        rentalPeriodYear: 1,
+        advanceMonthsPaid: 1,
+        advancePeriodStart: 1,
+        advancePeriodEnd: 1,
+        rentUsed: 1,
+        rentAllocated: 1,
+        levyAllocated: 1,
         manualPropertyAddress: 1,
         createdAt: 1,
         updatedAt: 1,
@@ -547,6 +581,12 @@ export const getPayment = async (req: Request, res: Response) => {
 };
 
 // Create a new payment (for lease-based payments)
+async function paymentRecordVisible(req: Request, payment: { companyId?: unknown; propertyId?: unknown }): Promise<boolean> {
+  if (!req.user?.companyId || String(payment.companyId || '') !== String(req.user.companyId)) return false;
+  if (payment.propertyId && !(await callerCanAccessProperty(req, String(payment.propertyId)))) return false;
+  return true;
+}
+
 export const createPayment = async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ message: 'Unauthorized' });
@@ -581,6 +621,13 @@ export const createPayment = async (req: Request, res: Response) => {
         status: 'error',
         message: 'Missing required fields: leaseId, amount, paymentDate, paymentMethod, status',
       });
+    }
+    if (!req.user.companyId) {
+      return res.status(401).json({ status: 'error', message: 'Authentication required' });
+    }
+    const authorizedLease = await Lease.findOne({ _id: leaseId, companyId: req.user.companyId }).select('_id propertyId');
+    if (!authorizedLease || !(await callerCanAccessProperty(req, String(authorizedLease.propertyId)))) {
+      return res.status(404).json({ status: 'error', message: 'Lease not found' });
     }
     // Validate advance payment fields
     if (advanceMonthsPaid && advancePeriodStart && advancePeriodEnd) {
@@ -680,17 +727,83 @@ export const createPayment = async (req: Request, res: Response) => {
       }
     }
 
-    // Calculate commission based on property commission percentage and company config
-    const paymentCommissionResult = await CommissionService.calculateForProperty({
-      companyId: req.user.companyId,
-      grossRent: amount,
-      levy: 0,
-      commissionPercentage: property.commission || 0,
-      vatOnCommission: Boolean((property as any)?.vatOnCommission),
-      vatTreatment: (property as any)?.vatCommissionTreatment,
-      paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+    const propertyVatRequested = Boolean((property as any)?.vatOnCommission);
+    const propertyVatTreatment = (property as any)?.vatCommissionTreatment;
+    const isIntroductionPayment = String((property as any)?.rentalType || '').toLowerCase() === 'introduction';
+    const commissionVatPolicy = await resolveCommissionVatPolicy({
+      companyId: String(req.user.companyId),
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      property: {
+        vatOnCommission: propertyVatRequested,
+        vatCommissionTreatment: propertyVatTreatment
+      },
+      requestedVatOnCommission: propertyVatRequested,
+      requestedTreatment: propertyVatTreatment,
+      commissionType: isIntroductionPayment ? 'introduction' : 'management'
     });
-    const paymentCommissionDetails = applyLevyPassThroughToSnapshot(paymentCommissionResult, amount, 0);
+    const blockedVatRate = centralVatRateBlock(commissionVatPolicy);
+    if (blockedVatRate) {
+      return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+    }
+    const commissionVat = commissionVatFlagsFromPolicy(commissionVatPolicy);
+    if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+      await openReview({
+        companyId: String(req.user.companyId),
+        kind: commissionVatPolicy.reviewReason,
+        title: 'VAT on commission requires review',
+        detail: commissionVatPolicy.reason,
+        propertyId: String(lease.propertyId)
+      });
+    }
+
+    // Calculate commission based on property commission percentage and company config
+    let paymentCommissionResult;
+    let paymentCommissionDetails;
+    if (isIntroductionPayment) {
+      const prepared = await prepareIntroductionRentalCommission({
+        companyId: String(req.user.companyId || lease.companyId),
+        propertyId: lease.propertyId,
+        tenantId: lease.tenantId,
+        leaseId: lease._id,
+        rentAllocated: Number(amount || 0),
+        levyAllocated: 0,
+        vatOnCommission: commissionVat.vatOnCommission,
+        vatTreatment: commissionVat.vatTreatment,
+        vatRate: commissionVat.vatRate,
+        paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+        propertyRent: Number(rent || 0),
+        rentUsed: Number(rent || 0)
+      });
+      if (!prepared.ok) {
+        return res.status(400).json(introductionContextErrorResponse(prepared as IntroductionContextError));
+      }
+      paymentCommissionResult = prepared.result;
+      paymentCommissionDetails = prepared.snapshot;
+    } else {
+      paymentCommissionResult = await CommissionService.calculateForProperty({
+        companyId: req.user.companyId,
+        grossRent: amount,
+        levy: 0,
+        commissionPercentage: property.commission || 0,
+        vatOnCommission: commissionVat.vatOnCommission,
+        vatTreatment: commissionVat.vatTreatment,
+        vatRate: commissionVat.vatRate,
+        paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+      });
+      paymentCommissionDetails = applyLevyPassThroughToSnapshot(paymentCommissionResult, amount, 0);
+    }
+
+    try {
+      resolveCreateTransactionDomain({
+        paymentType: 'rental',
+        entity: { kind: 'property', rentalType: (property as any)?.rentalType }
+      });
+    } catch (domainError) {
+      if (domainError instanceof AccountingClassificationConflictError) {
+        return res.status(409).json(domainError.toBody());
+      }
+      throw domainError;
+    }
 
     // Create payment record
     const payment = new Payment({
@@ -698,8 +811,10 @@ export const createPayment = async (req: Request, res: Response) => {
       paymentDate,
       paymentMethod,
       status,
-      companyId: companyId || lease.companyId,
+      ...initialAccountingIntegrityFields({ status }),
+      companyId: req.user.companyId,
       paymentType: 'rental',
+      transactionDomain: 'RENTAL',
       propertyType: 'residential', // Default value
       propertyId: lease.propertyId,
       tenantId: lease.tenantId,
@@ -718,6 +833,7 @@ export const createPayment = async (req: Request, res: Response) => {
       vatOnCommissionRate: paymentCommissionResult.vatRate || 0,
       vatCommissionTreatment: paymentCommissionResult.vatTreatment,
       rentUsed: rent, // Store the rent used for this payment
+      leaseId: lease._id,
       idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
     });
 
@@ -736,22 +852,13 @@ export const createPayment = async (req: Request, res: Response) => {
 
     // If depositAmount > 0, record in rentaldeposits
     if (payment.depositAmount && payment.depositAmount > 0) {
-      const { RentalDeposit } = require('../models/rentalDeposit');
-      await RentalDeposit.create({
-        propertyId: payment.propertyId,
-        agentId: payment.agentId,
-        companyId: payment.companyId,
-        tenantId: payment.tenantId,
-        depositAmount: payment.depositAmount,
-        depositDate: payment.paymentDate,
-        paymentId: payment._id,
-      });
+      await ensureDepositLedgerFromPayment(payment);
     }
 
     // Company.revenue / User.balance are not accounting ledgers (Phase 5B).
-    const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
-    if (postResult.status === 'partial' || postResult.status === 'failed') {
-      console.warn('Payment accounting post incomplete (lease-based create)', postResult);
+    const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
+    if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
+      console.warn('Payment accounting post incomplete (lease-based create)', postResult.recon.missing);
     }
 
     // Update property arrears after payment
@@ -791,16 +898,26 @@ export const createPayment = async (req: Request, res: Response) => {
       console.warn('Non-fatal: failed to create agent notification for rental payment', e);
     }
 
-    // Email agent with payment details (fire-and-forget)
+    // Email agent with payment details (fire-and-forget). Owner email is downstream and cannot roll back the payment.
     void sendAgentPaymentNotificationEmail(payment);
+    if (postResult.accountingComplete === true) {
+      void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
+    }
 
     await emitPaymentConfirmedIfNeeded(payment, 'payment.create');
 
     res.status(201).json({
       message: 'Payment processed successfully',
       payment,
+      receiptStatus: 'PAYMENT_RECEIVED',
+      accountingComplete: postResult.accountingComplete,
+      accountingStatus: postResult.accountingStatus,
+      accountingState: postResult.accountingComplete ? 'ACCOUNTING_COMPLETE' : 'ACCOUNTING_INCOMPLETE'
     });
   } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode || 400).json({ message: error.message, code: 'VAT_RATE_UNAVAILABLE' });
+    }
     console.error('Error processing payment:', error);
     res.status(500).json({
       message: 'Failed to process payment',
@@ -825,7 +942,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
   } catch (_) {}
 
-  type CreateResult = { payment: IPayment } | { error: { status: number; message: string } };
+  type CreateResult =
+    | { payment: IPayment }
+    | { error: { status: number; message: string; code?: string; missing?: string[]; mismatches?: string[] } };
 
   // Helper to perform the actual create logic, with optional transaction session
   const performCreate = async (user: JwtPayload, session?: mongoose.ClientSession): Promise<CreateResult> => {
@@ -850,6 +969,12 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     const { advanceMonthsPaid, advancePeriodStart, advancePeriodEnd } = (req.body as any);
     if (!user.companyId) {
       return { error: { status: 400, message: 'Company ID is required' } };
+    }
+    if ((req.body as any).idempotencyKey) {
+      const existing = await Payment.findOne({ companyId: new mongoose.Types.ObjectId(user.companyId), idempotencyKey: String((req.body as any).idempotencyKey) }).lean();
+      if (existing) {
+        return { payment: existing as any };
+      }
     }
     const normalizedPaymentLines = await normalizePaymentLines((req.body as any).paymentLines, String(user.companyId));
     const lineTotal = sumPaymentLines(normalizedPaymentLines);
@@ -929,6 +1054,31 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       return { error: { status: 400, message: 'Invalid ownerId format' } };
     }
 
+    if (!manualProperty && rawPropertyId) {
+      const propertyInCompany = await Property.exists({ _id: rawPropertyId, companyId: user.companyId });
+      if (!propertyInCompany || !(await callerCanAccessProperty(req, String(rawPropertyId)))) {
+        return { error: { status: 404, message: 'Property was not found in this company' } };
+      }
+    }
+    if (!manualTenant && rawTenantId) {
+      const tenantInCompany = await Tenant.exists({ _id: rawTenantId, companyId: user.companyId });
+      if (!tenantInCompany) {
+        return { error: { status: 404, message: 'Tenant was not found in this company' } };
+      }
+    }
+    if (rawLeaseId) {
+      const leaseInCompany = await Lease.findOne({ _id: rawLeaseId, companyId: user.companyId }).select('propertyId tenantId').lean();
+      if (!leaseInCompany) {
+        return { error: { status: 404, message: 'Lease was not found in this company' } };
+      }
+      if (!manualProperty && rawPropertyId && String((leaseInCompany as any).propertyId) !== String(rawPropertyId)) {
+        return { error: { status: 404, message: 'Lease was not found in this company' } };
+      }
+      if (!manualTenant && rawTenantId && String((leaseInCompany as any).tenantId) !== String(rawTenantId)) {
+        return { error: { status: 404, message: 'Tenant was not found in this company' } };
+      }
+    }
+
     let resolvedPaymentType: 'sale' | 'rental' | 'introduction';
     if (manualProperty) {
       if (!paymentType) {
@@ -996,6 +1146,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     let rentalVatOnCommission = false;
     let rentalVatOnCommissionRate = 0;
     let rentalVatCommissionTreatment: 'inclusive' | 'exclusive' | undefined;
+    let resolvedIntroductionLeaseId: string | undefined = rawLeaseId;
     try {
       const isRental = resolvedPaymentType !== 'sale';
       const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
@@ -1009,9 +1160,10 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       let rentalTypeResolved: 'management' | 'introduction' | 'sale' | undefined = undefined;
       let propertyVatOnCommission = false;
       let propertyVatTreatment: 'inclusive' | 'exclusive' | undefined;
+      let propertyRentResolved = 0;
       if (!manualProperty && rawPropertyId) {
         const prop = await Property.findById(new mongoose.Types.ObjectId(rawPropertyId))
-          .select('commission rentalType ownerId vatOnCommission vatCommissionTreatment')
+          .select('commission rentalType ownerId vatOnCommission vatCommissionTreatment rent')
           .lean();
         if (prop) {
           if (typeof (prop as any)?.commission === 'number') {
@@ -1021,6 +1173,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
             rentalTypeResolved = (prop as any).rentalType as any;
           }
           propertyVatOnCommission = Boolean((prop as any)?.vatOnCommission);
+          propertyRentResolved = Number((prop as any)?.rent || 0);
           if (propertyVatOnCommission) {
             propertyVatTreatment = String((prop as any)?.vatCommissionTreatment || '').toLowerCase() === 'inclusive'
               ? 'inclusive'
@@ -1033,6 +1186,33 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       }
       const isIntroduction = rentalTypeResolved === 'introduction';
       const levyAllocated = Number(combinedAllocation?.levyAllocated || 0);
+      const vatPolicy = await resolveCommissionVatPolicy({
+        companyId: String(user.companyId),
+        paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+        property: {
+          vatOnCommission: propertyVatOnCommission,
+          vatCommissionTreatment: propertyVatTreatment
+        },
+        requestedVatOnCommission: propertyVatOnCommission,
+        requestedTreatment: propertyVatTreatment,
+        commissionType: isIntroduction ? 'introduction' : 'management'
+      });
+      const blockedVatRate = centralVatRateBlock(vatPolicy);
+      if (blockedVatRate) {
+        return { error: { status: 400, code: blockedVatRate.code, message: blockedVatRate.message } };
+      }
+      const commissionVat = commissionVatFlagsFromPolicy(vatPolicy);
+      propertyVatOnCommission = commissionVat.vatOnCommission;
+      propertyVatTreatment = commissionVat.vatTreatment;
+      if (vatPolicy.reviewRequired && vatPolicy.reviewReason) {
+        await openReview({
+          companyId: String(user.companyId),
+          kind: vatPolicy.reviewReason,
+          title: 'VAT on commission requires review',
+          detail: vatPolicy.reason,
+          propertyId: rawPropertyId
+        });
+      }
 
       const buildRentalCommission = async (commissionableRent: number) => {
         const result = await CommissionService.calculateForProperty({
@@ -1042,6 +1222,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
           commissionPercentage: commissionPercentResolved,
           vatOnCommission: propertyVatOnCommission,
           vatTreatment: propertyVatTreatment,
+          vatRate: commissionVat.vatRate,
           paymentDate: paymentDate ? new Date(paymentDate) : new Date()
         });
         rentalVatOnCommission = result.vatOnCommission;
@@ -1053,39 +1234,37 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       // Compute server-enforced commission
       let computed: any = undefined;
       if (isRental && tenantObjectId && propertyObjectId) {
-        if (isIntroduction && !isDepositOnly) {
-          // Introduction: commission once, capped to one month's rent (first rental payment only)
-          const priorCount = await Payment.countDocuments({
-            companyId: new mongoose.Types.ObjectId(user.companyId),
-            paymentType: 'rental',
-            tenantId: tenantObjectId,
+        if (isIntroduction) {
+          const prepared = await prepareIntroductionRentalCommission({
+            companyId: user.companyId,
             propertyId: propertyObjectId,
-            status: 'completed',
-            isProvisional: { $ne: true },
-            isInSuspense: { $ne: true }
+            tenantId: tenantObjectId,
+            leaseId: rawLeaseId,
+            rentAllocated: isDepositOnly ? 0 : Math.max(0, commissionBaseAmount),
+            levyAllocated: isDepositOnly ? 0 : levyAllocated,
+            vatOnCommission: propertyVatOnCommission,
+            vatTreatment: propertyVatTreatment,
+            vatRate: commissionVat.vatRate,
+            paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+            propertyRent: propertyRentResolved,
+            rentUsed: typeof rentUsed === 'number' ? Number(rentUsed) : undefined
           });
-          const isFirstCommissionable = priorCount === 0;
-          if (isFirstCommissionable && commissionPercentResolved > 0) {
-            // Determine one-month rent
-            let oneMonthRent = typeof rentUsed === 'number' ? Number(rentUsed) : 0;
-            if (!oneMonthRent) {
-              try {
-                const prop = await Property.findById(propertyObjectId).select('rent').lean();
-                oneMonthRent = Number((prop as any)?.rent || 0);
-              } catch {}
-            }
-            const commissionable = oneMonthRent > 0
-              ? Math.min(Math.max(0, commissionBaseAmount), oneMonthRent)
-              : Math.max(0, commissionBaseAmount);
-            if (commissionable > 0) {
-              computed = await buildRentalCommission(commissionable);
-            }
+          if (!prepared.ok) {
+            return {
+              error: {
+                status: 400,
+                code: prepared.code,
+                message: prepared.message,
+                missing: (prepared as any).missing,
+                mismatches: (prepared as any).mismatches
+              }
+            };
           }
-          // Not first or zero commissionable → zero commission
-          if (!computed) {
-            computed = await buildRentalCommission(0);
-            computed.ownerAmount = roundMoney(commissionBaseAmount + levyAllocated);
-          }
+          resolvedIntroductionLeaseId = prepared.context.leaseId;
+          rentalVatOnCommission = prepared.result.vatOnCommission;
+          rentalVatOnCommissionRate = Number(prepared.result.vatRate || 0);
+          rentalVatCommissionTreatment = prepared.result.vatTreatment;
+          computed = prepared.snapshot;
         } else {
           // Management (or unknown): standard commission on rent portion only (advance supported)
           computed = await buildRentalCommission(Math.max(0, commissionBaseAmount));
@@ -1101,6 +1280,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       // Always enforce server rule over client-provided commissionDetails
       finalCommissionDetails = computed;
     } catch (err) {
+      if (err instanceof AppError) throw err;
       // Fallback: give full amount to owner
       const amountNum = Number(amount || 0);
       finalCommissionDetails = {
@@ -1111,6 +1291,23 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         vatOnCommission: 0,
         ownerAmount: amountNum
       } as any;
+    }
+
+    if (resolvedPaymentType === 'sale') {
+      const saleCheck = validateSalePaymentCompleteness({
+        amount: Number(amount || 0),
+        commissionDetails: finalCommissionDetails
+      });
+      if (!saleCheck.ok) {
+        return {
+          error: {
+            status: 400,
+            code: SALE_PAYMENT_INCOMPLETE_CODE,
+            message: SALE_PAYMENT_INCOMPLETE_MESSAGE,
+            missing: saleCheck.missing
+          }
+        };
+      }
     }
 
     // Remaining-balance enforcement for rental payments (single month) and advance-payment handling
@@ -1196,19 +1393,12 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       }
     }
 
-    // Idempotency: short-circuit on duplicate key
-    if ((req.body as any).idempotencyKey) {
-      const existing = await Payment.findOne({ companyId: new mongoose.Types.ObjectId(user.companyId), idempotencyKey: String((req.body as any).idempotencyKey) }).lean();
-      if (existing) {
-        return { payment: existing as any };
-      }
-    }
-
     // Determine provisional flags
     const markProvisional = Boolean(manualProperty || manualTenant);
     // Create payment record
     const payment = new Payment({
       paymentType: resolvedPaymentType,
+      transactionDomain: resolvedPaymentType === 'sale' ? 'SALE' : 'RENTAL',
       propertyType: propertyType || 'residential',
       propertyId: manualProperty ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(rawPropertyId!), // Generate new ID for manual entries
       tenantId: manualTenant ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(rawTenantId!), // Generate new ID for manual entries
@@ -1237,7 +1427,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       vatCommissionTreatment: rentalVatCommissionTreatment,
       status: 'completed',
       currency: currency || 'USD',
-      leaseId: rawLeaseId ? new mongoose.Types.ObjectId(rawLeaseId) : undefined,
+      leaseId: resolvedIntroductionLeaseId
+        ? new mongoose.Types.ObjectId(resolvedIntroductionLeaseId)
+        : (rawLeaseId ? new mongoose.Types.ObjectId(rawLeaseId) : undefined),
       rentUsed: combinedAllocation?.rentUsed ?? rentUsed,
       levyUsed: combinedAllocation?.levyUsed,
       rentAllocated: combinedAllocation ? combinedAllocation.rentAllocated : undefined,
@@ -1253,6 +1445,11 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       isInSuspense: markProvisional,
       commissionFinalized: !markProvisional,
       provisionalRelationshipType: markProvisional ? 'unknown' : undefined,
+      ...initialAccountingIntegrityFields({
+        status: 'completed',
+        isProvisional: markProvisional,
+        isInSuspense: markProvisional
+      }),
       idempotencyKey: (req.body as any).idempotencyKey ? String((req.body as any).idempotencyKey) : undefined,
       saleId: rawSaleId ? new mongoose.Types.ObjectId(rawSaleId) : undefined,
     });
@@ -1297,32 +1494,12 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       userId: user.userId
     });
 
-    // If depositAmount > 0, record in rentaldeposits (ledger)
+    // If depositAmount > 0, record in rentaldeposits (ledger) — idempotent, session-aware
     if (payment.depositAmount && payment.depositAmount > 0) {
-      const { RentalDeposit } = await import('../models/rentalDeposit');
-      const deposit = new RentalDeposit({
-        propertyId: payment.propertyId,
-        agentId: payment.agentId,
-        companyId: payment.companyId,
-        tenantId: payment.tenantId,
-        depositAmount: payment.depositAmount,
-        depositDate: payment.paymentDate,
-        paymentId: payment._id,
-        type: 'payment',
-        referenceNumber: payment.referenceNumber,
-        notes: notes || '',
-        processedBy: payment.processedBy,
-        paymentMethod
-      } as any);
-      await deposit.save(session ? { session } : undefined);
+      await ensureDepositLedgerFromPayment(payment, session);
     }
 
-    if (!payment.isProvisional) {
-      const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: user.userId });
-      if (postResult.status === 'partial' || postResult.status === 'failed') {
-        console.warn('Payment accounting post incomplete (accountant create)', postResult);
-      }
-    }
+    // Accounting is posted once after the Payment commit. Do not post inside this transaction.
 
     // Notify the primary agent (and split participants) when a completed sale payment is created
     try {
@@ -1413,7 +1590,14 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
 
     const result: CreateResult = await performCreate(currentUser, session || undefined);
     if ('error' in result && result.error) {
-      return res.status(result.error.status).json({ message: result.error.message });
+      return res.status(result.error.status).json({
+        status: 'error',
+        success: false,
+        message: result.error.message,
+        ...(result.error.code ? { code: result.error.code } : {}),
+        ...(result.error.missing ? { missing: result.error.missing } : {}),
+        ...(result.error.mismatches ? { mismatches: result.error.mismatches } : {})
+      });
     }
 
     if (useTransaction && session) {
@@ -1421,17 +1605,28 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     }
 
     if ('payment' in result) {
+      let accountingReceipt: { accountingComplete: boolean; accountingStatus: string } | undefined;
       if ((result.payment as any)?.status === 'completed' && !(result.payment as any)?.isProvisional) {
-        await postPaymentAccounting(String((result.payment as any)._id), { createdBy: currentUser.userId });
+        accountingReceipt = await ensurePaymentAccountingPosted(String((result.payment as any)._id), { createdBy: currentUser.userId });
         await emitPaymentConfirmedIfNeeded(result.payment as any, 'payment.create.accountant');
+        if (accountingReceipt?.accountingComplete === true) {
+          void notifyOwnerOfRentPayment(result.payment as any, { accountingComplete: true });
+        }
       }
       return res.status(201).json({
         message: 'Payment processed successfully',
         payment: result.payment,
+        receiptStatus: 'PAYMENT_RECEIVED',
+        accountingComplete: accountingReceipt?.accountingComplete === true,
+        accountingStatus: accountingReceipt?.accountingStatus || 'incomplete',
+        accountingState: accountingReceipt?.accountingComplete ? 'ACCOUNTING_COMPLETE' : 'ACCOUNTING_INCOMPLETE'
       });
     }
     return res.status(500).json({ message: 'Unknown error creating payment' });
   } catch (error: any) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode || 400).json({ message: error.message, code: 'VAT_RATE_UNAVAILABLE' });
+    }
     if (useTransaction && session) {
       try { await session.abortTransaction(); } catch {}
     }
@@ -1440,16 +1635,31 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       try {
         const result: CreateResult = await performCreate(currentUser);
         if ('error' in result && result.error) {
-          return res.status(result.error.status).json({ message: result.error.message });
+          return res.status(result.error.status).json({
+            status: 'error',
+            success: false,
+            message: result.error.message,
+            ...(result.error.code ? { code: result.error.code } : {}),
+            ...(result.error.missing ? { missing: result.error.missing } : {}),
+        ...(result.error.mismatches ? { mismatches: result.error.mismatches } : {})
+          });
         }
         if ('payment' in result) {
+          let accountingReceipt: { accountingComplete: boolean; accountingStatus: string } | undefined;
           if ((result.payment as any)?.status === 'completed' && !(result.payment as any)?.isProvisional) {
-            await postPaymentAccounting(String((result.payment as any)._id), { createdBy: currentUser.userId });
+            accountingReceipt = await ensurePaymentAccountingPosted(String((result.payment as any)._id), { createdBy: currentUser.userId });
             await emitPaymentConfirmedIfNeeded(result.payment as any, 'payment.create.accountant');
+            if (accountingReceipt?.accountingComplete === true) {
+          void notifyOwnerOfRentPayment(result.payment as any, { accountingComplete: true });
+        }
           }
           return res.status(201).json({
             message: 'Payment processed successfully',
             payment: result.payment,
+            receiptStatus: 'PAYMENT_RECEIVED',
+            accountingComplete: accountingReceipt?.accountingComplete === true,
+            accountingStatus: accountingReceipt?.accountingStatus || 'incomplete',
+            accountingState: accountingReceipt?.accountingComplete ? 'ACCOUNTING_COMPLETE' : 'ACCOUNTING_INCOMPLETE'
           });
         }
         return res.status(500).json({ message: 'Unknown error creating payment' });
@@ -1508,16 +1718,55 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       applyVatOnCommission,
       vatOnCommissionRate
     } = req.body as any;
-    const normalizedVatIncluded = Boolean(vatIncluded);
-    const saleVatRate = Math.max(0, Math.min(1, Number(vatRate ?? 0.155)));
+    const saleVatPolicy = await resolveSaleVatPolicy({
+      companyId: String(user.companyId),
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      vatIncludedRequested: Boolean(vatIncluded)
+    });
+    const normalizedVatIncluded = Boolean(vatIncluded) && saleVatPolicy.apply;
+    const blockedSaleVat = centralVatRateBlock(saleVatPolicy);
+    if (blockedSaleVat) {
+      return res.status(400).json({ message: blockedSaleVat.message, code: blockedSaleVat.code });
+    }
+    const saleVatRate = saleVatPolicy.apply ? saleVatPolicy.vatRate : 0;
+    if (saleVatPolicy.reviewRequired && saleVatPolicy.reviewReason) {
+      await openReview({
+        companyId: String(user.companyId),
+        kind: saleVatPolicy.reviewReason,
+        title: 'Sale VAT applicability requires review',
+        detail: saleVatPolicy.reason
+      });
+    }
     const normalizedApplyVatOnCommission = Boolean(applyVatOnCommission);
     const grossAmount = Number(amount || 0);
-    const vatAmount = normalizedVatIncluded ? Number((grossAmount - (grossAmount / (1 + saleVatRate))).toFixed(2)) : 0;
+    const vatAmount = normalizedVatIncluded && saleVatRate > 0
+      ? Number((grossAmount - (grossAmount / (1 + saleVatRate))).toFixed(2))
+      : 0;
     const taxableAmountForAllocation = Number((grossAmount - vatAmount).toFixed(2));
 
 
     if (!amount || !paymentDate || !paymentMethod) {
       return res.status(400).json({ message: 'Missing required fields: amount, paymentDate, paymentMethod' });
+    }
+
+    const headerKey = (req.headers['idempotency-key'] || req.headers['Idempotency-Key']) as string | undefined;
+    if (headerKey && !(req.body as any).idempotencyKey) {
+      (req.body as any).idempotencyKey = String(headerKey);
+    }
+    const salesIdempotencyKey = (req.body as any).idempotencyKey
+      ? String((req.body as any).idempotencyKey)
+      : undefined;
+    if (salesIdempotencyKey) {
+      const existingSalesPayment = await Payment.findOne({
+        companyId: new mongoose.Types.ObjectId(user.companyId),
+        idempotencyKey: salesIdempotencyKey
+      }).lean();
+      if (existingSalesPayment) {
+        return res.status(200).json({
+          message: 'Sales payment processed successfully',
+          payment: existingSalesPayment
+        });
+      }
     }
 
     const toObjectId = (v?: string) => (v && mongoose.Types.ObjectId.isValid(v) ? new mongoose.Types.ObjectId(v) : undefined);
@@ -1611,21 +1860,22 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
     }
 
     let normalizedVatOnCommissionRate = 0;
-    // Apply VAT on commission only when selected for this sale.
     {
-      let vatRate = 0;
-      const explicit = Number(vatOnCommissionRate);
-      if (normalizedApplyVatOnCommission) {
-        if (Number.isFinite(explicit) && explicit >= 0) {
-          vatRate = Math.max(0, Math.min(1, explicit));
-        } else {
-          const lookedUp = await getVatRateForDate(user.companyId);
-          vatRate = lookedUp.decimal;
-        }
+      const commissionVatPolicy = await resolveCommissionVatPolicy({
+        companyId: String(user.companyId),
+        paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+        requestedVatOnCommission: normalizedApplyVatOnCommission,
+        requestedTreatment: 'exclusive'
+      });
+      const blockedCommissionVat = centralVatRateBlock(commissionVatPolicy);
+      if (blockedCommissionVat) {
+        return res.status(400).json({ message: blockedCommissionVat.message, code: blockedCommissionVat.code });
       }
-      normalizedVatOnCommissionRate = normalizedApplyVatOnCommission ? vatRate : 0;
+      const applyCommissionVat = Boolean(normalizedApplyVatOnCommission) && commissionVatPolicy.apply;
+      const vatRate = applyCommissionVat ? commissionVatPolicy.vatRate : 0;
+      normalizedVatOnCommissionRate = vatRate;
       const commissionBase = Number(((finalCommissionDetails as any)?.totalCommission) || 0);
-      const vatOnCommission = normalizedApplyVatOnCommission ? roundMoney(commissionBase * vatRate) : 0;
+      const vatOnCommission = applyCommissionVat ? roundMoney(commissionBase * vatRate) : 0;
       (finalCommissionDetails as any).vatOnCommission = vatOnCommission;
       (finalCommissionDetails as any).ownerAmount = roundMoney(taxableAmountForAllocation - commissionBase - vatOnCommission);
     }
@@ -1694,16 +1944,52 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     } catch { /* no-op */ }
 
+    const saleCompleteness = validateSalePaymentCompleteness({
+      amount: grossAmount,
+      commissionDetails: finalCommissionDetails
+    });
+    if (!saleCompleteness.ok) {
+      return res.status(400).json(salePaymentIncompleteResponse(saleCompleteness.missing));
+    }
+
+    if (!propId && !devId && !unitId) {
+      return res.status(400).json({
+        code: 'SALE_CONTEXT_REQUIRED',
+        message: 'A sale payment requires a property, development, or unit.'
+      });
+    }
+    if (propId) {
+      const saleProperty = await Property.findOne({
+        _id: propId,
+        companyId: new mongoose.Types.ObjectId(user.companyId)
+      }).select('rentalType').lean();
+      if (!saleProperty) {
+        return res.status(400).json({ message: 'Property not found for this sale payment' });
+      }
+      try {
+        resolveCreateTransactionDomain({
+          paymentType: 'sale',
+          entity: { kind: 'property', rentalType: (saleProperty as any).rentalType }
+        });
+      } catch (domainError) {
+        if (domainError instanceof AccountingClassificationConflictError) {
+          return res.status(409).json(domainError.toBody());
+        }
+        throw domainError;
+      }
+    }
+
     const jsDate = new Date(paymentDate);
     const periodMonth = Number(rentalPeriodMonth ?? (jsDate.getMonth() + 1));
     const periodYear = Number(rentalPeriodYear ?? jsDate.getFullYear());
 
     const payment = new Payment({
       paymentType: 'sale',
+      transactionDomain: 'SALE',
       saleMode: (saleMode === 'installment' ? 'installment' : 'quick'),
       propertyType: 'residential',
-      propertyId: propId || new mongoose.Types.ObjectId(),
-      tenantId: tenId || new mongoose.Types.ObjectId(),
+      propertyId: propId,
+      tenantId: tenId,
       agentId: agId,
       companyId: new mongoose.Types.ObjectId(user.companyId),
       paymentDate: new Date(paymentDate),
@@ -1720,6 +2006,7 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       applyVatOnCommission: normalizedApplyVatOnCommission,
       vatOnCommissionRate: normalizedVatOnCommissionRate,
       status: 'completed',
+      ...initialAccountingIntegrityFields({ status: 'completed' }),
       currency: currency || 'USD',
       rentalPeriodMonth: periodMonth,
       rentalPeriodYear: periodYear,
@@ -1731,7 +2018,8 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       // Sales linkage
       saleId: saleObjId,
       developmentId: devId,
-      developmentUnitId: unitId
+      developmentUnitId: unitId,
+      idempotencyKey: salesIdempotencyKey
     });
 
     // Critical writes: keep payment insert and company revenue increment atomic where possible.
@@ -1747,6 +2035,18 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       if (usedTransaction && session) {
         try { await session.abortTransaction(); } catch {}
       }
+      if (txErr?.code === 11000 && salesIdempotencyKey) {
+        const existingDup = await Payment.findOne({
+          companyId: new mongoose.Types.ObjectId(user.companyId),
+          idempotencyKey: salesIdempotencyKey
+        }).lean();
+        if (existingDup) {
+          return res.status(200).json({
+            message: 'Sales payment processed successfully',
+            payment: existingDup
+          });
+        }
+      }
       // Some deployments do not support transactions; fallback to non-transactional writes.
       if (txErr?.code === 20 || /Transaction numbers are only allowed/.test(String(txErr?.message || ''))) {
         await payment.save();
@@ -1759,9 +2059,9 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       }
     }
 
-    const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: user.userId });
-    if (postResult.status === 'partial' || postResult.status === 'failed') {
-      console.warn('Payment accounting post incomplete (sales create)', postResult);
+    const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: user.userId });
+    if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
+      console.warn('Payment accounting post incomplete (sales create)', postResult.recon.missing);
     }
     await emitPaymentConfirmedIfNeeded(payment, 'payment.create.sales');
 
@@ -1796,7 +2096,14 @@ export const createSalesPaymentAccountant = async (req: Request, res: Response) 
       console.warn('Non-fatal: failed to create agent/split notifications for sale payment', e);
     }
 
-    return res.status(201).json({ message: 'Sales payment processed successfully', payment });
+    return res.status(201).json({
+      message: 'Sales payment processed successfully',
+      payment,
+      receiptStatus: 'PAYMENT_RECEIVED',
+      accountingComplete: postResult.accountingComplete,
+      accountingStatus: postResult.accountingStatus,
+      accountingState: postResult.accountingComplete ? 'ACCOUNTING_COMPLETE' : 'ACCOUNTING_INCOMPLETE'
+    });
   } catch (error: any) {
     console.error('Error creating sales payment:', error);
     return res.status(500).json({ message: 'Failed to process sales payment', error: error?.message || 'Unknown error' });
@@ -1817,11 +2124,19 @@ export const updatePayment = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Payment not found' });
     }
 
+    if (isCompletedFinancialPayment(payment)) {
+      return res.status(409).json({ message: COMPLETED_PAYMENT_IMMUTABLE_MESSAGE });
+    }
     if (String((payment as any).postingStatus || '') !== 'draft') {
       return res.status(409).json({ message: 'Only draft payments can be edited. Reverse posted payments instead.' });
     }
     if (isAccountingPeriodLocked(payment.paymentDate)) {
       return res.status(409).json({ message: 'Accounting period is locked. Post an adjustment entry instead.' });
+    }
+    try {
+      await assertVatPeriodOpen(String(req.user.companyId), new Date(payment.paymentDate as any));
+    } catch (error: any) {
+      return res.status(error?.statusCode || 409).json({ message: error?.message || 'VAT period is locked.' });
     }
 
     const before = paymentAuditSnapshot(payment);
@@ -1845,7 +2160,7 @@ export const updatePayment = async (req: Request, res: Response) => {
         Number(req.body?.commissionPercent) > 0
           ? Number(req.body?.commissionPercent)
           : (() => {
-              const saleVatRate = Math.max(0, Math.min(1, Number((payment as any).vatRate ?? 0.155)));
+              const saleVatRate = Math.max(0, Math.min(1, Number((payment as any).vatRate || 0)));
               const saleVatAmount = Boolean((payment as any).vatIncluded)
                 ? Number((grossAmount - grossAmount / (1 + saleVatRate)).toFixed(2))
                 : 0;
@@ -1859,7 +2174,7 @@ export const updatePayment = async (req: Request, res: Response) => {
         companyId: String((payment as any).companyId || req.user.companyId),
         propertyId: (payment as any).propertyId,
         vatIncluded: Boolean((payment as any).vatIncluded),
-        vatRate: Number((payment as any).vatRate ?? 0.155),
+        vatRate: Number((payment as any).vatRate || 0),
         applyVatOnCommission: Boolean((payment as any).applyVatOnCommission),
         vatOnCommissionRate: Number((payment as any).vatOnCommissionRate ?? 0),
         existingSplit: rawDetails?.agentSplit,
@@ -1869,8 +2184,20 @@ export const updatePayment = async (req: Request, res: Response) => {
     }
 
     const nextStatus = String((payment as any).status || '').toLowerCase();
+    if (String((payment as any).paymentType || '') === 'sale' && nextStatus === 'completed') {
+      const saleCompleteness = validateSalePaymentCompleteness({
+        amount: (payment as any).amount,
+        commissionDetails: (payment as any).commissionDetails
+      });
+      if (!saleCompleteness.ok) {
+        return res.status(400).json(salePaymentIncompleteResponse(saleCompleteness.missing));
+      }
+    }
     if (nextStatus === 'completed') {
       (payment as any).postingStatus = 'posted';
+      if (previousStatus !== 'completed') {
+        activateAccountingTrackingForCompletion(payment);
+      }
     } else if (nextStatus === 'pending') {
       (payment as any).postingStatus = 'draft';
     } else if (nextStatus === 'failed') {
@@ -1879,9 +2206,9 @@ export const updatePayment = async (req: Request, res: Response) => {
     await payment.save();
 
     if (previousStatus !== 'completed' && nextStatus === 'completed') {
-      const postResult = await postPaymentAccounting(String(payment._id), { createdBy: req.user.userId });
-      if (postResult.status === 'partial' || postResult.status === 'failed') {
-        console.warn('Payment accounting post incomplete (update complete)', postResult);
+      const postResult = await ensurePaymentAccountingPosted(String(payment._id), { createdBy: req.user.userId });
+      if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
+        console.warn('Payment accounting post incomplete (update complete)', postResult.recon.missing);
       }
       await emitPaymentConfirmedIfNeeded(payment, 'payment.update');
       await logPaymentAudit({
@@ -2229,16 +2556,9 @@ export const getPaymentDetails = async (req: Request, res: Response) => {
       .populate('agentId', 'name')
       .populate('processedBy', 'name');
 
-    if (!payment) {
+    if (!payment || !(await paymentRecordVisible(req, payment))) {
       return res.status(404).json({
         message: 'Payment not found',
-      });
-    }
-
-    // Check if user has access to this payment
-    if (payment.companyId.toString() !== req.user.companyId) {
-      return res.status(403).json({
-        message: 'Access denied',
       });
     }
 
@@ -2248,6 +2568,80 @@ export const getPaymentDetails = async (req: Request, res: Response) => {
     res.status(500).json({
       message: 'Failed to fetch payment details',
       error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+};
+
+export const getPaymentAccountingReconciliation = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+  try {
+    const payment = await Payment.findById(req.params.id)
+      .select('_id companyId tenantId propertyId leaseId paymentType status postingStatus accountingComplete accountingStatus referenceNumber currency')
+      .lean();
+    if (!payment || !(await paymentRecordVisible(req, payment as any))) return res.status(404).json({ message: 'Payment not found' });
+    const recon = await reconcilePayment(String(payment._id));
+    const { loadLegacyIntroductionContextRisk } = await import('../services/legacyIntroductionRisk');
+    const { buildPaymentIntegrityDiagnostic, detectCurrencyMismatch } = await import('../services/paymentIntegrityDiagnostic');
+    let legacyIntroductionRisk = null;
+    try {
+      legacyIntroductionRisk = await loadLegacyIntroductionContextRisk({
+        companyId: (payment as any).companyId,
+        tenantId: (payment as any).tenantId,
+        propertyId: (payment as any).propertyId,
+        leaseId: (payment as any).leaseId
+      });
+    } catch {
+      legacyIntroductionRisk = null;
+    }
+    return res.json({
+      ...recon,
+      diagnostic: buildPaymentIntegrityDiagnostic({
+        payment,
+        recon,
+        legacyIntroductionRisk,
+        currencyFlag: detectCurrencyMismatch({
+          paymentCurrency: (payment as any).currency
+        })
+      })
+    });
+  } catch (error) {
+    console.error('Error reconciling payment accounting:', error);
+    return res.status(500).json({ message: 'Failed to reconcile payment accounting' });
+  }
+};
+
+export const repairPaymentAccountingExplicit = async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+  try {
+    const payment = await Payment.findById(req.params.id).select('_id companyId propertyId').lean();
+    if (!payment) return res.status(404).json({ message: 'Payment not found' });
+    if (String((payment as any).companyId) !== String(req.user.companyId)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    if ((payment as any).propertyId && !(await callerCanAccessProperty(req, String((payment as any).propertyId)))) {
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+    const dryRun = !(req.body?.dryRun === false && req.body?.confirm === true);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (!dryRun && !reason) {
+      return res.status(400).json({ message: 'Manual accounting repair requires confirm=true, dryRun=false, and a non-empty reason' });
+    }
+    const result = await repairPaymentAccounting(String(payment._id), {
+      dryRun,
+      reason,
+      userId: req.user.userId,
+      createdBy: req.user.userId
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error('Error repairing payment accounting:', error);
+    return res.status(500).json({
+      message: 'Failed to repair payment accounting',
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
@@ -2269,25 +2663,28 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
 
     const payment = await Payment.findById(req.params.id);
 
-    if (!payment) {
+    if (!payment || !(await paymentRecordVisible(req, payment))) {
       return res.status(404).json({
         message: 'Payment not found',
-      });
-    }
-
-    // Check if user has access to this payment
-    if (payment.companyId.toString() !== req.user.companyId) {
-      return res.status(403).json({
-        message: 'Access denied',
       });
     }
 
     if (isAccountingPeriodLocked(payment.paymentDate) && status !== 'reversed') {
       return res.status(409).json({ message: 'Accounting period is locked. Post an adjustment entry instead.' });
     }
+    if (status !== 'reversed') {
+      try {
+        await assertVatPeriodOpen(String(req.user.companyId), new Date(payment.paymentDate as any), { allowAdjustment: false });
+      } catch (error: any) {
+        return res.status(error?.statusCode || 409).json({ message: error?.message || 'VAT period is locked.' });
+      }
+    }
 
     if (status === 'reversed') {
       return res.status(400).json({ message: 'Use /payments/:id/reverse endpoint for reversals.' });
+    }
+    if (isCompletedFinancialPayment(payment) && String(status) !== 'completed') {
+      return res.status(409).json({ message: COMPLETED_PAYMENT_IMMUTABLE_MESSAGE });
     }
 
     const previousStatus = payment.status;
@@ -2296,6 +2693,9 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
     payment.status = status;
     if (status === 'completed') {
       (payment as any).postingStatus = 'posted';
+      if (previousStatus !== 'completed') {
+        activateAccountingTrackingForCompletion(payment);
+      }
     } else if (status === 'pending') {
       (payment as any).postingStatus = 'draft';
     } else if (status === 'failed') {
@@ -2307,9 +2707,9 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
     await payment.save();
 
     if (previousStatus !== 'completed' && status === 'completed') {
-      const postResult = await postPaymentAccounting(String(payment._id), { createdBy: req.user.userId });
-      if (postResult.status === 'partial' || postResult.status === 'failed') {
-        console.warn('Payment accounting post incomplete (status update)', postResult);
+      const postResult = await ensurePaymentAccountingPosted(String(payment._id), { createdBy: req.user.userId });
+      if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
+        console.warn('Payment accounting post incomplete (status update)', postResult.recon.missing);
       }
       await emitPaymentConfirmedIfNeeded(payment, 'payment.status.updated');
       await logPaymentAudit({
@@ -2347,6 +2747,8 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
 };
 
 export const reversePayment = async (req: Request, res: Response) => {
+  // Correction foundation: Original Payment → Reversal Payment → Correction draft.
+  // Do not UPDATE the original completed Payment amount.
   if (!req.user) {
     return res.status(401).json({ message: 'Unauthorized' });
   }
@@ -2381,11 +2783,23 @@ export const reversePayment = async (req: Request, res: Response) => {
       if (!isPosted) {
         throw new AppError('Only posted payments can be reversed.', 409);
       }
-      if (String((original as any).postingStatus || '') === 'reversed' || String(original.status || '') === 'reversed') {
-        throw new AppError('Payment is already reversed.', 409);
-      }
-      if ((original as any).reversalPaymentId) {
-        throw new AppError('Payment already has a reversal entry.', 409);
+      const legacyReversed =
+        String(original.status || '') === 'reversed' || String((original as any).postingStatus || '') === 'reversed';
+      if ((original as any).reversalPaymentId || String((original as any).reversalState || '') === 'reversed' || legacyReversed) {
+        const existingReversal = (original as any).reversalPaymentId
+          ? await Payment.findById((original as any).reversalPaymentId)
+          : await Payment.findOne({ reversalOfPaymentId: original._id, amount: { $lt: 0 } });
+        if (!existingReversal) {
+          throw new AppError('Payment is already reversed.', 409);
+        }
+        resultPayload = {
+          original,
+          reversal: existingReversal,
+          correctedDraft: null,
+          alreadyReversed: true,
+          skipAccounting: legacyReversed && String((original as any).reversalState || '') !== 'reversal_incomplete'
+        };
+        return;
       }
 
       // Atomic guard to prevent duplicate reversals under concurrent requests.
@@ -2395,26 +2809,76 @@ export const reversePayment = async (req: Request, res: Response) => {
           _id: original._id,
           companyId: req.user!.companyId,
           reversalPaymentId: { $exists: false },
+          reversalState: { $nin: ['reversal_in_progress', 'reversal_incomplete', 'reversed'] },
           postingStatus: 'posted',
-          status: { $ne: 'reversed' }
+          status: 'completed'
         },
         {
           $set: {
-            postingStatus: 'voided',
-            voidReason: 'reversal_in_progress'
+            reversalState: 'reversal_in_progress',
+            reversalLockAt: new Date(),
+            reversalLockBy: new mongoose.Types.ObjectId(req.user!.userId)
           }
         },
         { new: true }
       );
-      const lockedOriginal = dbSession ? await lockedQuery.session(dbSession) : await lockedQuery;
+      let lockedOriginal = dbSession ? await lockedQuery.session(dbSession) : await lockedQuery;
       if (!lockedOriginal) {
-        throw new AppError('Payment is no longer eligible for reversal (possibly already reversed).', 409);
+        const existingReversalQuery = Payment.findOne({
+          reversalOfPaymentId: original._id,
+          companyId: req.user!.companyId,
+          amount: { $lt: 0 }
+        });
+        const existingReversal = dbSession ? await existingReversalQuery.session(dbSession) : await existingReversalQuery;
+        if (existingReversal) {
+          await Payment.updateOne(
+            { _id: original._id, reversalPaymentId: { $exists: false } },
+            { $set: { reversalPaymentId: existingReversal._id, reversalState: 'reversal_in_progress' } },
+            dbSession ? { session: dbSession } : undefined
+          );
+          const linkedQuery = Payment.findById(original._id);
+          const linked = dbSession ? await linkedQuery.session(dbSession) : await linkedQuery;
+          resultPayload = { original: linked, reversal: existingReversal, correctedDraft: null, alreadyReversed: true };
+          return;
+        }
+        const staleBefore = new Date(Date.now() - 60 * 1000);
+        const takeoverQuery = Payment.findOneAndUpdate(
+          {
+            _id: original._id,
+            companyId: req.user!.companyId,
+            reversalPaymentId: { $exists: false },
+            reversalState: 'reversal_in_progress',
+            $or: [
+              { reversalLockAt: { $lt: staleBefore } },
+              { reversalLockAt: { $exists: false }, updatedAt: { $lt: staleBefore } }
+            ]
+          },
+          {
+            $set: {
+              reversalState: 'reversal_in_progress',
+              reversalLockAt: new Date(),
+              reversalLockBy: new mongoose.Types.ObjectId(req.user!.userId)
+            }
+          },
+          { new: true }
+        );
+        lockedOriginal = dbSession ? await takeoverQuery.session(dbSession) : await takeoverQuery;
+        if (!lockedOriginal) {
+          throw new AppError('Payment is no longer eligible for reversal (possibly already reversed).', 409);
+        }
       }
+
+      throwOnceIfArmed(
+        String(lockedOriginal._id),
+        `${String((lockedOriginal as any).notes || '')} ${reason}`,
+        'PHASE28_FAIL_BEFORE_REVERSAL_SAVE'
+      );
 
       const before = paymentAuditSnapshot(original);
 
       const reversal = new Payment({
         paymentType: lockedOriginal.paymentType,
+        transactionDomain: historicalTransactionDomain(lockedOriginal) || undefined,
         saleMode: (lockedOriginal as any).saleMode,
         propertyType: lockedOriginal.propertyType,
         propertyId: lockedOriginal.propertyId,
@@ -2477,7 +2941,7 @@ export const reversePayment = async (req: Request, res: Response) => {
         companyId: String(lockedOriginal.companyId || ''),
         propertyId: (lockedOriginal as any).propertyId,
         vatIncluded: Boolean((lockedOriginal as any).vatIncluded),
-        vatRate: Number((lockedOriginal as any).vatRate ?? 0.155),
+        vatRate: Number((lockedOriginal as any).vatRate || 0),
         applyVatOnCommission: Boolean((lockedOriginal as any).applyVatOnCommission),
         vatOnCommissionRate: Number((lockedOriginal as any).vatOnCommissionRate ?? 0),
         existingSplit: (lockedOriginal as any)?.commissionDetails?.agentSplit
@@ -2486,6 +2950,7 @@ export const reversePayment = async (req: Request, res: Response) => {
       // Create a draft correction copy for manual accountant adjustments.
       const correctedDraft = new Payment({
         paymentType: lockedOriginal.paymentType,
+        transactionDomain: historicalTransactionDomain(lockedOriginal) || undefined,
         saleMode: (lockedOriginal as any).saleMode,
         propertyType: lockedOriginal.propertyType,
         propertyId: lockedOriginal.propertyId,
@@ -2532,13 +2997,12 @@ export const reversePayment = async (req: Request, res: Response) => {
         { _id: lockedOriginal._id },
         {
           $set: {
-            status: 'reversed',
-            postingStatus: 'reversed',
             reversedAt: new Date(),
             reversedBy: new mongoose.Types.ObjectId(req.user!.userId),
             reversalReason: reason,
             reversalPaymentId: reversal._id,
-            correctedPaymentId: correctedDraft._id
+            correctedPaymentId: correctedDraft._id,
+            reversalState: 'reversal_in_progress'
           }
         },
         dbSession ? { session: dbSession } : undefined
@@ -2599,7 +3063,7 @@ export const reversePayment = async (req: Request, res: Response) => {
     const original = resultPayload?.original as any;
     const reversal = resultPayload?.reversal as any;
     const propagationWarnings: string[] = [];
-    if (original) {
+    if (original && !resultPayload?.skipAccounting) {
       const reversalResult = await reversePaymentAccounting(String(original._id), {
         processedBy: req.user.userId,
         reason,
@@ -2611,7 +3075,8 @@ export const reversePayment = async (req: Request, res: Response) => {
         }
         console.error('Payment reversal accounting incomplete', reversalResult);
       }
-      try {
+      const reversalSettled = reversalResult.status === 'reversed' || reversalResult.status === 'already_reversed';
+      if (reversalSettled) try {
         await emitEvent('payment.reversed', {
           eventId: `payment.reversed:${String(original._id)}`,
           paymentId: String(original._id),
@@ -2803,7 +3268,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
 
     // Get lease details to extract property and tenant information
     const lease = await Lease.findOne({ _id: leaseId, companyId });
-    if (!lease) {
+    if (!lease || !(await callerCanAccessProperty(req, String(lease.propertyId)))) {
       return res.status(404).json({
         status: 'error',
         message: 'Lease not found',
@@ -2862,17 +3327,82 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       }
     }
 
-    // Calculate commission based on property commission percentage
-    const publicCommissionResult = await CommissionService.calculateForProperty({
-      companyId: lease.companyId,
-      grossRent: amount,
-      levy: 0,
-      commissionPercentage: property.commission || 0,
-      vatOnCommission: Boolean((property as any)?.vatOnCommission),
-      vatTreatment: (property as any)?.vatCommissionTreatment,
-      paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+    const propertyVatRequested = Boolean((property as any)?.vatOnCommission);
+    const isIntroductionPayment = String((property as any)?.rentalType || '').toLowerCase() === 'introduction';
+    const commissionVatPolicy = await resolveCommissionVatPolicy({
+      companyId: String(lease.companyId),
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      property: {
+        vatOnCommission: propertyVatRequested,
+        vatCommissionTreatment: (property as any)?.vatCommissionTreatment
+      },
+      requestedVatOnCommission: propertyVatRequested,
+      requestedTreatment: (property as any)?.vatCommissionTreatment,
+      commissionType: isIntroductionPayment ? 'introduction' : 'management'
     });
-    const publicCommissionDetails = applyLevyPassThroughToSnapshot(publicCommissionResult, amount, 0);
+    const blockedVatRate = centralVatRateBlock(commissionVatPolicy);
+    if (blockedVatRate) {
+      return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+    }
+    const commissionVat = commissionVatFlagsFromPolicy(commissionVatPolicy);
+    if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+      await openReview({
+        companyId: String(lease.companyId),
+        kind: commissionVatPolicy.reviewReason,
+        title: 'VAT on commission requires review',
+        detail: commissionVatPolicy.reason,
+        propertyId: String(lease.propertyId)
+      });
+    }
+
+    // Calculate commission based on property commission percentage
+    let publicCommissionResult;
+    let publicCommissionDetails;
+    if (isIntroductionPayment) {
+      const prepared = await prepareIntroductionRentalCommission({
+        companyId: lease.companyId,
+        propertyId: lease.propertyId,
+        tenantId: lease.tenantId,
+        leaseId: lease._id,
+        rentAllocated: Number(amount || 0),
+        levyAllocated: 0,
+        vatOnCommission: commissionVat.vatOnCommission,
+        vatTreatment: commissionVat.vatTreatment,
+        vatRate: commissionVat.vatRate,
+        paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+        propertyRent: Number(rent || 0),
+        rentUsed: Number(rent || 0)
+      });
+      if (!prepared.ok) {
+        return res.status(400).json(introductionContextErrorResponse(prepared as IntroductionContextError));
+      }
+      publicCommissionResult = prepared.result;
+      publicCommissionDetails = prepared.snapshot;
+    } else {
+      publicCommissionResult = await CommissionService.calculateForProperty({
+        companyId: lease.companyId,
+        grossRent: amount,
+        levy: 0,
+        commissionPercentage: property.commission || 0,
+        vatOnCommission: commissionVat.vatOnCommission,
+        vatTreatment: commissionVat.vatTreatment,
+        vatRate: commissionVat.vatRate,
+        paymentDate: paymentDate ? new Date(paymentDate) : new Date()
+      });
+      publicCommissionDetails = applyLevyPassThroughToSnapshot(publicCommissionResult, amount, 0);
+    }
+
+    try {
+      resolveCreateTransactionDomain({
+        paymentType: 'rental',
+        entity: { kind: 'property', rentalType: (property as any)?.rentalType }
+      });
+    } catch (domainError) {
+      if (domainError instanceof AccountingClassificationConflictError) {
+        return res.status(409).json(domainError.toBody());
+      }
+      throw domainError;
+    }
 
     // Create payment record
     const payment = new Payment({
@@ -2880,8 +3410,10 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       paymentDate,
       paymentMethod,
       status,
-      companyId: companyId || lease.companyId,
+      ...initialAccountingIntegrityFields({ status }),
+      companyId: req.user.companyId,
       paymentType: 'rental',
+      transactionDomain: 'RENTAL',
       propertyType: 'residential', // Default value
       propertyId: lease.propertyId,
       tenantId: lease.tenantId,
@@ -2900,6 +3432,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       vatOnCommissionRate: publicCommissionResult.vatRate || 0,
       vatCommissionTreatment: publicCommissionResult.vatTreatment,
       rentUsed: rent, // Store the rent used for this payment
+      leaseId: lease._id,
       idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined,
     });
 
@@ -2909,16 +3442,14 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
 
     // If depositAmount > 0, record in rentaldeposits
     if (payment.depositAmount && payment.depositAmount > 0) {
-      const { RentalDeposit } = require('../models/rentalDeposit');
-      await RentalDeposit.create({
-        propertyId: payment.propertyId,
-        agentId: payment.agentId,
-        companyId: payment.companyId,
-        tenantId: payment.tenantId,
-        depositAmount: payment.depositAmount,
-        depositDate: payment.paymentDate,
-        paymentId: payment._id,
-      });
+      await ensureDepositLedgerFromPayment(payment);
+    }
+
+    if (String(payment.status || '') === 'completed') {
+      const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user?.userId });
+      if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
+        console.warn('Payment accounting post incomplete (public create)', postResult.recon.missing);
+      }
     }
 
     if (process.env.NODE_ENV !== 'production') {
@@ -3480,6 +4011,33 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     }
 
     const commissionPercent = typeof overrideCommissionPercent === 'number' ? overrideCommissionPercent : (property.commission || 0);
+    const propertyVatRequested = Boolean((property as any)?.vatOnCommission);
+    const applyIntroductionRule = (relationshipType === 'introduction') || (property.rentalType === 'introduction');
+    const commissionVatPolicy = await resolveCommissionVatPolicy({
+      companyId: String(req.user.companyId),
+      paymentDate: payment.paymentDate ? new Date(payment.paymentDate) : new Date(),
+      property: {
+        vatOnCommission: propertyVatRequested,
+        vatCommissionTreatment: (property as any)?.vatCommissionTreatment
+      },
+      requestedVatOnCommission: propertyVatRequested,
+      requestedTreatment: (property as any)?.vatCommissionTreatment,
+      commissionType: applyIntroductionRule ? 'introduction' : 'management'
+    });
+    const blockedVatRate = centralVatRateBlock(commissionVatPolicy);
+    if (blockedVatRate) {
+      return res.status(400).json({ message: blockedVatRate.message, code: blockedVatRate.code });
+    }
+    const commissionVat = commissionVatFlagsFromPolicy(commissionVatPolicy);
+    if (commissionVatPolicy.reviewRequired && commissionVatPolicy.reviewReason) {
+      await openReview({
+        companyId: String(req.user.companyId),
+        kind: commissionVatPolicy.reviewReason,
+        title: 'VAT on commission requires review',
+        detail: commissionVatPolicy.reason,
+        propertyId: String(propertyId)
+      });
+    }
     // Apply rules based on relationshipType: 'introduction' → single-month once; 'management' → standard on full amount
     let finalCommission: any = {
       totalCommission: 0,
@@ -3489,41 +4047,28 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
       ownerAmount: payment.amount || 0
     };
     try {
-      const applyIntroductionRule = (relationshipType === 'introduction') || (property.rentalType === 'introduction');
       if (applyIntroductionRule) {
-        const priorCount = await Payment.countDocuments({
-          companyId: new mongoose.Types.ObjectId(req.user.companyId),
-          paymentType: 'rental',
-          tenantId: new mongoose.Types.ObjectId(tenantId),
-          propertyId: new mongoose.Types.ObjectId(propertyId),
-          status: 'completed',
-          isProvisional: { $ne: true },
-          isInSuspense: { $ne: true },
-          _id: { $ne: new mongoose.Types.ObjectId(payment._id) }
-        });
-        const isFirstCommissionable = priorCount === 0;
         const isDepositOnly = Number(payment.amount || 0) <= 0 && Number(payment.depositAmount || 0) > 0;
-        if (isFirstCommissionable && !isDepositOnly && commissionPercent > 0) {
-          const oneMonthRent = typeof payment.rentUsed === 'number' && payment.rentUsed > 0
-            ? Number(payment.rentUsed)
-            : Number(property.rent || 0);
-          const rentPortion = Math.max(0, Number(payment.amount || 0));
-          const commissionable = oneMonthRent > 0
-            ? Math.min(rentPortion, oneMonthRent)
-            : rentPortion;
-          if (commissionable > 0) {
-            const tmp = await CommissionService.calculateForProperty({
-              companyId: req.user.companyId,
-              grossRent: commissionable,
-              levy: 0,
-              commissionPercentage: Number(commissionPercent),
-              vatOnCommission: Boolean((property as any)?.vatOnCommission),
-              vatTreatment: (property as any)?.vatCommissionTreatment,
-              paymentDate: payment.paymentDate
-            });
-            finalCommission = applyLevyPassThroughToSnapshot(tmp, Number(payment.amount || 0), Number((payment as any).levyAllocated || 0));
+        const prepared = await prepareIntroductionRentalCommission({
+            companyId: String(req.user.companyId),
+            propertyId,
+            tenantId,
+            leaseId: (req.body as any).leaseId || (payment as any).leaseId,
+            rentAllocated: isDepositOnly ? 0 : Math.max(0, Number((payment as any).rentAllocated || payment.amount || 0)),
+            levyAllocated: isDepositOnly ? 0 : Number((payment as any).levyAllocated || 0),
+            vatOnCommission: commissionVat.vatOnCommission,
+            vatTreatment: commissionVat.vatTreatment,
+            vatRate: commissionVat.vatRate,
+            paymentDate: payment.paymentDate,
+            excludePaymentId: payment._id,
+            propertyRent: Number(property.rent || 0),
+            rentUsed: typeof payment.rentUsed === 'number' ? Number(payment.rentUsed) : undefined
+          });
+          if (!prepared.ok) {
+            return res.status(400).json(introductionContextErrorResponse(prepared as IntroductionContextError));
           }
-        }
+          finalCommission = prepared.snapshot;
+          (payment as any).leaseId = new mongoose.Types.ObjectId(prepared.context.leaseId);
       } else {
         // Management or other: standard commission on full amount (advance supported)
         const tmp = await CommissionService.calculateForProperty({
@@ -3531,8 +4076,9 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
           grossRent: Math.max(0, Number((payment as any).rentAllocated || payment.amount || 0)),
           levy: 0,
           commissionPercentage: Number(commissionPercent),
-          vatOnCommission: Boolean((property as any)?.vatOnCommission),
-          vatTreatment: (property as any)?.vatCommissionTreatment,
+          vatOnCommission: commissionVat.vatOnCommission,
+          vatTreatment: commissionVat.vatTreatment,
+          vatRate: commissionVat.vatRate,
           paymentDate: payment.paymentDate
         });
         finalCommission = applyLevyPassThroughToSnapshot(
@@ -3541,7 +4087,8 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
           Number((payment as any).levyAllocated || 0)
         );
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof AppError) throw error;
       finalCommission = {
         totalCommission: 0,
         preaFee: 0,
@@ -3557,7 +4104,7 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
       (payment as any).ownerId = new mongoose.Types.ObjectId(ownerId);
     }
     payment.commissionDetails = finalCommission as any;
-    (payment as any).applyVatOnCommission = Boolean((finalCommission as any)?.vatAmount > 0 || (property as any)?.vatOnCommission);
+    (payment as any).applyVatOnCommission = Boolean((finalCommission as any)?.vatOnCommission && Number((finalCommission as any)?.vatAmount || 0) > 0);
     (payment as any).vatOnCommissionRate = Number((finalCommission as any)?.vatRate || 0);
     (payment as any).vatCommissionTreatment = (finalCommission as any)?.vatTreatment;
     payment.isProvisional = false;
@@ -3566,12 +4113,13 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     payment.provisionalRelationshipType = (relationshipType as any) || payment.provisionalRelationshipType || 'unknown';
     (payment as any).finalizedAt = new Date();
     (payment as any).finalizedBy = new mongoose.Types.ObjectId(req.user.userId);
+    activateAccountingTrackingForCompletion(payment);
 
     await payment.save();
 
-    const postResult = await postPaymentAccounting(payment._id.toString(), { createdBy: req.user.userId });
-    if (postResult.status === 'partial' || postResult.status === 'failed') {
-      console.warn('Payment accounting post incomplete (finalize)', postResult);
+    const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
+    if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
+      console.warn('Payment accounting post incomplete (finalize)', postResult.recon.missing);
     }
 
     await emitPaymentConfirmedIfNeeded(payment, 'payment.finalized');

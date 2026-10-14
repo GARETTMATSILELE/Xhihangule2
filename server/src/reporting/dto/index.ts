@@ -139,6 +139,21 @@ export interface LedgerRowDTO {
   levies?: MoneyAmountDTO;
   ownerAmount?: MoneyAmountDTO;
   vatRate?: number;
+  paymentId?: string;
+  ownerWaterfall?: OwnerWaterfallDTO;
+}
+
+export interface OwnerWaterfallDTO {
+  grossAmount: MoneyAmountDTO;
+  commissionAmount: MoneyAmountDTO;
+  levyAmount: MoneyAmountDTO;
+  vatOnCommission: MoneyAmountDTO;
+  vatRate?: number;
+  netOwnerAmount: MoneyAmountDTO;
+  recordedOwnerAmount?: MoneyAmountDTO;
+  difference: MoneyAmountDTO;
+  reviewRequired: boolean;
+  formula: string;
 }
 
 export interface StatementSummaryDTO {
@@ -222,6 +237,8 @@ export interface OwnerStatementDTO {
     address?: string;
   };
   statementNumber: string;
+  ledger?: 'rental' | 'sale';
+  currency?: string;
   period: ReportPeriodDTO;
   executiveSummary: {
     openingBalance: MoneyAmountDTO;
@@ -249,6 +266,7 @@ export interface OwnerStatementDTO {
   timeline: TimelineDTO;
   pluginSections: ReportPluginSectionDTO[];
   statementSummary?: StatementSummaryDTO;
+  ownerMoneyWaterfall?: OwnerWaterfallDTO;
   rentalSettlement?: {
     grossRent: MoneyAmountDTO;
     levy: MoneyAmountDTO;

@@ -17,6 +17,7 @@ import PlansPage from './PlansPage';
 import AuditLogsPage from './AuditLogsPage';
 import SupportTicketsPage from './SupportTicketsPage';
 import RevenueAnalyticsPage from './RevenueAnalyticsPage';
+import VatRatesPage from './VatRatesPage';
 
 const SystemAdminDashboard: React.FC = () => {
   return (
@@ -38,6 +39,7 @@ const SystemAdminDashboard: React.FC = () => {
           <Route path="audit-logs" element={<AuditLogsPage />} />
           <Route path="support-tickets" element={<SupportTicketsPage />} />
           <Route path="revenue" element={<RevenueAnalyticsPage />} />
+          <Route path="vat-rates" element={<VatRatesPage />} />
           <Route path="*" element={<Navigate to="/system-admin" replace />} />
         </Route>
       </Routes>

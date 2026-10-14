@@ -39,6 +39,21 @@ import { DutyRosterShift } from './DutyRosterShift';
 import { AgentAvailability } from './AgentAvailability';
 import { LeaveRequest } from './LeaveRequest';
 import { PublicHoliday } from './PublicHoliday';
+import { LandlordFinancialTransaction } from './LandlordFinancialTransaction';
+import { AccountingEventLog } from './AccountingEventLog';
+import { TransactionTaxSnapshot } from './TransactionTaxSnapshot';
+import { TaxPeriod } from './TaxPeriod';
+import { TaxRule } from './TaxRule';
+import { IndividualTaxProfile } from './IndividualTaxProfile';
+import { IndividualVatRecord } from './IndividualVatRecord';
+import { IndividualRentalTaxRecord } from './IndividualRentalTaxRecord';
+import { IndividualRentalTaxPayment } from './IndividualRentalTaxPayment';
+import { IndividualIncomeTaxRecord } from './IndividualIncomeTaxRecord';
+import { IndividualIncomeTaxAdjustment } from './IndividualIncomeTaxAdjustment';
+import { IndividualIncomeTaxPayment } from './IndividualIncomeTaxPayment';
+import { IndividualTaxEvidence } from './IndividualTaxEvidence';
+import { IndividualTaxComplianceReview } from './IndividualTaxComplianceReview';
+import { IndividualTaxPack } from './IndividualTaxPack';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -149,6 +164,21 @@ export async function createIndexes() {
       { model: AgentAvailability, name: 'AgentAvailability' },
       { model: LeaveRequest, name: 'LeaveRequest' },
       { model: PublicHoliday, name: 'PublicHoliday' },
+      { model: LandlordFinancialTransaction, name: 'LandlordFinancialTransaction' },
+      { model: AccountingEventLog, name: 'AccountingEventLog' },
+      { model: TransactionTaxSnapshot, name: 'TransactionTaxSnapshot' },
+      { model: TaxPeriod, name: 'TaxPeriod' },
+      { model: TaxRule, name: 'TaxRule' },
+      { model: IndividualTaxProfile, name: 'IndividualTaxProfile' },
+      { model: IndividualVatRecord, name: 'IndividualVatRecord' },
+      { model: IndividualRentalTaxRecord, name: 'IndividualRentalTaxRecord' },
+      { model: IndividualRentalTaxPayment, name: 'IndividualRentalTaxPayment' },
+      { model: IndividualIncomeTaxRecord, name: 'IndividualIncomeTaxRecord' },
+      { model: IndividualIncomeTaxAdjustment, name: 'IndividualIncomeTaxAdjustment' },
+      { model: IndividualIncomeTaxPayment, name: 'IndividualIncomeTaxPayment' },
+      { model: IndividualTaxEvidence, name: 'IndividualTaxEvidence' },
+      { model: IndividualTaxComplianceReview, name: 'IndividualTaxComplianceReview' },
+      { model: IndividualTaxPack, name: 'IndividualTaxPack' },
     ];
 
     for (const { model, name } of models) {

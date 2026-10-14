@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { auth } from '../middleware/auth';
+import { hasAllowedUploadExtension } from '../utils/contentDisposition';
 
 const router = express.Router();
 
@@ -18,7 +19,8 @@ const upload = multer({
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/msword',
     ];
-    if (allowed.includes(file.mimetype)) {
+    const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx'];
+    if (allowed.includes(file.mimetype) && hasAllowedUploadExtension(file.originalname, allowedExtensions)) {
       cb(null, true);
       return;
     }

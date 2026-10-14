@@ -38,7 +38,7 @@ const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
 const TaxRateSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
-    taxType: { type: String, enum: ['VAT'], required: true, default: 'VAT', index: true },
+    taxType: { type: String, enum: ['VAT', 'CGT', 'CGWT'], required: true, default: 'VAT', index: true },
     rate: {
         type: Number,
         required: true,

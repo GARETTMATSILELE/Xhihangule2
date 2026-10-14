@@ -54,6 +54,7 @@ const Tenant_1 = require("../models/Tenant");
 const Company_1 = require("../models/Company");
 const Property_1 = require("../models/Property");
 const propertyAccountService_1 = __importDefault(require("../services/propertyAccountService"));
+const propertyAccess_1 = require("../utils/propertyAccess");
 const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -82,6 +83,10 @@ const createLevyPayment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         if (!amount || amount <= 0) {
             throw new errorHandler_1.AppError('Valid amount is required', 400);
+        }
+        const propertyInCompany = yield Property_1.Property.findOne({ _id: propertyId, companyId: req.user.companyId }).select('_id');
+        if (!propertyInCompany || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))) {
+            throw new errorHandler_1.AppError('Property was not found in this company', 404);
         }
         const levyPaymentData = Object.assign(Object.assign({}, req.body), { companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId), processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId), paymentType: 'levy', status: 'completed' // Set as completed for accountant dashboard payments
          });
@@ -232,7 +237,11 @@ const getLevyPayments = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!companyId) {
             return res.status(401).json({ message: 'Authentication required' });
         }
-        const levyPayments = yield LevyPayment_1.LevyPayment.find({ companyId })
+        const visibleIds = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        const levyQuery = { companyId };
+        if (visibleIds !== 'company')
+            levyQuery.propertyId = { $in: visibleIds };
+        const levyPayments = yield LevyPayment_1.LevyPayment.find(levyQuery)
             .populate('propertyId', 'name address')
             .populate('processedBy', 'firstName lastName email')
             .sort({ paymentDate: -1 });
@@ -246,7 +255,7 @@ const getLevyPayments = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getLevyPayments = getLevyPayments;
 // Public endpoint for getting a levy payment receipt (for printing)
 const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const { id } = req.params;
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -257,13 +266,17 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
         try {
             query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        catch (_b) {
+        catch (_c) {
             query.companyId = String(companyId);
         }
         const levy = yield LevyPayment_1.LevyPayment.findOne(query)
             .populate('propertyId', 'name address')
             .populate('processedBy', 'firstName lastName email');
         if (!levy) {
+            return res.status(404).json({ status: 'error', message: 'Payment not found' });
+        }
+        const levyPropertyId = String(((_b = levy.propertyId) === null || _b === void 0 ? void 0 : _b._id) || levy.propertyId || '');
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, levyPropertyId))) {
             return res.status(404).json({ status: 'error', message: 'Payment not found' });
         }
         // Resolve tenant name via active lease (fallback: any tenant linked by propertyId)
@@ -280,7 +293,7 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
                     tenantName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
             }
         }
-        catch (_c) { }
+        catch (_d) { }
         // Load company details for header/logo
         let company = null;
         try {
@@ -288,7 +301,7 @@ const getLevyReceiptPublic = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
             }
         }
-        catch (_d) { }
+        catch (_e) { }
         const receipt = {
             receiptNumber: levy.referenceNumber || String(levy._id),
             paymentDate: levy.paymentDate,
@@ -332,6 +345,9 @@ const initiateLevyPayout = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const levy = yield LevyPayment_1.LevyPayment.findOne({ _id: id, companyId: req.user.companyId });
         if (!levy)
             throw new errorHandler_1.AppError('Levy payment not found', 404);
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(levy.propertyId)))) {
+            throw new errorHandler_1.AppError('Levy payment not found', 404);
+        }
         const normalizedMethod = typeof payoutMethod === 'string'
             ? payoutMethod.trim().toLowerCase().replace(/\s+/g, '_')
             : undefined;
@@ -385,7 +401,7 @@ const initiateLevyPayout = (req, res) => __awaiter(void 0, void 0, void 0, funct
 });
 exports.initiateLevyPayout = initiateLevyPayout;
 const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const { id } = req.params;
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -397,6 +413,10 @@ const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, voi
             .populate('processedBy', 'firstName lastName email');
         if (!levy)
             throw new errorHandler_1.AppError('Levy payment not found', 404);
+        const ackPropertyId = String(((_b = levy.propertyId) === null || _b === void 0 ? void 0 : _b._id) || levy.propertyId || '');
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, ackPropertyId))) {
+            throw new errorHandler_1.AppError('Levy payment not found', 404);
+        }
         const company = levy.companyId ? yield Company_1.Company.findById(levy.companyId).select('name address phone email logo') : null;
         const html = `<!DOCTYPE html>
       <html>
@@ -429,18 +449,18 @@ const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, voi
             ${((company === null || company === void 0 ? void 0 : company.phone) || (company === null || company === void 0 ? void 0 : company.email)) ? `<div class="line">${company.phone || ''} ${company.phone && company.email ? ' | ' : ''} ${company.email || ''}</div>` : ''}
           </div>
           <div class="section">
-            <div class="row"><div class="label">Payout Reference</div><div class="value">${((_b = levy.payout) === null || _b === void 0 ? void 0 : _b.payoutReference) || '-'}</div></div>
-            <div class="row"><div class="label">Payout Date</div><div class="value">${((_c = levy.payout) === null || _c === void 0 ? void 0 : _c.payoutDate) ? new Date(levy.payout.payoutDate).toLocaleDateString() : new Date().toLocaleDateString()}</div></div>
-            <div class="row"><div class="label">Property</div><div class="value">${((_d = levy.propertyId) === null || _d === void 0 ? void 0 : _d.name) || 'N/A'}</div></div>
+            <div class="row"><div class="label">Payout Reference</div><div class="value">${((_c = levy.payout) === null || _c === void 0 ? void 0 : _c.payoutReference) || '-'}</div></div>
+            <div class="row"><div class="label">Payout Date</div><div class="value">${((_d = levy.payout) === null || _d === void 0 ? void 0 : _d.payoutDate) ? new Date(levy.payout.payoutDate).toLocaleDateString() : new Date().toLocaleDateString()}</div></div>
+            <div class="row"><div class="label">Property</div><div class="value">${((_e = levy.propertyId) === null || _e === void 0 ? void 0 : _e.name) || 'N/A'}</div></div>
             <div class="row"><div class="label">Amount</div><div class="value">${levy.currency || 'USD'} ${(levy.amount || 0).toFixed(2)}</div></div>
-            <div class="row"><div class="label">Payment Method</div><div class="value">${((_e = levy.payout) === null || _e === void 0 ? void 0 : _e.payoutMethod) || '-'}</div></div>
+            <div class="row"><div class="label">Payment Method</div><div class="value">${((_f = levy.payout) === null || _f === void 0 ? void 0 : _f.payoutMethod) || '-'}</div></div>
           </div>
           <div class="section">
-            <div class="row"><div class="label">Paid To (Association)</div><div class="value">${((_f = levy.payout) === null || _f === void 0 ? void 0 : _f.paidToName) || '-'}</div></div>
-            ${((_g = levy.payout) === null || _g === void 0 ? void 0 : _g.paidToAccount) ? `<div class="row"><div class="label">Account</div><div class="value">${levy.payout.paidToAccount}</div></div>` : ''}
-            ${((_h = levy.payout) === null || _h === void 0 ? void 0 : _h.paidToContact) ? `<div class="row"><div class="label">Contact</div><div class="value">${levy.payout.paidToContact}</div></div>` : ''}
+            <div class="row"><div class="label">Paid To (Association)</div><div class="value">${((_g = levy.payout) === null || _g === void 0 ? void 0 : _g.paidToName) || '-'}</div></div>
+            ${((_h = levy.payout) === null || _h === void 0 ? void 0 : _h.paidToAccount) ? `<div class="row"><div class="label">Account</div><div class="value">${levy.payout.paidToAccount}</div></div>` : ''}
+            ${((_j = levy.payout) === null || _j === void 0 ? void 0 : _j.paidToContact) ? `<div class="row"><div class="label">Contact</div><div class="value">${levy.payout.paidToContact}</div></div>` : ''}
           </div>
-          ${((_j = levy.payout) === null || _j === void 0 ? void 0 : _j.notes) ? `<div class="section"><div class="label">Notes</div><div class="value">${levy.payout.notes}</div></div>` : ''}
+          ${((_k = levy.payout) === null || _k === void 0 ? void 0 : _k.notes) ? `<div class="section"><div class="label">Notes</div><div class="value">${levy.payout.notes}</div></div>` : ''}
           <div class="ack">
             <p>We acknowledge receipt of the above payout.</p>
             <div class="sig-line">
@@ -468,7 +488,7 @@ const getLevyPayoutAcknowledgement = (req, res) => __awaiter(void 0, void 0, voi
 exports.getLevyPayoutAcknowledgement = getLevyPayoutAcknowledgement;
 // Public: Download levy receipt as HTML (formatted for A4 print/PDF)
 const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const { id } = req.params;
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -480,13 +500,17 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
         try {
             query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        catch (_f) {
+        catch (_g) {
             query.companyId = String(companyId);
         }
         const levy = yield LevyPayment_1.LevyPayment.findOne(query)
             .populate('propertyId', 'name address')
             .populate('processedBy', 'firstName lastName email');
         if (!levy) {
+            return res.status(404).send('Levy payment not found');
+        }
+        const downloadPropertyId = String(((_c = levy.propertyId) === null || _c === void 0 ? void 0 : _c._id) || levy.propertyId || '');
+        if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, downloadPropertyId))) {
             return res.status(404).send('Levy payment not found');
         }
         // Resolve tenant name for display
@@ -503,7 +527,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
                     tenantName = `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
             }
         }
-        catch (_g) { }
+        catch (_h) { }
         // Load company details for header/logo
         let company = null;
         try {
@@ -511,7 +535,7 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
                 company = yield Company_1.Company.findById(levy.companyId).select('name address phone email website registrationNumber tinNumber vatNumber logo description');
             }
         }
-        catch (_h) { }
+        catch (_j) { }
         const html = `<!DOCTYPE html>
       <html>
       <head>
@@ -551,9 +575,9 @@ const getLevyReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, f
             <div class="row"><div class="label">Date:</div><div class="value">${new Date(levy.paymentDate).toLocaleDateString()}</div></div>
             <div class="row"><div class="label">Method:</div><div class="value">${String(levy.paymentMethod).replace('_', ' ').toUpperCase()}</div></div>
             <div class="row"><div class="label">Status:</div><div class="value">${String(levy.status).toUpperCase()}</div></div>
-            <div class="row"><div class="label">Property:</div><div class="value">${((_c = levy.propertyId) === null || _c === void 0 ? void 0 : _c.name) || 'N/A'}</div></div>
+            <div class="row"><div class="label">Property:</div><div class="value">${((_d = levy.propertyId) === null || _d === void 0 ? void 0 : _d.name) || 'N/A'}</div></div>
             <div class="row"><div class="label">Tenant:</div><div class="value">${tenantName || 'N/A'}</div></div>
-            <div class="row"><div class="label">Processed By:</div><div class="value">${(((_d = levy.processedBy) === null || _d === void 0 ? void 0 : _d.firstName) || '')} ${(((_e = levy.processedBy) === null || _e === void 0 ? void 0 : _e.lastName) || '')}</div></div>
+            <div class="row"><div class="label">Processed By:</div><div class="value">${(((_e = levy.processedBy) === null || _e === void 0 ? void 0 : _e.firstName) || '')} ${(((_f = levy.processedBy) === null || _f === void 0 ? void 0 : _f.lastName) || '')}</div></div>
             ${levy.notes ? `<div class="row"><div class="label">Notes:</div><div class="value">${levy.notes}</div></div>` : ''}
           </div>
           <div class="footer">

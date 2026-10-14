@@ -76,6 +76,11 @@ const LevyPaymentSchema = new mongoose_1.Schema({
     notes: {
         type: String,
     },
+    receiptNumber: { type: String, default: '' },
+    receiptFileUrl: { type: String },
+    levyAuthority: { type: String },
+    receiptUploadedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    receiptUploadedAt: { type: Date },
     processedBy: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'User',

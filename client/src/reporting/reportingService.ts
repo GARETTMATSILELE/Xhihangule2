@@ -6,6 +6,7 @@ export interface OwnerStatementQuery {
   from?: string;
   to?: string;
   includeAllTransactions?: boolean;
+  ledgerType?: 'rental' | 'sale';
 }
 
 const buildStatementParams = (query?: string | OwnerStatementQuery) => {
@@ -13,12 +14,15 @@ const buildStatementParams = (query?: string | OwnerStatementQuery) => {
   if (!query) return params;
   if (typeof query === 'string') {
     params.set('period', query);
+    params.set('ledger', 'rental');
     return params;
   }
   if (query.period) params.set('period', query.period);
   if (query.from) params.set('from', query.from);
   if (query.to) params.set('to', query.to);
   if (query.includeAllTransactions) params.set('includeAllTransactions', 'true');
+  if (query.ledgerType) params.set('ledger', query.ledgerType);
+  if (!params.has('ledger')) params.set('ledger', 'rental');
   return params;
 };
 

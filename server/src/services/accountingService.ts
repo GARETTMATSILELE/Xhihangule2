@@ -11,6 +11,8 @@ import { Payment } from '../models/Payment';
 import dashboardKpiService from './dashboardKpiService';
 import type { DashboardOutstandingBreakdown } from './dashboardKpiService';
 import propertyAccountService from './propertyAccountService';
+import { PHASE8_CHART_SEEDS } from './tax/chartAccounts';
+import { assertPeriodAllowsPosting } from './accountingPeriodService';
 
 export interface PostJournalLineInput {
   accountCode: string;
@@ -28,6 +30,7 @@ export interface PostTransactionInput {
   sourceId?: string;
   transactionDate?: Date;
   createdBy?: string;
+  periodOverrideReason?: string;
   lines: PostJournalLineInput[];
   vat?: {
     sourceType: string;
@@ -45,18 +48,11 @@ type AccountSeed = {
   type: AccountType;
 };
 
-const DEFAULT_ACCOUNTS: AccountSeed[] = [
-  { code: '1001', name: 'Main Bank Account', type: 'asset' },
-  { code: '1002', name: 'Cash On Hand', type: 'asset' },
-  { code: '2101', name: 'VAT Payable', type: 'liability' },
-  { code: '2102', name: 'Commission Liability', type: 'liability' },
-  { code: '3001', name: 'Retained Earnings', type: 'equity' },
-  { code: '4001', name: 'Rental Income', type: 'revenue' },
-  { code: '4002', name: 'Sales Income', type: 'revenue' },
-  { code: '5001', name: 'Operating Expense', type: 'expense' },
-  { code: '5002', name: 'Commission Expense', type: 'expense' },
-  { code: '5003', name: 'VAT Expense', type: 'expense' }
-];
+const DEFAULT_ACCOUNTS: AccountSeed[] = PHASE8_CHART_SEEDS.map((row) => ({
+  code: row.code,
+  name: row.name,
+  type: row.type
+}));
 
 const toMoney = (value: number): number => Number(Number(value || 0).toFixed(2));
 
@@ -126,11 +122,10 @@ class AccountingService {
       await ChartOfAccount.updateOne(
         { companyId: companyObjectId, code: account.code },
         {
+          $set: { name: account.name, type: account.type },
           $setOnInsert: {
             companyId: companyObjectId,
             code: account.code,
-            name: account.name,
-            type: account.type,
             balance: 0,
             currency: 'USD',
             isActive: true,
@@ -165,6 +160,15 @@ class AccountingService {
 
   async postTransaction(input: PostTransactionInput): Promise<{ journalEntryId: string }> {
     await this.ensureIndexes();
+    const transactionDate = input.transactionDate || new Date();
+    await assertPeriodAllowsPosting({
+      companyId: input.companyId,
+      transactionDate,
+      overrideReason: input.periodOverrideReason,
+      actorId: input.createdBy,
+      sourceModule: input.sourceModule,
+      sourceId: input.sourceId
+    });
     const run = async (session?: mongoose.ClientSession): Promise<{ journalEntryId: string }> => {
       await this.ensureDefaultChartOfAccounts(input.companyId, session);
       await this.ensureCompanyBalance(input.companyId, session);
@@ -457,22 +461,7 @@ class AccountingService {
       const totalRevenue = toMoney(paymentRevenueCount > 0 ? paymentRevenue : ledgerRevenue);
       const totalExpenses = toMoney(balance?.totalExpenses || 0);
       const netProfit = toMoney(totalRevenue - totalExpenses);
-
-      // Self-heal stale dashboard snapshots so subsequent calls stay stable.
-      if (totalRevenue !== ledgerRevenue || netProfit !== toMoney(balance?.netProfit || 0)) {
-        await CompanyBalance.updateOne(
-          { companyId: companyObjectId },
-          {
-            $set: {
-              _id: getCompanyBalanceId(companyId),
-              totalRevenue,
-              netProfit,
-              lastUpdated: new Date()
-            }
-          },
-          { upsert: true }
-        );
-      }
+      // GET remains read-only: do not persist computed totals onto CompanyBalance.
 
       const summary = {
         totalRevenue,

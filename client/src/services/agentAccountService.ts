@@ -197,11 +197,15 @@ class AgentAccountService {
   }
 
   /**
-   * Sync agent accounts from payments
+   * Explicit historical catch-up of agent accounts from payments.
+   * Requires confirm=true and a non-empty reason.
    */
-  async syncAgentAccounts(): Promise<void> {
+  async syncAgentAccounts(opts: { confirm: true; reason: string }): Promise<void> {
     try {
-      await api.post('/accountants/agent-accounts/sync');
+      await api.post('/accountants/agent-accounts/sync', {
+        confirm: opts.confirm,
+        reason: opts.reason
+      });
     } catch (error) {
       console.error('Error syncing agent accounts:', error);
       throw error;
@@ -209,11 +213,15 @@ class AgentAccountService {
   }
 
   /**
-   * Sync commission transactions for a specific agent
+   * Explicit historical catch-up of commission transactions for one agent.
+   * Requires confirm=true and a non-empty reason.
    */
-  async syncAgentCommissions(agentId: string): Promise<void> {
+  async syncAgentCommissions(agentId: string, opts: { confirm: true; reason: string }): Promise<void> {
     try {
-      await api.post(`/accountants/agent-accounts/${agentId}/sync-commissions`);
+      await api.post(`/accountants/agent-accounts/${agentId}/sync-commissions`, {
+        confirm: opts.confirm,
+        reason: opts.reason
+      });
     } catch (error) {
       console.error('Error syncing agent commissions:', error);
       throw error;

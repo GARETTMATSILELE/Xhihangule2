@@ -17,6 +17,8 @@ export type AccountingTreatment =
   | 'PROPERTY_EXPENSE'
   | 'PASS_THROUGH'
   | 'OWNER_WITHDRAWAL'
+  | 'LIABILITY'
+  | 'CAPITAL'
   | 'SYSTEM';
 
 export type PassThroughChargeType =
@@ -43,6 +45,7 @@ export interface Transaction {
   amount: number;
   date: Date;
   paymentId?: Types.ObjectId;
+  reversesPaymentId?: Types.ObjectId;
   idempotencyKey?: string;
   description: string;
   category?: string;
@@ -162,6 +165,10 @@ const TransactionSchema = new Schema<Transaction>({
     type: Schema.Types.ObjectId, 
     ref: 'Payment' 
   },
+  reversesPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Payment'
+  },
   idempotencyKey: {
     type: String
   },
@@ -179,7 +186,7 @@ const TransactionSchema = new Schema<Transaction>({
   },
   accountingTreatment: {
     type: String,
-    enum: ['PROPERTY_INCOME', 'PROPERTY_EXPENSE', 'PASS_THROUGH', 'OWNER_WITHDRAWAL', 'SYSTEM'],
+    enum: ['PROPERTY_INCOME', 'PROPERTY_EXPENSE', 'PASS_THROUGH', 'OWNER_WITHDRAWAL', 'LIABILITY', 'CAPITAL', 'SYSTEM'],
     required: false
   },
   chargeTypeCode: {
@@ -555,11 +562,11 @@ PropertyAccountSchema.pre('findOneAndDelete', guardPropertyAccountDeletion as an
 PropertyAccountSchema.pre('save', function(next) {
   // Calculate totals from transactions
   this.totalIncome = this.transactions
-    .filter(t => t.type === 'income' && t.status === 'completed' && t.accountingTreatment !== 'PASS_THROUGH')
+    .filter(t => t.type === 'income' && t.status === 'completed' && !['PASS_THROUGH', 'LIABILITY', 'CAPITAL'].includes(String(t.accountingTreatment || '')))
     .reduce((sum, t) => sum + t.amount, 0);
   
   this.totalExpenses = this.transactions
-    .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed' && t.accountingTreatment !== 'PASS_THROUGH')
+    .filter(t => t.type !== 'income' && t.type !== 'opening_balance' && t.status === 'completed' && !['PASS_THROUGH', 'LIABILITY', 'CAPITAL'].includes(String(t.accountingTreatment || '')))
     .reduce((sum, t) => sum + t.amount, 0);
   
   this.totalOwnerPayouts = this.ownerPayouts

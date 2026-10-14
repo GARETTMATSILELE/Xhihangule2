@@ -10,6 +10,7 @@ import mongoose from 'mongoose';
 import { Tenant } from '../models/Tenant';
 import { Lease } from '../models/Lease';
 import { Payment } from '../models/Payment';
+import { advanceAssessment, ownerApplicationDecision, ownerLettingWorkspace, signAgencyLease } from '../agency/lettingController';
 
 const router = express.Router();
 
@@ -633,6 +634,11 @@ router.get('/financial-data', propertyOwnerAuth, async (req, res) => {
     });
   }
 });
+
+router.get('/letting/properties/:propertyId/workspace', propertyOwnerAuth, (req, res) => ownerLettingWorkspace(req as any, res));
+router.post('/letting/assessments/:id/decision', propertyOwnerAuth, (req, res) => advanceAssessment(req as any, res));
+router.post('/letting/applications/:id/decision', propertyOwnerAuth, (req, res) => ownerApplicationDecision(req as any, res));
+router.post('/letting/leases/:id/signature', propertyOwnerAuth, (req, res) => signAgencyLease(req as any, res));
 
 console.log('OwnerRoutes: All owner routes registered');
 

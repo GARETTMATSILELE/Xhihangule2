@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense } from 'react';
 import { Routes, Route, Outlet } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -19,6 +19,8 @@ import DashboardRedirect from './components/DashboardRedirect';
 import AgencyDashboardGate from './components/AgencyDashboardGate';
 
 const LandingPage = lazyWithRetry(() => import('./pages/LandingPage'));
+const DemoWorkspace = lazyWithRetry(() => import('./pages/DemoWorkspace'));
+const OnboardingImport = lazyWithRetry(() => import('./pages/OnboardingImport'));
 const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
 const IndividualDashboard = lazyWithRetry(() => import('./pages/IndividualDashboard'));
 const SystemAdminDashboard = lazyWithRetry(() => import('./pages/SystemAdminDashboard'));
@@ -35,10 +37,15 @@ const MaintenancePageWrapper = lazyWithRetry(() => import('./components/maintena
 const PaymentsPage = lazyWithRetry(() => import('./pages/PaymentsPage'));
 const LeasesPage = lazyWithRetry(() => import('./pages/LeasesPage'));
 const OwnerDashboard = lazyWithRetry(() => import('./components/owner/OwnerDashboard'));
+const TenantDashboard = lazyWithRetry(() => import('./pages/TenantDashboard'));
+const ContractorDashboard = lazyWithRetry(() => import('./pages/ContractorDashboard'));
+const TenantRegister = lazyWithRetry(() => import('./pages/ecosystem/PortalRegister').then(m => ({ default: m.TenantRegister })));
+const ContractorRegister = lazyWithRetry(() => import('./pages/ecosystem/PortalRegister').then(m => ({ default: m.ContractorRegister })));
 const AgentDashboard = lazyWithRetry(() => import('./pages/AgentDashboard'));
 const AccountantDashboard = lazyWithRetry(() => import('./pages/AccountantDashboard'));
 const SalesDashboard = lazyWithRetry(() => import('./pages/SalesDashboard'));
 const BillingSetup = lazyWithRetry(() => import('./pages/Billing/BillingSetup'));
+const BillingReturn = lazyWithRetry(() => import('./pages/Billing/BillingReturn'));
 const PaypalCheckout = lazyWithRetry(() => import('./pages/Checkout/PaypalCheckout'));
 const SalesLeadsPage = lazyWithRetry(() => import('./pages/SalesDashboard/LeadsPage'));
 const SalesViewingsPage = lazyWithRetry(() => import('./pages/SalesDashboard/ViewingsPage'));
@@ -68,7 +75,19 @@ const AgentAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboar
 const AgentAccountDetailPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AgentAccountDetailPage'));
 const WrittenInvoicesPage = lazyWithRetry(() => import('./pages/AccountantDashboard/WrittenInvoicesPage'));
 const LevyPaymentsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/LevyPaymentsPage'));
-const TaxAccountsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TaxAccountsPage'));
+const TaxCompliancePage = lazyWithRetry(() => import('./pages/AccountantDashboard/TaxCompliancePage'));
+const AccountingIntegrityPage = lazyWithRetry(() => import('./pages/AccountantDashboard/AccountingIntegrityPage'));
+const OwnerCollectionsPage = lazyWithRetry(() => import('./pages/agency/OwnerCollectionsPage').then((m) => ({ default: m.OwnerCollectionsPage })));
+const AccountantWorkQueuePage = lazyWithRetry(() => import('./pages/agency/AccountantWorkQueuePage'));
+const AccountantPortfolioPage = lazyWithRetry(async () => {
+  const pages = await import('./pages/agency/AgencyOperationsPages');
+  return { default: () => pages.SeniorPortfolioPage({ apiBase: '/accountants' }) };
+});
+const AccountantRentBoardPage = lazyWithRetry(async () => {
+  const pages = await import('./pages/agency/AgencyOperationsPages');
+  return { default: () => pages.RentCollectionPage({ apiBase: '/accountants' }) };
+});
+const FinancialControlsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/FinancialControlsPage'));
 const TasksPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TasksPage'));
 const DatabaseSyncDashboard = lazyWithRetry(() => import('./components/admin/DatabaseSyncDashboard'));
 const TrustAccountReportsPage = lazyWithRetry(() => import('./pages/AccountantDashboard/TrustAccountReportsPage'));
@@ -134,13 +153,18 @@ const App: React.FC = () => {
               <Routes>
               {/* Public Routes - No PropertyProvider or CompanyProvider */}
               <Route path="/" element={<LandingPage />} />
+              <Route path="/demo/*" element={<DemoWorkspace />} />
+              <Route path="/onboarding/import" element={<OnboardingImport />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              <Route path="/tenant-register" element={<TenantRegister />} />
+              <Route path="/contractor-register" element={<ContractorRegister />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/admin-signup" element={<AdminSignup />} />
               <Route path="/billing/setup" element={<BillingSetup />} />
               <Route path="/billing/upgrade" element={<BillingSetup />} />
+              <Route path="/billing/return" element={<BillingReturn />} />
               <Route path="/checkout/paypal" element={<PaypalCheckout />} />
               <Route path="/checkout" element={<PaypalCheckout />} />
               <Route path="/dashboard" element={
@@ -201,6 +225,16 @@ const App: React.FC = () => {
                   </PropertyProvider>
                 </ProtectedRoute>
               } />
+              <Route path="/tenant-dashboard/*" element={
+                <ProtectedRoute requiredRoles={['tenant']}>
+                  <TenantDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/contractor-dashboard/*" element={
+                <ProtectedRoute requiredRoles={['contractor']}>
+                  <ContractorDashboard />
+                </ProtectedRoute>
+              } />
               
               <Route path="/agent-dashboard/*" element={
                 <ProtectedRoute requiredRoles={['agent']}>
@@ -248,7 +282,7 @@ const App: React.FC = () => {
                 <Route path="agent-accounts" element={<AgentAccountsPage />} />
                 <Route path="agent-accounts/:agentId" element={<AgentAccountDetailPage />} />
                 <Route path="commissions" element={<CommissionsPage />} />
-                <Route path="tax" element={<TaxAccountsPage />} />
+                <Route path="tax" element={<TaxCompliancePage />} />
                 <Route path="written-invoices" element={<WrittenInvoicesPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="levies" element={<LevyPaymentsPage />} />
@@ -257,6 +291,12 @@ const App: React.FC = () => {
                 <Route path="trust-account-reports" element={<TrustAccountReportsPage />} />
                 <Route path="trust-account-reports/:propertyId" element={<TrustAccountPropertyReportPage />} />
                 <Route path="tasks" element={<TasksPage />} />
+                <Route path="accounting-integrity" element={<AccountingIntegrityPage />} />
+                <Route path="owner-collections" element={<OwnerCollectionsPage apiBase="/accountants" />} />
+                <Route path="work-queue" element={<AccountantWorkQueuePage />} />
+                <Route path="portfolio" element={<AccountantPortfolioPage />} />
+                <Route path="rent-collection" element={<AccountantRentBoardPage />} />
+                <Route path="financial-controls" element={<FinancialControlsPage />} />
                 <Route path="data-sync" element={
                   <ProtectedRoute requiredRoles={['admin']}>
                     <DatabaseSyncDashboard />

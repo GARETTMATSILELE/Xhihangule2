@@ -21,6 +21,7 @@ const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const leaseBillingEngine_1 = require("../services/leaseBillingEngine");
 const inspectionAutomationService_1 = require("../services/inspectionAutomationService");
+const propertyAccess_1 = require("../utils/propertyAccess");
 const LEASE_STATUSES = [
     'draft',
     'pending_approval',
@@ -69,14 +70,40 @@ class LeaseController {
         }
         return LeaseController.instance;
     }
-    getLeases(req, res) {
+    leaseScope(req) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a;
+            if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
+                return null;
+            const filter = { companyId: req.user.companyId };
+            const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            if (ids !== 'company')
+                filter.propertyId = { $in: ids };
+            return filter;
+        });
+    }
+    leaseVisibleToCaller(req, id) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || !mongoose_1.default.Types.ObjectId.isValid(id))
+                return null;
+            const lease = yield Lease_1.Lease.findOne({ _id: id, companyId: req.user.companyId });
+            if (!lease)
+                return null;
+            if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(lease.propertyId), { includeDeleted: true })))
+                return null;
+            return lease;
+        });
+    }
+    getLeases(req, res) {
+        return __awaiter(this, void 0, void 0, function* () {
             try {
-                const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
-                const leases = companyId
-                    ? yield this.leaseRepository.findByCompanyId(companyId)
-                    : yield this.leaseRepository.find({});
+                const scope = yield this.leaseScope(req);
+                if (!scope) {
+                    res.status(401).json({ error: 'Authentication required' });
+                    return;
+                }
+                const leases = yield this.leaseRepository.find(scope);
                 res.json(leases);
             }
             catch (error) {
@@ -88,7 +115,7 @@ class LeaseController {
     getLeaseById(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const lease = yield this.leaseRepository.findById(req.params.id);
+                const lease = yield this.leaseVisibleToCaller(req, req.params.id);
                 if (!lease) {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
@@ -103,7 +130,7 @@ class LeaseController {
     }
     createLease(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
             try {
                 // Validate required fields - handle both field name variations
                 const { propertyId, tenantId, startDate, endDate, rentAmount, depositAmount, monthlyRent, securityDeposit } = req.body;
@@ -151,15 +178,18 @@ class LeaseController {
                     });
                     return;
                 }
-                // Ensure companyId is available
-                if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) && !req.body.companyId) {
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.log('Missing companyId detected');
-                    }
-                    res.status(400).json({
-                        error: 'Company ID is required',
-                        received: { userCompanyId: (_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId, bodyCompanyId: req.body.companyId }
-                    });
+                if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId)) {
+                    res.status(401).json({ error: 'Authentication required' });
+                    return;
+                }
+                const property = yield Property_1.Property.findOne({ _id: propertyId, companyId: req.user.companyId }).select('_id');
+                if (!property || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))) {
+                    res.status(404).json({ error: 'Property was not found in this company' });
+                    return;
+                }
+                const tenant = yield Tenant_1.Tenant.findOne({ _id: tenantId, companyId: req.user.companyId }).select('_id');
+                if (!tenant) {
+                    res.status(404).json({ error: 'Tenant was not found in this company' });
                     return;
                 }
                 // Transform and validate the data
@@ -171,23 +201,23 @@ class LeaseController {
                     rentAmount: Number(finalRentAmount),
                     depositAmount: Number(finalDepositAmount),
                     status: LEASE_STATUSES.includes(req.body.status) ? req.body.status : 'active',
-                    companyId: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) ? new mongoose_1.default.Types.ObjectId(req.user.companyId) : (req.body.companyId ? new mongoose_1.default.Types.ObjectId(req.body.companyId) : undefined),
+                    companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
                     // Always stamp ownerId from the authenticated user context (required by schema)
-                    ownerId: ((_d = req.user) === null || _d === void 0 ? void 0 : _d.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
+                    ownerId: ((_b = req.user) === null || _b === void 0 ? void 0 : _b.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
                     previousLeaseId: asObjectIdOrUndefined(req.body.previousLeaseId) || null,
                     renewalReminderDate: req.body.renewalReminderDate ? new Date(req.body.renewalReminderDate) : undefined,
                     billingStatus: req.body.billingStatus || 'current',
                     billingRules: {
                         frequency: 'monthly',
                         rentDueDay: Number(req.body.rentDueDay || 1),
-                        escalationPercent: Number(req.body.escalationPercent || ((_e = req.body.billingRules) === null || _e === void 0 ? void 0 : _e.escalationPercent) || 0),
-                        escalationFrequencyMonths: Number(req.body.escalationFrequencyMonths || ((_f = req.body.billingRules) === null || _f === void 0 ? void 0 : _f.escalationFrequencyMonths) || 12),
-                        nextEscalationDate: req.body.nextEscalationDate || ((_g = req.body.billingRules) === null || _g === void 0 ? void 0 : _g.nextEscalationDate)
+                        escalationPercent: Number(req.body.escalationPercent || ((_c = req.body.billingRules) === null || _c === void 0 ? void 0 : _c.escalationPercent) || 0),
+                        escalationFrequencyMonths: Number(req.body.escalationFrequencyMonths || ((_d = req.body.billingRules) === null || _d === void 0 ? void 0 : _d.escalationFrequencyMonths) || 12),
+                        nextEscalationDate: req.body.nextEscalationDate || ((_e = req.body.billingRules) === null || _e === void 0 ? void 0 : _e.nextEscalationDate)
                             ? new Date(req.body.nextEscalationDate || req.body.billingRules.nextEscalationDate)
                             : undefined,
-                        recurringLevies: Number(req.body.recurringLevies || ((_h = req.body.billingRules) === null || _h === void 0 ? void 0 : _h.recurringLevies) || 0),
-                        recurringServiceCharges: Number(req.body.recurringServiceCharges || ((_j = req.body.billingRules) === null || _j === void 0 ? void 0 : _j.recurringServiceCharges) || 0),
-                        prorateMoveIn: (_m = (_k = req.body.prorateMoveIn) !== null && _k !== void 0 ? _k : (_l = req.body.billingRules) === null || _l === void 0 ? void 0 : _l.prorateMoveIn) !== null && _m !== void 0 ? _m : true,
+                        recurringLevies: Number(req.body.recurringLevies || ((_f = req.body.billingRules) === null || _f === void 0 ? void 0 : _f.recurringLevies) || 0),
+                        recurringServiceCharges: Number(req.body.recurringServiceCharges || ((_g = req.body.billingRules) === null || _g === void 0 ? void 0 : _g.recurringServiceCharges) || 0),
+                        prorateMoveIn: (_k = (_h = req.body.prorateMoveIn) !== null && _h !== void 0 ? _h : (_j = req.body.billingRules) === null || _j === void 0 ? void 0 : _j.prorateMoveIn) !== null && _k !== void 0 ? _k : true,
                     },
                     financialSummary: {
                         totalBilled: 0,
@@ -266,7 +296,9 @@ class LeaseController {
                 }
                 const { id } = req.params;
                 const updateData = Object.assign({}, req.body);
-                const existingLease = yield this.leaseRepository.findById(id);
+                delete updateData.companyId;
+                delete updateData.ownerId;
+                const existingLease = yield this.leaseVisibleToCaller(req, id);
                 if (!existingLease) {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
@@ -362,6 +394,11 @@ class LeaseController {
     deleteLease(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                const existing = yield this.leaseVisibleToCaller(req, req.params.id);
+                if (!existing) {
+                    res.status(404).json({ error: 'Lease not found' });
+                    return;
+                }
                 const success = yield this.leaseRepository.delete(req.params.id);
                 if (!success) {
                     res.status(404).json({ error: 'Lease not found' });
@@ -378,8 +415,19 @@ class LeaseController {
     getLeaseStats(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const stats = yield this.leaseRepository.getLeaseStats();
-                res.json(stats);
+                const scope = yield this.leaseScope(req);
+                if (!scope) {
+                    res.status(401).json({ error: 'Authentication required' });
+                    return;
+                }
+                const now = new Date();
+                const [total, active, expired, upcoming] = yield Promise.all([
+                    Lease_1.Lease.countDocuments(scope),
+                    Lease_1.Lease.countDocuments(Object.assign(Object.assign({}, scope), { startDate: { $lte: now }, endDate: { $gte: now }, status: 'active' })),
+                    Lease_1.Lease.countDocuments(Object.assign(Object.assign({}, scope), { endDate: { $lt: now }, status: 'active' })),
+                    Lease_1.Lease.countDocuments(Object.assign(Object.assign({}, scope), { startDate: { $gt: now }, status: 'pending_approval' })),
+                ]);
+                res.json({ total, active, expired, upcoming });
             }
             catch (error) {
                 console.error('Error fetching lease stats:', error);
@@ -390,7 +438,13 @@ class LeaseController {
     getActiveLeases(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const leases = yield this.leaseRepository.findActiveLeases();
+                const scope = yield this.leaseScope(req);
+                if (!scope) {
+                    res.status(401).json({ error: 'Authentication required' });
+                    return;
+                }
+                const now = new Date();
+                const leases = yield this.leaseRepository.find(Object.assign(Object.assign({}, scope), { startDate: { $lte: now }, endDate: { $gte: now }, status: 'active' }));
                 res.json(leases);
             }
             catch (error) {
@@ -402,8 +456,14 @@ class LeaseController {
     getExpiringLeases(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                const scope = yield this.leaseScope(req);
+                if (!scope) {
+                    res.status(401).json({ error: 'Authentication required' });
+                    return;
+                }
                 const daysThreshold = parseInt(req.query.days) || 30;
-                const leases = yield this.leaseRepository.findExpiringLeases(daysThreshold);
+                const thresholdDate = new Date(Date.now() + daysThreshold * 24 * 60 * 60 * 1000);
+                const leases = yield this.leaseRepository.find(Object.assign(Object.assign({}, scope), { endDate: { $lte: thresholdDate }, status: 'active' }));
                 res.json(leases);
             }
             catch (error) {
@@ -415,6 +475,11 @@ class LeaseController {
     updateLeaseStatus(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                const visibleLease = yield this.leaseVisibleToCaller(req, req.params.id);
+                if (!visibleLease) {
+                    res.status(404).json({ error: 'Lease not found' });
+                    return;
+                }
                 const { status } = req.body;
                 if (!LEASE_STATUSES.includes(status)) {
                     res.status(400).json({ error: 'Invalid lease status' });
@@ -442,7 +507,7 @@ class LeaseController {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const { newEndDate } = req.body;
-                const lease = yield this.leaseRepository.findById(req.params.id);
+                const lease = yield this.leaseVisibleToCaller(req, req.params.id);
                 if (!lease) {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
@@ -459,7 +524,7 @@ class LeaseController {
     renewLease(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const lease = yield this.leaseRepository.findById(req.params.id);
+                const lease = yield this.leaseVisibleToCaller(req, req.params.id);
                 if (!lease) {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
@@ -476,7 +541,7 @@ class LeaseController {
     terminateLease(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const lease = yield Lease_1.Lease.findById(req.params.id);
+                const lease = yield this.leaseVisibleToCaller(req, req.params.id);
                 if (!lease) {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
@@ -526,7 +591,7 @@ class LeaseController {
     closeSettlement(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const lease = yield Lease_1.Lease.findById(req.params.id);
+                const lease = yield this.leaseVisibleToCaller(req, req.params.id);
                 if (!lease) {
                     res.status(404).json({ error: 'Lease not found' });
                     return;
@@ -643,13 +708,23 @@ class LeaseController {
                     res.status(401).json({ message: 'Authentication required' });
                     return;
                 }
-                let query = { companyId };
+                const scope = yield this.leaseScope(req);
+                if (!scope) {
+                    res.status(401).json({ message: 'Authentication required' });
+                    return;
+                }
+                let query = Object.assign({}, scope);
                 // Additional filtering options
                 if (req.query.status) {
                     query.status = req.query.status;
                 }
                 if (req.query.propertyId) {
-                    query.propertyId = req.query.propertyId;
+                    const requestedPropertyId = String(req.query.propertyId);
+                    if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, requestedPropertyId))) {
+                        res.json({ status: 'success', data: [], count: 0, companyId });
+                        return;
+                    }
+                    query.propertyId = requestedPropertyId;
                 }
                 if (req.query.tenantId) {
                     query.tenantId = req.query.tenantId;
@@ -683,8 +758,7 @@ class LeaseController {
                     res.status(401).json({ message: 'Authentication required' });
                     return;
                 }
-                let query = { _id: id, companyId };
-                const lease = yield this.leaseRepository.findOne(query);
+                const lease = yield this.leaseVisibleToCaller(req, id);
                 if (!lease) {
                     res.status(404).json({
                         status: 'error',

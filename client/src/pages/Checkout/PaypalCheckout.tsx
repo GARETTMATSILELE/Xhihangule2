@@ -1,15 +1,26 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Paper, Typography, Alert, CircularProgress, Button, ToggleButtonGroup, ToggleButton, TextField, Stack } from '@mui/material';
 import api from '../../api/axios';
+import PaynowBadge from '../../components/payments/PaynowBadge';
 
 type Plan = 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
 type Cycle = 'monthly' | 'yearly';
 
-const PRICES: Record<Plan, { monthly: number; yearly: number }> = {
-  INDIVIDUAL: { monthly: 250, yearly: 3000 },
-  SME: { monthly: 600, yearly: 7200 },
-  ENTERPRISE: { monthly: 1200, yearly: 14400 }
+const PLAN_LABELS: Record<Plan, string> = {
+  INDIVIDUAL: 'Landlord',
+  SME: 'Property Manager',
+  ENTERPRISE: 'Enterprise'
+};
+
+type CheckoutQuote = {
+  paymentSessionId: string;
+  plan: Plan;
+  billingCycle: Cycle;
+  amount: number;
+  currency: string;
+  status: string;
+  awaitingConfirmation?: boolean;
 };
 
 const parseParams = (search: string) => {
@@ -28,13 +39,48 @@ const PaypalCheckout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { plan, cycle, paymentSessionId } = useMemo(() => parseParams(location.search), [location.search]);
+  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(true);
   const [method, setMethod] = useState<'paynow' | 'cash'>('paynow');
   const [cashCode, setCashCode] = useState('');
   const [cashPin, setCashPin] = useState('');
 
-  const amount = PRICES[plan][cycle].toFixed(2);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setQuoteLoading(true);
+      try {
+        const path = paymentSessionId
+          ? `/billing/sessions/${encodeURIComponent(paymentSessionId)}`
+          : '/billing/sessions/current';
+        const response = await api.get(path);
+        if (!cancelled) {
+          setQuote(response.data);
+          setMessage(null);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setQuote(null);
+          setMessage({
+            type: 'error',
+            text: e?.response?.data?.message || 'Checkout details could not be loaded. Complete registration before paying.'
+          });
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentSessionId]);
+
+  const displayPlan = quote?.plan || plan;
+  const displayCycle = quote?.billingCycle || cycle;
+  const amount = quote ? Number(quote.amount).toFixed(2) : null;
 
   const routeAfterActivation = async () => {
     // Checkout routes are "public" in the router, so we can't rely on ProtectedRoute to steer correctly.
@@ -81,11 +127,14 @@ const PaypalCheckout: React.FC = () => {
     try {
       setLoading(true);
       setMessage(null);
-      const reference = `SUBS-${plan}-${cycle}-${Date.now()}`;
+      const sessionId = quote?.paymentSessionId || paymentSessionId;
+      if (!sessionId) {
+        setMessage({ type: 'error', text: 'Checkout is not ready. Register the company again only if you have not already created it.' });
+        return;
+      }
       const resp = await api.post('/paynow/web/create', {
-        amount: Number(amount),
-        reference,
-        paymentSessionId
+        paymentSessionId: sessionId,
+        description: `Mantis ${displayPlan} ${displayCycle} subscription`
       });
       const redirectUrl = resp.data?.redirectUrl;
       if (!redirectUrl) {
@@ -93,7 +142,13 @@ const PaypalCheckout: React.FC = () => {
       }
       window.location.href = redirectUrl;
     } catch (e: any) {
-      setMessage({ type: 'error', text: e?.response?.data?.message || e?.message || 'Failed to start Paynow checkout.' });
+      const code = e?.response?.data?.code;
+      const text = code === 'PAYMENT_ALREADY_COMPLETED'
+        ? 'This payment is already confirmed. Sign in to continue.'
+        : code === 'PAYMENT_AWAITING_CONFIRMATION'
+          ? 'This payment is still being checked. Do not start another payment until it is confirmed.'
+          : (e?.response?.data?.message || e?.message || 'Failed to start Paynow checkout.');
+      setMessage({ type: code === 'PAYMENT_ALREADY_COMPLETED' ? 'info' : 'error', text });
     } finally {
       setLoading(false);
     }
@@ -104,17 +159,32 @@ const PaypalCheckout: React.FC = () => {
       <Paper elevation={3} sx={{ p: 4, borderRadius: 3, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
         <Typography variant="h5" gutterBottom>Checkout</Typography>
         <Typography variant="body2" sx={{ mb: 1, opacity: 0.9 }}>
-          Plan: <strong>{plan}</strong> • Billing: <strong>{cycle}</strong>
+          Plan: <strong>{PLAN_LABELS[displayPlan] || displayPlan}</strong> • Billing: <strong>{displayCycle}</strong>
         </Typography>
         <Typography variant="subtitle2" sx={{ textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>
-          Total
+          Total confirmed by Mantis
         </Typography>
         <Typography variant="h3" sx={{ fontWeight: 900, mb: 3 }}>
-          USD {amount}
+          {quoteLoading ? '…' : amount ? `${quote?.currency || 'USD'} ${amount}` : 'Unavailable'}
         </Typography>
 
         {message && (
           <Alert severity={message.type} sx={{ mb: 2 }}>{message.text}</Alert>
+        )}
+        {!message && quote?.status === 'pending' && !quote.awaitingConfirmation && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Registration is not complete until payment is confirmed. You can leave and resume later with the same email address and password.
+          </Alert>
+        )}
+        {!message && (quote?.status === 'cancelled' || quote?.status === 'failed' || quote?.status === 'expired') && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            No successful payment has been confirmed. Retry checkout when you are ready. This registration is still saved.
+          </Alert>
+        )}
+        {!message && (quote?.status === 'provider_created' || quote?.awaitingConfirmation) && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            This payment is still being checked. Continue the existing checkout instead of starting another payment.
+          </Alert>
         )}
 
         <Box sx={{ mb: 2 }}>
@@ -135,13 +205,16 @@ const PaypalCheckout: React.FC = () => {
               variant="contained"
               color="primary"
               onClick={handlePaynowCheckout}
-              disabled={loading}
+              disabled={loading || quoteLoading || !quote || quote.status === 'paid' || quote.status === 'reconciled' || (quote.awaitingConfirmation && quote.status === 'pending')}
             >
-              {loading ? <CircularProgress size={20} /> : 'Pay with Paynow (Visa/Mastercard)'}
+              {loading ? <CircularProgress size={20} /> : (quote?.status === 'cancelled' || quote?.status === 'failed' || quote?.status === 'expired') ? 'Retry checkout' : quote?.status === 'provider_created' ? 'Continue checkout' : 'Pay with Paynow'}
             </Button>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              You will be redirected to Paynow to complete your payment (Visa/Mastercard, mobile wallets).
+            <Typography variant="body2" sx={{ mt: 1, color: 'inherit', opacity: 0.9 }}>
+              You will be redirected to Paynow to pay by Visa, Mastercard, EcoCash, Zimswitch or Telecash.
             </Typography>
+            <Box sx={{ mt: 2, p: 1.5, bgcolor: '#fff', borderRadius: 2, display: 'inline-block' }}>
+              <PaynowBadge />
+            </Box>
           </Box>
         ) : (
           <Box sx={{ mb: 2 }}>

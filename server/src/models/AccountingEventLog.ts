@@ -28,6 +28,22 @@ const AccountingEventLogSchema = new Schema<IAccountingEventLog>(
 AccountingEventLogSchema.index({ companyId: 1, createdAt: -1 });
 AccountingEventLogSchema.index({ companyId: 1, sourceModule: 1, sourceId: 1 });
 
+AccountingEventLogSchema.pre('save', function(next) {
+  if (!this.isNew && this.isModified()) {
+    return next(new Error('Accounting event logs are immutable.'));
+  }
+  return next();
+});
+AccountingEventLogSchema.pre('deleteOne', { document: false, query: true }, function(next) {
+  next(new Error('Hard delete is disabled for accounting event logs.'));
+});
+AccountingEventLogSchema.pre('deleteMany', { document: false, query: true }, function(next) {
+  next(new Error('Hard delete is disabled for accounting event logs.'));
+});
+AccountingEventLogSchema.pre('findOneAndDelete', function(next) {
+  next(new Error('Hard delete is disabled for accounting event logs.'));
+});
+
 export const AccountingEventLog = mongoose.model<IAccountingEventLog>(
   'AccountingEventLog',
   AccountingEventLogSchema,

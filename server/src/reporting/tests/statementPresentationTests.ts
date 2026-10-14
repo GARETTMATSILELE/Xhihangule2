@@ -224,6 +224,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   const dto = await builder.build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     generatedBy: 'tester',
     period: {
@@ -301,6 +302,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   ], vatOffSnapshots)).build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     period: { startDate: '2026-08-01', endDate: '2026-08-31', label: '2026-08' }
   });
@@ -333,6 +335,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   ], inclusiveSnapshots)).build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     period: { startDate: '2026-08-01', endDate: '2026-08-31', label: '2026-08' }
   });
@@ -365,6 +368,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   }])).build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     period: { startDate: '2026-08-01', endDate: '2026-08-31', label: '2026-08' }
   });
@@ -393,6 +397,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   ], [snapshots[0]])).build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     period: { startDate: '2026-08-01', endDate: '2026-08-31', label: '2026-08' }
   });
@@ -428,6 +433,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   }])).build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     period: { startDate: '2026-08-01', endDate: '2026-08-31', label: '2026-08' }
   });
@@ -450,6 +456,7 @@ export async function runStatementPresentationTests(): Promise<void> {
   ])).build({
     companyId,
     propertyId,
+    ledgerType: 'rental',
     companyName: 'The Benjamins Realty',
     period: { startDate: '2026-08-01', endDate: '2026-08-31', label: '2026-08' }
   });

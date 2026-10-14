@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../../../contexts/AuthContext';
 import { useFeature } from '../../../contexts/FeatureFlags';
 import { PageShell } from '../components/shared';
+import { TaxProfileForm } from '../components/TaxProfileForm';
 import { INDIVIDUAL_THEME } from '../theme';
 
 function ProfileTab() {
@@ -74,12 +75,12 @@ export function IndividualSettingsPage() {
   const apiAccess = useFeature('apiAccess');
   const multiUser = useFeature('multiUser');
   const [tab, setTab] = useState(0);
-  const tabs = ['Profile', 'Security', 'Notifications', 'Billing', 'Preferences'];
+  const tabs = ['Profile', 'Security', 'Notifications', 'Billing', 'Preferences', 'Tax'];
   if (apiAccess) tabs.push('API');
   if (multiUser) tabs.push('Users');
 
   return (
-    <PageShell title="Settings" subtitle="Profile, security, notifications, and preferences — agency settings hidden for individual owners.">
+    <PageShell title="Settings" subtitle="Profile, security, tax registration, and preferences — agency commission settings remain hidden.">
       <Card elevation={0} sx={{ border: `1px solid ${INDIVIDUAL_THEME.border}` }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable">
           {tabs.map((t) => <Tab key={t} label={t} />)}
@@ -90,6 +91,7 @@ export function IndividualSettingsPage() {
           {tab === 2 && <NotificationsTab />}
           {tab === 3 && <BillingTab />}
           {tab === 4 && <PreferencesTab />}
+          {tabs[tab] === 'Tax' && <TaxProfileForm />}
           {tabs[tab] === 'API' && <Alert severity="warning">API access is enabled for your plan.</Alert>}
           {tabs[tab] === 'Users' && <Alert severity="warning">Multi-user management is enabled for your plan.</Alert>}
         </CardContent>

@@ -4,6 +4,8 @@ import { Box } from '@mui/material';
 import { useCompany } from '../../contexts/CompanyContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { isIndividualWorkspace } from '../../contexts/FeatureFlags';
+import { getDemoCompany } from '../../demo/demoData';
+import { getWorkspaceBasePath, isDemoMode } from '../../demo/demoMode';
 import api from '../../api/axios';
 import { Tenants } from '../Tenants/Tenants';
 import { Files } from '../Files/Files';
@@ -19,11 +21,16 @@ import RentCollectionPage from './pages/RentCollectionPage';
 import { ExpensesPage, BillsLeviesPage } from './pages/FinancePages';
 import { MaintenancePage, AccountingPage } from './pages/OperationsPages';
 import ReportsPage from './pages/ReportsPage';
+import VatCentrePage from './pages/VatCentrePage';
+import RentalTaxCentrePage from './pages/RentalTaxCentrePage';
+import IncomeTaxCentrePage from './pages/IncomeTaxCentrePage';
+import TaxComplianceCentrePage from './pages/TaxComplianceCentrePage';
 import IndividualLeasesPage from './pages/LeasesPage';
 import IndividualInspectionsPage from './pages/InspectionsPage';
 import IndividualSettingsPage from './pages/SettingsPage';
 
 function IndividualRoutes() {
+  const base = getWorkspaceBasePath();
   return (
     <Routes>
       <Route index element={<DashboardPage />} />
@@ -35,10 +42,18 @@ function IndividualRoutes() {
       <Route path="maintenance" element={<MaintenancePage />} />
       <Route path="files" element={<Files />} />
       <Route path="rent-collection" element={<RentCollectionPage />} />
-      <Route path="income" element={<Navigate to="/individual-dashboard/rent-collection" replace />} />
+      <Route path="income" element={<Navigate to={`${base}/rent-collection`} replace />} />
       <Route path="expenses" element={<ExpensesPage />} />
       <Route path="bills" element={<BillsLeviesPage />} />
       <Route path="accounting" element={<AccountingPage />} />
+      <Route path="tax/vat" element={<VatCentrePage />} />
+      <Route path="tax/rental" element={<RentalTaxCentrePage />} />
+      <Route path="tax/income" element={<IncomeTaxCentrePage />} />
+      <Route path="tax/income/working-paper" element={<IncomeTaxCentrePage />} />
+      <Route path="tax/income/transactions" element={<IncomeTaxCentrePage />} />
+      <Route path="tax/income/review" element={<IncomeTaxCentrePage />} />
+      <Route path="tax/income/reconciliation" element={<IncomeTaxCentrePage />} />
+      <Route path="tax/compliance" element={<TaxComplianceCentrePage />} />
       <Route path="reports" element={<ReportsPage />} />
       <Route path="settings" element={<IndividualSettingsPage />} />
     </Routes>
@@ -68,9 +83,9 @@ const IndividualDashboard: React.FC = () => {
   const [checkingCompany, setCheckingCompany] = useState(false);
   const [hasCheckedFallback, setHasCheckedFallback] = useState(false);
 
-  const company = contextCompany || resolvedCompany || authCompany;
-  const needsFallbackCheck = !loading && !contextCompany && !resolvedCompany && !authCompany && !hasCheckedFallback;
-  const workspaceAllowed = useMemo(() => isIndividualWorkspace(company), [company]);
+  const company = contextCompany || resolvedCompany || authCompany || (isDemoMode() ? getDemoCompany() : null);
+  const needsFallbackCheck = !isDemoMode() && !loading && !contextCompany && !resolvedCompany && !authCompany && !hasCheckedFallback;
+  const workspaceAllowed = useMemo(() => isDemoMode() || isIndividualWorkspace(company), [company]);
 
   useEffect(() => {
     if (!needsFallbackCheck) return;

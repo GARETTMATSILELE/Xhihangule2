@@ -8,6 +8,7 @@ export interface IOwnerPreferences extends Document {
   maintenanceAlerts: boolean;
   monthlyReports: boolean;
   leaseExpiryAlerts: boolean;
+  rentPaymentEmails?: boolean;
   updatedAt: Date;
   createdAt: Date;
 }
@@ -21,6 +22,7 @@ const OwnerPreferencesSchema = new Schema<IOwnerPreferences>(
     maintenanceAlerts: { type: Boolean, default: true },
     monthlyReports: { type: Boolean, default: true },
     leaseExpiryAlerts: { type: Boolean, default: true },
+    rentPaymentEmails: { type: Boolean, default: true },
   },
   { timestamps: true, collection: 'owner_preferences' }
 );

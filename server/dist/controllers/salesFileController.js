@@ -17,15 +17,25 @@ const SalesFile_1 = __importDefault(require("../models/SalesFile"));
 const Property_1 = require("../models/Property");
 const Deal_1 = require("../models/Deal");
 const salesDocs_1 = require("../constants/salesDocs");
+const propertyAccess_1 = require("../utils/propertyAccess");
+const contentDisposition_1 = require("../utils/contentDisposition");
 const listSalesFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
             return res.status(401).json({ message: 'Authentication required' });
         const { propertyId, dealId, stage } = req.query;
+        const scope = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
         const query = { companyId: req.user.companyId };
-        if (propertyId)
+        if (scope !== 'company') {
+            if (propertyId && !scope.some((id) => String(id) === String(propertyId))) {
+                return res.json({ files: [] });
+            }
+            query.propertyId = propertyId || { $in: scope };
+        }
+        else if (propertyId) {
             query.propertyId = propertyId;
+        }
         if (dealId)
             query.dealId = dealId;
         if (stage)
@@ -50,13 +60,18 @@ const uploadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function
             return res.status(400).json({ message: 'Missing propertyId or docType' });
         const companyId = req.user.companyId;
         const prop = yield Property_1.Property.findOne({ _id: propertyId, companyId });
-        if (!prop)
+        if (!prop || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(propertyId)))) {
             return res.status(404).json({ message: 'Property not found' });
+        }
         // If uploading against a deal, validate ownership and stage/docType compatibility
         if (dealId) {
             const deal = yield Deal_1.Deal.findOne({ _id: dealId, companyId });
-            if (!deal)
+            if (!deal || String(deal.propertyId || '') !== String(propertyId)) {
                 return res.status(404).json({ message: 'Deal not found' });
+            }
+            if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(deal.propertyId)))) {
+                return res.status(404).json({ message: 'Deal not found' });
+            }
             if (stage) {
                 const allowed = salesDocs_1.ALLOWED_DOCS_BY_STAGE[stage] || [];
                 if (!allowed.includes(docType)) {
@@ -68,7 +83,7 @@ const uploadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function
             propertyId,
             dealId,
             companyId,
-            fileName: req.file.originalname,
+            fileName: (0, contentDisposition_1.safeAttachmentFilename)(req.file.originalname),
             docType,
             fileUrl: req.file.buffer.toString('base64'),
             uploadedBy: req.user.userId,
@@ -87,11 +102,12 @@ const downloadSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
             return res.status(401).json({ message: 'Authentication required' });
         const f = yield SalesFile_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
-        if (!f)
+        if (!f || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(f.propertyId)))) {
             return res.status(404).json({ message: 'File not found' });
+        }
         const buffer = Buffer.from(f.fileUrl, 'base64');
         res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${f.fileName}"`);
+        res.setHeader('Content-Disposition', (0, contentDisposition_1.attachmentContentDisposition)(f.fileName));
         res.send(buffer);
     }
     catch (e) {
@@ -105,8 +121,9 @@ const deleteSalesFile = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
             return res.status(401).json({ message: 'Authentication required' });
         const f = yield SalesFile_1.default.findOne({ _id: req.params.id, companyId: req.user.companyId });
-        if (!f)
+        if (!f || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(f.propertyId)))) {
             return res.status(404).json({ message: 'File not found' });
+        }
         yield f.deleteOne();
         res.json({ message: 'File deleted successfully' });
     }

@@ -5,7 +5,7 @@ import { MaintenanceActivity } from '../models/MaintenanceActivity';
 import { MaintenanceAttachmentRecord, ALLOWED_ATTACHMENT_MIME } from '../models/MaintenanceAttachment';
 import { MaintenanceQuote } from '../models/MaintenanceQuote';
 import { MaintenanceVerification } from '../models/MaintenanceVerification';
-import { MaintenanceContractor } from '../models/MaintenanceContractor';
+import { contractorDirectoryFilter, MaintenanceContractor } from '../models/MaintenanceContractor';
 import { PaymentRequest } from '../models/PaymentRequest';
 import { Property } from '../models/Property';
 import { AppError } from '../middleware/errorHandler';
@@ -247,7 +247,7 @@ export async function assignContractor(input: {
 }) {
   const contractor = await MaintenanceContractor.findOne({
     _id: input.contractorId,
-    companyId: input.companyId,
+    ...contractorDirectoryFilter(input.companyId),
     active: true,
   });
   if (!contractor) throw new AppError('Contractor not found or inactive', 404);

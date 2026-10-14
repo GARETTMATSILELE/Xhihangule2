@@ -40,7 +40,7 @@ const TaxPayoutSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
     trustAccountId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'TrustAccount', required: true, index: true },
     propertyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Property', required: true, index: true },
-    taxType: { type: String, enum: ['CGT', 'VAT', 'VAT_ON_COMMISSION'], required: true, index: true },
+    taxType: { type: String, enum: ['CGT', 'VAT', 'VAT_ON_COMMISSION', 'CGWT'], required: true, index: true },
     amount: { type: Number, required: true, min: 0.01 },
     payoutDate: { type: Date, required: true, default: () => new Date() },
     reference: { type: String, trim: true },

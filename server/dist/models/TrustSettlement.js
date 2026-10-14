@@ -48,6 +48,21 @@ const TrustSettlementSchema = new mongoose_1.Schema({
         }
     ],
     netPayout: { type: Number, required: true, min: 0 },
+    cgtSnapshot: { type: mongoose_1.Schema.Types.Mixed, required: false },
+    cgwtSnapshot: { type: mongoose_1.Schema.Types.Mixed, required: false },
+    waterfall: { type: mongoose_1.Schema.Types.Mixed, required: false },
+    settlementStatus: {
+        type: String,
+        enum: ['CALCULATED', 'REQUIRES_TAX_REVIEW', 'PROVISIONAL', 'BLOCKED'],
+        required: false
+    },
+    cgwtApplicability: {
+        type: String,
+        enum: ['APPLICABLE', 'NOT_APPLICABLE', 'REVIEW_REQUIRED'],
+        required: false
+    },
+    calculatedAt: { type: Date, required: false },
+    calculatedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
     settlementDate: { type: Date, required: true, default: () => new Date() },
     locked: { type: Boolean, required: true, default: false, index: true }
 }, { timestamps: true });
