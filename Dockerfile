@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # ---------- Base with system deps (for puppeteer/chromium etc.) ----------
-FROM node:20-bullseye AS base
+# Debian 11 security packages were removed after Bullseye LTS ended, so apt-get install 404s.
+FROM node:20-bookworm AS base
 
 ARG APT_RETRIES=5
 
@@ -43,7 +44,7 @@ COPY server/ ./
 RUN npm run build
 
 # ---------- Production runtime ----------
-FROM node:20-bullseye-slim AS runtime
+FROM node:20-bookworm-slim AS runtime
 
 ARG APT_RETRIES=5
 
