@@ -9,8 +9,19 @@ const logger = winston_1.default.createLogger({
     level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
     format: winston_1.default.format.combine(winston_1.default.format.timestamp(), winston_1.default.format.json()),
     transports: [
-        new winston_1.default.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston_1.default.transports.File({ filename: 'combined.log' })
+        new winston_1.default.transports.File({
+            filename: 'error.log',
+            level: 'error',
+            maxsize: 5 * 1024 * 1024,
+            maxFiles: 5,
+            tailable: true
+        }),
+        new winston_1.default.transports.File({
+            filename: 'combined.log',
+            maxsize: 10 * 1024 * 1024,
+            maxFiles: 5,
+            tailable: true
+        })
     ]
 });
 exports.logger = logger;

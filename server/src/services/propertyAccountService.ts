@@ -31,9 +31,32 @@ import { classifyDuplicateGroup, classifyLedgerTransactionDuplicates } from './p
 import { computePropertyAccountTotals } from './propertyAccountTotals';
 import { isIndexCreationAllowed } from './ledgerMutationPolicy';
 import { throwOnceIfArmed } from './testFailureSeam';
+import { duplicateKeyDetails } from './journalDuplicateKey';
+import { idsEqual } from '../utils/money';
 
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise: Promise<void> | null = null;
+
+const ACTIVE_PROPERTY_LEDGER_FIELDS = ['propertyId', 'ledgerType'];
+
+/**
+ * The active-ledger identity is the partial unique index { propertyId, ledgerType }
+ * where isArchived is false. A duplicate-key error is this identity only when the
+ * server reports that index and the conflicting values are this property and ledger.
+ * Missing key metadata is not proof that creation succeeded.
+ */
+export function propertyLedgerDuplicateMatches(
+  error: unknown,
+  propertyId: unknown,
+  ledgerType: 'rental' | 'sale'
+): boolean {
+  const details = duplicateKeyDetails(error);
+  if (!details) return false;
+  const fields = Object.keys(details.pattern);
+  if (fields.length !== ACTIVE_PROPERTY_LEDGER_FIELDS.length) return false;
+  if (!ACTIVE_PROPERTY_LEDGER_FIELDS.every((field) => fields.includes(field))) return false;
+  return idsEqual(details.value.propertyId, propertyId) && String(details.value.ledgerType || '') === ledgerType;
+}
 
 const PASS_THROUGH_TYPE_LABELS: Record<string, string> = {
   LEVY: 'Levies',
@@ -957,27 +980,57 @@ export class PropertyAccountService {
           isArchived: false
         });
 
+        let created = false;
         try {
-          await account.save();
-        } catch (saveErr: any) {
-          const isDup = this.isDuplicateKeyError(saveErr);
-          if (isDup) {
-            const reloaded = await PropertyAccount.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
-            if (reloaded.length === 1) {
-              account = reloaded[0] as any;
-            } else if (reloaded.length > 1) {
-              throw new AppError(
-                `Multiple active PropertyAccounts found for property ${propertyId} after concurrent create; refusing to choose a writable ledger`,
-                409
-              );
-            } else {
-              throw saveErr;
+          const forced = process.env.NODE_ENV !== 'production' && process.env.MANTIS_TEST_SEAM === '1'
+            ? (global as any).__propertyAccountConflict
+            : null;
+          if (forced && displayName === forced.propertyName) {
+            const duplicate: any = new Error('E11000 duplicate key error');
+            duplicate.code = 11000;
+            duplicate.keyPattern = forced.pattern;
+            duplicate.keyValue = forced.keyValue;
+            if (forced.insertVisibleAccount) {
+              await PropertyAccount.collection.insertOne({
+                propertyId: propertyObjectId,
+                ledgerType: effectiveLedger,
+                propertyName: 'visible-unrelated',
+                isArchived: false,
+                isActive: true,
+                transactions: [],
+                ownerPayouts: [],
+                runningBalance: 0,
+                totalIncome: 0,
+                totalExpenses: 0
+              });
             }
-          } else {
+            throw duplicate;
+          }
+          await account.save();
+          created = true;
+        } catch (saveErr: any) {
+          if (!propertyLedgerDuplicateMatches(saveErr, propertyObjectId, effectiveLedger)) {
             throw saveErr;
           }
+          const reloaded = await PropertyAccount.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
+          if (reloaded.length !== 1) {
+            throw saveErr;
+          }
+          const candidate = reloaded[0];
+          if (!idsEqual(candidate.propertyId, propertyObjectId) || candidate.ledgerType !== effectiveLedger) {
+            throw saveErr;
+          }
+          if (property) {
+            const confirmed = await Property.findById(candidate.propertyId).select('companyId').lean();
+            if (!confirmed || !idsEqual((confirmed as any).companyId, property.companyId)) {
+              throw saveErr;
+            }
+          }
+          account = candidate;
         }
-        logger.info(`Created new property account for property: ${propertyId}`);
+        if (created) {
+          logger.info(`Created new property account for property: ${propertyId}`);
+        }
       }
 
       return this.validateWritableAccount(account, propertyId, 'getOrCreatePropertyAccount');

@@ -125,7 +125,8 @@ export async function runReportingReconciliationTests(): Promise<void> {
 
   const csv = await exportEngine.exportOwnerStatement(dto, 'csv');
   assert.ok(csv.buffer.toString('utf8').includes('Balance'), 'CSV export should contain ledger balance column.');
-  assert.ok(csv.buffer.toString('utf8').includes('Rent Amount'), 'CSV export should contain rent amount column.');
+  assert.ok(csv.buffer.toString('utf8').includes('Total Amount Received'), 'CSV export should contain the total amount received column.');
+  assert.ok(csv.buffer.toString('utf8').includes('Net Amount Due to Owner'), 'CSV export should contain the net amount due to owner column.');
   assert.ok(!csv.buffer.toString('utf8').includes('Status'), 'Printed statement CSV should not include a status column.');
 
   const excel = await exportEngine.exportOwnerStatement(dto, 'excel');

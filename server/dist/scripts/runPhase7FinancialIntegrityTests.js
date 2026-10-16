@@ -110,7 +110,9 @@ function run() {
         assert_1.default.ok(!accountingCtrl.includes('recordIncomeFromPayment('));
         const dashboardSummaryFn = sliceFn(srcFile('services/accountingService.ts'), 'async getDashboardSummary(companyId: string)', 'async getDashboardOutstanding');
         assert_1.default.ok(!dashboardSummaryFn.includes('CompanyBalance.updateOne'));
-        assert_1.default.ok(srcFile('controllers/propertyAccountController.ts').includes('Read-only: load the ledger'));
+        const propertyAccountCtrl = srcFile('controllers/propertyAccountController.ts');
+        assert_1.default.ok(propertyAccountCtrl.includes('Read-only: load the named ledger'));
+        assert_1.default.ok(propertyAccountCtrl.includes('Never posts income or repairs accounting'));
         results['GET safety'] = 'PASS';
         // Detection-only scheduled / orphan
         assert_1.default.ok(scheduled.includes('Read-only: never repairs or backfills'));

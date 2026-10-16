@@ -9,6 +9,7 @@ exports.isRegistrationEmail = isRegistrationEmail;
 exports.companyAwaitingRegistrationPayment = companyAwaitingRegistrationPayment;
 exports.isRegistrationPaymentExemptPath = isRegistrationPaymentExemptPath;
 exports.evaluateProviderPoll = evaluateProviderPoll;
+exports.paynowCheckoutDecision = paynowCheckoutDecision;
 exports.isAllowedPaynowPollUrl = isAllowedPaynowPollUrl;
 exports.paynowPayloadHash = paynowPayloadHash;
 exports.verifyPaynowPayload = verifyPaynowPayload;
@@ -16,7 +17,7 @@ exports.paynowConfigurationState = paynowConfigurationState;
 exports.productionApiUrl = productionApiUrl;
 const plan_1 = require("../types/plan");
 const PAID_STATUSES = ['paid', 'awaiting delivery', 'delivered'];
-const FAILED_STATUSES = ['cancelled', 'canceled', 'refunded', 'disputed', 'failed'];
+const FAILED_STATUSES = ['cancelled', 'canceled', 'refunded', 'disputed', 'failed', 'expired'];
 const PAYMENT_HOLD_STATUSES = ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP'];
 function configuredPlanCharge(plan, cycle) {
     var _a;
@@ -117,9 +118,26 @@ function evaluateProviderPoll(expected, poll) {
         return { outcome: 'paid' };
     }
     if (FAILED_STATUSES.includes(state)) {
-        return { outcome: 'failed', status: state === 'canceled' ? 'cancelled' : state };
+        const status = state === 'canceled' ? 'cancelled'
+            : state === 'expired' ? 'expired'
+                : state === 'cancelled' ? 'cancelled'
+                    : state === 'refunded' ? 'refunded'
+                        : state === 'disputed' ? 'disputed'
+                            : 'failed';
+        return { outcome: 'failed', status };
     }
     return { outcome: 'pending', status: state || 'pending' };
+}
+function paynowCheckoutDecision(session) {
+    const status = String(session.status || '');
+    if (status === 'paid' || status === 'reconciled')
+        return 'completed';
+    if (status === 'cancelled' || status === 'failed' || status === 'expired')
+        return 'closed';
+    if ((status === 'pending' || status === 'provider_created') && session.pollUrl) {
+        return isAllowedPaynowPollUrl(session.pollUrl) ? 'awaiting' : 'closed';
+    }
+    return 'create';
 }
 function isAllowedPaynowPollUrl(url) {
     try {
@@ -155,11 +173,13 @@ function paynowConfigurationState(env = process.env) {
     if (!configured)
         return { configured: false, mode: 'unconfigured' };
     const mode = String(env.PAYNOW_MODE || '').trim().toLowerCase();
+    if (!mode)
+        return { configured: true, mode: 'unspecified' };
     if (mode === 'test' || mode === 'sandbox')
         return { configured: true, mode: 'test' };
     if (mode === 'live')
         return { configured: true, mode: 'live' };
-    return { configured: true, mode: 'unspecified' };
+    return { configured: true, mode: 'invalid' };
 }
 function productionApiUrl(candidate, nodeEnv, browserOrigin) {
     const value = String(candidate || '').trim();

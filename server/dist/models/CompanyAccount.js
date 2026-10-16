@@ -17,6 +17,7 @@ const CompanyTransactionSchema = new mongoose_1.Schema({
     description: { type: String },
     processedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false },
     notes: { type: String },
+    idempotencyKey: { type: String, required: false },
     isArchived: { type: Boolean, default: false },
 }, { timestamps: true });
 const CompanyAccountSchema = new mongoose_1.Schema({

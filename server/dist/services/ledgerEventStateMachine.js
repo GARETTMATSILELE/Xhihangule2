@@ -1,9 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.LEDGER_RETRY_LIMIT = void 0;
 exports.isClaimableLedgerEvent = isClaimableLedgerEvent;
 exports.nextLedgerEventStatusAfterClaim = nextLedgerEventStatusAfterClaim;
 exports.nextLedgerEventStatusAfterSuccess = nextLedgerEventStatusAfterSuccess;
 exports.nextLedgerEventStatusAfterFailure = nextLedgerEventStatusAfterFailure;
+exports.ledgerRetryExhausted = ledgerRetryExhausted;
 exports.computeLedgerBackoffMs = computeLedgerBackoffMs;
 exports.classifyReversalOutcome = classifyReversalOutcome;
 /**
@@ -38,6 +40,10 @@ function nextLedgerEventStatusAfterSuccess() {
 }
 function nextLedgerEventStatusAfterFailure() {
     return 'failed';
+}
+exports.LEDGER_RETRY_LIMIT = 8;
+function ledgerRetryExhausted(attemptCount) {
+    return attemptCount >= exports.LEDGER_RETRY_LIMIT;
 }
 function computeLedgerBackoffMs(attempt) {
     const base = 5000;

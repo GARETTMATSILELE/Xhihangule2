@@ -220,8 +220,8 @@ function run() {
         {
             const rateSvc = srcFile('services/taxRateService.ts');
             assert_1.default.ok(rateSvc.includes('STANDARD_VAT_PERCENT_FROM_2026'));
-            assert_1.default.ok(rateSvc.includes('STANDARD_VAT_PERCENT_BEFORE_2026'));
             const vatCalc = srcFile('services/tax/vatCalculation.ts');
+            assert_1.default.ok(vatCalc.includes('STANDARD_VAT_PERCENT_BEFORE_2026'), 'the pre-2026 rate constant lives in the VAT calculation module');
             assert_1.default.ok(vatCalc.includes('15.5'));
             results['Dated VAT rate seed'] = 'PASS';
         }

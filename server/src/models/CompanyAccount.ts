@@ -26,6 +26,7 @@ export interface CompanyTransaction {
   description?: string;
   processedBy?: Types.ObjectId;
   notes?: string;
+  idempotencyKey?: string;
   // Soft archive flag for duplicate/correction entries
   isArchived?: boolean;
   createdAt?: Date;
@@ -56,6 +57,7 @@ const CompanyTransactionSchema = new Schema<CompanyTransaction>({
   description: { type: String },
   processedBy: { type: Schema.Types.ObjectId, required: false },
   notes: { type: String },
+  idempotencyKey: { type: String, required: false },
   isArchived: { type: Boolean, default: false },
 }, { timestamps: true });
 

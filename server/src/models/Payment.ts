@@ -65,6 +65,19 @@ export interface IPayment extends Document {
     vatTreatment?: 'inclusive' | 'exclusive';
     vatRate?: number;
     vatAmount?: number;
+    vatDecision?: {
+      registrationStatus?: boolean;
+      registrationEffectiveDate?: Date | null;
+      registrationCancelledAt?: Date | null;
+      taxClassification?: string;
+      centralVatRate?: number;
+      taxRateEffectiveDate?: Date | null;
+      propertyVatApplicable?: boolean;
+      treatment?: 'inclusive' | 'exclusive' | 'none';
+      commissionBase?: number;
+      vatAmount?: number;
+      reason?: string;
+    };
     // Optional breakdown when a collaborator sells in a development
     agentSplit?: {
       ownerAgentShare: number; // portion of agentShare to development owner
@@ -351,6 +364,19 @@ const PaymentSchema: Schema = new Schema({
     vatJurisdiction: { type: String, required: false },
     vatRuleId: { type: String, required: false },
     vatTaxPoint: { type: Date, required: false },
+    vatDecision: {
+      registrationStatus: { type: Boolean, required: false },
+      registrationEffectiveDate: { type: Date, required: false },
+      registrationCancelledAt: { type: Date, required: false },
+      taxClassification: { type: String, required: false },
+      centralVatRate: { type: Number, required: false },
+      taxRateEffectiveDate: { type: Date, required: false },
+      propertyVatApplicable: { type: Boolean, required: false },
+      treatment: { type: String, enum: ['inclusive', 'exclusive', 'none'], required: false },
+      commissionBase: { type: Number, required: false },
+      vatAmount: { type: Number, required: false },
+      reason: { type: String, required: false }
+    },
     agentSplit: {
       ownerAgentShare: { type: Number, required: false, default: 0 },
       collaboratorAgentShare: { type: Number, required: false, default: 0 },

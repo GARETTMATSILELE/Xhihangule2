@@ -145,7 +145,9 @@ async function run(): Promise<void> {
     'async getDashboardOutstanding'
   );
   assert.ok(!dashboardSummaryFn.includes('CompanyBalance.updateOne'));
-  assert.ok(srcFile('controllers/propertyAccountController.ts').includes('Read-only: load the ledger'));
+  const propertyAccountCtrl = srcFile('controllers/propertyAccountController.ts');
+  assert.ok(propertyAccountCtrl.includes('Read-only: load the named ledger'));
+  assert.ok(propertyAccountCtrl.includes('Never posts income or repairs accounting'));
   results['GET safety'] = 'PASS';
 
   // Detection-only scheduled / orphan

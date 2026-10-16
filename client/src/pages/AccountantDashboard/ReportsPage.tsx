@@ -6,6 +6,7 @@ import { Payment } from '../../types/payment';
 import { propertyAccountService } from '../../services/propertyAccountService';
 import companyAccountService, { CompanyAccountSummary } from '../../services/companyAccountService';
 import { agentAccountService } from '../../services/agentAccountService';
+import { rentPeriodDisplayLabels } from '../../utils/partyStatementReports';
 
 // helpers
 
@@ -759,7 +760,10 @@ const ReportsPage: React.FC = () => {
                   <tr><th>Period</th><th class="right">Expected</th><th class="right">Paid</th><th class="right">Outstanding</th></tr>
                 </thead>
                 <tbody>
-                  ${prop.months.map(m => `<tr><td>${m.period}</td><td class="right">${currency(m.expected || 0)}</td><td class="right">${currency(m.paid || 0)}</td><td class="right">${currency(m.outstanding || 0)}</td></tr>`).join('')}
+                  ${(() => {
+                    const labels = rentPeriodDisplayLabels(prop.months.map(m => m.period));
+                    return prop.months.map(m => `<tr><td>${escapeHtml(labels.get(m.period) || m.period)}</td><td class="right">${currency(m.expected || 0)}</td><td class="right">${currency(m.paid || 0)}</td><td class="right">${currency(m.outstanding || 0)}</td></tr>`).join('');
+                  })()}
                   <tr class="total"><td>Total</td><td></td><td class="right">${currency(prop.totalPaid || 0)}</td><td class="right">${currency(prop.totalOutstanding || 0)}</td></tr>
                 </tbody>
               </table>

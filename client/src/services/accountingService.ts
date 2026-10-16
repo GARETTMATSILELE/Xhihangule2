@@ -195,6 +195,13 @@ export interface AccountingIntegrityRow {
   status: 'MISSING' | 'MISMATCHED' | 'ORPHANED' | string;
   accountingComplete?: boolean;
   canRepair?: boolean;
+  amount?: number;
+  companyId?: string;
+  missingRecord?: string;
+  recommendedReview?: string;
+  detectedAt?: string;
+  operationId?: string;
+  canRetry?: boolean;
 }
 
 export interface AccountingIntegrityListParams {
@@ -306,6 +313,10 @@ const accountingService = {
   },
   async listTrustVisibility(): Promise<{ rows: any[] }> {
     const res = await api.get('/accountants/trust-visibility');
+    return res.data;
+  },
+  async retryLedgerEvent(eventId: string): Promise<{ status: string; retriedExistingEvent: boolean }> {
+    const res = await api.post(`/accountants/accounting-integrity/ledger-events/${eventId}/retry`);
     return res.data;
   },
   async repairPaymentAccounting(paymentId: string, payload: { confirm?: boolean; dryRun?: boolean; reason: string }): Promise<any> {

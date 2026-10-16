@@ -12,12 +12,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.VAT_RATE_UNAVAILABLE_MESSAGE = exports.VAT_RATE_UNAVAILABLE_CODE = void 0;
 exports.companyVatRegistrationFromDoc = companyVatRegistrationFromDoc;
 exports.loadCompanyVatRegistration = loadCompanyVatRegistration;
+exports.stampVatDecision = stampVatDecision;
 exports.resolveCommissionVatPolicy = resolveCommissionVatPolicy;
 exports.centralVatRateBlock = centralVatRateBlock;
 exports.commissionVatFlagsFromPolicy = commissionVatFlagsFromPolicy;
 exports.resolveSaleVatPolicy = resolveSaleVatPolicy;
+exports.commissionVatSnapshotGap = commissionVatSnapshotGap;
 exports.loadCgtRates = loadCgtRates;
 const Company_1 = require("../models/Company");
+const Property_1 = require("../models/Property");
 const taxRateService_1 = require("./taxRateService");
 const vatApplicability_1 = require("./tax/vatApplicability");
 const propertyCommissionCalculator_1 = require("./propertyCommissionCalculator");
@@ -45,6 +48,18 @@ function loadCompanyVatRegistration(companyId) {
         return companyVatRegistrationFromDoc(company);
     });
 }
+const asDateOrNull = (value) => {
+    if (!value)
+        return null;
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+function stampVatDecision(snapshot, policy) {
+    var _a, _b, _c;
+    if (!snapshot || !(policy === null || policy === void 0 ? void 0 : policy.decision))
+        return snapshot;
+    return Object.assign(Object.assign({}, snapshot), { vatDecision: Object.assign(Object.assign({}, policy.decision), { commissionBase: (_a = snapshot.commissionBase) !== null && _a !== void 0 ? _a : policy.decision.commissionBase, vatAmount: (_c = (_b = snapshot.vatAmount) !== null && _b !== void 0 ? _b : snapshot.vatOnCommission) !== null && _c !== void 0 ? _c : policy.decision.vatAmount }) });
+}
 function resolveCommissionVatPolicy(input) {
     return __awaiter(this, void 0, void 0, function* () {
         const property = input.property || {};
@@ -67,6 +82,32 @@ function resolveCommissionVatPolicy(input) {
             const normalized = (0, propertyCommissionCalculator_1.normalizeVatCommissionTreatment)(true, input.requestedTreatment || property.vatCommissionTreatment);
             treatment = normalized === 'inclusive' ? 'COMMISSION_VAT_INCLUSIVE' : 'COMMISSION_VAT_EXCLUSIVE';
         }
+        const lookedUp = yield (0, taxRateService_1.getVatRateForDate)(input.companyId, input.paymentDate).catch(() => ({
+            percent: 0,
+            decimal: 0,
+            source: 'none',
+            jurisdiction: undefined,
+            taxRateId: undefined,
+            effectiveFrom: undefined
+        }));
+        const applied = applicability.vatApplies && lookedUp.decimal > 0 && lookedUp.source !== 'none';
+        const appliedTreatment = !applied
+            ? 'none'
+            : (treatment === 'COMMISSION_VAT_INCLUSIVE' ? 'inclusive' : 'exclusive');
+        const reason = applicability.vatApplies && !applied
+            ? 'vat_rate_missing_on_transaction_date'
+            : applicability.reason;
+        const decision = {
+            registrationStatus: Boolean(company.vatRegistered),
+            registrationEffectiveDate: asDateOrNull(company.vatRegistrationEffectiveDate),
+            registrationCancelledAt: asDateOrNull(company.vatRegistrationCancelledAt),
+            taxClassification: 'STANDARD_TAXABLE',
+            centralVatRate: Number(lookedUp.decimal || 0),
+            taxRateEffectiveDate: asDateOrNull(lookedUp.effectiveFrom),
+            propertyVatApplicable: Boolean(property.vatOnCommission),
+            treatment: appliedTreatment,
+            reason
+        };
         if (!applicability.vatApplies) {
             return {
                 apply: false,
@@ -74,11 +115,11 @@ function resolveCommissionVatPolicy(input) {
                 treatment: 'NONE',
                 reason: applicability.reason,
                 reviewRequired: applicability.reviewRequired,
-                reviewReason: applicability.reviewReason
+                reviewReason: applicability.reviewReason,
+                decision
             };
         }
-        const lookedUp = yield (0, taxRateService_1.getVatRateForDate)(input.companyId, input.paymentDate);
-        if (!(lookedUp.decimal > 0) || lookedUp.source === 'none') {
+        if (!applied) {
             return {
                 apply: false,
                 vatRate: 0,
@@ -86,7 +127,8 @@ function resolveCommissionVatPolicy(input) {
                 reason: 'vat_rate_missing_on_transaction_date',
                 reviewRequired: true,
                 reviewReason: 'VAT_RATE_MISSING',
-                jurisdiction: lookedUp.jurisdiction
+                jurisdiction: lookedUp.jurisdiction,
+                decision
             };
         }
         return {
@@ -97,7 +139,8 @@ function resolveCommissionVatPolicy(input) {
             reviewRequired: applicability.reviewRequired,
             reviewReason: applicability.reviewReason,
             taxRateId: lookedUp.taxRateId,
-            jurisdiction: lookedUp.jurisdiction
+            jurisdiction: lookedUp.jurisdiction,
+            decision
         };
     });
 }
@@ -154,6 +197,62 @@ function resolveSaleVatPolicy(input) {
             reviewReason: applicability.reviewReason,
             supplyTreatment
         };
+    });
+}
+/**
+ * Eligible commission (property flag, company registered on the payment date, central rate)
+ * must keep its own VAT snapshot. A zero snapshot is a posting gap. Ineligible commission
+ * with a positive VAT snapshot is also a gap. This does not recalculate or rewrite amounts.
+ */
+function commissionVatSnapshotGap(payment) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        if (!payment || payment.reversalOfPaymentId)
+            return null;
+        if (String(payment.status || '') !== 'completed' || payment.isProvisional === true)
+            return null;
+        const paymentType = String(payment.paymentType || '');
+        if (paymentType === 'sale')
+            return null;
+        const details = payment.commissionDetails || {};
+        const commission = Number((_b = (_a = details.commissionNet) !== null && _a !== void 0 ? _a : details.totalCommission) !== null && _b !== void 0 ? _b : 0);
+        const vat = Number((_d = (_c = details.vatOnCommission) !== null && _c !== void 0 ? _c : details.vatAmount) !== null && _d !== void 0 ? _d : 0);
+        if (!(commission > 0) || !payment.propertyId || !payment.companyId)
+            return null;
+        const property = yield Property_1.Property.findById(payment.propertyId).select('vatOnCommission vatCommissionTreatment rentalType').lean();
+        if (!property || !property.vatOnCommission) {
+            if (vat > 0.005) {
+                return {
+                    code: 'VAT_ON_INELIGIBLE_COMMISSION',
+                    detail: 'VAT on commission is stored on a property that does not have VAT on commission enabled.'
+                };
+            }
+            return null;
+        }
+        const policy = yield resolveCommissionVatPolicy({
+            companyId: String(payment.companyId),
+            paymentDate: payment.paymentDate ? new Date(payment.paymentDate) : new Date(),
+            property,
+            requestedVatOnCommission: true,
+            requestedTreatment: property.vatCommissionTreatment,
+            commissionType: String(property.rentalType || '').toLowerCase() === 'introduction' ? 'introduction' : 'management'
+        });
+        if (!policy.apply) {
+            if (vat > 0.005) {
+                return {
+                    code: 'VAT_CHARGED_WHILE_NOT_APPLICABLE',
+                    detail: `VAT on commission ${vat.toFixed(2)} was stored while applicability is ${policy.reason}.`
+                };
+            }
+            return null;
+        }
+        if (!(vat > 0.005)) {
+            return {
+                code: 'MISSING_VAT_ON_ELIGIBLE_COMMISSION',
+                detail: 'This payment has commission and VAT on commission is applicable, but the VAT snapshot is missing.'
+            };
+        }
+        return null;
     });
 }
 function loadCgtRates(companyId, onDate) {

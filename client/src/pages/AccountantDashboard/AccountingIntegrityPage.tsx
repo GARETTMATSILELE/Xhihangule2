@@ -84,6 +84,8 @@ const AccountingIntegrityPage: React.FC = () => {
   const [confirmRepair, setConfirmRepair] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
   const [repairResult, setRepairResult] = useState<any>(null);
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
   const [trace, setTrace] = useState<any>(null);
   const [trustRows, setTrustRows] = useState<any[]>([]);
 
@@ -131,6 +133,7 @@ const AccountingIntegrityPage: React.FC = () => {
     setRecon(null);
     setTrace(null);
     setRepairResult(null);
+    setRetryMessage(null);
     setReason('');
     setConfirmRepair(false);
     if (!row.paymentId) return;
@@ -179,7 +182,9 @@ const AccountingIntegrityPage: React.FC = () => {
       width: 120,
       valueFormatter: (params) => params.value ? new Date(params.value).toLocaleDateString() : ''
     },
-    { field: 'paymentReference', headerName: 'Payment Reference', flex: 1, minWidth: 160 },
+    { field: 'paymentReference', headerName: 'Payment Reference', flex: 1, minWidth: 150 },
+    { field: 'amount', headerName: 'Amount', width: 110, valueGetter: (params) => moneyText(params.row.amount, params.row.currency) },
+    { field: 'missingRecord', headerName: 'Missing record', flex: 1, minWidth: 160 },
     { field: 'property', headerName: 'Property', flex: 1, minWidth: 140 },
     { field: 'tenant', headerName: 'Tenant', width: 140 },
     { field: 'currency', headerName: 'Currency', width: 90 },
@@ -346,6 +351,11 @@ const AccountingIntegrityPage: React.FC = () => {
           {selected && !detailLoading && (
             <>
               <Typography variant="h6" sx={{ mb: 1 }}>{selected.paymentReference || selected.paymentId || 'Orphaned accounting record'}</Typography>
+              {selected.recommendedReview && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Company {selected.companyId || 'unknown'}. Amount {moneyText(selected.amount, selected.currency)}. Missing record: {selected.missingRecord || 'see component'}. {selected.recommendedReview}
+                </Alert>
+              )}
               {trace?.allocation && (
                 <Box sx={{ mb: 2, p: 1.5, bgcolor: trace.allocation.reviewRequired ? '#fff7ed' : '#edf7f1', borderRadius: 1 }}>
                   <Typography sx={{ fontWeight: 700, mb: 0.5 }}>How the owner amount is calculated</Typography>
@@ -397,6 +407,12 @@ const AccountingIntegrityPage: React.FC = () => {
                   {repairResult.requiresManualReview?.length ? '. Manual accounting review required.' : ''}
                 </Alert>
               )}
+              {selected.canRetry && selected.operationId && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  This retries the existing ledger event. It does not create a new financial operation and it does not change historical amounts.
+                </Alert>
+              )}
+              {retryMessage && <Alert severity="info" sx={{ mt: 1 }}>{retryMessage}</Alert>}
               {selected.canRepair && (
                 <TextField
                   sx={{ mt: 2 }}
@@ -415,6 +431,28 @@ const AccountingIntegrityPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setSelected(null)}>Close</Button>
+          {selected?.canRetry && selected.operationId && (
+            <Button
+              variant="contained"
+              disabled={retryBusy}
+              onClick={() => {
+                const operationId = selected.operationId;
+                if (!operationId) return;
+                setRetryBusy(true);
+                setRetryMessage(null);
+                void accountingService.retryLedgerEvent(operationId)
+                  .then(() => {
+                    setRetryMessage('The existing ledger event completed.');
+                    void loadRows();
+                    void loadSummary();
+                  })
+                  .catch((err: any) => setRetryMessage(err?.response?.data?.message || err?.message || 'Retry failed'))
+                  .finally(() => setRetryBusy(false));
+              }}
+            >
+              Retry existing operation
+            </Button>
+          )}
           {selected?.canRepair && (
             <>
               <Button disabled={repairBusy || !reason.trim()} onClick={() => void runRepair(true)}>Dry run</Button>

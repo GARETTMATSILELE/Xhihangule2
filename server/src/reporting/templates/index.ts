@@ -30,21 +30,22 @@ export class TemplateEngine {
       'Statement Summary',
       `Opening Balance: ${summary.openingBalance.currency} ${summary.openingBalance.amount.toFixed(2)}`,
       ...(dto.ownerMoneyWaterfall ? [
-        `Amount Received: ${dto.ownerMoneyWaterfall.grossAmount.currency} ${dto.ownerMoneyWaterfall.grossAmount.amount.toFixed(2)}`,
-        `Less Commission: ${dto.ownerMoneyWaterfall.commissionAmount.currency} ${dto.ownerMoneyWaterfall.commissionAmount.amount.toFixed(2)}`,
-        `Less Levy: ${dto.ownerMoneyWaterfall.levyAmount.currency} ${dto.ownerMoneyWaterfall.levyAmount.amount.toFixed(2)}`,
-        `Less VAT on Commission: ${dto.ownerMoneyWaterfall.vatOnCommission.currency} ${dto.ownerMoneyWaterfall.vatOnCommission.amount.toFixed(2)}`,
-        `Net Owner Amount: ${dto.ownerMoneyWaterfall.netOwnerAmount.currency} ${dto.ownerMoneyWaterfall.netOwnerAmount.amount.toFixed(2)}`,
+        `Total Amount Received: ${dto.ownerMoneyWaterfall.grossAmount.currency} ${dto.ownerMoneyWaterfall.grossAmount.amount.toFixed(2)}`,
+        `Total Commission: ${dto.ownerMoneyWaterfall.commissionAmount.currency} ${dto.ownerMoneyWaterfall.commissionAmount.amount.toFixed(2)}`,
+        `Total Levy: ${dto.ownerMoneyWaterfall.levyAmount.currency} ${dto.ownerMoneyWaterfall.levyAmount.amount.toFixed(2)}`,
+        `Total VAT on Commission: ${dto.ownerMoneyWaterfall.vatOnCommission.currency} ${dto.ownerMoneyWaterfall.vatOnCommission.amount.toFixed(2)}`,
+        `Net Amount Due to Owner: ${dto.ownerMoneyWaterfall.netOwnerAmount.currency} ${dto.ownerMoneyWaterfall.netOwnerAmount.amount.toFixed(2)}`,
         dto.ownerMoneyWaterfall.reviewRequired ? 'Review required. Recorded owner income does not match the stored allocation. No amount was changed.' : 'Recorded owner income matches the stored allocation.'
       ] : []),
       ...(dto.statementSummary ? [
-        `Total Rent: ${dto.statementSummary.totalRent.currency} ${dto.statementSummary.totalRent.amount.toFixed(2)}`,
+        `Total Amount Received: ${(dto.statementSummary.totalAmountReceived || dto.statementSummary.totalRent).currency} ${(dto.statementSummary.totalAmountReceived || dto.statementSummary.totalRent).amount.toFixed(2)}`,
+        `Contractual Rent: ${dto.statementSummary.totalRent.currency} ${dto.statementSummary.totalRent.amount.toFixed(2)}`,
         `Total Commission: ${dto.statementSummary.totalCommission.currency} ${dto.statementSummary.totalCommission.amount.toFixed(2)}`,
-        `Total VAT: ${dto.statementSummary.totalVat.currency} ${dto.statementSummary.totalVat.amount.toFixed(2)}`,
-        `Total Levies: ${dto.statementSummary.totalLevies.currency} ${dto.statementSummary.totalLevies.amount.toFixed(2)}`,
-        `Owner Amount: ${dto.statementSummary.totalOwnerAmount.currency} ${dto.statementSummary.totalOwnerAmount.amount.toFixed(2)}`,
-        `Total Payouts: ${dto.statementSummary.totalPayouts.currency} ${dto.statementSummary.totalPayouts.amount.toFixed(2)}`,
-        `Closing Balance: ${dto.statementSummary.closingBalance.currency} ${dto.statementSummary.closingBalance.amount.toFixed(2)}`
+        `Total VAT on Commission: ${dto.statementSummary.totalVat.currency} ${dto.statementSummary.totalVat.amount.toFixed(2)}`,
+        `Total Levy: ${dto.statementSummary.totalLevies.currency} ${dto.statementSummary.totalLevies.amount.toFixed(2)}`,
+        `Net Amount Due to Owner: ${dto.statementSummary.totalOwnerAmount.currency} ${dto.statementSummary.totalOwnerAmount.amount.toFixed(2)}`,
+        `Owner Payouts: ${dto.statementSummary.totalPayouts.currency} ${dto.statementSummary.totalPayouts.amount.toFixed(2)}`,
+        `Closing Balance Due to Owner: ${dto.statementSummary.closingBalance.currency} ${dto.statementSummary.closingBalance.amount.toFixed(2)}`
       ] : [
         `Rental Income: ${summary.rentalIncome.currency} ${summary.rentalIncome.amount.toFixed(2)}`,
         `Owner Paid: ${summary.ownerPaid.currency} ${summary.ownerPaid.amount.toFixed(2)}`,

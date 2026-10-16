@@ -1094,6 +1094,7 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 });
                 commissionDetails = (0, commissionService_1.applyLevyPassThroughToSnapshot)(agentCommissionResult, commissionBaseAmount, levyAllocated);
             }
+            commissionDetails = (0, vatPolicyService_1.stampVatDecision)(commissionDetails, commissionVatPolicy);
         }
         else {
             commissionDetails = yield commissionService_1.CommissionService.calculate(commissionBaseAmount, commissionPercentage, new mongoose_1.default.Types.ObjectId(req.user.companyId));
@@ -1308,7 +1309,7 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                     if (!prepared.ok) {
                         return res.status(400).json((0, introductionLeaseContext_1.introductionContextErrorResponse)(prepared));
                     }
-                    updateData.commissionDetails = prepared.snapshot;
+                    updateData.commissionDetails = (0, vatPolicyService_1.stampVatDecision)(prepared.snapshot, commissionVatPolicy);
                     updateData.applyVatOnCommission = prepared.result.vatOnCommission;
                     updateData.vatOnCommissionRate = prepared.result.vatRate || 0;
                     updateData.vatCommissionTreatment = prepared.result.vatTreatment;
@@ -1325,7 +1326,7 @@ const updateAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
                         vatRate: commissionVat.vatRate,
                         paymentDate: updatePaymentDate
                     });
-                    updateData.commissionDetails = (0, commissionService_1.applyLevyPassThroughToSnapshot)(result, rentAllocated, levyAllocated);
+                    updateData.commissionDetails = (0, vatPolicyService_1.stampVatDecision)((0, commissionService_1.applyLevyPassThroughToSnapshot)(result, rentAllocated, levyAllocated), commissionVatPolicy);
                     updateData.applyVatOnCommission = result.vatOnCommission;
                     updateData.vatOnCommissionRate = result.vatRate || 0;
                     updateData.vatCommissionTreatment = result.vatTreatment;

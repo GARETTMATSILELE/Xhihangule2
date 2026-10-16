@@ -14,7 +14,7 @@ import {
   WEBHOOK_PAYMENT_TYPE_UNKNOWN_CODE
 } from '../services/salePaymentCompleteness';
 import { prepareIntroductionRentalCommission } from '../services/introductionCommissionService';
-import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy } from '../services/vatPolicyService';
+import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy, stampVatDecision } from '../services/vatPolicyService';
 import { openReview } from '../services/taxObligationService';
 import { introductionContextErrorResponse } from '../services/introductionLeaseContext';
 import { mayPostSaleTrust } from '../services/transactionDomain';
@@ -175,7 +175,7 @@ export const resolveWebhookCreatedPaymentFinancials = async (input: {
       ok: true,
       paymentType: 'rental',
       agentId,
-      commissionDetails: prepared.snapshot,
+      commissionDetails: stampVatDecision(prepared.snapshot, commissionVatPolicy),
       applyVatOnCommission: prepared.result.vatOnCommission,
       vatOnCommissionRate: Number(prepared.result.vatRate || 0),
       vatCommissionTreatment: prepared.result.vatTreatment,
@@ -199,7 +199,7 @@ export const resolveWebhookCreatedPaymentFinancials = async (input: {
     ok: true,
     paymentType: 'rental',
     agentId,
-    commissionDetails: applyLevyPassThroughToSnapshot(commissionResult, amount, 0),
+    commissionDetails: stampVatDecision(applyLevyPassThroughToSnapshot(commissionResult, amount, 0), commissionVatPolicy),
     applyVatOnCommission: commissionResult.vatOnCommission,
     vatOnCommissionRate: Number(commissionResult.vatRate || 0),
     vatCommissionTreatment: commissionResult.vatTreatment,

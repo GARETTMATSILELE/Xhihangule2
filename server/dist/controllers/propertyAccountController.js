@@ -13,6 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mergePropertyAccountDuplicatesForProperty = exports.listPropertyMaintenanceJobs = exports.getPropertyMaintenanceJobStatus = exports.ensureDevelopmentLedgers = exports.getAcknowledgementDocument = exports.getPaymentRequestDocument = exports.syncPropertyAccounts = exports.reconcilePropertyDuplicates = exports.getPayoutHistory = exports.updatePayoutStatus = exports.createOwnerPayout = exports.addOpeningBalanceAdjustment = exports.addExpense = exports.getPropertyTransactions = exports.getCompanyPropertyAccounts = exports.migrateLegacyLedgerTypes = exports.getPropertyAccount = void 0;
+const crypto_1 = require("crypto");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Property_1 = require("../models/Property");
 const Development_1 = require("../models/Development");
@@ -298,7 +299,7 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId)) {
             return res.status(401).json({ message: 'User authentication required' });
         }
-        const idempotencyKey = req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || undefined;
+        const idempotencyKey = String(req.headers['idempotency-key'] || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey) || `expense:${(0, crypto_1.randomUUID)()}`).trim();
         const expenseData = {
             amount: Number(amount),
             date: date ? new Date(date) : new Date(),
@@ -314,8 +315,8 @@ const addExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if ((_c = req.user) === null || _c === void 0 ? void 0 : _c.companyId) {
             yield accountingIntegrationService_1.default.syncExpenseCreated({
                 companyId: String(req.user.companyId),
-                sourceId: `property:${propertyId}:${Date.now()}`,
-                reference: `PROP-EXP-${Date.now()}`,
+                sourceId: `property-expense:${propertyId}:${idempotencyKey}`,
+                reference: `PROP-EXP-${idempotencyKey}`.slice(0, 120),
                 amount: Number(amount),
                 description: description || category || 'Property expense',
                 date: date ? new Date(date) : new Date(),

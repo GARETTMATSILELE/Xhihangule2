@@ -1,11 +1,11 @@
-import React from 'react';
-import { Outlet, NavLink } from 'react-router-dom';
-import { Box, Button, CssBaseline, Drawer, Toolbar, Typography, Stack, AppBar, IconButton, Menu, MenuItem, Avatar, ListItemIcon } from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Box, Button, CssBaseline, Drawer, Toolbar, Typography, Stack, AppBar, IconButton, Menu, MenuItem, Avatar, ListItemIcon, useMediaQuery } from '@mui/material';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
+import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
 
 const drawerWidth = 240;
 
@@ -47,8 +47,15 @@ const NavButton: React.FC<{ to: string; label: string }> = ({ to, label }) => {
 
 const SystemAdminLayout: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const compact = useMediaQuery('(max-width:899.95px)');
   const { user, company, logout } = useAuth() as any;
-  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
   const userDisplayName =
     (user && ((user as any).firstName || (user as any).lastName))
       ? `${(user as any).firstName || ''} ${(user as any).lastName || ''}`.trim()
@@ -76,6 +83,17 @@ const SystemAdminLayout: React.FC = () => {
           }}
         >
           <Toolbar>
+            {compact && (
+              <IconButton
+                color="inherit"
+                aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+                aria-expanded={navOpen}
+                onClick={() => setNavOpen((open) => !open)}
+                sx={{ mr: 1 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
             <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700, color: '#DAF1DE' }}>
               {company?.name || 'System Admin'}
             </Typography>
@@ -104,9 +122,12 @@ const SystemAdminLayout: React.FC = () => {
           </Toolbar>
         </AppBar>
         <Drawer
-          variant="permanent"
+          variant={compact ? 'temporary' : 'permanent'}
+          open={compact ? navOpen : true}
+          onClose={() => setNavOpen(false)}
+          ModalProps={{ keepMounted: true }}
           sx={{
-            width: drawerWidth,
+            width: compact ? 0 : drawerWidth,
             flexShrink: 0,
             '& .MuiDrawer-paper': {
               width: drawerWidth,
@@ -119,7 +140,6 @@ const SystemAdminLayout: React.FC = () => {
               overflowY: 'auto'
             }
           }}
-          open
         >
           <Box sx={{ p: 2 }}>
             <Typography variant="h6" sx={{ mb: 1, fontWeight: 700, color: '#DAF1DE' }}>
@@ -144,7 +164,7 @@ const SystemAdminLayout: React.FC = () => {
             </Stack>
           </Box>
         </Drawer>
-        <Box component="main" sx={{ flexGrow: 1, p: 3, bgcolor: '#F0EDE5' }}>
+        <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: { xs: 2, md: 3 }, bgcolor: '#F0EDE5' }}>
           <Toolbar />
           <Outlet />
         </Box>

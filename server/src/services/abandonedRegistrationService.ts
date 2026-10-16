@@ -7,6 +7,7 @@ import { OnboardingSession } from '../models/OnboardingSession';
 import { PaymentSession } from '../models/PaymentSession';
 import { BillingPayment } from '../models/BillingPayment';
 import { recordAuditEvent } from './auditService';
+import { noteMissingAudit } from './auditPolicy';
 import { logger } from '../utils/logger';
 
 export const SIGN_IN_REQUIRED_MESSAGE = 'We could not continue with these details. Sign in if you already have an account, or use password recovery.';
@@ -183,25 +184,28 @@ export async function releaseAbandonedRegistration(companyId: mongoose.Types.Obj
   }
 
   if (!alreadyArchived) {
-    await recordAuditEvent({
-      companyId: String(company._id),
-      action: 'registration.expired',
-      entityType: 'Company',
-      entityId: String(company._id),
-      metadata: { retentionDays: abandonedRegistrationRetentionMs() / 86400000 }
-    });
-    await recordAuditEvent({
-      companyId: String(company._id),
-      action: 'registration.archived',
-      entityType: 'Company',
-      entityId: String(company._id)
-    });
-    await recordAuditEvent({
-      companyId: String(company._id),
-      action: 'registration.email_released',
-      entityType: 'Company',
-      entityId: String(company._id)
-    });
+    const archiveAudits = [
+      ['registration.expired', { retentionDays: abandonedRegistrationRetentionMs() / 86400000 }],
+      ['registration.archived', {}],
+      ['registration.email_released', {}]
+    ] as const;
+    for (const [action, metadata] of archiveAudits) {
+      const persisted = await recordAuditEvent({
+        companyId: String(company._id),
+        action,
+        entityType: 'Company',
+        entityId: String(company._id),
+        metadata
+      });
+      if (!persisted) {
+        await noteMissingAudit({
+          action,
+          companyId: String(company._id),
+          entityId: String(company._id),
+          operationId: String(company._id)
+        });
+      }
+    }
   }
   return 'released';
 }

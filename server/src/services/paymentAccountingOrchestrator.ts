@@ -20,7 +20,11 @@ import {
 import { AccountingException } from '../models/AccountingException';
 import { isPermanentAccountingFailure, mayPostSaleTrust, OwnerIncomeAmountMissingError } from './transactionDomain';
 import { reversePaymentTaxObligations } from './taxObligationService';
+import { throwOnceIfArmed } from './testFailureSeam';
 import trustPaymentPostingService from './trustPaymentPostingService';
+import { classifyOperationalFailure } from './operationalFailure';
+import { signalOperationalFailure } from './operationalSignal';
+import { upsertFinancialReview } from './financialOperationVisibility';
 
 export type AccountingArtifactResult = 'posted' | 'reversed' | 'skipped' | 'failed' | 'absent' | 'already_applied';
 
@@ -39,8 +43,50 @@ export type PaymentReversalResult = {
   errors: string[];
 };
 
-async function recordOwnerIncomeException(payment: { _id?: unknown; companyId?: unknown; propertyId?: unknown }, message: string): Promise<void> {
+async function persistOwnerIncomeFailure(
+  payment: { _id?: unknown; companyId?: unknown; propertyId?: unknown },
+  message: string,
+  haystack = ''
+): Promise<boolean> {
+  const paymentId = String(payment._id || '');
+  const companyId = payment.companyId ? String(payment.companyId) : '';
+  let durable = false;
   try {
+    throwOnceIfArmed(paymentId, haystack, 'PHASE_FAIL_LEDGER_RECORD');
+    durable = await ledgerEventService.recordPermanentOwnerIncomeFailure(paymentId, message);
+  } catch (error) {
+    signalOperationalFailure('owner_income_ledger_failure_unpersisted', {
+      correlationId: paymentId,
+      paymentId,
+      companyId: companyId || undefined,
+      failureClass: classifyOperationalFailure(error),
+      error: message.slice(0, 200)
+    });
+  }
+  const recorded = await recordOwnerIncomeException(payment, message, haystack);
+  if (recorded) durable = true;
+  if (!durable) {
+    signalOperationalFailure('owner_income_failure_unpersisted', {
+      correlationId: paymentId,
+      paymentId,
+      companyId: companyId || undefined,
+      failureClass: 'permanent',
+      error: message.slice(0, 200),
+      alert: 'database persistence unavailable'
+    });
+  }
+  return durable;
+}
+
+async function recordOwnerIncomeException(
+  payment: { _id?: unknown; companyId?: unknown; propertyId?: unknown },
+  message: string,
+  haystack = ''
+): Promise<boolean> {
+  const paymentId = String(payment._id || '');
+  const companyId = payment.companyId ? String(payment.companyId) : '';
+  try {
+    throwOnceIfArmed(paymentId, haystack, 'PHASE_FAIL_EXCEPTION_RECORD');
     const now = new Date();
     await AccountingException.updateOne(
       {
@@ -68,8 +114,38 @@ async function recordOwnerIncomeException(payment: { _id?: unknown; companyId?: 
       },
       { upsert: true }
     );
+    return true;
   } catch (error) {
-    logger.warn('Failed to record owner-income accounting exception', error);
+    signalOperationalFailure('owner_income_exception_persist_failed', {
+      correlationId: paymentId,
+      paymentId,
+      companyId: companyId || undefined,
+      failureClass: classifyOperationalFailure(error),
+      error: message.slice(0, 200)
+    });
+    try {
+      throwOnceIfArmed(paymentId, haystack, 'PHASE_FAIL_EXCEPTION_VISIBILITY');
+      if (companyId) {
+        await upsertFinancialReview({
+          companyId,
+          component: 'OWNER_INCOME_EXCEPTION_UNRECORDED',
+          operationId: paymentId,
+          paymentId,
+          missingRecord: 'owner income exception',
+          issueType: 'missing',
+          recommendedReview: `Owner income failed for payment ${paymentId} and the exception row was not stored. Accounting is not complete. Do not create a replacement financial operation.`
+        });
+      }
+    } catch (visibilityError) {
+      signalOperationalFailure('owner_income_exception_visibility_failed', {
+        correlationId: paymentId,
+        paymentId,
+        companyId: companyId || undefined,
+        failureClass: classifyOperationalFailure(visibilityError),
+        error: message.slice(0, 200)
+      });
+    }
+    return false;
   }
 }
 
@@ -118,13 +194,21 @@ export async function postPaymentAccounting(
 
   if (!policy.skipOwnerIncome) {
     try {
+      throwOnceIfArmed(paymentId, String((payment as any).notes || ''), 'PHASE_FAIL_OWNER_INCOME');
       await propertyAccountService.recordIncomeFromPayment(paymentId);
       artifacts.ownerIncome = 'posted';
     } catch (e: any) {
       artifacts.ownerIncome = 'failed';
       errors.push(`ownerIncome: ${e?.message || e}`);
       if (e instanceof OwnerIncomeAmountMissingError || e?.code === 'OWNER_INCOME_AMOUNT_MISSING') {
-        await recordOwnerIncomeException(payment, e?.message || String(e));
+        const durable = await persistOwnerIncomeFailure(
+          payment,
+          e?.message || String(e),
+          String((payment as any).notes || '')
+        );
+        if (!durable) {
+          errors.push('ownerIncome.exception: the owner-income failure was not durably recorded');
+        }
       }
       if (!isPermanentAccountingFailure(e)) {
         try {
@@ -140,6 +224,7 @@ export async function postPaymentAccounting(
 
   if (!policy.skipAgentCommission) {
     try {
+      throwOnceIfArmed(paymentId, String((payment as any).notes || ''), 'PHASE_FAIL_AGENT_COMMISSION');
       await agentAccountService.syncCommissionForPayment(paymentId);
       artifacts.agentCommission = 'posted';
     } catch (e: any) {
@@ -157,6 +242,7 @@ export async function postPaymentAccounting(
 
   if (!policy.skipCompanyCommission) {
     try {
+      throwOnceIfArmed(paymentId, String((payment as any).notes || ''), 'PHASE_FAIL_COMPANY_COMMISSION');
       await accountingIntegrationService.postCompanyCommission(payment as any);
       artifacts.companyCommission = 'posted';
     } catch (e: any) {
@@ -237,6 +323,7 @@ export async function reversePaymentAccounting(
   }
 
   try {
+    throwOnceIfArmed(paymentId, `${String((payment as any).notes || '')} ${String(opts?.reason || '')}`, 'PHASE_FAIL_REVERSAL_OWNER');
     const income = await propertyAccountService.reverseIncomeFromPayment(paymentId, {
       processedBy: opts?.processedBy,
       reason: opts?.reason
@@ -288,6 +375,7 @@ export async function reversePaymentAccounting(
       reason: opts?.reason,
       notes: String((payment as any).notes || '')
     });
+    artifacts.vatRecord = await accountingIntegrationService.reversePaymentVatRecord(payment as any);
   } catch (e: any) {
     artifacts.tax = 'failed';
     errors.push(`tax: ${e?.message || e}`);
@@ -367,6 +455,13 @@ export async function reversePaymentAccounting(
 
   const reversalComplete = status === 'reversed' || status === 'already_reversed';
   const reversalState = reversalComplete ? 'reversed' : 'reversal_incomplete';
+  if (!reversalComplete) {
+    signalOperationalFailure('reversal_incomplete', {
+      paymentId,
+      companyId: payment.companyId ? String(payment.companyId) : undefined,
+      status
+    });
+  }
   const reversalPaymentId = opts?.reversalPaymentId || (payment as any).reversalPaymentId;
   await Payment.updateOne({ _id: payment._id }, { $set: { reversalState } });
   if (reversalPaymentId) {

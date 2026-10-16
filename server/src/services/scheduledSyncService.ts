@@ -366,6 +366,8 @@ export class ScheduledSyncService {
   private async executePaymentAccountingIntegrity(): Promise<void> {
     const { runPaymentAccountingIntegrityPass } = await import('./paymentAccountingIntegrity');
     await runPaymentAccountingIntegrityPass(50);
+    const { logStuckRegistrationCheckouts } = await import('./registrationCheckoutMonitor');
+    await logStuckRegistrationCheckouts();
   }
 
   /**

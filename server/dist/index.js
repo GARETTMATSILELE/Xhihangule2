@@ -244,7 +244,7 @@ if (process.env.NODE_ENV === 'production') {
                     "https://*.paypal.com",
                     "https://*.paypalobjects.com"
                 ],
-                styleSrc: ["'self'", "'unsafe-inline'"],
+                styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
                 imgSrc: [
                     "'self'",
                     "data:",
@@ -259,7 +259,7 @@ if (process.env.NODE_ENV === 'production') {
                     "https://*.paypal.com",
                     "https://*.paypalobjects.com"
                 ],
-                fontSrc: ["'self'", "data:"],
+                fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
                 connectSrc: [
                     "'self'",
                     ...allowedOrigins,

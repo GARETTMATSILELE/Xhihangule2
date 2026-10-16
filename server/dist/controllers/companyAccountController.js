@@ -8,13 +8,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createCompanyTransaction = exports.getCompanyTransactions = exports.getCompanyAccountSummary = void 0;
 const CompanyAccount_1 = require("../models/CompanyAccount");
-const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
+const companyAccountExpenseService_1 = require("../services/companyAccountExpenseService");
 const getCompanyAccountSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -50,62 +47,42 @@ const getCompanyTransactions = (req, res) => __awaiter(void 0, void 0, void 0, f
 });
 exports.getCompanyTransactions = getCompanyTransactions;
 const createCompanyTransaction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     try {
-        const companyId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId) || req.body.companyId;
+        const userCompany = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
+        const bodyCompany = (_b = req.body) === null || _b === void 0 ? void 0 : _b.companyId;
+        if (userCompany && bodyCompany && String(userCompany) !== String(bodyCompany)) {
+            return res.status(403).json({ message: 'Company context does not match this expense' });
+        }
+        const companyId = userCompany || bodyCompany;
         if (!companyId) {
             return res.status(400).json({ message: 'companyId is required' });
         }
-        const { type = 'expense', amount, date, description, category, reference, paymentMethod, currency } = req.body || {};
-        if (typeof amount !== 'number' || amount <= 0) {
-            return res.status(400).json({ message: 'Valid amount is required' });
-        }
-        const now = new Date();
-        // Find or create company account
-        let account = yield CompanyAccount_1.CompanyAccount.findOne({ companyId });
-        if (!account) {
-            account = new CompanyAccount_1.CompanyAccount({ companyId, transactions: [], runningBalance: 0, totalIncome: 0, totalExpenses: 0 });
-        }
-        // Normalize transaction
-        const tx = {
-            type: type === 'income' ? 'income' : 'expense',
-            amount,
-            date: date ? new Date(date) : now,
-            description: description || undefined,
-            category: category || undefined,
-            referenceNumber: reference || undefined,
-            paymentMethod: paymentMethod || undefined,
-            currency: currency || 'USD',
-            processedBy: ((_b = req.user) === null || _b === void 0 ? void 0 : _b.userId) ? req.user.userId : undefined,
-            createdAt: now,
-            updatedAt: now
-        };
-        account.transactions.push(tx);
-        if (tx.type === 'income') {
-            account.totalIncome = (account.totalIncome || 0) + amount;
-            account.runningBalance = (account.runningBalance || 0) + amount;
-        }
-        else {
-            account.totalExpenses = (account.totalExpenses || 0) + amount;
-            account.runningBalance = (account.runningBalance || 0) - amount;
-        }
-        account.lastUpdated = now;
-        yield account.save();
-        if (tx.type === 'expense') {
-            yield accountingIntegrationService_1.default.syncExpenseCreated({
-                companyId: String(companyId),
-                sourceId: String((tx === null || tx === void 0 ? void 0 : tx._id) || `${Date.now()}`),
-                reference: reference || `EXP-${Date.now()}`,
-                amount,
-                description: description || category || 'Company expense',
-                date: tx.date,
-                createdBy: (_c = req.user) === null || _c === void 0 ? void 0 : _c.userId
-            });
-        }
-        return res.status(201).json({ message: 'Transaction recorded', account, transaction: tx });
+        const idempotencyKey = String(req.get('Idempotency-Key') || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.idempotencyKey) || '').trim();
+        const result = yield (0, companyAccountExpenseService_1.recordCompanyAccountExpense)({
+            companyId: String(companyId),
+            type: (_d = req.body) === null || _d === void 0 ? void 0 : _d.type,
+            amount: Number((_e = req.body) === null || _e === void 0 ? void 0 : _e.amount),
+            date: (_f = req.body) === null || _f === void 0 ? void 0 : _f.date,
+            description: (_g = req.body) === null || _g === void 0 ? void 0 : _g.description,
+            category: (_h = req.body) === null || _h === void 0 ? void 0 : _h.category,
+            reference: (_j = req.body) === null || _j === void 0 ? void 0 : _j.reference,
+            paymentMethod: (_k = req.body) === null || _k === void 0 ? void 0 : _k.paymentMethod,
+            currency: (_l = req.body) === null || _l === void 0 ? void 0 : _l.currency,
+            payee: (_m = req.body) === null || _m === void 0 ? void 0 : _m.payee,
+            idempotencyKey: idempotencyKey || undefined,
+            processedBy: ((_o = req.user) === null || _o === void 0 ? void 0 : _o.userId) ? String(req.user.userId) : undefined
+        });
+        return res.status(result.reused ? 200 : 201).json({
+            message: result.reused ? 'Existing transaction returned' : 'Transaction recorded',
+            account: result.account,
+            transaction: result.transaction,
+            reused: result.reused
+        });
     }
     catch (err) {
-        return res.status(500).json({ message: err.message || 'Failed to create company transaction' });
+        const status = err instanceof companyAccountExpenseService_1.CompanyExpenseIdempotencyError ? 409 : Number(err === null || err === void 0 ? void 0 : err.statusCode) || 500;
+        return res.status(status).json({ message: err.message || 'Failed to create company transaction', code: err === null || err === void 0 ? void 0 : err.code });
     }
 });
 exports.createCompanyTransaction = createCompanyTransaction;

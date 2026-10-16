@@ -26,6 +26,7 @@ const dashboardKpiService_1 = __importDefault(require("./dashboardKpiService"));
 const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const chartAccounts_1 = require("./tax/chartAccounts");
 const accountingPeriodService_1 = require("./accountingPeriodService");
+const testFailureSeam_1 = require("./testFailureSeam");
 const DEFAULT_ACCOUNTS = chartAccounts_1.PHASE8_CHART_SEEDS.map((row) => ({
     code: row.code,
     name: row.name,
@@ -234,6 +235,7 @@ class AccountingService {
                     }
                 }, { upsert: true, session });
                 if (input.vat) {
+                    (0, testFailureSeam_1.throwOnceIfArmed)(String(input.sourceId || input.reference), String(input.seamHaystack || ''), 'PHASE_FAIL_VAT_RECORD');
                     yield VatRecord_1.VatRecord.updateOne({
                         companyId: companyObjectId,
                         transactionId: input.sourceId || String(createdEntry._id),

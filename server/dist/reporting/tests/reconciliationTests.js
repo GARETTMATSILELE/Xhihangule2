@@ -172,7 +172,8 @@ function runReportingReconciliationTests() {
         assert_1.default.strictEqual(exportedDto.executiveSummary.closingTrustBalance.amount, dto.executiveSummary.closingTrustBalance.amount, 'JSON export totals must match DTO totals.');
         const csv = yield exportEngine.exportOwnerStatement(dto, 'csv');
         assert_1.default.ok(csv.buffer.toString('utf8').includes('Balance'), 'CSV export should contain ledger balance column.');
-        assert_1.default.ok(csv.buffer.toString('utf8').includes('Rent Amount'), 'CSV export should contain rent amount column.');
+        assert_1.default.ok(csv.buffer.toString('utf8').includes('Total Amount Received'), 'CSV export should contain the total amount received column.');
+        assert_1.default.ok(csv.buffer.toString('utf8').includes('Net Amount Due to Owner'), 'CSV export should contain the net amount due to owner column.');
         assert_1.default.ok(!csv.buffer.toString('utf8').includes('Status'), 'Printed statement CSV should not include a status column.');
         const excel = yield exportEngine.exportOwnerStatement(dto, 'excel');
         assert_1.default.ok(excel.buffer.toString('utf8').includes('Executive Summary'), 'Excel export should contain summary worksheet.');

@@ -42,6 +42,7 @@ const WebhookEventReceiptSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
     paymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment', required: false, index: true },
     status: { type: String, enum: ['processing', 'processed', 'failed'], default: 'processing', index: true },
+    payloadFingerprint: { type: String, required: false },
     lastError: { type: String, required: false },
     processedAt: { type: Date, required: false }
 }, { timestamps: true });

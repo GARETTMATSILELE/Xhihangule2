@@ -29,6 +29,10 @@ const JournalEntry_1 = require("../models/JournalEntry");
 const JournalLine_1 = require("../models/JournalLine");
 const ChartOfAccount_1 = require("../models/ChartOfAccount");
 const testFailureSeam_1 = require("./testFailureSeam");
+const logger_1 = require("../utils/logger");
+const operationalFailure_1 = require("./operationalFailure");
+const financialOperationVisibility_1 = require("./financialOperationVisibility");
+const journalDuplicateKey_1 = require("./journalDuplicateKey");
 const toMoney = (value) => Number(Number(value || 0).toFixed(2));
 const filingPeriodFromDate = (value) => {
     const date = value ? new Date(value) : new Date();
@@ -41,7 +45,45 @@ const safeObjectId = (id) => {
         return undefined;
     return new mongoose_1.default.Types.ObjectId(id);
 };
-const isDuplicateKeyError = (error) => Boolean(error && (error.code === 11000 || String((error === null || error === void 0 ? void 0 : error.message) || '').includes('duplicate key')));
+function findJournalForIdentity(identity) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const companyId = identity.companyId instanceof mongoose_1.default.Types.ObjectId
+            ? identity.companyId
+            : new mongoose_1.default.Types.ObjectId(String(identity.companyId));
+        return JournalEntry_1.JournalEntry.findOne({
+            companyId,
+            sourceModule: identity.sourceModule,
+            sourceId: identity.sourceId
+        }).select('_id companyId sourceModule sourceId reference status').lean();
+    });
+}
+/**
+ * Insert a journal once. A duplicate key is success only when the conflicting
+ * index and the stored journal are this exact operation. The stored journal
+ * is not updated.
+ */
+function ensureJournal(identity, post) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const existing = yield findJournalForIdentity(identity);
+        if (existing) {
+            if (!(0, journalDuplicateKey_1.persistedJournalMatchesIdentity)(existing, identity)) {
+                throw new Error('Existing journal does not match this posting operation');
+            }
+            return;
+        }
+        try {
+            yield post();
+        }
+        catch (error) {
+            const matched = (0, journalDuplicateKey_1.matchingJournalIdentity)(error, [identity]);
+            if (!matched)
+                throw error;
+            const raced = yield findJournalForIdentity(identity);
+            if (!(0, journalDuplicateKey_1.persistedJournalMatchesIdentity)(raced, identity))
+                throw error;
+        }
+    });
+}
 class AccountingIntegrationService {
     upsertPaymentVatRecord(payment) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -51,19 +93,112 @@ class AccountingIntegrationService {
             const totalVatCollected = toMoney(vatOnCommission + paymentVat);
             if (totalVatCollected <= 0)
                 return;
-            yield VatRecord_1.VatRecord.updateOne({
+            const filter = {
                 companyId: new mongoose_1.default.Types.ObjectId(String(payment.companyId)),
                 transactionId: String(payment._id),
                 sourceType: payment.paymentType
-            }, {
-                $set: {
-                    vatCollected: totalVatCollected,
-                    vatPaid: 0,
-                    vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
-                    filingPeriod: filingPeriodFromDate(payment.paymentDate),
-                    status: 'pending'
+            };
+            const existing = yield VatRecord_1.VatRecord.findOne(filter).select('status vatCollected').lean();
+            if (existing)
+                return;
+            try {
+                yield VatRecord_1.VatRecord.updateOne(filter, {
+                    $setOnInsert: {
+                        vatCollected: totalVatCollected,
+                        vatPaid: 0,
+                        vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                        filingPeriod: filingPeriodFromDate(payment.paymentDate),
+                        status: 'pending'
+                    }
+                }, { upsert: true });
+            }
+            catch (error) {
+                const raced = yield VatRecord_1.VatRecord.findOne(filter).select('_id').lean();
+                if (!raced)
+                    throw error;
+            }
+        });
+    }
+    ensurePaymentVatObligations(payment, opts) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b, _c, _d, _e;
+            const companyId = String(payment.companyId);
+            const paymentId = String(payment._id);
+            const vatOnCommission = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) || 0);
+            const paymentVat = toMoney((payment === null || payment === void 0 ? void 0 : payment.vatAmount) || 0);
+            const commissionNet = toMoney(Number(((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.commissionNet) || ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.totalCommission) || 0));
+            const effectiveVatRate = Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || ((_d = payment.commissionDetails) === null || _d === void 0 ? void 0 : _d.vatRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0);
+            const propertyId = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : undefined;
+            const period = (0, vatCalculation_1.filingPeriodFromDate)(payment.paymentDate);
+            const details = (payment.commissionDetails || {});
+            if (vatOnCommission > 0) {
+                (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, String(payment.notes || ''), 'PHASE_FAIL_OBLIGATION_ONCE');
+                if (process.env.NODE_ENV !== 'production' &&
+                    process.env.MANTIS_TEST_SEAM === '1' &&
+                    String(payment.notes || '').includes('FAIL_VAT_OBLIGATION')) {
+                    throw new Error('FAIL_VAT_OBLIGATION');
                 }
-            }, { upsert: true });
+                yield (0, taxObligationService_1.upsertPaymentTaxObligation)({
+                    companyId,
+                    taxType: 'VAT_ON_COMMISSION',
+                    paymentId,
+                    propertyId,
+                    taxPeriod: period,
+                    transactionDate: payment.paymentDate,
+                    currency: payment.currency,
+                    taxableAmount: commissionNet,
+                    taxRate: effectiveVatRate,
+                    taxAmount: vatOnCommission,
+                    calculationBasis: String(details.vatTreatment || 'COMMISSION_VAT'),
+                    calculationSnapshot: {
+                        paymentId,
+                        commissionBase: details.commissionBase,
+                        commissionRate: details.commissionRate,
+                        commissionNet,
+                        vatTreatment: details.vatTreatment,
+                        vatRate: (_e = details.vatRate) !== null && _e !== void 0 ? _e : effectiveVatRate,
+                        vatAmount: vatOnCommission,
+                        vatRuleId: details.vatRuleId,
+                        vatTaxPoint: details.vatTaxPoint || payment.paymentDate,
+                        vatDecision: details.vatDecision
+                    },
+                    glAccount: chartAccounts_1.GL.VAT_PAYABLE,
+                    createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy
+                });
+            }
+            if (paymentVat > 0) {
+                yield (0, taxObligationService_1.upsertPaymentTaxObligation)({
+                    companyId,
+                    taxType: 'VAT_OUTPUT',
+                    paymentId,
+                    propertyId,
+                    taxPeriod: period,
+                    transactionDate: payment.paymentDate,
+                    currency: payment.currency,
+                    taxableAmount: toMoney(Number(payment.amount || 0) - paymentVat),
+                    taxRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                    taxAmount: paymentVat,
+                    calculationBasis: 'PROPERTY_SALE_VAT',
+                    glAccount: chartAccounts_1.GL.VAT_PAYABLE,
+                    createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy
+                });
+            }
+        });
+    }
+    reversePaymentVatRecord(payment) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const result = yield VatRecord_1.VatRecord.updateOne({
+                companyId: new mongoose_1.default.Types.ObjectId(String(payment.companyId)),
+                transactionId: String(payment._id),
+                status: { $ne: 'reversed' }
+            }, { $set: { status: 'reversed' } });
+            if (Number(result.matchedCount || result.n || 0) > 0)
+                return 'reversed';
+            const existing = yield VatRecord_1.VatRecord.findOne({
+                transactionId: String(payment._id),
+                status: 'reversed'
+            }).select('_id').lean();
+            return existing ? 'reversed' : 'skipped';
         });
     }
     /**
@@ -105,7 +240,7 @@ class AccountingIntegrationService {
     }
     syncPaymentReceived(payment, opts) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
             const companyId = String(payment.companyId);
             const paymentId = String(payment._id);
             try {
@@ -144,16 +279,24 @@ class AccountingIntegrationService {
                     propertyId,
                     agentId
                 });
+                const sourceModule = (0, transactionDomain_1.journalPaymentType)(payment) === 'sale' ? 'sale' : 'payment';
+                const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
                 if (amount > 0 && receiptJournal.lines.length > 0) {
-                    yield accountingService_1.default.postTransaction({
+                    yield ensureJournal({
+                        companyId: companyObjectId,
+                        sourceModule,
+                        sourceId: paymentId,
+                        reference: `PAY-${payment.referenceNumber || paymentId}`
+                    }, () => accountingService_1.default.postTransaction({
                         companyId,
                         reference: `PAY-${payment.referenceNumber || paymentId}`,
                         description: `Agent collection ${payment.referenceNumber || paymentId} (commission as company revenue; principal funds as client liability)`,
-                        sourceModule: (0, transactionDomain_1.journalPaymentType)(payment) === 'sale' ? 'sale' : 'payment',
+                        sourceModule,
                         sourceId: paymentId,
                         transactionDate: payment.paymentDate,
                         createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
                         lines: receiptJournal.lines,
+                        seamHaystack: String(payment.notes || ''),
                         vat: totalVatCollected > 0
                             ? {
                                 sourceType: payment.paymentType,
@@ -163,46 +306,20 @@ class AccountingIntegrationService {
                                 status: 'pending'
                             }
                             : undefined
-                    });
+                    }));
                 }
-                const period = (0, vatCalculation_1.filingPeriodFromDate)(payment.paymentDate);
-                if (vatOnCommission > 0) {
-                    yield (0, taxObligationService_1.upsertPaymentTaxObligation)({
-                        companyId,
-                        taxType: 'VAT_ON_COMMISSION',
-                        paymentId,
-                        propertyId,
-                        taxPeriod: period,
-                        transactionDate: payment.paymentDate,
-                        currency: payment.currency,
-                        taxableAmount: commissionNet,
-                        taxRate: effectiveVatRate,
-                        taxAmount: vatOnCommission,
-                        calculationBasis: String(((_l = payment.commissionDetails) === null || _l === void 0 ? void 0 : _l.vatTreatment) || 'COMMISSION_VAT'),
-                        glAccount: chartAccounts_1.GL.VAT_PAYABLE,
-                        createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy
-                    });
+                if (totalVatCollected > 0) {
+                    yield this.upsertPaymentVatRecord(payment);
                 }
-                if (paymentVat > 0) {
-                    yield (0, taxObligationService_1.upsertPaymentTaxObligation)({
-                        companyId,
-                        taxType: 'VAT_OUTPUT',
-                        paymentId,
-                        propertyId,
-                        taxPeriod: period,
-                        transactionDate: payment.paymentDate,
-                        currency: payment.currency,
-                        taxableAmount: toMoney(amount - paymentVat),
-                        taxRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
-                        taxAmount: paymentVat,
-                        calculationBasis: 'PROPERTY_SALE_VAT',
-                        glAccount: chartAccounts_1.GL.VAT_PAYABLE,
-                        createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy
-                    });
-                }
-                const agentShare = toMoney(((_m = payment.commissionDetails) === null || _m === void 0 ? void 0 : _m.agentShare) || 0);
+                yield this.ensurePaymentVatObligations(payment, opts);
+                const agentShare = toMoney(((_l = payment.commissionDetails) === null || _l === void 0 ? void 0 : _l.agentShare) || 0);
                 if (agentShare > 0) {
-                    yield accountingService_1.default.postTransaction({
+                    yield ensureJournal({
+                        companyId: companyObjectId,
+                        sourceModule: 'commission',
+                        sourceId: `${paymentId}:commission`,
+                        reference: `COM-${payment.referenceNumber || paymentId}`
+                    }, () => accountingService_1.default.postTransaction({
                         companyId,
                         reference: `COM-${payment.referenceNumber || paymentId}`,
                         description: `Auto-post commission payable for ${payment.referenceNumber || paymentId}`,
@@ -218,15 +335,18 @@ class AccountingIntegrationService {
                                 agentId: (payment === null || payment === void 0 ? void 0 : payment.agentId) ? String(payment.agentId) : undefined
                             }
                         ]
-                    });
+                    }));
                 }
             }
             catch (error) {
-                if (isDuplicateKeyError(error)) {
-                    // Payment may already be journal-posted; still ensure the VAT record reflects full payment VAT.
-                    yield this.upsertPaymentVatRecord(payment);
-                    return;
-                }
+                const failureClass = (0, operationalFailure_1.classifyOperationalFailure)(error);
+                logger_1.logger.warn('payment_accounting_sync_failed', {
+                    correlationId: paymentId,
+                    paymentId,
+                    companyId,
+                    failureClass,
+                    code: error === null || error === void 0 ? void 0 : error.code
+                });
                 yield AccountingEventLog_1.AccountingEventLog.create({
                     companyId: new mongoose_1.default.Types.ObjectId(companyId),
                     eventType: 'payment_sync_failed',
@@ -234,7 +354,7 @@ class AccountingIntegrationService {
                     sourceId: paymentId,
                     success: false,
                     message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync payment to accounting',
-                    metadata: { paymentReference: payment.referenceNumber }
+                    metadata: { paymentReference: payment.referenceNumber, failureClass }
                 });
                 throw error;
             }
@@ -310,12 +430,18 @@ class AccountingIntegrationService {
             (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, `${String(payment.notes || '')} ${String((opts === null || opts === void 0 ? void 0 : opts.reason) || '')}`, 'PHASE27_FAIL_JOURNAL');
             const sourceModule = (0, transactionDomain_1.journalPaymentType)(payment) === 'sale' ? 'sale' : 'payment';
             const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
+            const reversalReference = `REV-PAY-${payment.referenceNumber || paymentId}`;
+            const reversalIdentity = {
+                companyId: companyObjectId,
+                sourceModule,
+                sourceId: `${paymentId}:reversal`,
+                reference: reversalReference
+            };
             try {
-                const existing = yield JournalEntry_1.JournalEntry.findOne({
-                    companyId: companyObjectId,
-                    sourceModule,
-                    sourceId: `${paymentId}:reversal`
-                }).select('_id').lean();
+                const existing = yield findJournalForIdentity(reversalIdentity);
+                if (existing && !(0, journalDuplicateKey_1.persistedJournalMatchesIdentity)(existing, reversalIdentity)) {
+                    throw new Error('Existing reversal journal does not match this payment');
+                }
                 if (!existing) {
                     const original = yield JournalEntry_1.JournalEntry.findOne({
                         companyId: companyObjectId,
@@ -371,16 +497,16 @@ class AccountingIntegrationService {
                         throw new Error('Original journal lines could not be reversed');
                     }
                     if (lines.length > 0) {
-                        yield accountingService_1.default.postTransaction({
+                        yield ensureJournal(reversalIdentity, () => accountingService_1.default.postTransaction({
                             companyId,
-                            reference: `REV-PAY-${payment.referenceNumber || paymentId}`,
+                            reference: reversalReference,
                             description: `Reversal of agent collection ${payment.referenceNumber || paymentId}`,
                             sourceModule,
                             sourceId: `${paymentId}:reversal`,
                             transactionDate: new Date(),
                             createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
                             lines
-                        });
+                        }));
                     }
                     else if (!original) {
                         return 'skipped';
@@ -388,36 +514,40 @@ class AccountingIntegrationService {
                 }
                 const agentShare = toMoney(((_l = payment.commissionDetails) === null || _l === void 0 ? void 0 : _l.agentShare) || 0);
                 if (agentShare > 0) {
-                    const agentJournal = yield JournalEntry_1.JournalEntry.findOne({
+                    yield ensureJournal({
                         companyId: companyObjectId,
                         sourceModule: 'commission',
-                        sourceId: `${paymentId}:commission:reversal`
-                    }).select('_id').lean();
-                    if (!agentJournal) {
-                        yield accountingService_1.default.postTransaction({
-                            companyId,
-                            reference: `REV-AGT-${payment.referenceNumber || paymentId}`,
-                            description: `Reversal of commission payable for ${payment.referenceNumber || paymentId}`,
-                            sourceModule: 'commission',
-                            sourceId: `${paymentId}:commission:reversal`,
-                            transactionDate: new Date(),
-                            createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
-                            lines: [
-                                { accountCode: '5002', credit: agentShare },
-                                {
-                                    accountCode: '2102',
-                                    debit: agentShare,
-                                    agentId: (payment === null || payment === void 0 ? void 0 : payment.agentId) ? String(payment.agentId) : undefined
-                                }
-                            ]
-                        });
-                    }
+                        sourceId: `${paymentId}:commission:reversal`,
+                        reference: `REV-AGT-${payment.referenceNumber || paymentId}`
+                    }, () => accountingService_1.default.postTransaction({
+                        companyId,
+                        reference: `REV-AGT-${payment.referenceNumber || paymentId}`,
+                        description: `Reversal of commission payable for ${payment.referenceNumber || paymentId}`,
+                        sourceModule: 'commission',
+                        sourceId: `${paymentId}:commission:reversal`,
+                        transactionDate: new Date(),
+                        createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
+                        lines: [
+                            { accountCode: '5002', credit: agentShare },
+                            {
+                                accountCode: '2102',
+                                debit: agentShare,
+                                agentId: (payment === null || payment === void 0 ? void 0 : payment.agentId) ? String(payment.agentId) : undefined
+                            }
+                        ]
+                    }));
                 }
                 return 'reversed';
             }
             catch (error) {
-                if (isDuplicateKeyError(error))
-                    return 'reversed';
+                const failureClass = (0, operationalFailure_1.classifyOperationalFailure)(error);
+                logger_1.logger.warn('payment_reversal_journal_failed', {
+                    correlationId: paymentId,
+                    paymentId,
+                    companyId,
+                    failureClass,
+                    code: error === null || error === void 0 ? void 0 : error.code
+                });
                 yield AccountingEventLog_1.AccountingEventLog.create({
                     companyId: companyObjectId,
                     eventType: 'payment_reversal_sync_failed',
@@ -425,7 +555,7 @@ class AccountingIntegrationService {
                     sourceId: paymentId,
                     success: false,
                     message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync payment reversal to accounting',
-                    metadata: { paymentReference: payment.referenceNumber, reason: (opts === null || opts === void 0 ? void 0 : opts.reason) || '' }
+                    metadata: { paymentReference: payment.referenceNumber, failureClass }
                 });
                 throw error;
             }
@@ -446,39 +576,82 @@ class AccountingIntegrationService {
     }
     syncExpenseCreated(input) {
         return __awaiter(this, void 0, void 0, function* () {
+            const companyObjectId = safeObjectId(input.companyId);
+            const sourceId = String(input.sourceId || '').trim();
+            const reference = String(input.reference || '').trim();
+            if (!companyObjectId) {
+                throw new operationalFailure_1.ExpenseSyncError('Expense sync requires a valid company id', 'permanent', 'EXPENSE_COMPANY_REQUIRED');
+            }
+            if (!sourceId || !reference) {
+                throw new operationalFailure_1.ExpenseSyncError('Expense sync requires a source id and reference', 'permanent', 'EXPENSE_SOURCE_REQUIRED');
+            }
+            const amount = toMoney(input.amount);
+            if (amount <= 0)
+                return;
+            const identity = {
+                companyId: companyObjectId,
+                sourceModule: 'expense',
+                sourceId,
+                reference
+            };
             try {
-                const amount = toMoney(input.amount);
-                if (amount <= 0)
-                    return;
-                yield accountingService_1.default.postTransaction({
-                    companyId: input.companyId,
-                    reference: input.reference,
-                    description: input.description || 'Auto-post expense',
-                    sourceModule: 'expense',
-                    sourceId: input.sourceId,
-                    transactionDate: input.date || new Date(),
-                    createdBy: input.createdBy,
-                    lines: [
-                        { accountCode: '5001', debit: amount, propertyId: input.propertyId },
-                        { accountCode: '1001', credit: amount, propertyId: input.propertyId }
-                    ]
+                yield ensureJournal(identity, () => {
+                    (0, testFailureSeam_1.throwOnceIfArmed)(sourceId, String(input.description || ''), 'PHASE_FAIL_EXPENSE_POST');
+                    return accountingService_1.default.postTransaction({
+                        companyId: input.companyId,
+                        reference,
+                        description: input.description || 'Auto-post expense',
+                        sourceModule: 'expense',
+                        sourceId,
+                        transactionDate: input.date || new Date(),
+                        createdBy: input.createdBy,
+                        lines: [
+                            { accountCode: '5001', debit: amount, propertyId: input.propertyId },
+                            { accountCode: '1001', credit: amount, propertyId: input.propertyId }
+                        ]
+                    });
                 });
+                (0, testFailureSeam_1.throwOnceIfArmed)(sourceId, String(input.description || ''), 'PHASE_FAIL_EXPENSE_AFTER');
+                const stored = yield findJournalForIdentity(identity);
+                if (!(0, journalDuplicateKey_1.persistedJournalMatchesIdentity)(stored, identity)) {
+                    throw new operationalFailure_1.ExpenseSyncError('Expense journal was not stored for this source', 'conflict', 'EXPENSE_SOURCE_MISSING');
+                }
+                yield (0, financialOperationVisibility_1.resolveFinancialReview)(input.companyId, 'EXPENSE_SYNC_FAILED', sourceId, 'The expense journal for this source is present. Amounts were not rewritten.');
             }
             catch (error) {
-                if (isDuplicateKeyError(error))
-                    return;
-                const companyObjectId = safeObjectId(input.companyId);
-                if (!companyObjectId)
-                    return;
+                const failureClass = error instanceof operationalFailure_1.ExpenseSyncError
+                    ? error.failureClass
+                    : (String((error === null || error === void 0 ? void 0 : error.message) || '').includes('does not match this posting') ? 'conflict' : (0, operationalFailure_1.classifyOperationalFailure)(error));
+                const syncError = error instanceof operationalFailure_1.ExpenseSyncError
+                    ? error
+                    : new operationalFailure_1.ExpenseSyncError((error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync expense to accounting', failureClass, (error === null || error === void 0 ? void 0 : error.code) || 'EXPENSE_SYNC_FAILED');
+                logger_1.logger.warn('expense_sync_failed', {
+                    correlationId: sourceId,
+                    companyId: input.companyId,
+                    sourceId,
+                    failureClass,
+                    code: syncError.code
+                });
                 yield AccountingEventLog_1.AccountingEventLog.create({
                     companyId: companyObjectId,
                     eventType: 'expense_sync_failed',
                     sourceModule: 'expense',
-                    sourceId: input.sourceId,
+                    sourceId,
                     success: false,
-                    message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync expense to accounting',
-                    metadata: { reference: input.reference }
+                    message: syncError.message,
+                    metadata: { reference, failureClass, amount }
                 });
+                yield (0, financialOperationVisibility_1.upsertFinancialReview)({
+                    companyId: input.companyId,
+                    component: 'EXPENSE_SYNC_FAILED',
+                    operationId: sourceId,
+                    amount,
+                    missingRecord: 'expense journal',
+                    issueType: failureClass === 'conflict' ? 'mismatched' : 'missing',
+                    actual: failureClass,
+                    recommendedReview: `Expense source ${sourceId} for company ${input.companyId}, amount ${amount.toFixed(2)}, did not finish. Failure class ${failureClass}. Do not create another expense. Retry this source through syncExpenseCreated. Do not rewrite historical amounts.`
+                });
+                throw syncError;
             }
         });
     }

@@ -54,7 +54,7 @@ const AdminDashboard: React.FC = () => {
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <AdminSidebar activeTab={activeTab} onTabChange={setActiveTab} />
-      <Box sx={{ flexGrow: 1 }}>
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
         <Header />
         <Box sx={{ mt: 8, p: 3 }}>
           <Routes>

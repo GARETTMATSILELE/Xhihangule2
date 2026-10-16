@@ -19,6 +19,14 @@ import { JournalEntry } from '../models/JournalEntry';
 import { JournalLine } from '../models/JournalLine';
 import { ChartOfAccount } from '../models/ChartOfAccount';
 import { throwOnceIfArmed } from './testFailureSeam';
+import { logger } from '../utils/logger';
+import { classifyOperationalFailure, ExpenseSyncError } from './operationalFailure';
+import { resolveFinancialReview, upsertFinancialReview } from './financialOperationVisibility';
+import {
+  JournalOperationIdentity,
+  matchingJournalIdentity,
+  persistedJournalMatchesIdentity
+} from './journalDuplicateKey';
 
 const toMoney = (value: number): number => Number(Number(value || 0).toFixed(2));
 
@@ -34,8 +42,42 @@ const safeObjectId = (id?: string): mongoose.Types.ObjectId | undefined => {
   return new mongoose.Types.ObjectId(id);
 };
 
-const isDuplicateKeyError = (error: any): boolean =>
-  Boolean(error && (error.code === 11000 || String(error?.message || '').includes('duplicate key')));
+async function findJournalForIdentity(identity: JournalOperationIdentity) {
+  const companyId = identity.companyId instanceof mongoose.Types.ObjectId
+    ? identity.companyId
+    : new mongoose.Types.ObjectId(String(identity.companyId));
+  return JournalEntry.findOne({
+    companyId,
+    sourceModule: identity.sourceModule,
+    sourceId: identity.sourceId
+  }).select('_id companyId sourceModule sourceId reference status').lean();
+}
+
+/**
+ * Insert a journal once. A duplicate key is success only when the conflicting
+ * index and the stored journal are this exact operation. The stored journal
+ * is not updated.
+ */
+async function ensureJournal(
+  identity: JournalOperationIdentity,
+  post: () => Promise<unknown>
+): Promise<void> {
+  const existing = await findJournalForIdentity(identity);
+  if (existing) {
+    if (!persistedJournalMatchesIdentity(existing, identity)) {
+      throw new Error('Existing journal does not match this posting operation');
+    }
+    return;
+  }
+  try {
+    await post();
+  } catch (error) {
+    const matched = matchingJournalIdentity(error, [identity]);
+    if (!matched) throw error;
+    const raced = await findJournalForIdentity(identity);
+    if (!persistedJournalMatchesIdentity(raced, identity)) throw error;
+  }
+}
 
 class AccountingIntegrationService {
   private async upsertPaymentVatRecord(payment: IPayment): Promise<void> {
@@ -44,23 +86,117 @@ class AccountingIntegrationService {
     const totalVatCollected = toMoney(vatOnCommission + paymentVat);
     if (totalVatCollected <= 0) return;
 
-    await VatRecord.updateOne(
+    const filter = {
+      companyId: new mongoose.Types.ObjectId(String(payment.companyId)),
+      transactionId: String(payment._id),
+      sourceType: payment.paymentType
+    };
+    const existing = await VatRecord.findOne(filter).select('status vatCollected').lean();
+    if (existing) return;
+
+    try {
+      await VatRecord.updateOne(
+        filter,
+        {
+          $setOnInsert: {
+            vatCollected: totalVatCollected,
+            vatPaid: 0,
+            vatRate: Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0),
+            filingPeriod: filingPeriodFromDate(payment.paymentDate),
+            status: 'pending'
+          }
+        },
+        { upsert: true }
+      );
+    } catch (error) {
+      const raced = await VatRecord.findOne(filter).select('_id').lean();
+      if (!raced) throw error;
+    }
+  }
+
+  private async ensurePaymentVatObligations(payment: IPayment, opts?: { createdBy?: string }): Promise<void> {
+    const companyId = String(payment.companyId);
+    const paymentId = String(payment._id);
+    const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
+    const paymentVat = toMoney((payment as any)?.vatAmount || 0);
+    const commissionNet = toMoney(
+      Number((payment.commissionDetails as any)?.commissionNet || (payment.commissionDetails as any)?.totalCommission || 0)
+    );
+    const effectiveVatRate = Number((payment as any)?.vatOnCommissionRate || (payment.commissionDetails as any)?.vatRate || (payment as any)?.vatRate || 0);
+    const propertyId = (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined;
+    const period = taxFilingPeriod(payment.paymentDate);
+    const details = (payment.commissionDetails || {}) as any;
+    if (vatOnCommission > 0) {
+      throwOnceIfArmed(paymentId, String((payment as any).notes || ''), 'PHASE_FAIL_OBLIGATION_ONCE');
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        process.env.MANTIS_TEST_SEAM === '1' &&
+        String((payment as any).notes || '').includes('FAIL_VAT_OBLIGATION')
+      ) {
+        throw new Error('FAIL_VAT_OBLIGATION');
+      }
+      await upsertPaymentTaxObligation({
+        companyId,
+        taxType: 'VAT_ON_COMMISSION',
+        paymentId,
+        propertyId,
+        taxPeriod: period,
+        transactionDate: payment.paymentDate,
+        currency: (payment as any).currency,
+        taxableAmount: commissionNet,
+        taxRate: effectiveVatRate,
+        taxAmount: vatOnCommission,
+        calculationBasis: String(details.vatTreatment || 'COMMISSION_VAT'),
+        calculationSnapshot: {
+          paymentId,
+          commissionBase: details.commissionBase,
+          commissionRate: details.commissionRate,
+          commissionNet,
+          vatTreatment: details.vatTreatment,
+          vatRate: details.vatRate ?? effectiveVatRate,
+          vatAmount: vatOnCommission,
+          vatRuleId: details.vatRuleId,
+          vatTaxPoint: details.vatTaxPoint || payment.paymentDate,
+          vatDecision: details.vatDecision
+        },
+        glAccount: GL.VAT_PAYABLE,
+        createdBy: opts?.createdBy
+      });
+    }
+    if (paymentVat > 0) {
+      await upsertPaymentTaxObligation({
+        companyId,
+        taxType: 'VAT_OUTPUT',
+        paymentId,
+        propertyId,
+        taxPeriod: period,
+        transactionDate: payment.paymentDate,
+        currency: (payment as any).currency,
+        taxableAmount: toMoney(Number(payment.amount || 0) - paymentVat),
+        taxRate: Number((payment as any)?.vatRate || 0),
+        taxAmount: paymentVat,
+        calculationBasis: 'PROPERTY_SALE_VAT',
+        glAccount: GL.VAT_PAYABLE,
+        createdBy: opts?.createdBy
+      });
+    }
+  }
+
+  async reversePaymentVatRecord(payment: IPayment): Promise<'reversed' | 'skipped'> {
+    const result = await VatRecord.updateOne(
       {
         companyId: new mongoose.Types.ObjectId(String(payment.companyId)),
         transactionId: String(payment._id),
-        sourceType: payment.paymentType
+        status: { $ne: 'reversed' }
       },
-      {
-        $set: {
-          vatCollected: totalVatCollected,
-          vatPaid: 0,
-          vatRate: Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0),
-          filingPeriod: filingPeriodFromDate(payment.paymentDate),
-          status: 'pending'
-        }
-      },
-      { upsert: true }
+      { $set: { status: 'reversed' } }
     );
+    if (Number((result as any).matchedCount || (result as any).n || 0) > 0) return 'reversed';
+    const existing = await VatRecord.findOne({
+      transactionId: String(payment._id),
+      status: 'reversed'
+    }).select('_id').lean();
+    return existing ? 'reversed' : 'skipped';
   }
 
   /**
@@ -144,90 +280,82 @@ class AccountingIntegrationService {
         agentId
       });
 
+      const sourceModule = journalPaymentType(payment) === 'sale' ? 'sale' : 'payment';
+      const companyObjectId = new mongoose.Types.ObjectId(companyId);
       if (amount > 0 && receiptJournal.lines.length > 0) {
-        await accountingService.postTransaction({
-          companyId,
-          reference: `PAY-${payment.referenceNumber || paymentId}`,
-          description: `Agent collection ${payment.referenceNumber || paymentId} (commission as company revenue; principal funds as client liability)`,
-          sourceModule: journalPaymentType(payment) === 'sale' ? 'sale' : 'payment',
-          sourceId: paymentId,
-          transactionDate: payment.paymentDate,
-          createdBy: opts?.createdBy,
-          lines: receiptJournal.lines,
-          vat: totalVatCollected > 0
-            ? {
-                sourceType: payment.paymentType,
-                vatCollected: totalVatCollected,
-                vatRate: effectiveVatRate,
-                filingPeriod: filingPeriodFromDate(payment.paymentDate),
-                status: 'pending'
-              }
-            : undefined
-        });
+        await ensureJournal(
+          {
+            companyId: companyObjectId,
+            sourceModule,
+            sourceId: paymentId,
+            reference: `PAY-${payment.referenceNumber || paymentId}`
+          },
+          () => accountingService.postTransaction({
+            companyId,
+            reference: `PAY-${payment.referenceNumber || paymentId}`,
+            description: `Agent collection ${payment.referenceNumber || paymentId} (commission as company revenue; principal funds as client liability)`,
+            sourceModule,
+            sourceId: paymentId,
+            transactionDate: payment.paymentDate,
+            createdBy: opts?.createdBy,
+            lines: receiptJournal.lines,
+            seamHaystack: String((payment as any).notes || ''),
+            vat: totalVatCollected > 0
+              ? {
+                  sourceType: payment.paymentType,
+                  vatCollected: totalVatCollected,
+                  vatRate: effectiveVatRate,
+                  filingPeriod: filingPeriodFromDate(payment.paymentDate),
+                  status: 'pending'
+                }
+              : undefined
+          })
+        );
       }
 
-      const period = taxFilingPeriod(payment.paymentDate);
-      if (vatOnCommission > 0) {
-        await upsertPaymentTaxObligation({
-          companyId,
-          taxType: 'VAT_ON_COMMISSION',
-          paymentId,
-          propertyId,
-          taxPeriod: period,
-          transactionDate: payment.paymentDate,
-          currency: (payment as any).currency,
-          taxableAmount: commissionNet,
-          taxRate: effectiveVatRate,
-          taxAmount: vatOnCommission,
-          calculationBasis: String((payment.commissionDetails as any)?.vatTreatment || 'COMMISSION_VAT'),
-          glAccount: GL.VAT_PAYABLE,
-          createdBy: opts?.createdBy
-        });
+      if (totalVatCollected > 0) {
+        await this.upsertPaymentVatRecord(payment);
       }
-      if (paymentVat > 0) {
-        await upsertPaymentTaxObligation({
-          companyId,
-          taxType: 'VAT_OUTPUT',
-          paymentId,
-          propertyId,
-          taxPeriod: period,
-          transactionDate: payment.paymentDate,
-          currency: (payment as any).currency,
-          taxableAmount: toMoney(amount - paymentVat),
-          taxRate: Number((payment as any)?.vatRate || 0),
-          taxAmount: paymentVat,
-          calculationBasis: 'PROPERTY_SALE_VAT',
-          glAccount: GL.VAT_PAYABLE,
-          createdBy: opts?.createdBy
-        });
-      }
+
+      await this.ensurePaymentVatObligations(payment, opts);
 
       const agentShare = toMoney((payment.commissionDetails as any)?.agentShare || 0);
       if (agentShare > 0) {
-        await accountingService.postTransaction({
-          companyId,
-          reference: `COM-${payment.referenceNumber || paymentId}`,
-          description: `Auto-post commission payable for ${payment.referenceNumber || paymentId}`,
-          sourceModule: 'commission',
-          sourceId: `${paymentId}:commission`,
-          transactionDate: payment.paymentDate,
-          createdBy: opts?.createdBy,
-          lines: [
-            { accountCode: '5002', debit: agentShare },
-            {
-              accountCode: '2102',
-              credit: agentShare,
-              agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
-            }
-          ]
-        });
+        await ensureJournal(
+          {
+            companyId: companyObjectId,
+            sourceModule: 'commission',
+            sourceId: `${paymentId}:commission`,
+            reference: `COM-${payment.referenceNumber || paymentId}`
+          },
+          () => accountingService.postTransaction({
+            companyId,
+            reference: `COM-${payment.referenceNumber || paymentId}`,
+            description: `Auto-post commission payable for ${payment.referenceNumber || paymentId}`,
+            sourceModule: 'commission',
+            sourceId: `${paymentId}:commission`,
+            transactionDate: payment.paymentDate,
+            createdBy: opts?.createdBy,
+            lines: [
+              { accountCode: '5002', debit: agentShare },
+              {
+                accountCode: '2102',
+                credit: agentShare,
+                agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
+              }
+            ]
+          })
+        );
       }
     } catch (error: any) {
-      if (isDuplicateKeyError(error)) {
-        // Payment may already be journal-posted; still ensure the VAT record reflects full payment VAT.
-        await this.upsertPaymentVatRecord(payment);
-        return;
-      }
+      const failureClass = classifyOperationalFailure(error);
+      logger.warn('payment_accounting_sync_failed', {
+        correlationId: paymentId,
+        paymentId,
+        companyId,
+        failureClass,
+        code: error?.code
+      });
       await AccountingEventLog.create({
         companyId: new mongoose.Types.ObjectId(companyId),
         eventType: 'payment_sync_failed',
@@ -235,7 +363,7 @@ class AccountingIntegrationService {
         sourceId: paymentId,
         success: false,
         message: error?.message || 'Failed to sync payment to accounting',
-        metadata: { paymentReference: payment.referenceNumber }
+        metadata: { paymentReference: payment.referenceNumber, failureClass }
       });
       throw error;
     }
@@ -326,12 +454,18 @@ class AccountingIntegrationService {
     );
     const sourceModule = journalPaymentType(payment) === 'sale' ? 'sale' : 'payment';
     const companyObjectId = new mongoose.Types.ObjectId(companyId);
+    const reversalReference = `REV-PAY-${payment.referenceNumber || paymentId}`;
+    const reversalIdentity: JournalOperationIdentity = {
+      companyId: companyObjectId,
+      sourceModule,
+      sourceId: `${paymentId}:reversal`,
+      reference: reversalReference
+    };
     try {
-      const existing = await JournalEntry.findOne({
-        companyId: companyObjectId,
-        sourceModule,
-        sourceId: `${paymentId}:reversal`
-      }).select('_id').lean();
+      const existing = await findJournalForIdentity(reversalIdentity);
+      if (existing && !persistedJournalMatchesIdentity(existing, reversalIdentity)) {
+        throw new Error('Existing reversal journal does not match this payment');
+      }
       if (!existing) {
         const original = await JournalEntry.findOne({
           companyId: companyObjectId,
@@ -390,16 +524,16 @@ class AccountingIntegrationService {
           throw new Error('Original journal lines could not be reversed');
         }
         if (lines.length > 0) {
-          await accountingService.postTransaction({
+          await ensureJournal(reversalIdentity, () => accountingService.postTransaction({
             companyId,
-            reference: `REV-PAY-${payment.referenceNumber || paymentId}`,
+            reference: reversalReference,
             description: `Reversal of agent collection ${payment.referenceNumber || paymentId}`,
             sourceModule,
             sourceId: `${paymentId}:reversal`,
             transactionDate: new Date(),
             createdBy: opts?.createdBy,
             lines
-          });
+          }));
         } else if (!original) {
           return 'skipped';
         }
@@ -407,13 +541,14 @@ class AccountingIntegrationService {
 
       const agentShare = toMoney((payment.commissionDetails as any)?.agentShare || 0);
       if (agentShare > 0) {
-        const agentJournal = await JournalEntry.findOne({
-          companyId: companyObjectId,
-          sourceModule: 'commission',
-          sourceId: `${paymentId}:commission:reversal`
-        }).select('_id').lean();
-        if (!agentJournal) {
-          await accountingService.postTransaction({
+        await ensureJournal(
+          {
+            companyId: companyObjectId,
+            sourceModule: 'commission',
+            sourceId: `${paymentId}:commission:reversal`,
+            reference: `REV-AGT-${payment.referenceNumber || paymentId}`
+          },
+          () => accountingService.postTransaction({
             companyId,
             reference: `REV-AGT-${payment.referenceNumber || paymentId}`,
             description: `Reversal of commission payable for ${payment.referenceNumber || paymentId}`,
@@ -429,12 +564,19 @@ class AccountingIntegrationService {
                 agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
               }
             ]
-          });
-        }
+          })
+        );
       }
       return 'reversed';
     } catch (error: any) {
-      if (isDuplicateKeyError(error)) return 'reversed';
+      const failureClass = classifyOperationalFailure(error);
+      logger.warn('payment_reversal_journal_failed', {
+        correlationId: paymentId,
+        paymentId,
+        companyId,
+        failureClass,
+        code: error?.code
+      });
       await AccountingEventLog.create({
         companyId: companyObjectId,
         eventType: 'payment_reversal_sync_failed',
@@ -442,7 +584,7 @@ class AccountingIntegrationService {
         sourceId: paymentId,
         success: false,
         message: error?.message || 'Failed to sync payment reversal to accounting',
-        metadata: { paymentReference: payment.referenceNumber, reason: opts?.reason || '' }
+        metadata: { paymentReference: payment.referenceNumber, failureClass }
       });
       throw error;
     }
@@ -473,35 +615,90 @@ class AccountingIntegrationService {
     createdBy?: string;
     propertyId?: string;
   }): Promise<void> {
+    const companyObjectId = safeObjectId(input.companyId);
+    const sourceId = String(input.sourceId || '').trim();
+    const reference = String(input.reference || '').trim();
+    if (!companyObjectId) {
+      throw new ExpenseSyncError('Expense sync requires a valid company id', 'permanent', 'EXPENSE_COMPANY_REQUIRED');
+    }
+    if (!sourceId || !reference) {
+      throw new ExpenseSyncError('Expense sync requires a source id and reference', 'permanent', 'EXPENSE_SOURCE_REQUIRED');
+    }
+    const amount = toMoney(input.amount);
+    if (amount <= 0) return;
+
+    const identity: JournalOperationIdentity = {
+      companyId: companyObjectId,
+      sourceModule: 'expense',
+      sourceId,
+      reference
+    };
     try {
-      const amount = toMoney(input.amount);
-      if (amount <= 0) return;
-      await accountingService.postTransaction({
-        companyId: input.companyId,
-        reference: input.reference,
-        description: input.description || 'Auto-post expense',
-        sourceModule: 'expense',
-        sourceId: input.sourceId,
-        transactionDate: input.date || new Date(),
-        createdBy: input.createdBy,
-        lines: [
-          { accountCode: '5001', debit: amount, propertyId: input.propertyId },
-          { accountCode: '1001', credit: amount, propertyId: input.propertyId }
-        ]
+      await ensureJournal(identity, () => {
+        throwOnceIfArmed(sourceId, String(input.description || ''), 'PHASE_FAIL_EXPENSE_POST');
+        return accountingService.postTransaction({
+          companyId: input.companyId,
+          reference,
+          description: input.description || 'Auto-post expense',
+          sourceModule: 'expense',
+          sourceId,
+          transactionDate: input.date || new Date(),
+          createdBy: input.createdBy,
+          lines: [
+            { accountCode: '5001', debit: amount, propertyId: input.propertyId },
+            { accountCode: '1001', credit: amount, propertyId: input.propertyId }
+          ]
+        });
       });
+      throwOnceIfArmed(sourceId, String(input.description || ''), 'PHASE_FAIL_EXPENSE_AFTER');
+      const stored = await findJournalForIdentity(identity);
+      if (!persistedJournalMatchesIdentity(stored, identity)) {
+        throw new ExpenseSyncError('Expense journal was not stored for this source', 'conflict', 'EXPENSE_SOURCE_MISSING');
+      }
+      await resolveFinancialReview(
+        input.companyId,
+        'EXPENSE_SYNC_FAILED',
+        sourceId,
+        'The expense journal for this source is present. Amounts were not rewritten.'
+      );
     } catch (error: any) {
-      if (isDuplicateKeyError(error)) return;
-      const companyObjectId = safeObjectId(input.companyId);
-      if (!companyObjectId) return;
+      const failureClass = error instanceof ExpenseSyncError
+        ? error.failureClass
+        : (String(error?.message || '').includes('does not match this posting') ? 'conflict' : classifyOperationalFailure(error));
+      const syncError = error instanceof ExpenseSyncError
+        ? error
+        : new ExpenseSyncError(
+          error?.message || 'Failed to sync expense to accounting',
+          failureClass,
+          error?.code || 'EXPENSE_SYNC_FAILED'
+        );
+      logger.warn('expense_sync_failed', {
+        correlationId: sourceId,
+        companyId: input.companyId,
+        sourceId,
+        failureClass,
+        code: syncError.code
+      });
       await AccountingEventLog.create({
         companyId: companyObjectId,
         eventType: 'expense_sync_failed',
         sourceModule: 'expense',
-        sourceId: input.sourceId,
+        sourceId,
         success: false,
-        message: error?.message || 'Failed to sync expense to accounting',
-        metadata: { reference: input.reference }
+        message: syncError.message,
+        metadata: { reference, failureClass, amount }
       });
+      await upsertFinancialReview({
+        companyId: input.companyId,
+        component: 'EXPENSE_SYNC_FAILED',
+        operationId: sourceId,
+        amount,
+        missingRecord: 'expense journal',
+        issueType: failureClass === 'conflict' ? 'mismatched' : 'missing',
+        actual: failureClass,
+        recommendedReview: `Expense source ${sourceId} for company ${input.companyId}, amount ${amount.toFixed(2)}, did not finish. Failure class ${failureClass}. Do not create another expense. Retry this source through syncExpenseCreated. Do not rewrite historical amounts.`
+      });
+      throw syncError;
     }
   }
 

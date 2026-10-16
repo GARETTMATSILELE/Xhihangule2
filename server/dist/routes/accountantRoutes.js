@@ -116,6 +116,7 @@ router.get('/trust-visibility', roles_1.canViewAccountantDashboard, paymentAccou
 router.post('/payments/:id/accounting/repair', roles_1.canViewAccountantDashboard, paymentController_1.repairPaymentAccountingExplicit);
 router.get('/accounting-integrity/summary', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.getAccountingIntegritySummary);
 router.get('/accounting-integrity/inconsistencies', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.listAccountingIntegrityInconsistencies);
+router.post('/accounting-integrity/ledger-events/:id/retry', roles_1.canViewAccountantDashboard, paymentAccountingIntegrityController_1.retryFailedLedgerEvent);
 router.put('/payments/:id/status', roles_1.canManagePayments, paymentController_1.updatePaymentStatus);
 router.post('/payments/:id/reverse', roles_1.canManagePayments, paymentController_1.reversePayment);
 router.post('/payments/:id/finalize', roles_1.canManagePayments, paymentController_1.finalizeProvisionalPayment);

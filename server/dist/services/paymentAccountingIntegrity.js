@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -281,6 +314,18 @@ function runPaymentAccountingIntegrityPass() {
         catch (e) {
             logger_1.logger.warn('Orphan accounting detection failed', { error: (e === null || e === void 0 ? void 0 : e.message) || e });
         }
+        try {
+            const { flagFinancialPostingGaps } = yield Promise.resolve().then(() => __importStar(require('./financialPostingGapService')));
+            const companyIds = Array.from(new Set(rows.map((row) => row.companyId ? String(row.companyId) : '').filter(Boolean)));
+            for (const companyId of companyIds.slice(0, 10)) {
+                yield flagFinancialPostingGaps(companyId);
+                const { flagExhaustedLedgerEvents } = yield Promise.resolve().then(() => __importStar(require('./financialOperationVisibility')));
+                yield flagExhaustedLedgerEvents(companyId);
+            }
+        }
+        catch (e) {
+            logger_1.logger.warn('Financial posting gap detection failed', { error: (e === null || e === void 0 ? void 0 : e.message) || e, failureClass: 'transient' });
+        }
         logger_1.logger.info('Payment accounting integrity pass completed', stats);
         return stats;
     });
@@ -380,7 +425,16 @@ function listCompanyAccountingInconsistencies(companyId_1) {
         }
         if (constrainPayments) {
             const paymentIds = yield Payment_1.Payment.find(paymentFilter).select('_id').limit(2000).lean();
-            query.paymentId = { $in: paymentIds.map((row) => row._id) };
+            const paymentConstraint = {
+                $or: [
+                    { paymentId: { $in: paymentIds.map((row) => row._id) } },
+                    ...(filters.propertyId || filters.agentId || filters.paymentReference
+                        ? []
+                        : [{ paymentId: { $exists: false }, kind: 'financial_review' }])
+                ]
+            };
+            const existingAnd = Array.isArray(query.$and) ? query.$and : [];
+            query.$and = [...existingAnd, paymentConstraint];
         }
         const [total, rows] = yield Promise.all([
             AccountingException_1.AccountingException.countDocuments(query),
@@ -400,6 +454,7 @@ function listCompanyAccountingInconsistencies(companyId_1) {
             : [];
         const paymentMap = new Map(payments.map((p) => [String(p._id), p]));
         const items = rows.map((row) => {
+            var _a;
             const payment = row.paymentId ? paymentMap.get(String(row.paymentId)) : undefined;
             const issue = Array.isArray(row.issues) && row.issues.length ? row.issues[0] : null;
             const component = row.component || (issue === null || issue === void 0 ? void 0 : issue.component) || row.ledger || (row.missingComponents || [])[0] || '';
@@ -421,7 +476,16 @@ function listCompanyAccountingInconsistencies(companyId_1) {
                 difference: row.difference != null ? row.difference : issue === null || issue === void 0 ? void 0 : issue.difference,
                 status: statusLabel,
                 accountingComplete: (payment === null || payment === void 0 ? void 0 : payment.accountingComplete) === true,
-                canRepair: row.kind !== 'orphan_accounting' && Boolean(row.paymentId)
+                canRepair: row.kind !== 'orphan_accounting' && row.kind !== 'financial_review' && Boolean(row.paymentId),
+                amount: Number((payment === null || payment === void 0 ? void 0 : payment.amount) || row.expected || 0),
+                companyId: row.companyId ? String(row.companyId) : '',
+                missingRecord: Array.isArray(row.missingComponents) && row.missingComponents.length
+                    ? row.missingComponents.join(', ')
+                    : (row.component || ''),
+                recommendedReview: row.error || 'Review this payment before any correction. Financial records were not changed by this check.',
+                detectedAt: row.detectedAt,
+                operationId: ((_a = row.accountingRef) === null || _a === void 0 ? void 0 : _a.transactionId) || '',
+                canRetry: row.component === 'LEDGER_RETRY_EXHAUSTED' && String(row.actual || '') === 'transient'
             };
         });
         return { items, total, page, limit };

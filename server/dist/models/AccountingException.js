@@ -39,7 +39,7 @@ const collections_1 = require("../config/collections");
 const AccountingExceptionSchema = new mongoose_1.Schema({
     kind: {
         type: String,
-        enum: ['incomplete_projection', 'orphan_accounting'],
+        enum: ['incomplete_projection', 'orphan_accounting', 'financial_review'],
         required: true,
         index: true
     },

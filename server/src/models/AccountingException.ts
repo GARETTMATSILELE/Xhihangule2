@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import { COLLECTIONS } from '../config/collections';
 
-export type AccountingExceptionKind = 'incomplete_projection' | 'orphan_accounting';
+export type AccountingExceptionKind = 'incomplete_projection' | 'orphan_accounting' | 'financial_review';
 export type AccountingExceptionStatus = 'open' | 'resolved' | 'ignored';
 export type AccountingExceptionIssueType = 'missing' | 'mismatched' | 'orphaned';
 export type AccountingExceptionLedger =
@@ -50,7 +50,7 @@ const AccountingExceptionSchema = new Schema<IAccountingException>(
   {
     kind: {
       type: String,
-      enum: ['incomplete_projection', 'orphan_accounting'],
+      enum: ['incomplete_projection', 'orphan_accounting', 'financial_review'],
       required: true,
       index: true
     },

@@ -55,6 +55,7 @@ import { Paid as PaidIcon } from '@mui/icons-material';
 import { developmentService } from '../../services/developmentService';
 import { developmentUnitService } from '../../services/developmentUnitService';
 import { OwnerStatementDTO, OwnerStatementPreview, reportingService, ReportFormat } from '../../reporting';
+import { explainDashboardRent, resolveTotalAmountReceived } from '../../reporting/totalAmountReceived';
 import { usePropertyAccountLiveRefresh, PropertyAccountRefreshSource } from '../../hooks/usePropertyAccountLiveRefresh';
 import { PropertyAccountChangeIds } from '../../utils/paymentsChanged';
 
@@ -90,6 +91,9 @@ interface TransactionPaymentBreakdown {
   ownerAmount: number;
   levy: number;
   paymentAmount?: number;
+  depositAmount?: number;
+  allocationGross?: number;
+  grossRent?: number;
   rentUsed?: number;
   rentAllocated?: number;
   levyAllocated?: number;
@@ -131,21 +135,6 @@ const rentalPeriodDescription = (payment?: TransactionPaymentBreakdown): string 
     return `${RENT_MONTHS[start.month - 1]}–${RENT_MONTHS[end.month - 1]} ${start.year} Rent`;
   }
   return `${RENT_MONTHS[start.month - 1]} ${start.year}–${RENT_MONTHS[end.month - 1]} ${end.year} Rent`;
-};
-
-const recordedRentAmount = (payment?: TransactionPaymentBreakdown): number | undefined => {
-  if (!payment) return undefined;
-  const rentAllocated = Number(payment.rentAllocated);
-  if (Number.isFinite(rentAllocated) && rentAllocated > 0) return rentAllocated;
-  const months = Math.max(1, Number(payment.advanceMonthsPaid || 1));
-  const rentUsed = Number(payment.rentUsed);
-  if (Number.isFinite(rentUsed) && rentUsed > 0) return Math.round(rentUsed * months * 100) / 100;
-  const commissionBase = Number(payment.commissionBase);
-  if (Number.isFinite(commissionBase) && commissionBase > 0) return commissionBase;
-  const levy = Number(payment.levy || payment.levyAllocated || 0);
-  const amount = Number(payment.paymentAmount);
-  if (Number.isFinite(amount) && amount > 0 && !(levy > 0)) return amount;
-  return undefined;
 };
 
 const moneyOrDash = (amount: number | undefined, format: (value: number) => string): string => {
@@ -265,6 +254,9 @@ const PropertyAccountDetailPage: React.FC = () => {
               ownerAmount: Number(cd.ownerAmount || 0),
               levy: Number(cd.levy || (p as any).levyAllocated || 0),
               paymentAmount: Number((p as any).amount || 0),
+              depositAmount: Number((p as any).depositAmount || 0),
+              allocationGross: Number(cd.paymentAllocation?.grossAmount || 0),
+              grossRent: Number(cd.grossRent || 0),
               rentUsed: (p as any).rentUsed,
               rentAllocated: (p as any).rentAllocated,
               levyAllocated: (p as any).levyAllocated,
@@ -782,13 +774,13 @@ const PropertyAccountDetailPage: React.FC = () => {
             .statement-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
             .statement-table col:nth-child(1), .statement-table th:nth-child(1) { width: 8% !important; }
             .statement-table col:nth-child(2), .statement-table th:nth-child(2) { width: 7% !important; }
-            .statement-table col:nth-child(3), .statement-table th:nth-child(3) { width: 11% !important; }
-            .statement-table col:nth-child(4), .statement-table th:nth-child(4) { width: 11% !important; }
+            .statement-table col:nth-child(3), .statement-table th:nth-child(3) { width: 13% !important; }
+            .statement-table col:nth-child(4), .statement-table th:nth-child(4) { width: 12% !important; }
             .statement-table col:nth-child(5), .statement-table th:nth-child(5) { width: 10% !important; }
-            .statement-table col:nth-child(6), .statement-table th:nth-child(6) { width: 14% !important; }
-            .statement-table col:nth-child(7), .statement-table th:nth-child(7) { width: 9% !important; }
-            .statement-table col:nth-child(8), .statement-table th:nth-child(8) { width: 15% !important; }
-            .statement-table col:nth-child(9), .statement-table th:nth-child(9) { width: 15% !important; }
+            .statement-table col:nth-child(6), .statement-table th:nth-child(6) { width: 12% !important; }
+            .statement-table col:nth-child(7), .statement-table th:nth-child(7) { width: 8% !important; }
+            .statement-table col:nth-child(8), .statement-table th:nth-child(8) { width: 16% !important; }
+            .statement-table col:nth-child(9), .statement-table th:nth-child(9) { width: 14% !important; }
             .statement-table thead { display: table-header-group; }
             .statement-table tfoot { display: table-footer-group; }
             .statement-table tbody tr, .statement-table tfoot tr { break-inside: avoid; page-break-inside: avoid; }
@@ -1106,17 +1098,17 @@ const PropertyAccountDetailPage: React.FC = () => {
           />
         </Box>
         <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-          <Table size="small" sx={{ minWidth: 1080 }}>
+          <Table size="small" sx={{ minWidth: 1280 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Description</TableCell>
-                <TableCell align="right">Rent Amount</TableCell>
+                <TableCell align="right">Total Amount Received</TableCell>
                 <TableCell align="right">Commission</TableCell>
                 <TableCell align="right">VAT on Commission</TableCell>
                 <TableCell align="right">Levy</TableCell>
-                <TableCell align="right">Owner Amount</TableCell>
+                <TableCell align="right">Net Amount Due to Owner</TableCell>
                 <TableCell align="right">Balance</TableCell>
                 <TableCell>Status</TableCell>
               </TableRow>
@@ -1128,6 +1120,23 @@ const PropertyAccountDetailPage: React.FC = () => {
                 const isSaleIncome = transaction.category === 'sale_income' || breakdown?.paymentType === 'sale';
                 const isRentalIncome = transaction.type === 'income' && !isSaleIncome;
                 const format = (value: number) => propertyAccountService.formatCurrency(value);
+                const explainedRent = breakdown ? explainDashboardRent({
+                  rentUsed: breakdown.rentUsed,
+                  advanceMonthsPaid: breakdown.advanceMonthsPaid,
+                  rentAllocated: breakdown.rentAllocated,
+                  commissionBase: breakdown.commissionBase,
+                  levy: breakdown.levy,
+                  grossRent: breakdown.grossRent,
+                  amount: breakdown.paymentAmount
+                }) : {};
+                const receipt = breakdown ? resolveTotalAmountReceived({
+                  paymentAmount: breakdown.paymentAmount,
+                  depositAmount: breakdown.depositAmount,
+                  rentComponent: explainedRent.amount,
+                  rentSource: explainedRent.source,
+                  levy: breakdown.levy,
+                  allocationGross: breakdown.allocationGross
+                }) : undefined;
                 const description = isRentalIncome
                   ? (rentalPeriodDescription(breakdown) || transaction.description || transaction.referenceNumber || '—')
                   : (transaction.description || transaction.referenceNumber || '—');
@@ -1163,7 +1172,17 @@ const PropertyAccountDetailPage: React.FC = () => {
                   </TableCell>
                   <TableCell sx={{ minWidth: 160 }}>{description}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'success.main' }}>
-                    {isRentalIncome ? moneyOrDash(recordedRentAmount(breakdown), format) : '—'}
+                    {isRentalIncome ? (
+                      <Tooltip
+                        title={receipt?.reviewRequired
+                          ? 'Review required. The stored receipt could not be split into rent and levy, so the levy was not added again.'
+                          : (receipt?.contractualRent && receipt.totalAmountReceived && Math.abs(receipt.contractualRent - receipt.totalAmountReceived) >= 0.005
+                            ? `Contractual rent ${format(receipt.contractualRent)}`
+                            : 'Total cash received from the tenant')}
+                      >
+                        <span>{moneyOrDash(receipt?.totalAmountReceived, format)}</span>
+                      </Tooltip>
+                    ) : '—'}
                   </TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
                     {isRentalIncome ? moneyOrDash(breakdown?.totalCommission, format) : '—'}

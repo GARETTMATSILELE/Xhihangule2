@@ -4,6 +4,7 @@ import { CanonicalLedgerEntry, LedgerQuery } from '../ledger';
 import { PaymentCommissionSnapshot, ReportingReadModels } from '../readModels';
 import { cleanStatementDescription, formatRentPeriodDescription } from '../rentalPeriod';
 import { resolveStatementRentAmount } from '../statementRent';
+import { resolveTotalAmountReceived } from '../totalAmountReceived';
 
 const companyId = 'company-1';
 const propertyId = 'property-1';
@@ -464,4 +465,179 @@ export async function runStatementPresentationTests(): Promise<void> {
   assert.strictEqual(namedPayoutDto.trustLedger[0].description, 'Owner payout - John Doe');
   assert.strictEqual(namedPayoutDto.trustLedger[0].rentAmount, undefined);
   assert.strictEqual(namedPayoutDto.trustLedger[0].ownerAmount?.amount, -250);
+
+  const standardRent = resolveTotalAmountReceived({
+    paymentAmount: 1800,
+    rentComponent: 1800,
+    rentSource: 'rent_used',
+    levy: 0
+  });
+  assert.strictEqual(standardRent.totalAmountReceived, 1800, 'Rent with no levy uses the cash received.');
+  assert.strictEqual(standardRent.levyIncludedInTotal, false);
+  assert.strictEqual(standardRent.reviewRequired, false);
+
+  const rentWithLevy = resolveTotalAmountReceived({
+    paymentAmount: 1900,
+    rentComponent: 1800,
+    rentSource: 'rent_used',
+    levy: 100
+  });
+  assert.strictEqual(rentWithLevy.totalAmountReceived, 1900, 'Levy collected with rent is included once via the stored receipt.');
+  assert.strictEqual(rentWithLevy.levyIncludedInTotal, true);
+  assert.notStrictEqual(rentWithLevy.totalAmountReceived, 2000);
+
+  const levyAlreadyInside = resolveTotalAmountReceived({
+    paymentAmount: 1900,
+    rentComponent: 1900,
+    rentSource: 'commission_base_plus_levy',
+    levy: 100
+  });
+  assert.strictEqual(levyAlreadyInside.totalAmountReceived, 1900, 'A rent figure that already includes levy must not be increased again.');
+  assert.strictEqual(levyAlreadyInside.levyIncludedInTotal, true);
+
+  const levyNotInThisReceipt = resolveTotalAmountReceived({
+    paymentAmount: 1800,
+    rentComponent: 1800,
+    rentSource: 'rent_used',
+    levy: 100
+  });
+  assert.strictEqual(levyNotInThisReceipt.totalAmountReceived, 1800, 'A levy that is not in the stored receipt is not added.');
+  assert.strictEqual(levyNotInThisReceipt.levyIncludedInTotal, false);
+
+  const partial = resolveTotalAmountReceived({
+    paymentAmount: 900,
+    rentComponent: 1800,
+    rentSource: 'rent_used',
+    levy: 0
+  });
+  assert.strictEqual(partial.totalAmountReceived, 900, 'A partial payment displays the cash received, not the contractual rent.');
+
+  const advance = resolveTotalAmountReceived({
+    paymentAmount: 5700,
+    rentComponent: 5400,
+    rentSource: 'rent_used',
+    levy: 300
+  });
+  assert.strictEqual(advance.totalAmountReceived, 5700, 'Advance rent keeps the stored receipt, including levy collected with it.');
+  assert.strictEqual(advance.reviewRequired, false);
+
+  const ambiguousGross = resolveTotalAmountReceived({
+    rentComponent: 1800,
+    rentSource: 'stored_gross_rent',
+    levy: 100
+  });
+  assert.strictEqual(ambiguousGross.totalAmountReceived, 1800, 'An ambiguous stored gross rent is not increased by levy.');
+  assert.strictEqual(ambiguousGross.reviewRequired, true);
+
+  const octoberDto = await new OwnerStatementBuilder(createReadModels([
+    entry({
+      entryId: 'rent-october',
+      eventType: 'income',
+      debit: 0,
+      credit: 1488.15,
+      effectiveDate: new Date('2026-10-05T00:00:00.000Z'),
+      metadata: { paymentId: 'pay-october', description: 'Rental income' }
+    })
+  ], [{
+    paymentId: 'pay-october',
+    paymentDate: new Date('2026-10-05T00:00:00.000Z'),
+    grossRent: 1800,
+    totalAmountReceived: 1900,
+    levy: 100,
+    commission: 270,
+    vatOnCommission: 41.85,
+    vatRate: 0.155,
+    vatTreatment: 'exclusive',
+    ownerPayable: 1488.15,
+    rentalPeriodMonth: 10,
+    rentalPeriodYear: 2026
+  }])).build({
+    companyId,
+    propertyId,
+    ledgerType: 'rental',
+    companyName: 'The Benjamins Realty',
+    period: { startDate: '2026-10-01', endDate: '2026-10-31', label: '2026-10' }
+  });
+  const october = octoberDto.trustLedger[0];
+  assert.strictEqual(october.description, 'October 2026 Rent');
+  assert.strictEqual(october.totalAmountReceived?.amount, 1900);
+  assert.strictEqual(october.contractualRent?.amount, 1800);
+  assert.strictEqual(october.commission?.amount, 270);
+  assert.strictEqual(october.vatOnCommission?.amount, 41.85);
+  assert.strictEqual(october.levies?.amount, 100);
+  assert.strictEqual(october.ownerAmount?.amount, 1488.15, 'Net amount due to owner stays the posted ledger credit.');
+  assert.strictEqual(october.ownerWaterfall?.netOwnerAmount.amount, 1488.15);
+  assert.strictEqual(october.ownerWaterfall?.reviewRequired, false);
+  assert.strictEqual(octoberDto.statementSummary?.totalAmountReceived?.amount, 1900);
+  assert.strictEqual(octoberDto.statementSummary?.totalRent.amount, 1800, 'Contractual rent stays distinct from cash received.');
+  assert.strictEqual(octoberDto.statementSummary?.closingBalance.amount, october.runningBalance.amount);
+
+  const gapDto = await new OwnerStatementBuilder(createReadModels([
+    entry({
+      entryId: 'rent-gap',
+      eventType: 'income',
+      debit: 0,
+      credit: 7399.92,
+      effectiveDate: new Date('2026-10-05T00:00:00.000Z'),
+      metadata: { paymentId: 'pay-gap', description: 'Rental income' }
+    })
+  ], [{
+    paymentId: 'pay-gap',
+    paymentDate: new Date('2026-10-05T00:00:00.000Z'),
+    grossRent: 9000,
+    levy: 500,
+    commission: 1335,
+    vatOnCommission: 165.08,
+    ownerPayable: 6999.92,
+    rentalPeriodMonth: 10,
+    rentalPeriodYear: 2026
+  }])).build({
+    companyId,
+    propertyId,
+    ledgerType: 'rental',
+    companyName: 'The Benjamins Realty',
+    period: { startDate: '2026-10-01', endDate: '2026-10-31', label: '2026-10' }
+  });
+  assert.strictEqual(gapDto.trustLedger[0].totalAmountReceived?.amount, 9000);
+  assert.strictEqual(gapDto.trustLedger[0].ownerAmount?.amount, 7399.92, 'The posted owner credit is not rewritten to force a balance.');
+  assert.strictEqual(gapDto.ownerMoneyWaterfall?.netOwnerAmount.amount, 6999.92);
+  assert.strictEqual(gapDto.ownerMoneyWaterfall?.recordedOwnerAmount?.amount, 7399.92);
+  assert.strictEqual(gapDto.ownerMoneyWaterfall?.difference.amount, 400);
+  assert.strictEqual(gapDto.ownerMoneyWaterfall?.reviewRequired, true, 'The $400 reconciliation warning must stay visible.');
+  assert.ok(
+    gapDto.dataQuality.warnings.some((warning) => /no historical amount was changed/i.test(warning)),
+    'The warning must state that no historical amount was changed.'
+  );
+
+  const gapWithCashDto = await new OwnerStatementBuilder(createReadModels([
+    entry({
+      entryId: 'rent-gap-cash',
+      eventType: 'income',
+      debit: 0,
+      credit: 7399.92,
+      effectiveDate: new Date('2026-10-05T00:00:00.000Z'),
+      metadata: { paymentId: 'pay-gap-cash', description: 'Rental income' }
+    })
+  ], [{
+    paymentId: 'pay-gap-cash',
+    paymentDate: new Date('2026-10-05T00:00:00.000Z'),
+    grossRent: 9000,
+    totalAmountReceived: 9500,
+    levy: 500,
+    commission: 1335,
+    vatOnCommission: 165.08,
+    ownerPayable: 6999.92,
+    rentalPeriodMonth: 10,
+    rentalPeriodYear: 2026
+  }])).build({
+    companyId,
+    propertyId,
+    ledgerType: 'rental',
+    companyName: 'The Benjamins Realty',
+    period: { startDate: '2026-10-01', endDate: '2026-10-31', label: '2026-10' }
+  });
+  assert.strictEqual(gapWithCashDto.trustLedger[0].totalAmountReceived?.amount, 9500);
+  assert.strictEqual(gapWithCashDto.trustLedger[0].ownerAmount?.amount, 7399.92);
+  assert.notStrictEqual(gapWithCashDto.ownerMoneyWaterfall?.difference.amount, 0);
+  assert.strictEqual(gapWithCashDto.ownerMoneyWaterfall?.reviewRequired, true, 'Showing rent plus levy must not hide an owner-income difference.');
 }

@@ -49,6 +49,10 @@ const LedgerEventSchema = new mongoose_1.Schema({
     nextAttemptAt: { type: Date, default: () => new Date() },
     claimedAt: { type: Date, default: undefined },
     lastError: { type: String, default: undefined },
+    failureClass: { type: String, enum: ['transient', 'permanent', 'conflict'], required: false },
+    companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
+    correlationId: { type: String, required: false },
+    exhaustedAt: { type: Date, required: false },
     processorGeneration: { type: Number, default: ledgerMutationPolicy_1.LEDGER_EVENT_PROCESSOR_GENERATION, index: true },
     metadata: { type: mongoose_1.Schema.Types.Mixed, default: undefined }
 }, { timestamps: true });

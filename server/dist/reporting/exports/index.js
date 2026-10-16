@@ -93,15 +93,15 @@ class ExportEngine {
                 ? 'All Transactions'
                 : `${dto.period.startDate} - ${dto.period.endDate}`;
             const columns = [
-                { x: 28, width: 63, label: 'Date', align: 'left' },
-                { x: 91, width: 55, label: 'Type', align: 'left' },
-                { x: 146, width: 86, label: 'Description', align: 'left' },
-                { x: 232, width: 86, label: 'Amount Received', align: 'right' },
-                { x: 318, width: 78, label: 'Commission', align: 'right' },
-                { x: 396, width: 110, label: 'VAT on Commission', align: 'right' },
-                { x: 506, width: 70, label: 'Levy', align: 'right' },
-                { x: 576, width: 122, label: 'Net Owner Amount', align: 'right' },
-                { x: 698, width: 115, label: 'Balance', align: 'right' }
+                { x: 28, width: 58, label: 'Date', align: 'left' },
+                { x: 86, width: 52, label: 'Type', align: 'left' },
+                { x: 138, width: 100, label: 'Description', align: 'left' },
+                { x: 238, width: 90, label: 'Total Amount Received', align: 'right' },
+                { x: 328, width: 72, label: 'Commission', align: 'right' },
+                { x: 400, width: 88, label: 'VAT on Commission', align: 'right' },
+                { x: 488, width: 58, label: 'Levy', align: 'right' },
+                { x: 546, width: 130, label: 'Net Amount Due to Owner', align: 'right' },
+                { x: 676, width: 137, label: 'Balance', align: 'right' }
             ];
             const wrapText = (text, maxWidth, size, usedFont) => {
                 const words = String(text || '').split(/\s+/).filter(Boolean);
@@ -234,13 +234,13 @@ class ExportEngine {
             });
             const summaryItems = [
                 ['Opening Balance', summaryMoney(summary.openingBalance.amount, summary.openingBalance.currency), false],
-                ['Amount Received', summaryMoney(summary.totalRent.amount, summary.totalRent.currency), false],
-                ['Less Commission', summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true), false],
-                ['Less VAT on Commission', summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true), false],
-                ['Less Levy', summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true), false],
-                ['Net Owner Amount', summaryMoney(summary.totalOwnerAmount.amount, summary.totalOwnerAmount.currency), false],
+                ['Total Amount Received', summaryMoney((summary.totalAmountReceived || summary.totalRent).amount, (summary.totalAmountReceived || summary.totalRent).currency), false],
+                ['Total Commission', summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true), false],
+                ['Total VAT on Commission', summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true), false],
+                ['Total Levy', summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true), false],
+                ['Net Amount Due to Owner', summaryMoney(summary.totalOwnerAmount.amount, summary.totalOwnerAmount.currency), false],
                 ['Owner Payouts', summaryMoney(summary.totalPayouts.amount, summary.totalPayouts.currency, true), false],
-                ['Balance Due to Owner', summaryMoney(summary.closingBalance.amount, summary.closingBalance.currency), true]
+                ['Closing Balance Due to Owner', summaryMoney(summary.closingBalance.amount, summary.closingBalance.currency), true]
             ];
             summaryItems.forEach((item, index) => {
                 const y = 490 - index * 13;
@@ -261,11 +261,11 @@ class ExportEngine {
                     : ` at ${(waterfall.vatRate <= 1 ? waterfall.vatRate * 100 : waterfall.vatRate).toFixed(1)}%`;
                 const lines = [
                     { text: 'HOW THE OWNER AMOUNT IS CALCULATED', strong: true, color: green },
-                    { text: `Amount received ${moneyText(waterfall.grossAmount.amount, waterfall.grossAmount.currency)}`, strong: false, color: ink },
+                    { text: `Total amount received ${moneyText(waterfall.grossAmount.amount, waterfall.grossAmount.currency)}`, strong: false, color: ink },
                     { text: `Less commission ${summaryMoney(waterfall.commissionAmount.amount, waterfall.commissionAmount.currency, true)}`, strong: false, color: ink },
                     { text: `Less levy ${summaryMoney(waterfall.levyAmount.amount, waterfall.levyAmount.currency, true)}`, strong: false, color: ink },
                     { text: `Less VAT on commission ${summaryMoney(waterfall.vatOnCommission.amount, waterfall.vatOnCommission.currency, true)}${vatRate}`, strong: false, color: ink },
-                    { text: `Net owner amount ${moneyText(waterfall.netOwnerAmount.amount, waterfall.netOwnerAmount.currency)}`, strong: true, color: ink },
+                    { text: `Net amount due to owner ${moneyText(waterfall.netOwnerAmount.amount, waterfall.netOwnerAmount.currency)}`, strong: true, color: ink },
                     {
                         text: waterfall.reviewRequired
                             ? `Review required. Recorded owner income is ${waterfall.recordedOwnerAmount ? moneyText(waterfall.recordedOwnerAmount.amount, waterfall.recordedOwnerAmount.currency) : 'missing'}. Difference ${moneyText(waterfall.difference.amount, waterfall.difference.currency)}. No amount was changed.`
@@ -308,16 +308,16 @@ class ExportEngine {
                 rowY -= rowHeight;
             };
             dto.trustLedger.forEach((row) => {
-                var _a, _b, _c, _d, _e;
+                var _a, _b, _c, _d, _e, _f, _g;
                 const ownerNegative = Number(((_a = row.ownerAmount) === null || _a === void 0 ? void 0 : _a.amount) || 0) < 0 || row.rowType === 'Payout';
                 drawRow([
                     new Date(row.date).toLocaleDateString(),
                     row.rowType || (row.credit.amount > 0 ? 'Income' : 'Payout'),
                     row.description,
-                    dashOrMoney((_b = row.rentAmount) === null || _b === void 0 ? void 0 : _b.amount, row.runningBalance.currency),
-                    dashOrMoney((_c = row.commission) === null || _c === void 0 ? void 0 : _c.amount, row.runningBalance.currency, true),
-                    dashOrMoney((_d = row.vatOnCommission) === null || _d === void 0 ? void 0 : _d.amount, row.runningBalance.currency, true),
-                    dashOrMoney((_e = row.levies) === null || _e === void 0 ? void 0 : _e.amount, row.runningBalance.currency, true),
+                    dashOrMoney((_c = (_b = row.totalAmountReceived) === null || _b === void 0 ? void 0 : _b.amount) !== null && _c !== void 0 ? _c : (_d = row.rentAmount) === null || _d === void 0 ? void 0 : _d.amount, row.runningBalance.currency),
+                    dashOrMoney((_e = row.commission) === null || _e === void 0 ? void 0 : _e.amount, row.runningBalance.currency, true),
+                    dashOrMoney((_f = row.vatOnCommission) === null || _f === void 0 ? void 0 : _f.amount, row.runningBalance.currency, true),
+                    dashOrMoney((_g = row.levies) === null || _g === void 0 ? void 0 : _g.amount, row.runningBalance.currency, true),
                     row.ownerAmount ? moneyText(row.ownerAmount.amount, row.ownerAmount.currency, ownerNegative) : '-',
                     moneyText(row.runningBalance.amount, row.runningBalance.currency)
                 ], { ownerNegative });
@@ -326,7 +326,7 @@ class ExportEngine {
                 'TOTALS',
                 '',
                 '',
-                summaryMoney(summary.totalRent.amount, summary.totalRent.currency),
+                summaryMoney((summary.totalAmountReceived || summary.totalRent).amount, (summary.totalAmountReceived || summary.totalRent).currency),
                 summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true),
                 summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true),
                 summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true),
@@ -344,18 +344,18 @@ class ExportEngine {
     }
     toCsv(dto) {
         const rows = [
-            ['Date', 'Type', 'Description', 'Rent Amount', 'Less Commission', 'Less VAT on Commission', 'Less Levies', 'Owner Amount', 'Balance'],
+            ['Date', 'Type', 'Description', 'Total Amount Received', 'Commission', 'VAT on Commission', 'Levy', 'Net Amount Due to Owner', 'Balance'],
             ...dto.trustLedger.map((row) => {
-                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
                 return [
                     row.date,
                     row.rowType || '',
                     row.description,
-                    (_b = (_a = row.rentAmount) === null || _a === void 0 ? void 0 : _a.amount) !== null && _b !== void 0 ? _b : '',
-                    (_d = (_c = row.commission) === null || _c === void 0 ? void 0 : _c.amount) !== null && _d !== void 0 ? _d : '',
-                    (_f = (_e = row.vatOnCommission) === null || _e === void 0 ? void 0 : _e.amount) !== null && _f !== void 0 ? _f : '',
-                    (_h = (_g = row.levies) === null || _g === void 0 ? void 0 : _g.amount) !== null && _h !== void 0 ? _h : '',
-                    (_k = (_j = row.ownerAmount) === null || _j === void 0 ? void 0 : _j.amount) !== null && _k !== void 0 ? _k : '',
+                    (_d = (_b = (_a = row.totalAmountReceived) === null || _a === void 0 ? void 0 : _a.amount) !== null && _b !== void 0 ? _b : (_c = row.rentAmount) === null || _c === void 0 ? void 0 : _c.amount) !== null && _d !== void 0 ? _d : '',
+                    (_f = (_e = row.commission) === null || _e === void 0 ? void 0 : _e.amount) !== null && _f !== void 0 ? _f : '',
+                    (_h = (_g = row.vatOnCommission) === null || _g === void 0 ? void 0 : _g.amount) !== null && _h !== void 0 ? _h : '',
+                    (_k = (_j = row.levies) === null || _j === void 0 ? void 0 : _j.amount) !== null && _k !== void 0 ? _k : '',
+                    (_m = (_l = row.ownerAmount) === null || _l === void 0 ? void 0 : _l.amount) !== null && _m !== void 0 ? _m : '',
                     row.runningBalance.amount
                 ];
             })
@@ -367,31 +367,32 @@ class ExportEngine {
         };
     }
     toExcel(dto) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7;
         const summaryRows = [
             ['Metric', 'Currency', 'Amount'],
             ['Opening Balance', dto.executiveSummary.openingBalance.currency, dto.executiveSummary.openingBalance.amount],
-            ['Total Rent', ((_a = dto.statementSummary) === null || _a === void 0 ? void 0 : _a.totalRent.currency) || dto.executiveSummary.rentalIncome.currency, (_e = (_c = (_b = dto.statementSummary) === null || _b === void 0 ? void 0 : _b.totalRent.amount) !== null && _c !== void 0 ? _c : (_d = dto.rentalSettlement) === null || _d === void 0 ? void 0 : _d.grossRent.amount) !== null && _e !== void 0 ? _e : dto.executiveSummary.rentalIncome.amount],
-            ['Total Commission', ((_f = dto.statementSummary) === null || _f === void 0 ? void 0 : _f.totalCommission.currency) || dto.executiveSummary.rentalIncome.currency, (_k = (_h = (_g = dto.statementSummary) === null || _g === void 0 ? void 0 : _g.totalCommission.amount) !== null && _h !== void 0 ? _h : (_j = dto.rentalSettlement) === null || _j === void 0 ? void 0 : _j.commission.amount) !== null && _k !== void 0 ? _k : 0],
-            ['Total VAT', ((_l = dto.statementSummary) === null || _l === void 0 ? void 0 : _l.totalVat.currency) || dto.executiveSummary.rentalIncome.currency, (_q = (_o = (_m = dto.statementSummary) === null || _m === void 0 ? void 0 : _m.totalVat.amount) !== null && _o !== void 0 ? _o : (_p = dto.rentalSettlement) === null || _p === void 0 ? void 0 : _p.vatOnCommission.amount) !== null && _q !== void 0 ? _q : 0],
-            ['Total Levies', ((_r = dto.statementSummary) === null || _r === void 0 ? void 0 : _r.totalLevies.currency) || dto.executiveSummary.rentalIncome.currency, (_v = (_t = (_s = dto.statementSummary) === null || _s === void 0 ? void 0 : _s.totalLevies.amount) !== null && _t !== void 0 ? _t : (_u = dto.rentalSettlement) === null || _u === void 0 ? void 0 : _u.levy.amount) !== null && _v !== void 0 ? _v : 0],
-            ['Total Owner Amount', ((_w = dto.statementSummary) === null || _w === void 0 ? void 0 : _w.totalOwnerAmount.currency) || dto.executiveSummary.netAvailable.currency, (_y = (_x = dto.statementSummary) === null || _x === void 0 ? void 0 : _x.totalOwnerAmount.amount) !== null && _y !== void 0 ? _y : dto.executiveSummary.netAvailable.amount],
-            ['Total Payouts', dto.executiveSummary.ownerPaid.currency, dto.executiveSummary.ownerPaid.amount],
-            ['Closing Balance', dto.executiveSummary.closingTrustBalance.currency, dto.executiveSummary.closingTrustBalance.amount]
+            ['Total Amount Received', (((_a = dto.statementSummary) === null || _a === void 0 ? void 0 : _a.totalAmountReceived) || ((_b = dto.statementSummary) === null || _b === void 0 ? void 0 : _b.totalRent) || dto.executiveSummary.rentalIncome).currency, (_j = (_g = (_e = (_d = (_c = dto.statementSummary) === null || _c === void 0 ? void 0 : _c.totalAmountReceived) === null || _d === void 0 ? void 0 : _d.amount) !== null && _e !== void 0 ? _e : (_f = dto.statementSummary) === null || _f === void 0 ? void 0 : _f.totalRent.amount) !== null && _g !== void 0 ? _g : (_h = dto.rentalSettlement) === null || _h === void 0 ? void 0 : _h.grossRent.amount) !== null && _j !== void 0 ? _j : dto.executiveSummary.rentalIncome.amount],
+            ['Contractual Rent', ((_k = dto.statementSummary) === null || _k === void 0 ? void 0 : _k.totalRent.currency) || dto.executiveSummary.rentalIncome.currency, (_p = (_m = (_l = dto.statementSummary) === null || _l === void 0 ? void 0 : _l.totalRent.amount) !== null && _m !== void 0 ? _m : (_o = dto.rentalSettlement) === null || _o === void 0 ? void 0 : _o.grossRent.amount) !== null && _p !== void 0 ? _p : ''],
+            ['Total Commission', ((_q = dto.statementSummary) === null || _q === void 0 ? void 0 : _q.totalCommission.currency) || dto.executiveSummary.rentalIncome.currency, (_u = (_s = (_r = dto.statementSummary) === null || _r === void 0 ? void 0 : _r.totalCommission.amount) !== null && _s !== void 0 ? _s : (_t = dto.rentalSettlement) === null || _t === void 0 ? void 0 : _t.commission.amount) !== null && _u !== void 0 ? _u : 0],
+            ['Total VAT on Commission', ((_v = dto.statementSummary) === null || _v === void 0 ? void 0 : _v.totalVat.currency) || dto.executiveSummary.rentalIncome.currency, (_z = (_x = (_w = dto.statementSummary) === null || _w === void 0 ? void 0 : _w.totalVat.amount) !== null && _x !== void 0 ? _x : (_y = dto.rentalSettlement) === null || _y === void 0 ? void 0 : _y.vatOnCommission.amount) !== null && _z !== void 0 ? _z : 0],
+            ['Total Levy', ((_0 = dto.statementSummary) === null || _0 === void 0 ? void 0 : _0.totalLevies.currency) || dto.executiveSummary.rentalIncome.currency, (_4 = (_2 = (_1 = dto.statementSummary) === null || _1 === void 0 ? void 0 : _1.totalLevies.amount) !== null && _2 !== void 0 ? _2 : (_3 = dto.rentalSettlement) === null || _3 === void 0 ? void 0 : _3.levy.amount) !== null && _4 !== void 0 ? _4 : 0],
+            ['Net Amount Due to Owner', ((_5 = dto.statementSummary) === null || _5 === void 0 ? void 0 : _5.totalOwnerAmount.currency) || dto.executiveSummary.netAvailable.currency, (_7 = (_6 = dto.statementSummary) === null || _6 === void 0 ? void 0 : _6.totalOwnerAmount.amount) !== null && _7 !== void 0 ? _7 : dto.executiveSummary.netAvailable.amount],
+            ['Owner Payouts', dto.executiveSummary.ownerPaid.currency, dto.executiveSummary.ownerPaid.amount],
+            ['Closing Balance Due to Owner', dto.executiveSummary.closingTrustBalance.currency, dto.executiveSummary.closingTrustBalance.amount]
         ];
         const ledgerRows = [
-            ['Date', 'Type', 'Description', 'Rent Amount', 'Less Commission', 'Less VAT on Commission', 'Less Levies', 'Owner Amount', 'Balance'],
+            ['Date', 'Type', 'Description', 'Total Amount Received', 'Commission', 'VAT on Commission', 'Levy', 'Net Amount Due to Owner', 'Balance'],
             ...dto.trustLedger.map((row) => {
-                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
                 return [
                     row.date,
                     row.rowType || '',
                     row.description,
-                    (_b = (_a = row.rentAmount) === null || _a === void 0 ? void 0 : _a.amount) !== null && _b !== void 0 ? _b : '',
-                    (_d = (_c = row.commission) === null || _c === void 0 ? void 0 : _c.amount) !== null && _d !== void 0 ? _d : '',
-                    (_f = (_e = row.vatOnCommission) === null || _e === void 0 ? void 0 : _e.amount) !== null && _f !== void 0 ? _f : '',
-                    (_h = (_g = row.levies) === null || _g === void 0 ? void 0 : _g.amount) !== null && _h !== void 0 ? _h : '',
-                    (_k = (_j = row.ownerAmount) === null || _j === void 0 ? void 0 : _j.amount) !== null && _k !== void 0 ? _k : '',
+                    (_d = (_b = (_a = row.totalAmountReceived) === null || _a === void 0 ? void 0 : _a.amount) !== null && _b !== void 0 ? _b : (_c = row.rentAmount) === null || _c === void 0 ? void 0 : _c.amount) !== null && _d !== void 0 ? _d : '',
+                    (_f = (_e = row.commission) === null || _e === void 0 ? void 0 : _e.amount) !== null && _f !== void 0 ? _f : '',
+                    (_h = (_g = row.vatOnCommission) === null || _g === void 0 ? void 0 : _g.amount) !== null && _h !== void 0 ? _h : '',
+                    (_k = (_j = row.levies) === null || _j === void 0 ? void 0 : _j.amount) !== null && _k !== void 0 ? _k : '',
+                    (_m = (_l = row.ownerAmount) === null || _l === void 0 ? void 0 : _l.amount) !== null && _m !== void 0 ? _m : '',
                     row.runningBalance.amount
                 ];
             })

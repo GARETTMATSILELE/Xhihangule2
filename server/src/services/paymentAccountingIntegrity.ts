@@ -282,6 +282,18 @@ export async function runPaymentAccountingIntegrityPass(limit = 50): Promise<{
     logger.warn('Orphan accounting detection failed', { error: e?.message || e });
   }
 
+  try {
+    const { flagFinancialPostingGaps } = await import('./financialPostingGapService');
+    const companyIds = Array.from(new Set(rows.map((row: any) => row.companyId ? String(row.companyId) : '').filter(Boolean)));
+    for (const companyId of companyIds.slice(0, 10)) {
+      await flagFinancialPostingGaps(companyId);
+      const { flagExhaustedLedgerEvents } = await import('./financialOperationVisibility');
+      await flagExhaustedLedgerEvents(companyId);
+    }
+  } catch (e: any) {
+    logger.warn('Financial posting gap detection failed', { error: e?.message || e, failureClass: 'transient' });
+  }
+
   logger.info('Payment accounting integrity pass completed', stats);
   return stats;
 }
@@ -401,7 +413,16 @@ export async function listCompanyAccountingInconsistencies(
 
   if (constrainPayments) {
     const paymentIds = await Payment.find(paymentFilter).select('_id').limit(2000).lean();
-    query.paymentId = { $in: paymentIds.map((row: any) => row._id) };
+    const paymentConstraint: Record<string, unknown> = {
+      $or: [
+        { paymentId: { $in: paymentIds.map((row: any) => row._id) } },
+        ...(filters.propertyId || filters.agentId || filters.paymentReference
+          ? []
+          : [{ paymentId: { $exists: false }, kind: 'financial_review' }])
+      ]
+    };
+    const existingAnd = Array.isArray((query as any).$and) ? (query as any).$and : [];
+    query.$and = [...existingAnd, paymentConstraint];
   }
 
   const [total, rows] = await Promise.all([
@@ -445,7 +466,16 @@ export async function listCompanyAccountingInconsistencies(
       difference: row.difference != null ? row.difference : issue?.difference,
       status: statusLabel,
       accountingComplete: payment?.accountingComplete === true,
-      canRepair: row.kind !== 'orphan_accounting' && Boolean(row.paymentId)
+      canRepair: row.kind !== 'orphan_accounting' && row.kind !== 'financial_review' && Boolean(row.paymentId),
+      amount: Number(payment?.amount || row.expected || 0),
+      companyId: row.companyId ? String(row.companyId) : '',
+      missingRecord: Array.isArray(row.missingComponents) && row.missingComponents.length
+        ? row.missingComponents.join(', ')
+        : (row.component || ''),
+      recommendedReview: row.error || 'Review this payment before any correction. Financial records were not changed by this check.',
+      detectedAt: row.detectedAt,
+      operationId: row.accountingRef?.transactionId || '',
+      canRetry: row.component === 'LEDGER_RETRY_EXHAUSTED' && String(row.actual || '') === 'transient'
     };
   });
 

@@ -82,4 +82,12 @@ const TaxObligationSchema = new mongoose_1.Schema({
 }, { timestamps: true });
 TaxObligationSchema.index({ companyId: 1, taxType: 1, taxPeriod: 1, status: 1 });
 TaxObligationSchema.index({ companyId: 1, paymentId: 1, taxType: 1, reversalOf: 1 }, { unique: true, sparse: true });
+// Original obligations omit reversalOf. MongoDB rejects `$exists: false` in a partial
+// index because it is rewritten as `$not`. Equality to null covers missing and null
+// values, so originals stay unique while reversal rows (reversalOf set) stay outside.
+TaxObligationSchema.index({ companyId: 1, paymentId: 1, taxType: 1 }, {
+    name: 'companyId_1_paymentId_1_taxType_1_original',
+    unique: true,
+    partialFilterExpression: { reversalOf: null, paymentId: { $type: 'objectId' } }
+});
 exports.TaxObligation = mongoose_1.default.model('TaxObligation', TaxObligationSchema, collections_1.COLLECTIONS.TAX_OBLIGATIONS || 'taxobligations');

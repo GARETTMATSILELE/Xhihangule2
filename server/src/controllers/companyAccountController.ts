@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { CompanyAccount } from '../models/CompanyAccount';
-import accountingIntegrationService from '../services/accountingIntegrationService';
+import { CompanyExpenseIdempotencyError, recordCompanyAccountExpense } from '../services/companyAccountExpenseService';
 
 export const getCompanyAccountSummary = async (req: Request, res: Response) => {
   try {
@@ -34,67 +34,39 @@ export const getCompanyTransactions = async (req: Request, res: Response) => {
 
 export const createCompanyTransaction = async (req: Request, res: Response) => {
   try {
-    const companyId = (req as any).user?.companyId || req.body.companyId;
+    const userCompany = (req as any).user?.companyId;
+    const bodyCompany = req.body?.companyId;
+    if (userCompany && bodyCompany && String(userCompany) !== String(bodyCompany)) {
+      return res.status(403).json({ message: 'Company context does not match this expense' });
+    }
+    const companyId = userCompany || bodyCompany;
     if (!companyId) {
       return res.status(400).json({ message: 'companyId is required' });
     }
-
-    const { type = 'expense', amount, date, description, category, reference, paymentMethod, currency } = req.body || {};
-
-    if (typeof amount !== 'number' || amount <= 0) {
-      return res.status(400).json({ message: 'Valid amount is required' });
-    }
-
-    const now = new Date();
-
-    // Find or create company account
-    let account = await CompanyAccount.findOne({ companyId });
-    if (!account) {
-      account = new CompanyAccount({ companyId, transactions: [], runningBalance: 0, totalIncome: 0, totalExpenses: 0 });
-    }
-
-    // Normalize transaction
-    const tx: any = {
-      type: type === 'income' ? 'income' : 'expense',
-      amount,
-      date: date ? new Date(date) : now,
-      description: description || undefined,
-      category: category || undefined,
-      referenceNumber: reference || undefined,
-      paymentMethod: paymentMethod || undefined,
-      currency: currency || 'USD',
-      processedBy: (req as any).user?.userId ? (req as any).user.userId : undefined,
-      createdAt: now,
-      updatedAt: now
-    };
-
-    account.transactions.push(tx);
-    if (tx.type === 'income') {
-      account.totalIncome = (account.totalIncome || 0) + amount;
-      account.runningBalance = (account.runningBalance || 0) + amount;
-    } else {
-      account.totalExpenses = (account.totalExpenses || 0) + amount;
-      account.runningBalance = (account.runningBalance || 0) - amount;
-    }
-    account.lastUpdated = now;
-
-    await account.save();
-
-    if (tx.type === 'expense') {
-      await accountingIntegrationService.syncExpenseCreated({
-        companyId: String(companyId),
-        sourceId: String((tx as any)?._id || `${Date.now()}`),
-        reference: reference || `EXP-${Date.now()}`,
-        amount,
-        description: description || category || 'Company expense',
-        date: tx.date,
-        createdBy: (req as any).user?.userId
-      });
-    }
-
-    return res.status(201).json({ message: 'Transaction recorded', account, transaction: tx });
+    const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
+    const result = await recordCompanyAccountExpense({
+      companyId: String(companyId),
+      type: req.body?.type,
+      amount: Number(req.body?.amount),
+      date: req.body?.date,
+      description: req.body?.description,
+      category: req.body?.category,
+      reference: req.body?.reference,
+      paymentMethod: req.body?.paymentMethod,
+      currency: req.body?.currency,
+      payee: req.body?.payee,
+      idempotencyKey: idempotencyKey || undefined,
+      processedBy: (req as any).user?.userId ? String((req as any).user.userId) : undefined
+    });
+    return res.status(result.reused ? 200 : 201).json({
+      message: result.reused ? 'Existing transaction returned' : 'Transaction recorded',
+      account: result.account,
+      transaction: result.transaction,
+      reused: result.reused
+    });
   } catch (err: any) {
-    return res.status(500).json({ message: err.message || 'Failed to create company transaction' });
+    const status = err instanceof CompanyExpenseIdempotencyError ? 409 : Number(err?.statusCode) || 500;
+    return res.status(status).json({ message: err.message || 'Failed to create company transaction', code: err?.code });
   }
 };
 

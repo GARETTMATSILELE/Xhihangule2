@@ -58,6 +58,53 @@ const fxPolicy_1 = require("./tax/fxPolicy");
 const money_1 = require("../utils/money");
 const testFailureSeam_1 = require("./testFailureSeam");
 const toId = (value) => value instanceof mongoose_1.default.Types.ObjectId ? value : new mongoose_1.default.Types.ObjectId(String(value));
+function duplicateKeyDetails(error) {
+    var _a, _b;
+    if (Number(error === null || error === void 0 ? void 0 : error.code) !== 11000)
+        return null;
+    const pattern = (error === null || error === void 0 ? void 0 : error.keyPattern) || ((_a = error === null || error === void 0 ? void 0 : error.errorResponse) === null || _a === void 0 ? void 0 : _a.keyPattern);
+    const value = (error === null || error === void 0 ? void 0 : error.keyValue) || ((_b = error === null || error === void 0 ? void 0 : error.errorResponse) === null || _b === void 0 ? void 0 : _b.keyValue);
+    if (!pattern || typeof pattern !== 'object' || !value || typeof value !== 'object')
+        return null;
+    return { pattern, value };
+}
+function keyMatchesObligationIdentity(value, identity) {
+    if (identity.companyId == null || identity.paymentId == null || identity.taxType == null)
+        return false;
+    if (value.companyId != null && !(0, money_1.idsEqual)(value.companyId, identity.companyId))
+        return false;
+    if (value.paymentId != null && !(0, money_1.idsEqual)(value.paymentId, identity.paymentId))
+        return false;
+    if (value.taxType != null && String(value.taxType) !== String(identity.taxType))
+        return false;
+    return value.companyId != null && value.paymentId != null && value.taxType != null;
+}
+/** 11000 is an original collision only when the index key is this company, payment, and tax type. */
+function isExpectedOriginalDuplicate(error, identity) {
+    const details = duplicateKeyDetails(error);
+    if (!details)
+        return false;
+    const fields = Object.keys(details.pattern);
+    const coversIdentity = fields.includes('companyId') && fields.includes('paymentId') && fields.includes('taxType');
+    if (!coversIdentity || !keyMatchesObligationIdentity(details.value, identity))
+        return false;
+    if (fields.includes('reversalOf') && details.value.reversalOf != null)
+        return false;
+    return true;
+}
+/** 11000 is a reversal collision only when the index key is this original's reversal row. */
+function isExpectedReversalDuplicate(error, original) {
+    const details = duplicateKeyDetails(error);
+    if (!details)
+        return false;
+    const fields = Object.keys(details.pattern);
+    if (!fields.includes('reversalOf') || !fields.includes('companyId') || !fields.includes('paymentId') || !fields.includes('taxType')) {
+        return false;
+    }
+    if (!(0, money_1.idsEqual)(details.value.reversalOf, original._id))
+        return false;
+    return keyMatchesObligationIdentity(details.value, original);
+}
 function upsertPaymentTaxObligation(input) {
     return __awaiter(this, void 0, void 0, function* () {
         const taxAmount = (0, money_1.roundMoney)(Number(input.taxAmount || 0));
@@ -69,13 +116,10 @@ function upsertPaymentTaxObligation(input) {
             companyId,
             paymentId,
             taxType: input.taxType,
-            reversalOf: { $exists: false }
+            reversalOf: null
         });
-        if (existing) {
-            if (existing.status === 'REVERSED' || (0, taxTypes_1.isSettledStatus)(existing.status))
-                return String(existing._id);
+        if (existing)
             return String(existing._id);
-        }
         const fx = (0, fxPolicy_1.resolveTaxFx)({
             transactionCurrency: input.currency,
             taxCurrency: input.currency,
@@ -93,35 +137,66 @@ function upsertPaymentTaxObligation(input) {
                 detail: 'Transaction currency differs from tax/functional currency and no sourced rate was provided. Rate 1 was not applied.'
             });
         }
-        const created = yield TaxObligation_1.TaxObligation.create({
-            companyId,
-            taxType: input.taxType,
-            entityType: 'payment',
-            entityId: input.paymentId,
-            propertyId: input.propertyId ? toId(input.propertyId) : undefined,
-            paymentId,
-            transactionId: input.paymentId,
-            taxPeriod: input.taxPeriod,
-            transactionDate: input.transactionDate,
-            currency: fx.transactionCurrency,
-            taxCurrency: fx.taxCurrency,
-            exchangeRate: fx.exchangeRate == null ? undefined : fx.exchangeRate,
-            exchangeRateSource: fx.rateSource,
-            exchangeRateDate: fx.rateDate || input.transactionDate,
-            functionalAmount: fx.fxReviewRequired ? undefined : taxAmount,
-            taxableAmount: (0, money_1.roundMoney)(input.taxableAmount || 0),
-            taxRate: Number(input.taxRate || 0),
-            taxAmount,
-            calculationBasis: input.calculationBasis,
-            calculationSnapshot: input.calculationSnapshot,
-            status: fx.fxReviewRequired ? 'ACCOUNTANT_REVIEW' : (input.status || (taxAmount > 0 ? 'PAYABLE' : 'CALCULATED')),
-            calculatedAt: new Date(),
-            glAccount: input.glAccount,
-            sourceLedger: input.sourceLedger || 'company_journal',
-            journalEntryId: input.journalEntryId,
-            createdBy: input.createdBy ? toId(input.createdBy) : undefined
-        });
-        return String(created._id);
+        try {
+            const created = yield TaxObligation_1.TaxObligation.create({
+                companyId,
+                taxType: input.taxType,
+                entityType: 'payment',
+                entityId: input.paymentId,
+                propertyId: input.propertyId ? toId(input.propertyId) : undefined,
+                paymentId,
+                transactionId: input.paymentId,
+                taxPeriod: input.taxPeriod,
+                transactionDate: input.transactionDate,
+                currency: fx.transactionCurrency,
+                taxCurrency: fx.taxCurrency,
+                exchangeRate: fx.exchangeRate == null ? undefined : fx.exchangeRate,
+                exchangeRateSource: fx.rateSource,
+                exchangeRateDate: fx.rateDate || input.transactionDate,
+                functionalAmount: fx.fxReviewRequired ? undefined : taxAmount,
+                taxableAmount: (0, money_1.roundMoney)(input.taxableAmount || 0),
+                taxRate: Number(input.taxRate || 0),
+                taxAmount,
+                calculationBasis: input.calculationBasis,
+                calculationSnapshot: input.calculationSnapshot,
+                status: fx.fxReviewRequired ? 'ACCOUNTANT_REVIEW' : (input.status || (taxAmount > 0 ? 'PAYABLE' : 'CALCULATED')),
+                calculatedAt: new Date(),
+                glAccount: input.glAccount,
+                sourceLedger: input.sourceLedger || 'company_journal',
+                journalEntryId: input.journalEntryId,
+                createdBy: input.createdBy ? toId(input.createdBy) : undefined,
+                reversalOf: null
+            });
+            return String(created._id);
+        }
+        catch (error) {
+            if (isExpectedOriginalDuplicate(error, { companyId, paymentId, taxType: input.taxType })) {
+                const raced = yield TaxObligation_1.TaxObligation.findOne({
+                    companyId,
+                    paymentId,
+                    taxType: input.taxType,
+                    reversalOf: null
+                });
+                if (raced)
+                    return String(raced._id);
+            }
+            throw error;
+        }
+    });
+}
+function linkOriginalToExistingReversal(original, reversalId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let dirty = false;
+        if (!original.reversedByObligationId) {
+            original.reversedByObligationId = reversalId;
+            dirty = true;
+        }
+        if (original.status !== 'REVERSED') {
+            original.status = 'REVERSED';
+            dirty = true;
+        }
+        if (dirty)
+            yield original.save();
     });
 }
 function reversePaymentTaxObligations(input) {
@@ -129,58 +204,68 @@ function reversePaymentTaxObligations(input) {
         const originals = yield TaxObligation_1.TaxObligation.find({
             companyId: toId(input.companyId),
             paymentId: toId(input.paymentId),
-            reversalOf: { $exists: false }
+            reversalOf: null
         });
         if (!originals.length)
             return 'skipped';
         (0, testFailureSeam_1.throwOnceIfArmed)(String(input.paymentId), `${String(input.notes || '')} ${String(input.reason || '')}`, 'PHASE28_FAIL_TAX');
         for (const original of originals) {
             const preservedAmount = Number(original.taxAmount || 0);
-            const existing = yield TaxObligation_1.TaxObligation.findOne({ reversalOf: original._id });
+            const existing = yield TaxObligation_1.TaxObligation.findOne({
+                companyId: original.companyId,
+                paymentId: original.paymentId,
+                taxType: original.taxType,
+                reversalOf: original._id
+            });
             if (existing) {
-                if (!original.reversedByObligationId) {
-                    original.reversedByObligationId = existing._id;
-                    if (original.status !== 'REVERSED')
-                        original.status = 'REVERSED';
-                    if (Number(original.taxAmount || 0) !== preservedAmount)
-                        original.taxAmount = preservedAmount;
-                    yield original.save();
-                }
+                yield linkOriginalToExistingReversal(original, existing._id);
                 continue;
             }
-            const reversal = yield TaxObligation_1.TaxObligation.create({
-                companyId: original.companyId,
-                taxType: original.taxType,
-                entityType: original.entityType,
-                entityId: original.entityId,
-                propertyId: original.propertyId,
-                paymentId: original.paymentId,
-                transactionId: `${original.transactionId || original.paymentId}:reversal`,
-                taxPeriod: original.taxPeriod,
-                transactionDate: new Date(),
-                currency: original.currency,
-                taxableAmount: original.taxableAmount,
-                taxRate: original.taxRate,
-                taxAmount: preservedAmount,
-                calculationBasis: `REVERSAL_OF:${original._id}`,
-                calculationSnapshot: {
-                    originalId: String(original._id),
-                    originalTaxAmount: preservedAmount,
-                    originalTaxRate: original.taxRate,
-                    originalTaxPeriod: original.taxPeriod,
-                    originalTaxType: original.taxType
-                },
-                status: 'REVERSED',
-                calculatedAt: new Date(),
-                glAccount: original.glAccount,
-                sourceLedger: original.sourceLedger,
-                reversalOf: original._id,
-                createdBy: input.createdBy ? toId(input.createdBy) : undefined
-            });
-            original.status = 'REVERSED';
-            original.reversedByObligationId = reversal._id;
-            original.taxAmount = preservedAmount;
-            yield original.save();
+            let reversal;
+            try {
+                reversal = yield TaxObligation_1.TaxObligation.create({
+                    companyId: original.companyId,
+                    taxType: original.taxType,
+                    entityType: original.entityType,
+                    entityId: original.entityId,
+                    propertyId: original.propertyId,
+                    paymentId: original.paymentId,
+                    transactionId: `${original.transactionId || original.paymentId}:reversal`,
+                    taxPeriod: original.taxPeriod,
+                    transactionDate: new Date(),
+                    currency: original.currency,
+                    taxableAmount: original.taxableAmount,
+                    taxRate: original.taxRate,
+                    taxAmount: preservedAmount,
+                    calculationBasis: `REVERSAL_OF:${original._id}`,
+                    calculationSnapshot: {
+                        originalId: String(original._id),
+                        originalTaxAmount: preservedAmount,
+                        originalTaxRate: original.taxRate,
+                        originalTaxPeriod: original.taxPeriod,
+                        originalTaxType: original.taxType
+                    },
+                    status: 'REVERSED',
+                    calculatedAt: new Date(),
+                    glAccount: original.glAccount,
+                    sourceLedger: original.sourceLedger,
+                    reversalOf: original._id,
+                    createdBy: input.createdBy ? toId(input.createdBy) : undefined
+                });
+            }
+            catch (error) {
+                if (!isExpectedReversalDuplicate(error, original))
+                    throw error;
+                reversal = yield TaxObligation_1.TaxObligation.findOne({
+                    companyId: original.companyId,
+                    paymentId: original.paymentId,
+                    taxType: original.taxType,
+                    reversalOf: original._id
+                });
+                if (!reversal)
+                    throw error;
+            }
+            yield linkOriginalToExistingReversal(original, reversal._id);
         }
         return 'reversed';
     });

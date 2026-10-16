@@ -7,10 +7,12 @@ import { CompanyAccount } from '../models/CompanyAccount';
 import { JournalEntry } from '../models/JournalEntry';
 import { JournalLine } from '../models/JournalLine';
 import { VatRecord } from '../models/VatRecord';
+import { TaxObligation } from '../models/TaxObligation';
 import { RentalDeposit } from '../models/rentalDeposit';
 import { AccountingEventLog } from '../models/AccountingEventLog';
 import { AccountingException } from '../models/AccountingException';
 import { postPaymentAccounting } from './paymentAccountingOrchestrator';
+import { throwOnceIfArmed } from './testFailureSeam';
 import {
   AccountingActualSnapshot,
   AccountingComponent,
@@ -24,6 +26,7 @@ import {
   isHistoricalUntrackedPayment
 } from './paymentAccountingProjection';
 import { computeOwnerIncomeAmount } from './paymentAccountingCompleteness';
+import { commissionVatSnapshotGap } from './vatPolicyService';
 import { idsEqual, roundMoney } from '../utils/money';
 
 function asObjectId(paymentId: string): mongoose.Types.ObjectId | null {
@@ -341,16 +344,31 @@ export async function applyReconciliationOutcome(
   recon: AccountingReconciliationResult,
   extra?: { lastError?: string; companyId?: string }
 ): Promise<{ accountingComplete: boolean; accountingStatus: string }> {
-  const persisted = await persistAccountingIntegrityFromRecon(paymentId, recon, extra);
+  let effective = recon;
+  let lastError = extra?.lastError;
   if (recon.accountingComplete) {
+    const payment = await Payment.findById(paymentId);
+    const obligationGap = payment ? await missingOriginalVatObligation(payment) : null;
+    if (obligationGap) {
+      effective = {
+        ...recon,
+        status: 'incomplete',
+        accountingComplete: false,
+        missing: Array.from(new Set([...(recon.missing || []), 'vat']))
+      };
+      lastError = obligationGap;
+    }
+  }
+  const persisted = await persistAccountingIntegrityFromRecon(paymentId, effective, { ...extra, lastError });
+  if (effective.accountingComplete) {
     await resolveIncompleteAccountingException(paymentId, { resolution: 'reconcilePayment returned VALID/complete' });
-  } else if (recon.status === 'incomplete' || recon.status === 'failed') {
+  } else if (effective.status === 'incomplete' || effective.status === 'failed') {
     await upsertIncompleteAccountingException({
       paymentId,
       companyId: extra?.companyId,
-      propertyId: recon.propertyId,
-      recon,
-      error: extra?.lastError
+      propertyId: effective.propertyId,
+      recon: effective,
+      error: lastError
     });
   }
   return persisted;
@@ -380,6 +398,7 @@ export async function ensureDepositLedgerFromPayment(
   };
   const existing = await RentalDeposit.findOne(filter).select('_id').session(session || null).lean();
   if (existing) return 'existing';
+  throwOnceIfArmed(String(payment._id), String(payment.notes || ''), 'PHASE_FAIL_DEPOSIT');
   try {
     const result = await RentalDeposit.findOneAndUpdate(
       filter,
@@ -594,6 +613,32 @@ export async function repairPaymentAccounting(
 }
 
 /**
+ * A positive VAT snapshot needs an original VAT_ON_COMMISSION obligation.
+ * A reversed original explains the absence of an active obligation.
+ * This check does not create an obligation or change the snapshot.
+ */
+export async function missingOriginalVatObligation(payment: any): Promise<string | null> {
+  if (!payment || payment.reversalOfPaymentId) return null;
+  const vat = Number(payment?.commissionDetails?.vatOnCommission ?? payment?.commissionDetails?.vatAmount ?? 0);
+  if (!(vat > 0.005)) return null;
+  const rows = await TaxObligation.find({
+    paymentId: payment._id,
+    taxType: 'VAT_ON_COMMISSION'
+  }).select('reversalOf status taxAmount').lean();
+  const originals = (rows as any[]).filter((row) => row.reversalOf == null);
+  if (originals.some((row) => String(row.status) === 'REVERSED')) return null;
+  const active = originals.find((row) => String(row.status) !== 'REVERSED');
+  if (!active) {
+    return `Payment ${payment._id} has VAT snapshot ${vat.toFixed(2)} and no original VAT_ON_COMMISSION obligation.`;
+  }
+  const obligationAmount = Number(active.taxAmount || 0);
+  if (Math.abs(obligationAmount - vat) > 0.009) {
+    return `Payment ${payment._id} VAT snapshot ${vat.toFixed(2)} does not match obligation amount ${obligationAmount.toFixed(2)}.`;
+  }
+  return null;
+}
+
+/**
  * Normal payment-creation posting + verification. Not a repair loop.
  * If projection is incomplete, the payment remains saved and accountingComplete stays false.
  */
@@ -608,6 +653,23 @@ export async function ensurePaymentAccountingPosted(
     lastError: postResult.errors?.length ? postResult.errors.join('; ') : undefined,
     companyId: payment?.companyId ? String((payment as any).companyId) : undefined
   });
+  const postedPayment = await Payment.findById(paymentId);
+  const vatGap = await commissionVatSnapshotGap(postedPayment);
+  const obligationGap = await missingOriginalVatObligation(postedPayment);
+  if (vatGap?.code === 'MISSING_VAT_ON_ELIGIBLE_COMMISSION' || obligationGap) {
+    await Payment.updateOne(
+      { _id: paymentId },
+      {
+        $set: {
+          accountingComplete: false,
+          accountingStatus: 'incomplete',
+          accountingLastError: obligationGap || vatGap?.detail,
+          accountingMissing: Array.from(new Set([...(recon.missing || []), 'vat']))
+        }
+      }
+    );
+    return { recon, accountingComplete: false, accountingStatus: 'incomplete' };
+  }
   if (!recon.accountingComplete) {
     logger.warn('Payment accounting incomplete after posting', {
       paymentId,

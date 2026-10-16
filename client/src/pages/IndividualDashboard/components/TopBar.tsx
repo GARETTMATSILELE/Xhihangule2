@@ -51,16 +51,18 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
 
   return (
     <Box sx={{
-      height: 64,
-      px: 3,
+      minHeight: 64,
+      px: { xs: 1.5, sm: 3 },
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
+      gap: 1,
+      overflow: 'hidden',
       background: INDIVIDUAL_THEME.surface,
       borderBottom: `1px solid ${INDIVIDUAL_THEME.border}`
     }}>
-      <Typography variant="h6" sx={{ fontWeight: 600, color: '#111827' }}>{companyName || 'My Portfolio'}</Typography>
-      <Stack direction="row" spacing={1} alignItems="center">
+      <Typography variant="h6" noWrap sx={{ fontWeight: 600, color: '#111827', minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>{companyName || 'My Portfolio'}</Typography>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
         <Button
           variant="contained"
           size="small"

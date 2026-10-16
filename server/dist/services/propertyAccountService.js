@@ -46,6 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PropertyAccountService = void 0;
+exports.propertyLedgerDuplicateMatches = propertyLedgerDuplicateMatches;
 exports.migrateSalesLedgerForCompany = migrateSalesLedgerForCompany;
 exports.reconcilePropertyLedgerDuplicates = reconcilePropertyLedgerDuplicates;
 exports.ensureDevelopmentLedgersAndBackfillPayments = ensureDevelopmentLedgersAndBackfillPayments;
@@ -73,8 +74,28 @@ const propertyAccountDuplicateInventory_1 = require("./propertyAccountDuplicateI
 const propertyAccountTotals_1 = require("./propertyAccountTotals");
 const ledgerMutationPolicy_1 = require("./ledgerMutationPolicy");
 const testFailureSeam_1 = require("./testFailureSeam");
+const journalDuplicateKey_1 = require("./journalDuplicateKey");
+const money_1 = require("../utils/money");
 // Upgrade legacy indexes: allow separate ledgers per property
 let ledgerIndexUpgradePromise = null;
+const ACTIVE_PROPERTY_LEDGER_FIELDS = ['propertyId', 'ledgerType'];
+/**
+ * The active-ledger identity is the partial unique index { propertyId, ledgerType }
+ * where isArchived is false. A duplicate-key error is this identity only when the
+ * server reports that index and the conflicting values are this property and ledger.
+ * Missing key metadata is not proof that creation succeeded.
+ */
+function propertyLedgerDuplicateMatches(error, propertyId, ledgerType) {
+    const details = (0, journalDuplicateKey_1.duplicateKeyDetails)(error);
+    if (!details)
+        return false;
+    const fields = Object.keys(details.pattern);
+    if (fields.length !== ACTIVE_PROPERTY_LEDGER_FIELDS.length)
+        return false;
+    if (!ACTIVE_PROPERTY_LEDGER_FIELDS.every((field) => fields.includes(field)))
+        return false;
+    return (0, money_1.idsEqual)(details.value.propertyId, propertyId) && String(details.value.ledgerType || '') === ledgerType;
+}
 const PASS_THROUGH_TYPE_LABELS = {
     LEVY: 'Levies',
     WATER: 'Water Recoveries',
@@ -854,28 +875,58 @@ class PropertyAccountService {
                         isActive: true,
                         isArchived: false
                     });
+                    let created = false;
                     try {
+                        const forced = process.env.NODE_ENV !== 'production' && process.env.MANTIS_TEST_SEAM === '1'
+                            ? global.__propertyAccountConflict
+                            : null;
+                        if (forced && displayName === forced.propertyName) {
+                            const duplicate = new Error('E11000 duplicate key error');
+                            duplicate.code = 11000;
+                            duplicate.keyPattern = forced.pattern;
+                            duplicate.keyValue = forced.keyValue;
+                            if (forced.insertVisibleAccount) {
+                                yield PropertyAccount_1.default.collection.insertOne({
+                                    propertyId: propertyObjectId,
+                                    ledgerType: effectiveLedger,
+                                    propertyName: 'visible-unrelated',
+                                    isArchived: false,
+                                    isActive: true,
+                                    transactions: [],
+                                    ownerPayouts: [],
+                                    runningBalance: 0,
+                                    totalIncome: 0,
+                                    totalExpenses: 0
+                                });
+                            }
+                            throw duplicate;
+                        }
                         yield account.save();
+                        created = true;
                     }
                     catch (saveErr) {
-                        const isDup = this.isDuplicateKeyError(saveErr);
-                        if (isDup) {
-                            const reloaded = yield PropertyAccount_1.default.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
-                            if (reloaded.length === 1) {
-                                account = reloaded[0];
-                            }
-                            else if (reloaded.length > 1) {
-                                throw new errorHandler_1.AppError(`Multiple active PropertyAccounts found for property ${propertyId} after concurrent create; refusing to choose a writable ledger`, 409);
-                            }
-                            else {
+                        if (!propertyLedgerDuplicateMatches(saveErr, propertyObjectId, effectiveLedger)) {
+                            throw saveErr;
+                        }
+                        const reloaded = yield PropertyAccount_1.default.find(this.activeAccountCandidatesQuery(propertyObjectId, effectiveLedger));
+                        if (reloaded.length !== 1) {
+                            throw saveErr;
+                        }
+                        const candidate = reloaded[0];
+                        if (!(0, money_1.idsEqual)(candidate.propertyId, propertyObjectId) || candidate.ledgerType !== effectiveLedger) {
+                            throw saveErr;
+                        }
+                        if (property) {
+                            const confirmed = yield Property_1.Property.findById(candidate.propertyId).select('companyId').lean();
+                            if (!confirmed || !(0, money_1.idsEqual)(confirmed.companyId, property.companyId)) {
                                 throw saveErr;
                             }
                         }
-                        else {
-                            throw saveErr;
-                        }
+                        account = candidate;
                     }
-                    logger_1.logger.info(`Created new property account for property: ${propertyId}`);
+                    if (created) {
+                        logger_1.logger.info(`Created new property account for property: ${propertyId}`);
+                    }
                 }
                 return this.validateWritableAccount(account, propertyId, 'getOrCreatePropertyAccount');
             }

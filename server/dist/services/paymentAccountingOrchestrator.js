@@ -30,10 +30,51 @@ const ledgerEventStateMachine_1 = require("./ledgerEventStateMachine");
 const AccountingException_1 = require("../models/AccountingException");
 const transactionDomain_1 = require("./transactionDomain");
 const taxObligationService_1 = require("./taxObligationService");
+const testFailureSeam_1 = require("./testFailureSeam");
 const trustPaymentPostingService_1 = __importDefault(require("./trustPaymentPostingService"));
-function recordOwnerIncomeException(payment, message) {
-    return __awaiter(this, void 0, void 0, function* () {
+const operationalFailure_1 = require("./operationalFailure");
+const operationalSignal_1 = require("./operationalSignal");
+const financialOperationVisibility_1 = require("./financialOperationVisibility");
+function persistOwnerIncomeFailure(payment_1, message_1) {
+    return __awaiter(this, arguments, void 0, function* (payment, message, haystack = '') {
+        const paymentId = String(payment._id || '');
+        const companyId = payment.companyId ? String(payment.companyId) : '';
+        let durable = false;
         try {
+            (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, haystack, 'PHASE_FAIL_LEDGER_RECORD');
+            durable = yield ledgerEventService_1.default.recordPermanentOwnerIncomeFailure(paymentId, message);
+        }
+        catch (error) {
+            (0, operationalSignal_1.signalOperationalFailure)('owner_income_ledger_failure_unpersisted', {
+                correlationId: paymentId,
+                paymentId,
+                companyId: companyId || undefined,
+                failureClass: (0, operationalFailure_1.classifyOperationalFailure)(error),
+                error: message.slice(0, 200)
+            });
+        }
+        const recorded = yield recordOwnerIncomeException(payment, message, haystack);
+        if (recorded)
+            durable = true;
+        if (!durable) {
+            (0, operationalSignal_1.signalOperationalFailure)('owner_income_failure_unpersisted', {
+                correlationId: paymentId,
+                paymentId,
+                companyId: companyId || undefined,
+                failureClass: 'permanent',
+                error: message.slice(0, 200),
+                alert: 'database persistence unavailable'
+            });
+        }
+        return durable;
+    });
+}
+function recordOwnerIncomeException(payment_1, message_1) {
+    return __awaiter(this, arguments, void 0, function* (payment, message, haystack = '') {
+        const paymentId = String(payment._id || '');
+        const companyId = payment.companyId ? String(payment.companyId) : '';
+        try {
+            (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, haystack, 'PHASE_FAIL_EXCEPTION_RECORD');
             const now = new Date();
             yield AccountingException_1.AccountingException.updateOne({
                 paymentId: payment._id,
@@ -57,9 +98,40 @@ function recordOwnerIncomeException(payment, message) {
                     paymentId: payment._id
                 }
             }, { upsert: true });
+            return true;
         }
         catch (error) {
-            logger_1.logger.warn('Failed to record owner-income accounting exception', error);
+            (0, operationalSignal_1.signalOperationalFailure)('owner_income_exception_persist_failed', {
+                correlationId: paymentId,
+                paymentId,
+                companyId: companyId || undefined,
+                failureClass: (0, operationalFailure_1.classifyOperationalFailure)(error),
+                error: message.slice(0, 200)
+            });
+            try {
+                (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, haystack, 'PHASE_FAIL_EXCEPTION_VISIBILITY');
+                if (companyId) {
+                    yield (0, financialOperationVisibility_1.upsertFinancialReview)({
+                        companyId,
+                        component: 'OWNER_INCOME_EXCEPTION_UNRECORDED',
+                        operationId: paymentId,
+                        paymentId,
+                        missingRecord: 'owner income exception',
+                        issueType: 'missing',
+                        recommendedReview: `Owner income failed for payment ${paymentId} and the exception row was not stored. Accounting is not complete. Do not create a replacement financial operation.`
+                    });
+                }
+            }
+            catch (visibilityError) {
+                (0, operationalSignal_1.signalOperationalFailure)('owner_income_exception_visibility_failed', {
+                    correlationId: paymentId,
+                    paymentId,
+                    companyId: companyId || undefined,
+                    failureClass: (0, operationalFailure_1.classifyOperationalFailure)(visibilityError),
+                    error: message.slice(0, 200)
+                });
+            }
+            return false;
         }
     });
 }
@@ -106,6 +178,7 @@ function postPaymentAccounting(paymentId, opts) {
         }
         if (!policy.skipOwnerIncome) {
             try {
+                (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, String(payment.notes || ''), 'PHASE_FAIL_OWNER_INCOME');
                 yield propertyAccountService_1.default.recordIncomeFromPayment(paymentId);
                 artifacts.ownerIncome = 'posted';
             }
@@ -113,7 +186,10 @@ function postPaymentAccounting(paymentId, opts) {
                 artifacts.ownerIncome = 'failed';
                 errors.push(`ownerIncome: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
                 if (e instanceof transactionDomain_1.OwnerIncomeAmountMissingError || (e === null || e === void 0 ? void 0 : e.code) === 'OWNER_INCOME_AMOUNT_MISSING') {
-                    yield recordOwnerIncomeException(payment, (e === null || e === void 0 ? void 0 : e.message) || String(e));
+                    const durable = yield persistOwnerIncomeFailure(payment, (e === null || e === void 0 ? void 0 : e.message) || String(e), String(payment.notes || ''));
+                    if (!durable) {
+                        errors.push('ownerIncome.exception: the owner-income failure was not durably recorded');
+                    }
                 }
                 if (!(0, transactionDomain_1.isPermanentAccountingFailure)(e)) {
                     try {
@@ -130,6 +206,7 @@ function postPaymentAccounting(paymentId, opts) {
         }
         if (!policy.skipAgentCommission) {
             try {
+                (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, String(payment.notes || ''), 'PHASE_FAIL_AGENT_COMMISSION');
                 yield agentAccountService_1.default.syncCommissionForPayment(paymentId);
                 artifacts.agentCommission = 'posted';
             }
@@ -149,6 +226,7 @@ function postPaymentAccounting(paymentId, opts) {
         }
         if (!policy.skipCompanyCommission) {
             try {
+                (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, String(payment.notes || ''), 'PHASE_FAIL_COMPANY_COMMISSION');
                 yield accountingIntegrationService_1.default.postCompanyCommission(payment);
                 artifacts.companyCommission = 'posted';
             }
@@ -228,6 +306,7 @@ function reversePaymentAccounting(paymentId, opts) {
             }
         }
         try {
+            (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, `${String(payment.notes || '')} ${String((opts === null || opts === void 0 ? void 0 : opts.reason) || '')}`, 'PHASE_FAIL_REVERSAL_OWNER');
             const income = yield propertyAccountService_1.default.reverseIncomeFromPayment(paymentId, {
                 processedBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
                 reason: opts === null || opts === void 0 ? void 0 : opts.reason
@@ -279,6 +358,7 @@ function reversePaymentAccounting(paymentId, opts) {
                 reason: opts === null || opts === void 0 ? void 0 : opts.reason,
                 notes: String(payment.notes || '')
             });
+            artifacts.vatRecord = yield accountingIntegrationService_1.default.reversePaymentVatRecord(payment);
         }
         catch (e) {
             artifacts.tax = 'failed';
@@ -360,6 +440,13 @@ function reversePaymentAccounting(paymentId, opts) {
         }
         const reversalComplete = status === 'reversed' || status === 'already_reversed';
         const reversalState = reversalComplete ? 'reversed' : 'reversal_incomplete';
+        if (!reversalComplete) {
+            (0, operationalSignal_1.signalOperationalFailure)('reversal_incomplete', {
+                paymentId,
+                companyId: payment.companyId ? String(payment.companyId) : undefined,
+                status
+            });
+        }
         const reversalPaymentId = (opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId) || payment.reversalPaymentId;
         yield Payment_1.Payment.updateOne({ _id: payment._id }, { $set: { reversalState } });
         if (reversalPaymentId) {

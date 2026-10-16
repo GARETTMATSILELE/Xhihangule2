@@ -53,6 +53,35 @@ export type SaleTransactionRow = {
   collaboratorAgentName: string;
 };
 
+const RENT_MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+/** Turn a stored rental period key (YYYY-MM) into the month the rent covers, e.g. "May rent". */
+export function formatRentPeriodLabel(period: string, includeYear = false): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(period || '').trim());
+  if (!match) return period;
+  const name = RENT_MONTH_NAMES[Number(match[2]) - 1];
+  if (!name) return period;
+  return includeYear ? `${name} ${match[1]} rent` : `${name} rent`;
+}
+
+/** Use the year only when one property statement covers more than one calendar year. */
+export function rentPeriodDisplayLabels(periods: string[]): Map<string, string> {
+  const years = new Set(
+    periods
+      .map((period) => /^(\d{4})-\d{2}$/.exec(String(period || '').trim())?.[1])
+      .filter((year): year is string => Boolean(year))
+  );
+  const includeYear = years.size > 1;
+  const labels = new Map<string, string>();
+  periods.forEach((period) => {
+    labels.set(period, formatRentPeriodLabel(period, includeYear));
+  });
+  return labels;
+}
+
 export function formatReportCurrency(amount: number): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(amount);
 }
@@ -422,7 +451,10 @@ export function printTenantStatement(s: TenantPartyStatement): void {
           <table>
             <thead><tr><th>Period</th><th class="right">Expected</th><th class="right">Paid</th><th class="right">Outstanding</th></tr></thead>
             <tbody>
-              ${prop.months.map(m => `<tr><td>${m.period}</td><td class="right">${currency(m.expected || 0)}</td><td class="right">${currency(m.paid || 0)}</td><td class="right">${currency(m.outstanding || 0)}</td></tr>`).join('')}
+              ${(() => {
+                const labels = rentPeriodDisplayLabels(prop.months.map(m => m.period));
+                return prop.months.map(m => `<tr><td>${escapeHtml(labels.get(m.period) || m.period)}</td><td class="right">${currency(m.expected || 0)}</td><td class="right">${currency(m.paid || 0)}</td><td class="right">${currency(m.outstanding || 0)}</td></tr>`).join('');
+              })()}
               <tr class="total"><td>Total</td><td></td><td class="right">${currency(prop.totalPaid || 0)}</td><td class="right">${currency(prop.totalOutstanding || 0)}</td></tr>
             </tbody>
           </table>

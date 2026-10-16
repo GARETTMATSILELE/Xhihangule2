@@ -41,7 +41,7 @@ const PaymentSessionSchema = new mongoose_1.Schema({
     subscriptionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Subscription', required: false, index: true },
     onboardingSessionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'OnboardingSession', required: false, index: true },
     billingPaymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'BillingPayment', required: false, index: true },
-    idempotencyKey: { type: String, required: true, trim: true, index: true },
+    idempotencyKey: { type: String, required: true, trim: true },
     provider: { type: String, enum: ['paynow', 'cash', 'manual'], required: true, index: true },
     providerRef: { type: String, trim: true, index: true },
     pollUrl: { type: String, trim: true },

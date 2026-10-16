@@ -74,6 +74,12 @@ interface Company {
   receivablesCutover?: { year: number; month: number };
   rentReceivableOpeningBalance?: number;
   levyReceivableOpeningBalance?: number;
+  taxProfile?: {
+    vatRegistered?: boolean;
+    vatRegistrationEffectiveDate?: string | Date | null;
+    vatCategory?: string;
+    fiscalisationEnabled?: boolean;
+  };
   createdAt: string;
   updatedAt: string;
   __v: number;
@@ -147,6 +153,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
       receivablesCutover: data.receivablesCutover,
       rentReceivableOpeningBalance: data.rentReceivableOpeningBalance,
       levyReceivableOpeningBalance: data.levyReceivableOpeningBalance,
+      taxProfile: data.taxProfile,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
       __v: data.__v || 0

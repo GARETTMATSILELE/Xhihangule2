@@ -134,6 +134,9 @@ export interface LedgerRowDTO {
   sourceReferences: SourceReferenceDTO[];
   rowType?: StatementRowType;
   rentAmount?: MoneyAmountDTO;
+  totalAmountReceived?: MoneyAmountDTO;
+  contractualRent?: MoneyAmountDTO;
+  receiptReviewRequired?: boolean;
   commission?: MoneyAmountDTO;
   vatOnCommission?: MoneyAmountDTO;
   levies?: MoneyAmountDTO;
@@ -158,7 +161,10 @@ export interface OwnerWaterfallDTO {
 
 export interface StatementSummaryDTO {
   openingBalance: MoneyAmountDTO;
+  /** Contractual rent component. Kept so existing consumers are not redefined. */
   totalRent: MoneyAmountDTO;
+  /** Cash received from the tenant, including levy collected in the same payment. */
+  totalAmountReceived?: MoneyAmountDTO;
   totalCommission: MoneyAmountDTO;
   totalVat: MoneyAmountDTO;
   totalLevies: MoneyAmountDTO;

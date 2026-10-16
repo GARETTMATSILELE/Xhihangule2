@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Drawer,
   List,
   ListItem,
   ListItemIcon,
@@ -12,9 +11,10 @@ import {
   CircularProgress,
   Divider,
   Badge,
-  ListSubheader,
   Collapse,
+  Tooltip,
 } from '@mui/material';
+import { ResponsiveSidebarFrame, useResponsiveSidebar } from './responsiveSidebar';
 import {
   Dashboard as DashboardIcon,
   Business as BusinessIcon,
@@ -68,6 +68,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
   const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const { company } = useCompany();
+  const sidebar = useResponsiveSidebar(drawerWidth);
   const [pendingApprovalsCount, setPendingApprovalsCount] = React.useState(0);
   const [openSections, setOpenSections] = React.useState<Record<string, boolean>>({
     Portfolio: true,
@@ -218,44 +219,40 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);
     navigate(path);
+    sidebar.closeOverlay();
   };
 
   const toggleSection = (title: string) => {
     setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }));
   };
 
+  const paperSx = {
+    backgroundColor: '#1E1E2F',
+    color: '#FFFFFF',
+    borderRight: 'none',
+  };
+
   if (authLoading) {
     return (
-      <Drawer variant="permanent" sx={{ width: drawerWidth, flexShrink: 0, '& .MuiDrawer-paper': { width: drawerWidth, position: 'fixed', height: '100vh' } }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-          <CircularProgress />
-        </Box>
-      </Drawer>
+      <ResponsiveSidebarFrame state={sidebar} paperSx={paperSx} expandedWidth={drawerWidth}>
+        {() => (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+            <CircularProgress />
+          </Box>
+        )}
+      </ResponsiveSidebarFrame>
     );
   }
 
   let itemIndex = 0;
 
   return (
-    <Drawer
-      variant="permanent"
-      sx={{
-        width: drawerWidth,
-        flexShrink: 0,
-        '& .MuiDrawer-paper': {
-          width: drawerWidth,
-          boxSizing: 'border-box',
-          backgroundColor: '#1E1E2F',
-          color: '#FFFFFF',
-          borderRight: 'none',
-          position: 'fixed',
-          height: '100vh',
-          overflowY: 'auto',
-        },
-      }}
-    >
-      <Box sx={{ px: 2, pb: 2 }}>
-        {company && user && (
+    <ResponsiveSidebarFrame state={sidebar} paperSx={paperSx} expandedWidth={drawerWidth}>
+      {(collapsed) => {
+      itemIndex = 0;
+      return (
+      <Box sx={{ px: collapsed ? 0.5 : 2, pb: 2 }}>
+        {!collapsed && company && user && (
           <>
             <Box sx={{ px: 1, mb: 2, mt: 2 }}>
               {company.logo && (
@@ -275,8 +272,10 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
         )}
 
         <List disablePadding>
+          <Tooltip title={collapsed ? 'Dashboard' : ''} placement="right" disableHoverListener={!collapsed}>
           <ListItem
             button
+            aria-label="Dashboard"
             onClick={() => handleNavigation('/admin-dashboard', 0)}
             selected={activeTab === 0}
             sx={{
@@ -286,16 +285,18 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
               '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
             }}
           >
-            <ListItemIcon sx={{ color: activeTab === 0 ? 'primary.main' : 'inherit', minWidth: 40 }}>
+            <ListItemIcon sx={{ color: activeTab === 0 ? 'primary.main' : 'inherit', minWidth: collapsed ? 0 : 40, justifyContent: 'center' }}>
               <DashboardIcon />
             </ListItemIcon>
-            <ListItemText primary="Dashboard" primaryTypographyProps={{ fontWeight: activeTab === 0 ? 600 : 400 }} />
+            {!collapsed && <ListItemText primary="Dashboard" primaryTypographyProps={{ fontWeight: activeTab === 0 ? 600 : 400 }} />}
           </ListItem>
+          </Tooltip>
 
           {sections.map((section) => {
-            const sectionOpen = openSections[section.title] !== false;
+            const sectionOpen = collapsed || openSections[section.title] !== false;
             return (
               <React.Fragment key={section.title}>
+                {!collapsed && (
                 <ListItem button onClick={() => toggleSection(section.title)} sx={{ py: 0.5, mt: 0.5 }}>
                   <ListItemText
                     primary={section.title}
@@ -303,28 +304,32 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
                   />
                   {sectionOpen ? <ExpandLess sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 18 }} /> : <ExpandMore sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 18 }} />}
                 </ListItem>
+                )}
                 <Collapse in={sectionOpen}>
                   {section.items.map((item) => {
                     itemIndex += 1;
                     const idx = itemIndex;
                     const selected = activeTab === idx;
                     return (
+                      <Tooltip key={item.path} title={collapsed ? item.text : ''} placement="right" disableHoverListener={!collapsed}>
                       <ListItem
                         button
-                        key={item.path}
+                        aria-label={item.text}
                         onClick={() => handleNavigation(item.path, idx)}
                         selected={selected}
                         sx={{
                           borderRadius: 2,
                           mb: 0.25,
-                          pl: 2,
+                          pl: collapsed ? 1 : 2,
+                          justifyContent: collapsed ? 'center' : 'flex-start',
                           '&.Mui-selected': { backgroundColor: 'rgba(94, 114, 228, 0.12)' },
                           '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.06)' },
                         }}
                       >
-                        <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: 36 }}>
+                        <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: collapsed ? 0 : 36, justifyContent: 'center' }}>
                           {item.icon}
                         </ListItemIcon>
+                        {!collapsed && (
                         <ListItemText
                           primary={
                             item.badge && item.badge > 0 ? (
@@ -336,7 +341,10 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
                           }
                           primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: selected ? 600 : 400 }}
                         />
+                        )}
+                        {collapsed && item.badge && item.badge > 0 ? <Badge color="error" variant="dot" /> : null}
                       </ListItem>
+                      </Tooltip>
                     );
                   })}
                 </Collapse>
@@ -349,21 +357,26 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
             const idx = itemIndex;
             const selected = activeTab === idx;
             return (
+              <Tooltip title={collapsed ? 'Reports' : ''} placement="right" disableHoverListener={!collapsed}>
               <ListItem
                 button
+                aria-label="Reports"
                 onClick={() => handleNavigation('/admin-dashboard/reports', idx)}
                 selected={selected}
-                sx={{ borderRadius: 2, mt: 1, '&.Mui-selected': { backgroundColor: 'rgba(94, 114, 228, 0.12)' } }}
+                sx={{ borderRadius: 2, mt: 1, justifyContent: collapsed ? 'center' : 'flex-start', '&.Mui-selected': { backgroundColor: 'rgba(94, 114, 228, 0.12)' } }}
               >
-                <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: 40 }}>
+                <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: collapsed ? 0 : 40, justifyContent: 'center' }}>
                   <AssessmentIcon />
                 </ListItemIcon>
-                <ListItemText primary="Reports" primaryTypographyProps={{ fontWeight: selected ? 600 : 400 }} />
+                {!collapsed && <ListItemText primary="Reports" primaryTypographyProps={{ fontWeight: selected ? 600 : 400 }} />}
               </ListItem>
+              </Tooltip>
             );
           })()}
         </List>
       </Box>
-    </Drawer>
+      );
+      }}
+    </ResponsiveSidebarFrame>
   );
 };

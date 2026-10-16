@@ -84,15 +84,15 @@ export class ExportEngine {
       ? 'All Transactions'
       : `${dto.period.startDate} - ${dto.period.endDate}`;
     const columns = [
-      { x: 28, width: 63, label: 'Date', align: 'left' as const },
-      { x: 91, width: 55, label: 'Type', align: 'left' as const },
-      { x: 146, width: 86, label: 'Description', align: 'left' as const },
-      { x: 232, width: 86, label: 'Amount Received', align: 'right' as const },
-      { x: 318, width: 78, label: 'Commission', align: 'right' as const },
-      { x: 396, width: 110, label: 'VAT on Commission', align: 'right' as const },
-      { x: 506, width: 70, label: 'Levy', align: 'right' as const },
-      { x: 576, width: 122, label: 'Net Owner Amount', align: 'right' as const },
-      { x: 698, width: 115, label: 'Balance', align: 'right' as const }
+      { x: 28, width: 58, label: 'Date', align: 'left' as const },
+      { x: 86, width: 52, label: 'Type', align: 'left' as const },
+      { x: 138, width: 100, label: 'Description', align: 'left' as const },
+      { x: 238, width: 90, label: 'Total Amount Received', align: 'right' as const },
+      { x: 328, width: 72, label: 'Commission', align: 'right' as const },
+      { x: 400, width: 88, label: 'VAT on Commission', align: 'right' as const },
+      { x: 488, width: 58, label: 'Levy', align: 'right' as const },
+      { x: 546, width: 130, label: 'Net Amount Due to Owner', align: 'right' as const },
+      { x: 676, width: 137, label: 'Balance', align: 'right' as const }
     ];
     const wrapText = (text: string, maxWidth: number, size: number, usedFont: typeof font): string[] => {
       const words = String(text || '').split(/\s+/).filter(Boolean);
@@ -219,13 +219,13 @@ export class ExportEngine {
 
     const summaryItems = [
       ['Opening Balance', summaryMoney(summary.openingBalance.amount, summary.openingBalance.currency), false],
-      ['Amount Received', summaryMoney(summary.totalRent.amount, summary.totalRent.currency), false],
-      ['Less Commission', summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true), false],
-      ['Less VAT on Commission', summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true), false],
-      ['Less Levy', summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true), false],
-      ['Net Owner Amount', summaryMoney(summary.totalOwnerAmount.amount, summary.totalOwnerAmount.currency), false],
+      ['Total Amount Received', summaryMoney((summary.totalAmountReceived || summary.totalRent).amount, (summary.totalAmountReceived || summary.totalRent).currency), false],
+      ['Total Commission', summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true), false],
+      ['Total VAT on Commission', summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true), false],
+      ['Total Levy', summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true), false],
+      ['Net Amount Due to Owner', summaryMoney(summary.totalOwnerAmount.amount, summary.totalOwnerAmount.currency), false],
       ['Owner Payouts', summaryMoney(summary.totalPayouts.amount, summary.totalPayouts.currency, true), false],
-      ['Balance Due to Owner', summaryMoney(summary.closingBalance.amount, summary.closingBalance.currency), true]
+      ['Closing Balance Due to Owner', summaryMoney(summary.closingBalance.amount, summary.closingBalance.currency), true]
     ] as const;
     summaryItems.forEach((item, index) => {
       const y = 490 - index * 13;
@@ -247,11 +247,11 @@ export class ExportEngine {
         : ` at ${(waterfall.vatRate <= 1 ? waterfall.vatRate * 100 : waterfall.vatRate).toFixed(1)}%`;
       const lines = [
         { text: 'HOW THE OWNER AMOUNT IS CALCULATED', strong: true, color: green },
-        { text: `Amount received ${moneyText(waterfall.grossAmount.amount, waterfall.grossAmount.currency)}`, strong: false, color: ink },
+        { text: `Total amount received ${moneyText(waterfall.grossAmount.amount, waterfall.grossAmount.currency)}`, strong: false, color: ink },
         { text: `Less commission ${summaryMoney(waterfall.commissionAmount.amount, waterfall.commissionAmount.currency, true)}`, strong: false, color: ink },
         { text: `Less levy ${summaryMoney(waterfall.levyAmount.amount, waterfall.levyAmount.currency, true)}`, strong: false, color: ink },
         { text: `Less VAT on commission ${summaryMoney(waterfall.vatOnCommission.amount, waterfall.vatOnCommission.currency, true)}${vatRate}`, strong: false, color: ink },
-        { text: `Net owner amount ${moneyText(waterfall.netOwnerAmount.amount, waterfall.netOwnerAmount.currency)}`, strong: true, color: ink },
+        { text: `Net amount due to owner ${moneyText(waterfall.netOwnerAmount.amount, waterfall.netOwnerAmount.currency)}`, strong: true, color: ink },
         {
           text: waterfall.reviewRequired
             ? `Review required. Recorded owner income is ${waterfall.recordedOwnerAmount ? moneyText(waterfall.recordedOwnerAmount.amount, waterfall.recordedOwnerAmount.currency) : 'missing'}. Difference ${moneyText(waterfall.difference.amount, waterfall.difference.currency)}. No amount was changed.`
@@ -303,7 +303,7 @@ export class ExportEngine {
         new Date(row.date).toLocaleDateString(),
         row.rowType || (row.credit.amount > 0 ? 'Income' : 'Payout'),
         row.description,
-        dashOrMoney(row.rentAmount?.amount, row.runningBalance.currency),
+        dashOrMoney(row.totalAmountReceived?.amount ?? row.rentAmount?.amount, row.runningBalance.currency),
         dashOrMoney(row.commission?.amount, row.runningBalance.currency, true),
         dashOrMoney(row.vatOnCommission?.amount, row.runningBalance.currency, true),
         dashOrMoney(row.levies?.amount, row.runningBalance.currency, true),
@@ -316,7 +316,7 @@ export class ExportEngine {
       'TOTALS',
       '',
       '',
-      summaryMoney(summary.totalRent.amount, summary.totalRent.currency),
+      summaryMoney((summary.totalAmountReceived || summary.totalRent).amount, (summary.totalAmountReceived || summary.totalRent).currency),
       summaryMoney(summary.totalCommission.amount, summary.totalCommission.currency, true),
       summaryMoney(summary.totalVat.amount, summary.totalVat.currency, true),
       summaryMoney(summary.totalLevies.amount, summary.totalLevies.currency, true),
@@ -335,12 +335,12 @@ export class ExportEngine {
 
   private toCsv(dto: OwnerStatementDTO): ExportResult {
     const rows = [
-      ['Date', 'Type', 'Description', 'Rent Amount', 'Less Commission', 'Less VAT on Commission', 'Less Levies', 'Owner Amount', 'Balance'],
+      ['Date', 'Type', 'Description', 'Total Amount Received', 'Commission', 'VAT on Commission', 'Levy', 'Net Amount Due to Owner', 'Balance'],
       ...dto.trustLedger.map((row) => [
         row.date,
         row.rowType || '',
         row.description,
-        row.rentAmount?.amount ?? '',
+        row.totalAmountReceived?.amount ?? row.rentAmount?.amount ?? '',
         row.commission?.amount ?? '',
         row.vatOnCommission?.amount ?? '',
         row.levies?.amount ?? '',
@@ -359,21 +359,22 @@ export class ExportEngine {
     const summaryRows = [
       ['Metric', 'Currency', 'Amount'],
       ['Opening Balance', dto.executiveSummary.openingBalance.currency, dto.executiveSummary.openingBalance.amount],
-      ['Total Rent', dto.statementSummary?.totalRent.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalRent.amount ?? dto.rentalSettlement?.grossRent.amount ?? dto.executiveSummary.rentalIncome.amount],
+      ['Total Amount Received', (dto.statementSummary?.totalAmountReceived || dto.statementSummary?.totalRent || dto.executiveSummary.rentalIncome).currency, dto.statementSummary?.totalAmountReceived?.amount ?? dto.statementSummary?.totalRent.amount ?? dto.rentalSettlement?.grossRent.amount ?? dto.executiveSummary.rentalIncome.amount],
+      ['Contractual Rent', dto.statementSummary?.totalRent.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalRent.amount ?? dto.rentalSettlement?.grossRent.amount ?? ''],
       ['Total Commission', dto.statementSummary?.totalCommission.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalCommission.amount ?? dto.rentalSettlement?.commission.amount ?? 0],
-      ['Total VAT', dto.statementSummary?.totalVat.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalVat.amount ?? dto.rentalSettlement?.vatOnCommission.amount ?? 0],
-      ['Total Levies', dto.statementSummary?.totalLevies.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalLevies.amount ?? dto.rentalSettlement?.levy.amount ?? 0],
-      ['Total Owner Amount', dto.statementSummary?.totalOwnerAmount.currency || dto.executiveSummary.netAvailable.currency, dto.statementSummary?.totalOwnerAmount.amount ?? dto.executiveSummary.netAvailable.amount],
-      ['Total Payouts', dto.executiveSummary.ownerPaid.currency, dto.executiveSummary.ownerPaid.amount],
-      ['Closing Balance', dto.executiveSummary.closingTrustBalance.currency, dto.executiveSummary.closingTrustBalance.amount]
+      ['Total VAT on Commission', dto.statementSummary?.totalVat.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalVat.amount ?? dto.rentalSettlement?.vatOnCommission.amount ?? 0],
+      ['Total Levy', dto.statementSummary?.totalLevies.currency || dto.executiveSummary.rentalIncome.currency, dto.statementSummary?.totalLevies.amount ?? dto.rentalSettlement?.levy.amount ?? 0],
+      ['Net Amount Due to Owner', dto.statementSummary?.totalOwnerAmount.currency || dto.executiveSummary.netAvailable.currency, dto.statementSummary?.totalOwnerAmount.amount ?? dto.executiveSummary.netAvailable.amount],
+      ['Owner Payouts', dto.executiveSummary.ownerPaid.currency, dto.executiveSummary.ownerPaid.amount],
+      ['Closing Balance Due to Owner', dto.executiveSummary.closingTrustBalance.currency, dto.executiveSummary.closingTrustBalance.amount]
     ];
     const ledgerRows = [
-      ['Date', 'Type', 'Description', 'Rent Amount', 'Less Commission', 'Less VAT on Commission', 'Less Levies', 'Owner Amount', 'Balance'],
+      ['Date', 'Type', 'Description', 'Total Amount Received', 'Commission', 'VAT on Commission', 'Levy', 'Net Amount Due to Owner', 'Balance'],
       ...dto.trustLedger.map((row) => [
         row.date,
         row.rowType || '',
         row.description,
-        row.rentAmount?.amount ?? '',
+        row.totalAmountReceived?.amount ?? row.rentAmount?.amount ?? '',
         row.commission?.amount ?? '',
         row.vatOnCommission?.amount ?? '',
         row.levies?.amount ?? '',

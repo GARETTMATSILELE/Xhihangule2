@@ -13,6 +13,7 @@ import type { DashboardOutstandingBreakdown } from './dashboardKpiService';
 import propertyAccountService from './propertyAccountService';
 import { PHASE8_CHART_SEEDS } from './tax/chartAccounts';
 import { assertPeriodAllowsPosting } from './accountingPeriodService';
+import { throwOnceIfArmed } from './testFailureSeam';
 
 export interface PostJournalLineInput {
   accountCode: string;
@@ -32,6 +33,7 @@ export interface PostTransactionInput {
   createdBy?: string;
   periodOverrideReason?: string;
   lines: PostJournalLineInput[];
+  seamHaystack?: string;
   vat?: {
     sourceType: string;
     vatCollected?: number;
@@ -285,6 +287,7 @@ class AccountingService {
       );
 
       if (input.vat) {
+        throwOnceIfArmed(String(input.sourceId || input.reference), String(input.seamHaystack || ''), 'PHASE_FAIL_VAT_RECORD');
         await VatRecord.updateOne(
           {
             companyId: companyObjectId,

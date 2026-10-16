@@ -8,10 +8,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listAccountingIntegrityInconsistencies = exports.getTrustVisibility = exports.getPaymentFinancialTrace = exports.getAccountingIntegritySummary = void 0;
+exports.listAccountingIntegrityInconsistencies = exports.retryFailedLedgerEvent = exports.getTrustVisibility = exports.getPaymentFinancialTrace = exports.getAccountingIntegritySummary = void 0;
 const paymentAccountingIntegrity_1 = require("../services/paymentAccountingIntegrity");
 const financialTraceService_1 = require("../services/financialTraceService");
+const ledgerEventService_1 = __importDefault(require("../services/ledgerEventService"));
 function parseDate(value) {
     if (!value || typeof value !== 'string')
         return undefined;
@@ -67,6 +71,32 @@ const getTrustVisibility = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.getTrustVisibility = getTrustVisibility;
+const retryFailedLedgerEvent = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user)
+        return res.status(401).json({ message: 'Unauthorized' });
+    const companyId = String(req.user.companyId || '');
+    if (!companyId)
+        return res.status(400).json({ message: 'companyId is required' });
+    try {
+        const result = yield ledgerEventService_1.default.retryFailedEvent(String(req.params.id), companyId, {
+            userId: String(req.user.userId || req.user.id || req.user._id || ''),
+            requestId: req.get('x-request-id') || undefined
+        });
+        return res.json(result);
+    }
+    catch (error) {
+        const code = String((error === null || error === void 0 ? void 0 : error.code) || '');
+        const status = code === 'LEDGER_EVENT_COMPANY_MISMATCH'
+            ? 404
+            : code === 'AUDIT_PERSIST_FAILED'
+                ? 503
+                : code === 'LEDGER_EVENT_NOT_RETRYABLE' || code === 'LEDGER_EVENT_ALREADY_CLAIMED'
+                    ? 409
+                    : 500;
+        return res.status(status).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Ledger retry failed', code: code || undefined });
+    }
+});
+exports.retryFailedLedgerEvent = retryFailedLedgerEvent;
 const listAccountingIntegrityInconsistencies = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.user)
         return res.status(401).json({ message: 'Unauthorized' });

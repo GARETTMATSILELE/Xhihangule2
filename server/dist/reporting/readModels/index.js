@@ -25,6 +25,7 @@ const PropertyOwner_1 = require("../../models/PropertyOwner");
 const SalesOwner_1 = require("../../models/SalesOwner");
 const Tenant_1 = require("../../models/Tenant");
 const statementRent_1 = require("../statementRent");
+const totalAmountReceived_1 = require("../totalAmountReceived");
 const isWithinPeriod = (date, from, to) => {
     if (from && date < from)
         return false;
@@ -373,12 +374,12 @@ class PaymentReportingReadService {
             else {
                 filter.paymentDate = { $gte: from, $lte: to };
             }
-            const rows = yield Payment_1.Payment.find(filter).select('paymentDate amount rentUsed rentAllocated levyAllocated levyUsed commissionDetails referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd vatOnCommissionRate vatCommissionTreatment').lean();
+            const rows = yield Payment_1.Payment.find(filter).select('paymentDate amount depositAmount rentUsed rentAllocated levyAllocated levyUsed commissionDetails referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd vatOnCommissionRate vatCommissionTreatment').lean();
             return rows.map((row) => {
-                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
                 const cd = row.commissionDetails || {};
                 const levy = Number((_b = (_a = cd.levy) !== null && _a !== void 0 ? _a : row.levyAllocated) !== null && _b !== void 0 ? _b : 0);
-                const rentAmount = (0, statementRent_1.resolveStatementRentAmount)({
+                const explainedRent = (0, statementRent_1.explainStatementRentAmount)({
                     rentUsed: row.rentUsed,
                     advanceMonthsPaid: row.advanceMonthsPaid,
                     rentAllocated: row.rentAllocated,
@@ -387,7 +388,17 @@ class PaymentReportingReadService {
                     grossRent: cd.grossRent,
                     amount: row.amount
                 });
-                const vatRateRaw = (_c = cd.vatRate) !== null && _c !== void 0 ? _c : row.vatOnCommissionRate;
+                const allocationGross = Number((_c = cd.paymentAllocation) === null || _c === void 0 ? void 0 : _c.grossAmount);
+                const receipt = (0, totalAmountReceived_1.resolveTotalAmountReceived)({
+                    paymentAmount: row.amount,
+                    depositAmount: row.depositAmount,
+                    rentComponent: explainedRent.amount,
+                    rentSource: explainedRent.source,
+                    levy,
+                    allocationGross: Number.isFinite(allocationGross) && allocationGross > 0 ? allocationGross : undefined
+                });
+                const rentAmount = explainedRent.amount;
+                const vatRateRaw = (_d = cd.vatRate) !== null && _d !== void 0 ? _d : row.vatOnCommissionRate;
                 const vatRate = vatRateRaw == null || vatRateRaw === '' ? undefined : Number(vatRateRaw);
                 const vatTreatment = cd.vatTreatment || row.vatCommissionTreatment;
                 return {
@@ -395,21 +406,23 @@ class PaymentReportingReadService {
                     paymentDate: row.paymentDate,
                     referenceNumber: row.referenceNumber ? String(row.referenceNumber) : undefined,
                     grossRent: rentAmount !== null && rentAmount !== void 0 ? rentAmount : 0,
+                    totalAmountReceived: receipt.totalAmountReceived,
+                    receiptReviewRequired: receipt.reviewRequired,
                     levy,
-                    commission: Number((_e = (_d = cd.commissionNet) !== null && _d !== void 0 ? _d : cd.totalCommission) !== null && _e !== void 0 ? _e : 0),
-                    vatOnCommission: Number((_g = (_f = cd.vatOnCommission) !== null && _f !== void 0 ? _f : cd.vatAmount) !== null && _g !== void 0 ? _g : 0),
+                    commission: Number((_f = (_e = cd.commissionNet) !== null && _e !== void 0 ? _e : cd.totalCommission) !== null && _f !== void 0 ? _f : 0),
+                    vatOnCommission: Number((_h = (_g = cd.vatOnCommission) !== null && _g !== void 0 ? _g : cd.vatAmount) !== null && _h !== void 0 ? _h : 0),
                     vatRate: Number.isFinite(Number(vatRate)) ? Number(vatRate) : undefined,
                     vatTreatment: vatTreatment === 'inclusive' || vatTreatment === 'exclusive' ? vatTreatment : undefined,
-                    ownerPayable: Number(((_h = cd.paymentAllocation) === null || _h === void 0 ? void 0 : _h.ownerPayable) != null
+                    ownerPayable: Number(((_j = cd.paymentAllocation) === null || _j === void 0 ? void 0 : _j.ownerPayable) != null
                         ? cd.paymentAllocation.ownerPayable
                         : (cd.ownerAmount != null ? Number(cd.ownerAmount) - levy : 0)),
                     rentalPeriodMonth: Number.isFinite(Number(row.rentalPeriodMonth)) ? Number(row.rentalPeriodMonth) : undefined,
                     rentalPeriodYear: Number.isFinite(Number(row.rentalPeriodYear)) ? Number(row.rentalPeriodYear) : undefined,
                     advanceMonthsPaid: Number.isFinite(Number(row.advanceMonthsPaid)) ? Number(row.advanceMonthsPaid) : undefined,
-                    advancePeriodStart: ((_j = row.advancePeriodStart) === null || _j === void 0 ? void 0 : _j.month) && ((_k = row.advancePeriodStart) === null || _k === void 0 ? void 0 : _k.year)
+                    advancePeriodStart: ((_k = row.advancePeriodStart) === null || _k === void 0 ? void 0 : _k.month) && ((_l = row.advancePeriodStart) === null || _l === void 0 ? void 0 : _l.year)
                         ? { month: Number(row.advancePeriodStart.month), year: Number(row.advancePeriodStart.year) }
                         : undefined,
-                    advancePeriodEnd: ((_l = row.advancePeriodEnd) === null || _l === void 0 ? void 0 : _l.month) && ((_m = row.advancePeriodEnd) === null || _m === void 0 ? void 0 : _m.year)
+                    advancePeriodEnd: ((_m = row.advancePeriodEnd) === null || _m === void 0 ? void 0 : _m.month) && ((_o = row.advancePeriodEnd) === null || _o === void 0 ? void 0 : _o.year)
                         ? { month: Number(row.advancePeriodEnd.month), year: Number(row.advancePeriodEnd.year) }
                         : undefined
                 };

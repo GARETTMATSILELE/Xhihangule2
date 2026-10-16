@@ -25,6 +25,7 @@ const OnboardingSession_1 = require("../models/OnboardingSession");
 const PaymentSession_1 = require("../models/PaymentSession");
 const BillingPayment_1 = require("../models/BillingPayment");
 const auditService_1 = require("./auditService");
+const auditPolicy_1 = require("./auditPolicy");
 const logger_1 = require("../utils/logger");
 exports.SIGN_IN_REQUIRED_MESSAGE = 'We could not continue with these details. Sign in if you already have an account, or use password recovery.';
 const RELEASABLE_ONBOARDING = ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP'];
@@ -189,25 +190,28 @@ function releaseAbandonedRegistration(companyId_1) {
             }
         }
         if (!alreadyArchived) {
-            yield (0, auditService_1.recordAuditEvent)({
-                companyId: String(company._id),
-                action: 'registration.expired',
-                entityType: 'Company',
-                entityId: String(company._id),
-                metadata: { retentionDays: abandonedRegistrationRetentionMs() / 86400000 }
-            });
-            yield (0, auditService_1.recordAuditEvent)({
-                companyId: String(company._id),
-                action: 'registration.archived',
-                entityType: 'Company',
-                entityId: String(company._id)
-            });
-            yield (0, auditService_1.recordAuditEvent)({
-                companyId: String(company._id),
-                action: 'registration.email_released',
-                entityType: 'Company',
-                entityId: String(company._id)
-            });
+            const archiveAudits = [
+                ['registration.expired', { retentionDays: abandonedRegistrationRetentionMs() / 86400000 }],
+                ['registration.archived', {}],
+                ['registration.email_released', {}]
+            ];
+            for (const [action, metadata] of archiveAudits) {
+                const persisted = yield (0, auditService_1.recordAuditEvent)({
+                    companyId: String(company._id),
+                    action,
+                    entityType: 'Company',
+                    entityId: String(company._id),
+                    metadata
+                });
+                if (!persisted) {
+                    yield (0, auditPolicy_1.noteMissingAudit)({
+                        action,
+                        companyId: String(company._id),
+                        entityId: String(company._id),
+                        operationId: String(company._id)
+                    });
+                }
+            }
         }
         return 'released';
     });

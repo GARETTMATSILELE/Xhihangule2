@@ -1,7 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Drawer,
   List,
   ListItem,
   ListItemIcon,
@@ -12,7 +11,9 @@ import {
   Avatar,
   Divider,
   Button,
+  Tooltip,
 } from '@mui/material';
+import { ResponsiveSidebarFrame, useResponsiveSidebar } from './responsiveSidebar';
 import {
   Dashboard as DashboardIcon,
   Business as BusinessIcon,
@@ -44,6 +45,7 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
   const navigate = useNavigate();
   const location = useLocation();
   const { company, user } = useAuth();
+  const sidebar = useResponsiveSidebar(drawerWidth);
   const roleList = [user?.role, ...((user as any)?.roles || [])].filter(Boolean);
   const canOverseePortfolio = roleList.some((role) => ['admin', 'principal', 'prea', 'accountant'].includes(String(role)));
 
@@ -76,30 +78,24 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);
     navigate(path);
+    sidebar.closeOverlay();
   };
 
   return (
-    <Drawer
-      variant="permanent"
-      className="no-print"
-      sx={{
-        width: drawerWidth,
-        flexShrink: 0,
-        '@media print': { display: 'none' },
-        '& .MuiDrawer-paper': {
-          width: drawerWidth,
-          boxSizing: 'border-box',
-          background: 'radial-gradient(circle at top left, rgba(59,130,246,0.22), transparent 34%), linear-gradient(180deg, #0f172a 0%, #111827 48%, #0b1120 100%)',
-          color: '#FFFFFF',
-          borderRight: 'none',
-          position: 'fixed',
-          height: '100vh',
-          boxShadow: '18px 0 50px rgba(15, 23, 42, 0.18)',
-        },
+    <ResponsiveSidebarFrame
+      state={sidebar}
+      expandedWidth={drawerWidth}
+      hideOnPrint
+      paperSx={{
+        background: 'radial-gradient(circle at top left, rgba(59,130,246,0.22), transparent 34%), linear-gradient(180deg, #0f172a 0%, #111827 48%, #0b1120 100%)',
+        color: '#FFFFFF',
+        borderRight: 'none',
+        boxShadow: '18px 0 50px rgba(15, 23, 42, 0.18)',
       }}
     >
-      <Box sx={{ overflow: 'auto', px: 2.25, py: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {company && (
+      {(collapsed) => (
+      <Box sx={{ overflow: 'auto', px: collapsed ? 0.5 : 2.25, py: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {!collapsed && company && (
           <>
             <Box sx={{ px: 1.5, mb: 2, mt: 1 }}>
               {/* Company Logo */}
@@ -141,22 +137,25 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
               const showGroup = index === 0 || menuItems[index - 1].group !== item.group;
               return (
             <React.Fragment key={item.text}>
-            {showGroup && (
+            {showGroup && !collapsed && (
               <ListSubheader sx={{ bgcolor: 'transparent', color: 'rgba(226,232,240,0.45)', lineHeight: '28px', fontSize: 11, letterSpacing: '0.08em', fontWeight: 800 }}>
                 {item.group.toUpperCase()}
               </ListSubheader>
             )}
+            <Tooltip title={collapsed ? item.text : ''} placement="right" disableHoverListener={!collapsed}>
             <ListItem
               button
+              aria-label={item.text}
               onClick={() => handleNavigation(item.path, index)}
               selected={isSelected || activeTab === index}
               sx={{
                 borderRadius: 3,
                 mb: 0.75,
-                px: 1.5,
+                px: collapsed ? 1 : 1.5,
                 py: 1.05,
+                justifyContent: collapsed ? 'center' : 'flex-start',
                 color: isSelected || activeTab === index ? '#ffffff' : 'rgba(226, 232, 240, 0.72)',
-                transition: 'background-color 180ms ease, transform 180ms ease, color 180ms ease, box-shadow 180ms ease',
+                transition: sidebar.prefersReducedMotion ? 'none' : 'background-color 180ms ease, transform 180ms ease, color 180ms ease, box-shadow 180ms ease',
                 '&.Mui-selected': {
                   background: 'linear-gradient(135deg, rgba(37,99,235,0.88), rgba(14,165,233,0.58))',
                   boxShadow: '0 12px 30px rgba(37, 99, 235, 0.28)',
@@ -166,28 +165,31 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
                 },
                 '&:hover': {
                   backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                  transform: 'translateX(3px)',
+                  transform: collapsed ? 'none' : 'translateX(3px)',
                   color: '#ffffff',
                 },
               }}
             >
-              <ListItemIcon sx={{ color: 'inherit', minWidth: 38 }}>
+              <ListItemIcon sx={{ color: 'inherit', minWidth: collapsed ? 0 : 38, justifyContent: 'center' }}>
                 {item.icon}
               </ListItemIcon>
-              <ListItemText 
-                primary={item.text} 
+              {!collapsed && (
+              <ListItemText
+                primary={item.text}
                 primaryTypographyProps={{
                   fontWeight: isSelected || activeTab === index ? 800 : 500,
                   fontSize: 14,
                 }}
               />
+              )}
             </ListItem>
+            </Tooltip>
             </React.Fragment>
               );
             })()
           ))}
         </List>
-        <Box
+        {!collapsed && <Box
           sx={{
             mt: 2,
             p: 2,
@@ -206,8 +208,9 @@ export const AgentSidebar: React.FC<AgentSidebarProps> = ({ activeTab, onTabChan
           <Button size="small" variant="contained" fullWidth sx={{ borderRadius: 3, textTransform: 'none', fontWeight: 800, boxShadow: 'none' }}>
             Support
           </Button>
-        </Box>
+        </Box>}
       </Box>
-    </Drawer>
+      )}
+    </ResponsiveSidebarFrame>
   );
 }; 

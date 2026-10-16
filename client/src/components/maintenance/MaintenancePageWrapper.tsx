@@ -53,7 +53,7 @@ const MaintenancePageWrapper: React.FC<MaintenancePageWrapperProps> = ({ userRol
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
       <SidebarComponent activeTab={activeTab} onTabChange={setActiveTab} />
-      <Box sx={{ flexGrow: 1, width: { sm: 'calc(100% - 280px)' }, ml: { sm: '280px' } }}>
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
         <Header />
         <Box sx={{ p: 0, mt: 8 }}>
           <Maintenance 

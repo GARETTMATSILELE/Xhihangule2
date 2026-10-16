@@ -1,7 +1,7 @@
 import { PLAN_CONFIG, Plan } from '../types/plan';
 
 const PAID_STATUSES = ['paid', 'awaiting delivery', 'delivered'];
-const FAILED_STATUSES = ['cancelled', 'canceled', 'refunded', 'disputed', 'failed'];
+const FAILED_STATUSES = ['cancelled', 'canceled', 'refunded', 'disputed', 'failed', 'expired'];
 const PAYMENT_HOLD_STATUSES = ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP'];
 
 export function configuredPlanCharge(plan: string, cycle: 'monthly' | 'yearly'): number | null {
@@ -130,9 +130,25 @@ export function evaluateProviderPoll(
     return { outcome: 'paid' };
   }
   if (FAILED_STATUSES.includes(state)) {
-    return { outcome: 'failed', status: state === 'canceled' ? 'cancelled' : state };
+    const status = state === 'canceled' ? 'cancelled'
+      : state === 'expired' ? 'expired'
+      : state === 'cancelled' ? 'cancelled'
+      : state === 'refunded' ? 'refunded'
+      : state === 'disputed' ? 'disputed'
+      : 'failed';
+    return { outcome: 'failed', status };
   }
   return { outcome: 'pending', status: state || 'pending' };
+}
+
+export function paynowCheckoutDecision(session: { status?: string; pollUrl?: string }): 'completed' | 'closed' | 'awaiting' | 'create' {
+  const status = String(session.status || '');
+  if (status === 'paid' || status === 'reconciled') return 'completed';
+  if (status === 'cancelled' || status === 'failed' || status === 'expired') return 'closed';
+  if ((status === 'pending' || status === 'provider_created') && session.pollUrl) {
+    return isAllowedPaynowPollUrl(session.pollUrl) ? 'awaiting' : 'closed';
+  }
+  return 'create';
 }
 
 export function isAllowedPaynowPollUrl(url: string): boolean {
@@ -165,14 +181,15 @@ export function verifyPaynowPayload(values: Record<string, unknown>, integration
 
 export function paynowConfigurationState(env: NodeJS.ProcessEnv = process.env): {
   configured: boolean;
-  mode: 'live' | 'test' | 'unconfigured' | 'unspecified';
+  mode: 'live' | 'test' | 'unconfigured' | 'unspecified' | 'invalid';
 } {
   const configured = Boolean(String(env.PAYNOW_INTEGRATION_ID || '').trim() && String(env.PAYNOW_INTEGRATION_KEY || '').trim());
   if (!configured) return { configured: false, mode: 'unconfigured' };
   const mode = String(env.PAYNOW_MODE || '').trim().toLowerCase();
+  if (!mode) return { configured: true, mode: 'unspecified' };
   if (mode === 'test' || mode === 'sandbox') return { configured: true, mode: 'test' };
   if (mode === 'live') return { configured: true, mode: 'live' };
-  return { configured: true, mode: 'unspecified' };
+  return { configured: true, mode: 'invalid' };
 }
 
 export function productionApiUrl(candidate: string, nodeEnv: string, browserOrigin?: string): string {

@@ -5,16 +5,21 @@ import axios from 'axios';
 import { PaymentSession } from '../models/PaymentSession';
 import { BillingPayment } from '../models/BillingPayment';
 import { User } from '../models/User';
-import { WebhookEventReceipt } from '../models/WebhookEventReceipt';
 import { PLAN_CONFIG, Plan } from '../types/plan';
 import { chargeForPlan } from '../services/systemPlanService';
 import {
 	isAllowedPaynowPollUrl,
+	paynowCheckoutDecision,
 	paynowConfigurationState,
+	ProviderPoll,
 	verifyPaynowPayload
 } from '../services/registrationPaymentPolicy';
-import { applyPolledPayment } from '../services/applyPolledPayment';
+import { applyPolledPayment, resolvePaynowProviderRef } from '../services/applyPolledPayment';
+import { signalOperationalFailure } from '../services/operationalSignal';
 import { recordAuditEvent } from '../services/auditService';
+import { logger } from '../utils/logger';
+import { classifyOperationalFailure } from '../services/operationalFailure';
+import { processVerifiedPaynowEvent } from '../services/paynowCallbackService';
 
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -70,6 +75,13 @@ function getPaynowForRequest(req: Request) {
 			'Checkout is temporarily unavailable.',
 			503,
 			'PAYNOW_NOT_CONFIGURED'
+		);
+	}
+	if (paynowConfigurationState().mode === 'invalid') {
+		throw httpError(
+			'Paynow mode is not supported. Use test, sandbox, or live.',
+			503,
+			'PAYNOW_MODE_INVALID'
 		);
 	}
 	const paynow = new Paynow(env.INTEGRATION_ID, env.INTEGRATION_KEY);
@@ -134,8 +146,11 @@ export async function initiatePaynowCheckout(req: Request, input: {
 	}
 
 	const storedRedirect = String((session.rawProviderResponse as any)?.redirectUrl || '');
-	const awaitingProvider = Boolean(session.pollUrl) && (session.status === 'pending' || session.status === 'provider_created');
-	if (awaitingProvider && session.pollUrl && isAllowedPaynowPollUrl(session.pollUrl)) {
+	const checkoutDecision = paynowCheckoutDecision(session);
+	if (checkoutDecision === 'closed') {
+		throw httpError('This checkout can no longer be started', 409, 'PAYMENT_SESSION_CLOSED');
+	}
+	if (checkoutDecision === 'awaiting' && session.pollUrl) {
 		if (storedRedirect) {
 			return {
 				reference: String(session.providerRef || ''),
@@ -232,14 +247,30 @@ async function readPaynowStatus(req: Request, pollUrl: string) {
 	return { parsed, fields };
 }
 
-async function confirmSessionPayment(req: Request, reference: string) {
-	const session = await PaymentSession.findOne({ provider: 'paynow', providerRef: reference });
-	if (!session) return { found: false as const };
-	if (session.status === 'paid' || session.status === 'reconciled') {
-		return { found: true as const, paymentStatus: 'paid', session };
+async function confirmSessionPayment(req: Request, reference: string, verifiedPoll?: ProviderPoll) {
+	const resolved = await resolvePaynowProviderRef(reference);
+	if (resolved.kind === 'missing') return { found: false as const, activated: false, ignored: false };
+	if (resolved.kind === 'ambiguous') {
+		return { found: true as const, activated: false, ignored: true, reviewRequired: true, paymentStatus: 'review_required' as const };
+	}
+	const session = resolved.session;
+	if (session.status === 'paid' || session.status === 'reconciled' || session.status === 'cancelled' || session.status === 'failed' || session.status === 'expired') {
+		const applied = await applyPolledPayment(reference, verifiedPoll || {
+			status: session.status,
+			amount: session.amount,
+			currency: session.currency,
+			reference
+		});
+		return {
+			found: applied.found,
+			paymentStatus: applied.paymentStatus || session.status,
+			activated: applied.activated === true,
+			ignored: applied.ignored === true,
+			session: applied.session || session
+		};
 	}
 	if (!session.pollUrl) {
-		return { found: true as const, paymentStatus: session.status, session };
+		return { found: true as const, paymentStatus: session.status, activated: false, ignored: false, session };
 	}
 
 	const polled = await readPaynowStatus(req, session.pollUrl);
@@ -250,7 +281,13 @@ async function confirmSessionPayment(req: Request, reference: string) {
 		reference: polled.parsed?.reference,
 		paynowReference: polled.parsed?.paynowReference
 	});
-	return { found: applied.found, paymentStatus: applied.paymentStatus || session.status, session };
+	return {
+		found: applied.found,
+		paymentStatus: applied.paymentStatus || session.status,
+		activated: applied.activated === true,
+		ignored: applied.ignored === true,
+		session: applied.session || session
+	};
 }
 
 export function getStatus(_req: Request, res: Response) {
@@ -314,8 +351,21 @@ export async function createMobilePayment(req: Request, res: Response) {
 		if (!session || (callerCompanyId && String(session.companyId) !== String(callerCompanyId))) {
 			return res.status(404).json({ status: 'error', message: 'Payment session not found' });
 		}
-		if (session.status === 'paid' || session.status === 'reconciled') {
+		const checkoutDecision = paynowCheckoutDecision(session);
+		if (checkoutDecision === 'completed') {
 			return res.status(409).json({ status: 'error', message: 'This payment has already been completed' });
+		}
+		if (checkoutDecision === 'closed') {
+			return res.status(409).json({ status: 'error', message: 'This checkout can no longer be started', code: 'PAYMENT_SESSION_CLOSED' });
+		}
+		if (checkoutDecision === 'awaiting') {
+			return res.json({
+				status: 'ok',
+				reference: String(session.providerRef || ''),
+				pollUrl: String(session.pollUrl || ''),
+				instructions: (session.rawProviderResponse as { instructions?: string } | undefined)?.instructions || null,
+				reused: true
+			});
 		}
 		const amt = Number(session.amount);
 		if (!Number.isFinite(amt) || amt <= 0) {
@@ -341,10 +391,11 @@ export async function createMobilePayment(req: Request, res: Response) {
 			if (pollUrl && !isAllowedPaynowPollUrl(pollUrl)) {
 				return res.status(502).json({ status: 'error', message: 'Paynow returned an unexpected status URL', code: 'PAYNOW_POLL_URL_REJECTED' });
 			}
+			session.provider = 'paynow';
 			session.providerRef = ref;
 			session.pollUrl = pollUrl;
 			session.status = 'provider_created';
-			session.rawProviderResponse = { pollUrl };
+			session.rawProviderResponse = { pollUrl, instructions: response.instructions || null };
 			await session.save();
 			return res.json({
 				status: 'ok',
@@ -396,48 +447,60 @@ export async function handleResult(req: Request, res: Response) {
 		}
 		const payload = { ...(req.query || {}), ...(req.body || {}) } as Record<string, unknown>;
 		if (!verifyPaynowPayload(payload, env.INTEGRATION_KEY)) {
+			const unverifiedReference = String(payload.reference || payload.Reference || '').trim();
+			signalOperationalFailure('paynow_callback_unverified', {
+				correlationId: unverifiedReference || 'paynow',
+				reference: unverifiedReference || undefined
+			});
 			return res.status(401).json({ status: 'error', message: 'Invalid Paynow signature' });
 		}
 		const reference = String(payload.reference || payload.Reference || '').trim();
 		const eventId = String(payload.hash || payload.pollurl || payload.pollUrl || reference);
+		const payloadFingerprint = [
+			reference,
+			String(payload.status || payload.Status || ''),
+			String(payload.amount || payload.Amount || '')
+		].join('|');
 
 		if (!reference) {
 			return res.status(200).json({ status: 'received', message: 'No reference supplied' });
 		}
 
-		const receipt = await WebhookEventReceipt.findOneAndUpdate(
-			{ provider: 'paynow', eventId },
-			{ $setOnInsert: { provider: 'paynow', eventId, status: 'processing' } },
-			{ upsert: true, new: true }
-		);
-		if (receipt.status === 'processed') {
-			return res.status(200).json({ status: 'duplicate' });
+		const outcome = await processVerifiedPaynowEvent({
+			reference,
+			eventId,
+			payloadFingerprint,
+			apply: async () => {
+				const confirmed = await confirmSessionPayment(req, reference, {
+					status: String(payload.status || payload.Status || ''),
+					amount: String(payload.amount || payload.Amount || ''),
+					currency: String(payload.currency || payload.Currency || ''),
+					reference
+				});
+				return {
+					found: confirmed.found,
+					paymentStatus: confirmed.paymentStatus,
+					activated: confirmed.activated,
+					ignored: confirmed.ignored,
+					session: confirmed.session
+				};
+			}
+		});
+		if (outcome.status === 'duplicate' || outcome.status === 'in_progress' || outcome.status === 'payload_conflict') {
+			return res.status(200).json({ status: outcome.status, activated: false });
 		}
-
-		const confirmed = await confirmSessionPayment(req, reference);
-		if (confirmed.found && confirmed.paymentStatus === 'paid' && confirmed.session) {
-			receipt.companyId = confirmed.session.companyId as any;
-			receipt.paymentId = confirmed.session.billingPaymentId as any;
-		}
-		receipt.status = 'processed';
-		receipt.processedAt = new Date();
-		await receipt.save();
-
-		return res.status(200).json({ status: 'received' });
+		return res.status(200).json({ status: outcome.status, activated: outcome.activated });
 	} catch (e: any) {
-		try {
-			const payload = { ...(req.query || {}), ...(req.body || {}) } as any;
-			const eventId = String(payload.pollurl || payload.pollUrl || payload.hash || payload.reference || Date.now());
-			await WebhookEventReceipt.updateOne(
-				{ provider: 'paynow', eventId },
-				{ $set: { status: 'failed', lastError: e?.message || String(e) } },
-				{ upsert: true }
-			);
-		} catch {}
 		if (e?.statusCode === 409) {
 			return res.status(200).json({ status: 'ignored', message: e.message });
 		}
-		return res.status(500).json({ status: 'error', message: e?.message || 'Failed to process Paynow result' });
+		const failedReference = String((req.body as any)?.reference || (req.query as any)?.reference || '').trim();
+		logger.warn('paynow_callback_failed', {
+			correlationId: failedReference || 'paynow',
+			reference: failedReference || undefined,
+			failureClass: classifyOperationalFailure(e)
+		});
+		return res.status(500).json({ status: 'error', message: 'Failed to process Paynow result' });
 	}
 }
 
@@ -448,16 +511,38 @@ export async function confirmByReference(req: Request, res: Response) {
 		if (!reference) {
 			return res.status(400).json({ status: 'error', message: 'reference is required' });
 		}
-		const owned = await PaymentSession.findOne({ provider: 'paynow', providerRef: reference }).select('companyId');
+		const resolved = await resolvePaynowProviderRef(reference);
 		const callerCompanyId = (req as any).user?.companyId;
-		if (!owned || (callerCompanyId && String(owned.companyId) !== String(callerCompanyId))) {
+		if (resolved.kind === 'missing') {
+			return res.status(404).json({ status: 'error', message: 'Payment not found' });
+		}
+		if (resolved.kind === 'ambiguous') {
+			const visible = !callerCompanyId || resolved.sessions.some((session) => String(session.companyId) === String(callerCompanyId));
+			if (!visible) return res.status(404).json({ status: 'error', message: 'Payment not found' });
+			return res.status(409).json({
+				status: 'review_required',
+				message: 'This provider reference matches more than one payment session and was not activated.'
+			});
+		}
+		if (callerCompanyId && String(resolved.session.companyId) !== String(callerCompanyId)) {
 			return res.status(404).json({ status: 'error', message: 'Payment not found' });
 		}
 		const confirmed = await confirmSessionPayment(req, reference);
+		if ((confirmed as any).reviewRequired) {
+			return res.status(409).json({
+				status: 'review_required',
+				message: 'This provider reference matches more than one payment session and was not activated.'
+			});
+		}
 		if (!confirmed.found) {
 			return res.status(404).json({ status: 'error', message: 'Payment not found' });
 		}
-		return res.json({ status: 'ok', paymentStatus: confirmed.paymentStatus, reference });
+		return res.json({
+			status: 'ok',
+			paymentStatus: confirmed.paymentStatus,
+			activated: confirmed.activated === true,
+			reference
+		});
 	} catch (e: any) {
 		return res.status(e?.statusCode || 500).json({ status: 'error', message: e?.message || 'Failed to confirm Paynow payment' });
 	}

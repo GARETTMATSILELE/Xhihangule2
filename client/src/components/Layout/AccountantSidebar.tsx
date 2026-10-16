@@ -1,7 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Drawer,
   List,
   ListItem,
   ListItemIcon,
@@ -10,7 +9,9 @@ import {
   Box,
   Avatar,
   CircularProgress,
+  Tooltip,
 } from '@mui/material';
+import { ResponsiveSidebarFrame, useResponsiveSidebar } from './responsiveSidebar';
 import {
   Dashboard as DashboardIcon,
   Receipt as ReceiptIcon,
@@ -49,6 +50,7 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ onTabChang
   const location = useLocation();
   const { loading: authLoading, user } = useAuth();
   const { company } = useCompany();
+  const sidebar = useResponsiveSidebar(drawerWidth);
   const userRoles = ((user as any)?.roles as string[] | undefined) || (user?.role ? [user.role] : []);
   const canManageSync = userRoles.includes('admin');
 
@@ -80,52 +82,32 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ onTabChang
   const handleNavigation = (path: string, index: number) => {
     onTabChange(index);
     navigate(path);
+    sidebar.closeOverlay();
+  };
+
+  const paperSx = {
+    backgroundColor: '#1E1E2F',
+    color: '#FFFFFF',
+    borderRight: 'none',
   };
 
   if (authLoading) {
     return (
-      <Drawer
-        variant="permanent"
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          '& .MuiDrawer-paper': {
-            width: drawerWidth,
-            boxSizing: 'border-box',
-            position: 'fixed',
-            top: '64px',
-            height: 'calc(100vh - 64px)',
-          },
-        }}
-      >
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-          <CircularProgress />
-        </Box>
-      </Drawer>
+      <ResponsiveSidebarFrame state={sidebar} paperSx={paperSx} topOffset={64}>
+        {() => (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+            <CircularProgress />
+          </Box>
+        )}
+      </ResponsiveSidebarFrame>
     );
   }
 
   return (
-    <Drawer
-      variant="permanent"
-      sx={{
-        width: drawerWidth,
-        flexShrink: 0,
-        '& .MuiDrawer-paper': {
-          width: drawerWidth,
-          boxSizing: 'border-box',
-          backgroundColor: '#1E1E2F',
-          color: '#FFFFFF',
-          borderRight: 'none',
-          position: 'fixed',
-          top: '64px',
-          height: 'calc(100vh - 64px)',
-        },
-      }}
-    >
-      <Box sx={{ height: '100%', overflowY: 'auto', px: 2, pb: 2 }}>
-        {/* Company Logo (kept as requested) */}
-        {company?.logo && (
+    <ResponsiveSidebarFrame state={sidebar} paperSx={paperSx} topOffset={64} expandedWidth={drawerWidth}>
+      {(collapsed) => (
+      <Box sx={{ px: collapsed ? 0.5 : 2, pb: 2 }}>
+        {!collapsed && company?.logo && (
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 2 }}>
             <Avatar
               src={`data:image/png;base64,${company.logo}`}
@@ -142,21 +124,19 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ onTabChang
 
         <List>
           {menuItems.map((item, index) => {
-            const showGroup = index === 0 || menuItems[index - 1].group !== item.group;
-            return (
-            <React.Fragment key={item.text}>
-            {showGroup && (
-              <ListSubheader sx={{ bgcolor: 'transparent', color: 'rgba(255,255,255,0.45)', lineHeight: '28px', fontSize: 11, letterSpacing: '0.08em', fontWeight: 800 }}>
-                {item.group.toUpperCase()}
-              </ListSubheader>
-            )}
+            const showGroup = !collapsed && (index === 0 || menuItems[index - 1].group !== item.group);
+            const selected = isSidebarItemSelected(location.pathname, item.path);
+            const row = (
             <ListItem
               button
+              aria-label={item.text}
               onClick={() => handleNavigation(item.path, item.index)}
-              selected={isSidebarItemSelected(location.pathname, item.path)}
+              selected={selected}
               sx={{
                 borderRadius: 2,
                 mb: 0.5,
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                px: collapsed ? 1 : 2,
                 '&.Mui-selected': {
                   backgroundColor: 'rgba(94, 114, 228, 0.1)',
                   '&:hover': {
@@ -168,21 +148,33 @@ export const AccountantSidebar: React.FC<AccountantSidebarProps> = ({ onTabChang
                 },
               }}
             >
-              <ListItemIcon sx={{ color: isSidebarItemSelected(location.pathname, item.path) ? 'primary.main' : 'inherit' }}>
+              <ListItemIcon sx={{ color: selected ? 'primary.main' : 'inherit', minWidth: collapsed ? 0 : 56, justifyContent: 'center' }}>
                 {item.icon}
               </ListItemIcon>
-              <ListItemText 
-                primary={item.text} 
+              {!collapsed && (
+              <ListItemText
+                primary={item.text}
                 primaryTypographyProps={{
-                  fontWeight: isSidebarItemSelected(location.pathname, item.path) ? 600 : 400,
+                  fontWeight: selected ? 600 : 400,
                 }}
               />
+              )}
             </ListItem>
+            );
+            return (
+            <React.Fragment key={item.text}>
+            {showGroup && (
+              <ListSubheader sx={{ bgcolor: 'transparent', color: 'rgba(255,255,255,0.45)', lineHeight: '28px', fontSize: 11, letterSpacing: '0.08em', fontWeight: 800 }}>
+                {item.group.toUpperCase()}
+              </ListSubheader>
+            )}
+            {collapsed ? <Tooltip title={item.text} placement="right">{row}</Tooltip> : row}
             </React.Fragment>
             );
           })}
         </List>
       </Box>
-    </Drawer>
+      )}
+    </ResponsiveSidebarFrame>
   );
 }; 

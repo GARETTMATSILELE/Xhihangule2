@@ -244,12 +244,12 @@ const COLUMNS = [
   { key: 'date', label: 'Date', width: '8%' },
   { key: 'type', label: 'Type', width: '7%' },
   { key: 'description', label: 'Description', width: '11%' },
-  { key: 'rent', label: 'Amount received', width: '11%' },
+  { key: 'rent', label: 'Total Amount Received', width: '12%' },
   { key: 'commission', label: 'Commission', width: '10%' },
-  { key: 'vat', label: 'VAT on commission', width: '14%' },
-  { key: 'levies', label: 'Levy', width: '9%' },
-  { key: 'owner', label: 'Net owner amount', width: '15%' },
-  { key: 'balance', label: 'Balance', width: '15%' }
+  { key: 'vat', label: 'VAT on Commission', width: '12%' },
+  { key: 'levies', label: 'Levy', width: '8%' },
+  { key: 'owner', label: 'Net Amount Due to Owner', width: '16%' },
+  { key: 'balance', label: 'Balance', width: '12%' }
 ] as const;
 
 export const LedgerTable: React.FC<{ rows: LedgerRowDTO[] }> = ({ rows }) => (
@@ -265,7 +265,7 @@ const StatementTransactionTable: React.FC<{
   const currency = rows[0]?.runningBalance.currency || summary?.closingBalance.currency || 'USD';
   const zero = { amount: 0, currency };
   const totals = {
-    rent: summary?.totalRent || rows.reduce((sum, row) => ({ amount: sum.amount + Number(row.rentAmount?.amount || 0), currency }), zero),
+    rent: summary?.totalAmountReceived || summary?.totalRent || rows.reduce((sum, row) => ({ amount: sum.amount + Number(row.totalAmountReceived?.amount ?? row.rentAmount?.amount ?? 0), currency }), zero),
     commission: summary?.totalCommission || rows.reduce((sum, row) => ({ amount: sum.amount + Number(row.commission?.amount || 0), currency }), zero),
     vat: summary?.totalVat || rows.reduce((sum, row) => ({ amount: sum.amount + Number(row.vatOnCommission?.amount || 0), currency }), zero),
     levies: summary?.totalLevies || rows.reduce((sum, row) => ({ amount: sum.amount + Number(row.levies?.amount || 0), currency }), zero),
@@ -311,7 +311,7 @@ const StatementTransactionTable: React.FC<{
               <td className="col-text">{formatShortDate(row.date)}</td>
               <td className="col-text col-type">{row.rowType || (row.credit.amount > 0 ? 'Income' : 'Expense')}</td>
               <td className="col-text col-description">{row.description}</td>
-              <td className="col-money">{formatOptionalMoney(row.rentAmount)}</td>
+              <td className="col-money">{formatOptionalMoney(row.totalAmountReceived || row.rentAmount)}</td>
               <td className="col-money">{formatDeduction(row.commission)}</td>
               <td className="col-money">{formatDeduction(row.vatOnCommission)}</td>
               <td className="col-money">{formatDeduction(row.levies)}</td>
@@ -341,13 +341,13 @@ const StatementTransactionTable: React.FC<{
 const StatementSummaryPanel: React.FC<{ summary: StatementSummaryDTO }> = ({ summary }) => {
   const rows: Array<{ label: string; value: MoneyAmountDTO; emphasize?: boolean; deduction?: boolean }> = [
     { label: 'Opening Balance', value: summary.openingBalance },
-    { label: 'Amount Received', value: summary.totalRent },
-    { label: 'Less Commission', value: summary.totalCommission, deduction: true },
-    { label: 'Less VAT on Commission', value: summary.totalVat, deduction: true },
-    { label: 'Less Levy', value: summary.totalLevies, deduction: true },
-    { label: 'Net Owner Amount', value: summary.totalOwnerAmount },
+    { label: 'Total Amount Received', value: summary.totalAmountReceived || summary.totalRent },
+    { label: 'Total Commission', value: summary.totalCommission, deduction: true },
+    { label: 'Total VAT on Commission', value: summary.totalVat, deduction: true },
+    { label: 'Total Levy', value: summary.totalLevies, deduction: true },
+    { label: 'Net Amount Due to Owner', value: summary.totalOwnerAmount },
     { label: 'Owner Payouts', value: summary.totalPayouts, deduction: true },
-    { label: 'Balance Due to Owner', value: summary.closingBalance, emphasize: true }
+    { label: 'Closing Balance Due to Owner', value: summary.closingBalance, emphasize: true }
   ];
   return (
     <section className="statement-summary">
@@ -419,13 +419,13 @@ const statementStyles = `
   .statement-table { width: 100%; max-width: 100%; border-collapse: collapse; table-layout: fixed; }
   .statement-table col:nth-child(1), .statement-table th:nth-child(1) { width: 8%; }
   .statement-table col:nth-child(2), .statement-table th:nth-child(2) { width: 7%; }
-  .statement-table col:nth-child(3), .statement-table th:nth-child(3) { width: 11%; }
-  .statement-table col:nth-child(4), .statement-table th:nth-child(4) { width: 11%; }
+  .statement-table col:nth-child(3), .statement-table th:nth-child(3) { width: 13%; }
+  .statement-table col:nth-child(4), .statement-table th:nth-child(4) { width: 12%; }
   .statement-table col:nth-child(5), .statement-table th:nth-child(5) { width: 10%; }
-  .statement-table col:nth-child(6), .statement-table th:nth-child(6) { width: 14%; }
-  .statement-table col:nth-child(7), .statement-table th:nth-child(7) { width: 9%; }
-  .statement-table col:nth-child(8), .statement-table th:nth-child(8) { width: 15%; }
-  .statement-table col:nth-child(9), .statement-table th:nth-child(9) { width: 15%; }
+  .statement-table col:nth-child(6), .statement-table th:nth-child(6) { width: 12%; }
+  .statement-table col:nth-child(7), .statement-table th:nth-child(7) { width: 8%; }
+  .statement-table col:nth-child(8), .statement-table th:nth-child(8) { width: 16%; }
+  .statement-table col:nth-child(9), .statement-table th:nth-child(9) { width: 14%; }
   .statement-table thead { display: table-header-group; }
   .statement-table tfoot { display: table-footer-group; }
   .statement-table th { background: #dceee4; color: ${brandGreenDark}; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15px; line-height: 1.2; padding: 4px 3px; vertical-align: bottom; border-bottom: 2px solid ${brandGreen}; overflow-wrap: anywhere; }
@@ -476,11 +476,11 @@ const OwnerWaterfallPanel: React.FC<{ waterfall: OwnerWaterfallDTO; detail?: Led
   <section className="statement-waterfall" style={waterfall.reviewRequired ? { background: '#fff7ed' } : undefined}>
     <div className="summary-heading">{detail ? 'How this amount was calculated' : 'How the owner amount is calculated'}</div>
     <div className="waterfall-lines">
-      <div>Amount received {formatMoney(waterfall.grossAmount)}</div>
+      <div>Total amount received {formatMoney(waterfall.grossAmount)}</div>
       <div>Less commission {formatDeduction(waterfall.commissionAmount)}</div>
       <div>Less levy {formatDeduction(waterfall.levyAmount)}</div>
       <div>Less VAT on commission {formatDeduction(waterfall.vatOnCommission)}{waterfall.vatRate != null ? ` at ${(waterfall.vatRate <= 1 ? waterfall.vatRate * 100 : waterfall.vatRate).toFixed(1)}%` : ''}</div>
-      <div className="waterfall-net">Net owner amount {formatMoney(waterfall.netOwnerAmount)}</div>
+      <div className="waterfall-net">Net amount due to owner {formatMoney(waterfall.netOwnerAmount)}</div>
       {waterfall.reviewRequired ? (
         <div className="waterfall-review">
           Review required. Recorded owner income is {waterfall.recordedOwnerAmount ? formatMoney(waterfall.recordedOwnerAmount) : 'missing'}. Difference {formatMoney(waterfall.difference)}. No amount was changed.
@@ -498,6 +498,7 @@ export const OwnerStatementPreview: React.FC<{ statement: OwnerStatementDTO; lay
   const summary = statement.statementSummary || {
     openingBalance: statement.executiveSummary.openingBalance,
     totalRent: statement.rentalSettlement?.grossRent || statement.executiveSummary.rentalIncome,
+    totalAmountReceived: statement.rentalSettlement?.grossRent || statement.executiveSummary.rentalIncome,
     totalCommission: statement.rentalSettlement?.commission || { amount: 0, currency: statement.executiveSummary.rentalIncome.currency },
     totalVat: statement.rentalSettlement?.vatOnCommission || { amount: 0, currency: statement.executiveSummary.rentalIncome.currency },
     totalLevies: statement.rentalSettlement?.levy || { amount: 0, currency: statement.executiveSummary.rentalIncome.currency },

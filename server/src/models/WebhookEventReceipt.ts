@@ -7,6 +7,7 @@ export interface IWebhookEventReceipt extends Document {
   companyId?: mongoose.Types.ObjectId;
   paymentId?: mongoose.Types.ObjectId;
   status: 'processing' | 'processed' | 'failed';
+  payloadFingerprint?: string;
   lastError?: string;
   processedAt?: Date;
   createdAt: Date;
@@ -20,6 +21,7 @@ const WebhookEventReceiptSchema = new Schema<IWebhookEventReceipt>(
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', required: false, index: true },
     status: { type: String, enum: ['processing', 'processed', 'failed'], default: 'processing', index: true },
+    payloadFingerprint: { type: String, required: false },
     lastError: { type: String, required: false },
     processedAt: { type: Date, required: false }
   },

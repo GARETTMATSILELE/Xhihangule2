@@ -219,8 +219,8 @@ async function run(): Promise<void> {
   {
     const rateSvc = srcFile('services/taxRateService.ts');
     assert.ok(rateSvc.includes('STANDARD_VAT_PERCENT_FROM_2026'));
-    assert.ok(rateSvc.includes('STANDARD_VAT_PERCENT_BEFORE_2026'));
     const vatCalc = srcFile('services/tax/vatCalculation.ts');
+    assert.ok(vatCalc.includes('STANDARD_VAT_PERCENT_BEFORE_2026'), 'the pre-2026 rate constant lives in the VAT calculation module');
     assert.ok(vatCalc.includes('15.5'));
     results['Dated VAT rate seed'] = 'PASS';
   }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Property } from '../models/Property';
@@ -324,7 +325,7 @@ export const addExpense = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'User authentication required' });
     }
 
-    const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
+    const idempotencyKey = String((req.headers['idempotency-key'] as string) || req.body?.idempotencyKey || `expense:${randomUUID()}`).trim();
 
     const expenseData = {
       amount: Number(amount),
@@ -342,8 +343,8 @@ export const addExpense = async (req: Request, res: Response) => {
     if (req.user?.companyId) {
       await accountingIntegrationService.syncExpenseCreated({
         companyId: String(req.user.companyId),
-        sourceId: `property:${propertyId}:${Date.now()}`,
-        reference: `PROP-EXP-${Date.now()}`,
+        sourceId: `property-expense:${propertyId}:${idempotencyKey}`,
+        reference: `PROP-EXP-${idempotencyKey}`.slice(0, 120),
         amount: Number(amount),
         description: description || category || 'Property expense',
         date: date ? new Date(date) : new Date(),

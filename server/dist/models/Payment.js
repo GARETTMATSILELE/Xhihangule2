@@ -254,6 +254,19 @@ const PaymentSchema = new mongoose_1.Schema({
         vatJurisdiction: { type: String, required: false },
         vatRuleId: { type: String, required: false },
         vatTaxPoint: { type: Date, required: false },
+        vatDecision: {
+            registrationStatus: { type: Boolean, required: false },
+            registrationEffectiveDate: { type: Date, required: false },
+            registrationCancelledAt: { type: Date, required: false },
+            taxClassification: { type: String, required: false },
+            centralVatRate: { type: Number, required: false },
+            taxRateEffectiveDate: { type: Date, required: false },
+            propertyVatApplicable: { type: Boolean, required: false },
+            treatment: { type: String, enum: ['inclusive', 'exclusive', 'none'], required: false },
+            commissionBase: { type: Number, required: false },
+            vatAmount: { type: Number, required: false },
+            reason: { type: String, required: false }
+        },
         agentSplit: {
             ownerAgentShare: { type: Number, required: false, default: 0 },
             collaboratorAgentShare: { type: Number, required: false, default: 0 },

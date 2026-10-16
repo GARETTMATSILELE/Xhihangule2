@@ -26,12 +26,21 @@ const BillingReturn: React.FC = () => {
         const resp = await api.post('/paynow/confirm', { reference });
         const state = String(resp.data?.paymentStatus || '').toLowerCase();
         if (stopped) return;
-        if (state === 'paid' || state === 'reconciled') {
+        if (state === 'reconciled' || resp.data?.activated === true) {
           setPaymentStatus('paid');
           setMessage('Payment received. Your Mantis subscription is active.');
           return;
         }
-        if (state === 'cancelled' || state === 'failed' || state === 'refunded') {
+        if (state === 'paid') {
+          if (attempts >= 8) {
+            setPaymentStatus('pending');
+            setMessage('Payment was received. Registration activation is still finishing.');
+            return;
+          }
+          window.setTimeout(check, 2500);
+          return;
+        }
+        if (state === 'cancelled' || state === 'failed' || state === 'refunded' || state === 'expired') {
           setPaymentStatus('failed');
           setMessage('No successful payment has been confirmed. You can retry checkout. This registration is still saved.');
           return;

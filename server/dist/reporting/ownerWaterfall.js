@@ -22,6 +22,6 @@ function explainOwnerWaterfall(input) {
         recordedOwnerAmount,
         difference,
         reviewRequired: recordedOwnerAmount != null && !(0, money_1.moneyAmountsMatch)(netOwnerAmount, recordedOwnerAmount),
-        formula: 'Amount received − commission − levy − VAT on commission = net owner amount'
+        formula: 'Total amount received − commission − levy − VAT on commission = net amount due to owner'
     };
 }

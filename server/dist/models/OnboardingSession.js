@@ -40,7 +40,7 @@ const OnboardingSessionSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
     subscriptionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Subscription', required: false, index: true },
     paymentSessionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'PaymentSession', required: false, index: true },
-    idempotencyKey: { type: String, required: true, trim: true, index: true },
+    idempotencyKey: { type: String, required: true, trim: true },
     status: {
         type: String,
         enum: ['PENDING_SETUP', 'PENDING_PAYMENT', 'PAYMENT_RECEIVED', 'INITIALIZING_WORKSPACE', 'ACTIVE', 'FAILED_SETUP', 'SUSPENDED', 'EXPIRED'],

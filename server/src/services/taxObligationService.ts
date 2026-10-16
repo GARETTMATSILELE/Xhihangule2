@@ -4,11 +4,56 @@ import { TaxReviewItem } from '../models/TaxReviewItem';
 import type { CanonicalTaxType, TaxObligationStatus } from './tax/taxTypes';
 import { isPayableStatus, isSettledStatus } from './tax/taxTypes';
 import { resolveTaxFx } from './tax/fxPolicy';
-import { roundMoney } from '../utils/money';
+import { idsEqual, roundMoney } from '../utils/money';
 import { throwOnceIfArmed } from './testFailureSeam';
 
 const toId = (value: mongoose.Types.ObjectId | string): mongoose.Types.ObjectId =>
   value instanceof mongoose.Types.ObjectId ? value : new mongoose.Types.ObjectId(String(value));
+
+function duplicateKeyDetails(error: any): { pattern: Record<string, unknown>; value: Record<string, unknown> } | null {
+  if (Number(error?.code) !== 11000) return null;
+  const pattern = error?.keyPattern || error?.errorResponse?.keyPattern;
+  const value = error?.keyValue || error?.errorResponse?.keyValue;
+  if (!pattern || typeof pattern !== 'object' || !value || typeof value !== 'object') return null;
+  return { pattern, value };
+}
+
+function keyMatchesObligationIdentity(
+  value: Record<string, unknown>,
+  identity: { companyId: unknown; paymentId?: unknown; taxType: unknown }
+): boolean {
+  if (identity.companyId == null || identity.paymentId == null || identity.taxType == null) return false;
+  if (value.companyId != null && !idsEqual(value.companyId, identity.companyId)) return false;
+  if (value.paymentId != null && !idsEqual(value.paymentId, identity.paymentId)) return false;
+  if (value.taxType != null && String(value.taxType) !== String(identity.taxType)) return false;
+  return value.companyId != null && value.paymentId != null && value.taxType != null;
+}
+
+/** 11000 is an original collision only when the index key is this company, payment, and tax type. */
+function isExpectedOriginalDuplicate(
+  error: any,
+  identity: { companyId: unknown; paymentId?: unknown; taxType: unknown }
+): boolean {
+  const details = duplicateKeyDetails(error);
+  if (!details) return false;
+  const fields = Object.keys(details.pattern);
+  const coversIdentity = fields.includes('companyId') && fields.includes('paymentId') && fields.includes('taxType');
+  if (!coversIdentity || !keyMatchesObligationIdentity(details.value, identity)) return false;
+  if (fields.includes('reversalOf') && details.value.reversalOf != null) return false;
+  return true;
+}
+
+/** 11000 is a reversal collision only when the index key is this original's reversal row. */
+function isExpectedReversalDuplicate(error: any, original: { _id: unknown; companyId: unknown; paymentId?: unknown; taxType: unknown }): boolean {
+  const details = duplicateKeyDetails(error);
+  if (!details) return false;
+  const fields = Object.keys(details.pattern);
+  if (!fields.includes('reversalOf') || !fields.includes('companyId') || !fields.includes('paymentId') || !fields.includes('taxType')) {
+    return false;
+  }
+  if (!idsEqual(details.value.reversalOf, original._id)) return false;
+  return keyMatchesObligationIdentity(details.value, original);
+}
 
 export async function upsertPaymentTaxObligation(input: {
   companyId: string;
@@ -38,12 +83,9 @@ export async function upsertPaymentTaxObligation(input: {
     companyId,
     paymentId,
     taxType: input.taxType,
-    reversalOf: { $exists: false }
+    reversalOf: null
   });
-  if (existing) {
-    if (existing.status === 'REVERSED' || isSettledStatus(existing.status)) return String(existing._id);
-    return String(existing._id);
-  }
+  if (existing) return String(existing._id);
 
   const fx = resolveTaxFx({
     transactionCurrency: input.currency,
@@ -63,35 +105,62 @@ export async function upsertPaymentTaxObligation(input: {
     });
   }
 
-  const created = await TaxObligation.create({
-    companyId,
-    taxType: input.taxType,
-    entityType: 'payment',
-    entityId: input.paymentId,
-    propertyId: input.propertyId ? toId(input.propertyId) : undefined,
-    paymentId,
-    transactionId: input.paymentId,
-    taxPeriod: input.taxPeriod,
-    transactionDate: input.transactionDate,
-    currency: fx.transactionCurrency,
-    taxCurrency: fx.taxCurrency,
-    exchangeRate: fx.exchangeRate == null ? undefined : fx.exchangeRate,
-    exchangeRateSource: fx.rateSource,
-    exchangeRateDate: fx.rateDate || input.transactionDate,
-    functionalAmount: fx.fxReviewRequired ? undefined : taxAmount,
-    taxableAmount: roundMoney(input.taxableAmount || 0),
-    taxRate: Number(input.taxRate || 0),
-    taxAmount,
-    calculationBasis: input.calculationBasis,
-    calculationSnapshot: input.calculationSnapshot,
-    status: fx.fxReviewRequired ? 'ACCOUNTANT_REVIEW' : (input.status || (taxAmount > 0 ? 'PAYABLE' : 'CALCULATED')),
-    calculatedAt: new Date(),
-    glAccount: input.glAccount,
-    sourceLedger: input.sourceLedger || 'company_journal',
-    journalEntryId: input.journalEntryId,
-    createdBy: input.createdBy ? toId(input.createdBy) : undefined
-  });
-  return String(created._id);
+  try {
+    const created = await TaxObligation.create({
+      companyId,
+      taxType: input.taxType,
+      entityType: 'payment',
+      entityId: input.paymentId,
+      propertyId: input.propertyId ? toId(input.propertyId) : undefined,
+      paymentId,
+      transactionId: input.paymentId,
+      taxPeriod: input.taxPeriod,
+      transactionDate: input.transactionDate,
+      currency: fx.transactionCurrency,
+      taxCurrency: fx.taxCurrency,
+      exchangeRate: fx.exchangeRate == null ? undefined : fx.exchangeRate,
+      exchangeRateSource: fx.rateSource,
+      exchangeRateDate: fx.rateDate || input.transactionDate,
+      functionalAmount: fx.fxReviewRequired ? undefined : taxAmount,
+      taxableAmount: roundMoney(input.taxableAmount || 0),
+      taxRate: Number(input.taxRate || 0),
+      taxAmount,
+      calculationBasis: input.calculationBasis,
+      calculationSnapshot: input.calculationSnapshot,
+      status: fx.fxReviewRequired ? 'ACCOUNTANT_REVIEW' : (input.status || (taxAmount > 0 ? 'PAYABLE' : 'CALCULATED')),
+      calculatedAt: new Date(),
+      glAccount: input.glAccount,
+      sourceLedger: input.sourceLedger || 'company_journal',
+      journalEntryId: input.journalEntryId,
+      createdBy: input.createdBy ? toId(input.createdBy) : undefined,
+      reversalOf: null
+    });
+    return String(created._id);
+  } catch (error: any) {
+    if (isExpectedOriginalDuplicate(error, { companyId, paymentId, taxType: input.taxType })) {
+      const raced = await TaxObligation.findOne({
+        companyId,
+        paymentId,
+        taxType: input.taxType,
+        reversalOf: null
+      });
+      if (raced) return String(raced._id);
+    }
+    throw error;
+  }
+}
+
+async function linkOriginalToExistingReversal(original: any, reversalId: mongoose.Types.ObjectId): Promise<void> {
+  let dirty = false;
+  if (!original.reversedByObligationId) {
+    original.reversedByObligationId = reversalId;
+    dirty = true;
+  }
+  if (original.status !== 'REVERSED') {
+    original.status = 'REVERSED';
+    dirty = true;
+  }
+  if (dirty) await original.save();
 }
 
 export async function reversePaymentTaxObligations(input: {
@@ -104,7 +173,7 @@ export async function reversePaymentTaxObligations(input: {
   const originals = await TaxObligation.find({
     companyId: toId(input.companyId),
     paymentId: toId(input.paymentId),
-    reversalOf: { $exists: false }
+    reversalOf: null
   });
   if (!originals.length) return 'skipped';
   throwOnceIfArmed(
@@ -114,49 +183,58 @@ export async function reversePaymentTaxObligations(input: {
   );
   for (const original of originals) {
     const preservedAmount = Number(original.taxAmount || 0);
-    const existing = await TaxObligation.findOne({ reversalOf: original._id });
+    const existing = await TaxObligation.findOne({
+      companyId: original.companyId,
+      paymentId: original.paymentId,
+      taxType: original.taxType,
+      reversalOf: original._id
+    });
     if (existing) {
-      if (!original.reversedByObligationId) {
-        original.reversedByObligationId = existing._id;
-        if (original.status !== 'REVERSED') original.status = 'REVERSED';
-        if (Number(original.taxAmount || 0) !== preservedAmount) original.taxAmount = preservedAmount;
-        await original.save();
-      }
+      await linkOriginalToExistingReversal(original, existing._id);
       continue;
     }
-    const reversal = await TaxObligation.create({
-      companyId: original.companyId,
-      taxType: original.taxType,
-      entityType: original.entityType,
-      entityId: original.entityId,
-      propertyId: original.propertyId,
-      paymentId: original.paymentId,
-      transactionId: `${original.transactionId || original.paymentId}:reversal`,
-      taxPeriod: original.taxPeriod,
-      transactionDate: new Date(),
-      currency: original.currency,
-      taxableAmount: original.taxableAmount,
-      taxRate: original.taxRate,
-      taxAmount: preservedAmount,
-      calculationBasis: `REVERSAL_OF:${original._id}`,
-      calculationSnapshot: {
-        originalId: String(original._id),
-        originalTaxAmount: preservedAmount,
-        originalTaxRate: original.taxRate,
-        originalTaxPeriod: original.taxPeriod,
-        originalTaxType: original.taxType
-      },
-      status: 'REVERSED',
-      calculatedAt: new Date(),
-      glAccount: original.glAccount,
-      sourceLedger: original.sourceLedger,
-      reversalOf: original._id,
-      createdBy: input.createdBy ? toId(input.createdBy) : undefined
-    });
-    original.status = 'REVERSED';
-    original.reversedByObligationId = reversal._id;
-    original.taxAmount = preservedAmount;
-    await original.save();
+    let reversal: any;
+    try {
+      reversal = await TaxObligation.create({
+        companyId: original.companyId,
+        taxType: original.taxType,
+        entityType: original.entityType,
+        entityId: original.entityId,
+        propertyId: original.propertyId,
+        paymentId: original.paymentId,
+        transactionId: `${original.transactionId || original.paymentId}:reversal`,
+        taxPeriod: original.taxPeriod,
+        transactionDate: new Date(),
+        currency: original.currency,
+        taxableAmount: original.taxableAmount,
+        taxRate: original.taxRate,
+        taxAmount: preservedAmount,
+        calculationBasis: `REVERSAL_OF:${original._id}`,
+        calculationSnapshot: {
+          originalId: String(original._id),
+          originalTaxAmount: preservedAmount,
+          originalTaxRate: original.taxRate,
+          originalTaxPeriod: original.taxPeriod,
+          originalTaxType: original.taxType
+        },
+        status: 'REVERSED',
+        calculatedAt: new Date(),
+        glAccount: original.glAccount,
+        sourceLedger: original.sourceLedger,
+        reversalOf: original._id,
+        createdBy: input.createdBy ? toId(input.createdBy) : undefined
+      });
+    } catch (error: any) {
+      if (!isExpectedReversalDuplicate(error, original)) throw error;
+      reversal = await TaxObligation.findOne({
+        companyId: original.companyId,
+        paymentId: original.paymentId,
+        taxType: original.taxType,
+        reversalOf: original._id
+      });
+      if (!reversal) throw error;
+    }
+    await linkOriginalToExistingReversal(original, reversal._id);
   }
   return 'reversed';
 }

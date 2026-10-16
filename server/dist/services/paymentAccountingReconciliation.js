@@ -21,6 +21,7 @@ exports.resolveIncompleteAccountingException = resolveIncompleteAccountingExcept
 exports.applyReconciliationOutcome = applyReconciliationOutcome;
 exports.ensureDepositLedgerFromPayment = ensureDepositLedgerFromPayment;
 exports.repairPaymentAccounting = repairPaymentAccounting;
+exports.missingOriginalVatObligation = missingOriginalVatObligation;
 exports.ensurePaymentAccountingPosted = ensurePaymentAccountingPosted;
 exports.refreshPaymentAccountingStatus = refreshPaymentAccountingStatus;
 exports.initialAccountingStatusForNewPayment = initialAccountingStatusForNewPayment;
@@ -35,10 +36,12 @@ const CompanyAccount_1 = require("../models/CompanyAccount");
 const JournalEntry_1 = require("../models/JournalEntry");
 const JournalLine_1 = require("../models/JournalLine");
 const VatRecord_1 = require("../models/VatRecord");
+const TaxObligation_1 = require("../models/TaxObligation");
 const rentalDeposit_1 = require("../models/rentalDeposit");
 const AccountingEventLog_1 = require("../models/AccountingEventLog");
 const AccountingException_1 = require("../models/AccountingException");
 const paymentAccountingOrchestrator_1 = require("./paymentAccountingOrchestrator");
+const testFailureSeam_1 = require("./testFailureSeam");
 const paymentAccountingProjection_1 = require("./paymentAccountingProjection");
 Object.defineProperty(exports, "buildAccountingRepairPlan", { enumerable: true, get: function () { return paymentAccountingProjection_1.buildAccountingRepairPlan; } });
 Object.defineProperty(exports, "buildExpectedAccountingProjection", { enumerable: true, get: function () { return paymentAccountingProjection_1.buildExpectedAccountingProjection; } });
@@ -46,6 +49,7 @@ Object.defineProperty(exports, "deriveAccountingComplete", { enumerable: true, g
 Object.defineProperty(exports, "deriveAccountingStatus", { enumerable: true, get: function () { return paymentAccountingProjection_1.deriveAccountingStatus; } });
 Object.defineProperty(exports, "evaluateAccountingReconciliation", { enumerable: true, get: function () { return paymentAccountingProjection_1.evaluateAccountingReconciliation; } });
 const paymentAccountingCompleteness_1 = require("./paymentAccountingCompleteness");
+const vatPolicyService_1 = require("./vatPolicyService");
 const money_1 = require("../utils/money");
 function asObjectId(paymentId) {
     return mongoose_1.default.Types.ObjectId.isValid(paymentId) ? new mongoose_1.default.Types.ObjectId(paymentId) : null;
@@ -323,17 +327,27 @@ function resolveIncompleteAccountingException(paymentId, opts) {
 }
 function applyReconciliationOutcome(paymentId, recon, extra) {
     return __awaiter(this, void 0, void 0, function* () {
-        const persisted = yield persistAccountingIntegrityFromRecon(paymentId, recon, extra);
+        let effective = recon;
+        let lastError = extra === null || extra === void 0 ? void 0 : extra.lastError;
         if (recon.accountingComplete) {
+            const payment = yield Payment_1.Payment.findById(paymentId);
+            const obligationGap = payment ? yield missingOriginalVatObligation(payment) : null;
+            if (obligationGap) {
+                effective = Object.assign(Object.assign({}, recon), { status: 'incomplete', accountingComplete: false, missing: Array.from(new Set([...(recon.missing || []), 'vat'])) });
+                lastError = obligationGap;
+            }
+        }
+        const persisted = yield persistAccountingIntegrityFromRecon(paymentId, effective, Object.assign(Object.assign({}, extra), { lastError }));
+        if (effective.accountingComplete) {
             yield resolveIncompleteAccountingException(paymentId, { resolution: 'reconcilePayment returned VALID/complete' });
         }
-        else if (recon.status === 'incomplete' || recon.status === 'failed') {
+        else if (effective.status === 'incomplete' || effective.status === 'failed') {
             yield upsertIncompleteAccountingException({
                 paymentId,
                 companyId: extra === null || extra === void 0 ? void 0 : extra.companyId,
-                propertyId: recon.propertyId,
-                recon,
-                error: extra === null || extra === void 0 ? void 0 : extra.lastError
+                propertyId: effective.propertyId,
+                recon: effective,
+                error: lastError
             });
         }
         return persisted;
@@ -365,6 +379,7 @@ function ensureDepositLedgerFromPayment(payment, session) {
         const existing = yield rentalDeposit_1.RentalDeposit.findOne(filter).select('_id').session(session || null).lean();
         if (existing)
             return 'existing';
+        (0, testFailureSeam_1.throwOnceIfArmed)(String(payment._id), String(payment.notes || ''), 'PHASE_FAIL_DEPOSIT');
         try {
             const result = yield rentalDeposit_1.RentalDeposit.findOneAndUpdate(filter, { $setOnInsert: insertDoc }, { upsert: true, new: true, rawResult: true, session: session || undefined });
             const upserted = Boolean(((_a = result === null || result === void 0 ? void 0 : result.lastErrorObject) === null || _a === void 0 ? void 0 : _a.upserted) || (result === null || result === void 0 ? void 0 : result.upsertedId));
@@ -544,6 +559,37 @@ function repairPaymentAccounting(paymentId, opts) {
     });
 }
 /**
+ * A positive VAT snapshot needs an original VAT_ON_COMMISSION obligation.
+ * A reversed original explains the absence of an active obligation.
+ * This check does not create an obligation or change the snapshot.
+ */
+function missingOriginalVatObligation(payment) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        if (!payment || payment.reversalOfPaymentId)
+            return null;
+        const vat = Number((_d = (_b = (_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) !== null && _b !== void 0 ? _b : (_c = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.vatAmount) !== null && _d !== void 0 ? _d : 0);
+        if (!(vat > 0.005))
+            return null;
+        const rows = yield TaxObligation_1.TaxObligation.find({
+            paymentId: payment._id,
+            taxType: 'VAT_ON_COMMISSION'
+        }).select('reversalOf status taxAmount').lean();
+        const originals = rows.filter((row) => row.reversalOf == null);
+        if (originals.some((row) => String(row.status) === 'REVERSED'))
+            return null;
+        const active = originals.find((row) => String(row.status) !== 'REVERSED');
+        if (!active) {
+            return `Payment ${payment._id} has VAT snapshot ${vat.toFixed(2)} and no original VAT_ON_COMMISSION obligation.`;
+        }
+        const obligationAmount = Number(active.taxAmount || 0);
+        if (Math.abs(obligationAmount - vat) > 0.009) {
+            return `Payment ${payment._id} VAT snapshot ${vat.toFixed(2)} does not match obligation amount ${obligationAmount.toFixed(2)}.`;
+        }
+        return null;
+    });
+}
+/**
  * Normal payment-creation posting + verification. Not a repair loop.
  * If projection is incomplete, the payment remains saved and accountingComplete stays false.
  */
@@ -557,6 +603,20 @@ function ensurePaymentAccountingPosted(paymentId, opts) {
             lastError: ((_a = postResult.errors) === null || _a === void 0 ? void 0 : _a.length) ? postResult.errors.join('; ') : undefined,
             companyId: (payment === null || payment === void 0 ? void 0 : payment.companyId) ? String(payment.companyId) : undefined
         });
+        const postedPayment = yield Payment_1.Payment.findById(paymentId);
+        const vatGap = yield (0, vatPolicyService_1.commissionVatSnapshotGap)(postedPayment);
+        const obligationGap = yield missingOriginalVatObligation(postedPayment);
+        if ((vatGap === null || vatGap === void 0 ? void 0 : vatGap.code) === 'MISSING_VAT_ON_ELIGIBLE_COMMISSION' || obligationGap) {
+            yield Payment_1.Payment.updateOne({ _id: paymentId }, {
+                $set: {
+                    accountingComplete: false,
+                    accountingStatus: 'incomplete',
+                    accountingLastError: obligationGap || (vatGap === null || vatGap === void 0 ? void 0 : vatGap.detail),
+                    accountingMissing: Array.from(new Set([...(recon.missing || []), 'vat']))
+                }
+            });
+            return { recon, accountingComplete: false, accountingStatus: 'incomplete' };
+        }
         if (!recon.accountingComplete) {
             logger_1.logger.warn('Payment accounting incomplete after posting', {
                 paymentId,

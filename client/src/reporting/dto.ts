@@ -89,6 +89,9 @@ export interface LedgerRowDTO {
   sourceReferences: SourceReferenceDTO[];
   rowType?: StatementRowType;
   rentAmount?: MoneyAmountDTO;
+  totalAmountReceived?: MoneyAmountDTO;
+  contractualRent?: MoneyAmountDTO;
+  receiptReviewRequired?: boolean;
   commission?: MoneyAmountDTO;
   vatOnCommission?: MoneyAmountDTO;
   levies?: MoneyAmountDTO;
@@ -114,6 +117,7 @@ export interface OwnerWaterfallDTO {
 export interface StatementSummaryDTO {
   openingBalance: MoneyAmountDTO;
   totalRent: MoneyAmountDTO;
+  totalAmountReceived?: MoneyAmountDTO;
   totalCommission: MoneyAmountDTO;
   totalVat: MoneyAmountDTO;
   totalLevies: MoneyAmountDTO;

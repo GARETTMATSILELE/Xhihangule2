@@ -38,6 +38,7 @@ import { accountantWorkQueue, rentCollectionBoard, seniorPortfolio } from '../ag
 import {
   getAccountingIntegritySummary,
   listAccountingIntegrityInconsistencies,
+  retryFailedLedgerEvent,
   getPaymentFinancialTrace,
   getTrustVisibility
 } from '../controllers/paymentAccountingIntegrityController';
@@ -200,6 +201,7 @@ router.get('/trust-visibility', canViewAccountantDashboard, getTrustVisibility);
 router.post('/payments/:id/accounting/repair', canViewAccountantDashboard, repairPaymentAccountingExplicit);
 router.get('/accounting-integrity/summary', canViewAccountantDashboard, getAccountingIntegritySummary);
 router.get('/accounting-integrity/inconsistencies', canViewAccountantDashboard, listAccountingIntegrityInconsistencies);
+router.post('/accounting-integrity/ledger-events/:id/retry', canViewAccountantDashboard, retryFailedLedgerEvent);
 router.put('/payments/:id/status', canManagePayments, updatePaymentStatus);
 router.post('/payments/:id/reverse', canManagePayments, reversePayment);
 router.post('/payments/:id/finalize', canManagePayments, finalizeProvisionalPayment);

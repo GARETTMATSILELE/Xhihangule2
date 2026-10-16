@@ -21,6 +21,10 @@ export interface ILedgerEvent extends Document {
   nextAttemptAt?: Date;
   claimedAt?: Date;
   lastError?: string;
+  failureClass?: 'transient' | 'permanent' | 'conflict';
+  companyId?: mongoose.Types.ObjectId;
+  correlationId?: string;
+  exhaustedAt?: Date;
   processorGeneration: number;
   metadata?: Record<string, unknown>;
   createdAt: Date;
@@ -40,6 +44,10 @@ const LedgerEventSchema = new Schema<ILedgerEvent>({
   nextAttemptAt: { type: Date, default: () => new Date() },
   claimedAt: { type: Date, default: undefined },
   lastError: { type: String, default: undefined },
+  failureClass: { type: String, enum: ['transient', 'permanent', 'conflict'], required: false },
+  companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
+  correlationId: { type: String, required: false },
+  exhaustedAt: { type: Date, required: false },
   processorGeneration: { type: Number, default: LEDGER_EVENT_PROCESSOR_GENERATION, index: true },
   metadata: { type: Schema.Types.Mixed, default: undefined }
 }, { timestamps: true });

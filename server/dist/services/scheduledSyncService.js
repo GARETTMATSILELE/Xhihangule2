@@ -366,6 +366,8 @@ class ScheduledSyncService {
         return __awaiter(this, void 0, void 0, function* () {
             const { runPaymentAccountingIntegrityPass } = yield Promise.resolve().then(() => __importStar(require('./paymentAccountingIntegrity')));
             yield runPaymentAccountingIntegrityPass(50);
+            const { logStuckRegistrationCheckouts } = yield Promise.resolve().then(() => __importStar(require('./registrationCheckoutMonitor')));
+            yield logStuckRegistrationCheckouts();
         });
     }
     /**

@@ -14,7 +14,7 @@ import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotif
 import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationService';
 import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
 import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
-import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy } from '../services/vatPolicyService';
+import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy, stampVatDecision } from '../services/vatPolicyService';
 import { openReview } from '../services/taxObligationService';
 import { initialAccountingIntegrityFields, ensureDepositLedgerFromPayment } from '../services/paymentAccountingReconciliation';
 import { COMPLETED_PAYMENT_IMMUTABLE_MESSAGE, assertCompletedPaymentFinanciallyImmutable } from '../services/paymentFinancialImmutability';
@@ -1176,6 +1176,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
           levyAllocated
         );
       }
+      commissionDetails = stampVatDecision(commissionDetails, commissionVatPolicy);
     } else {
       commissionDetails = await CommissionService.calculate(
         commissionBaseAmount,
@@ -1444,7 +1445,7 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
           if (!prepared.ok) {
             return res.status(400).json(introductionContextErrorResponse(prepared));
           }
-          updateData.commissionDetails = prepared.snapshot;
+          updateData.commissionDetails = stampVatDecision(prepared.snapshot, commissionVatPolicy);
           updateData.applyVatOnCommission = prepared.result.vatOnCommission;
           updateData.vatOnCommissionRate = prepared.result.vatRate || 0;
           updateData.vatCommissionTreatment = prepared.result.vatTreatment;
@@ -1460,7 +1461,10 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
             vatRate: commissionVat.vatRate,
             paymentDate: updatePaymentDate
           });
-          updateData.commissionDetails = applyLevyPassThroughToSnapshot(result, rentAllocated, levyAllocated);
+          updateData.commissionDetails = stampVatDecision(
+            applyLevyPassThroughToSnapshot(result, rentAllocated, levyAllocated),
+            commissionVatPolicy
+          );
           updateData.applyVatOnCommission = result.vatOnCommission;
           updateData.vatOnCommissionRate = result.vatRate || 0;
           updateData.vatCommissionTreatment = result.vatTreatment;

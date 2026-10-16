@@ -4,6 +4,7 @@ import {
   listCompanyAccountingInconsistencies
 } from '../services/paymentAccountingIntegrity';
 import { buildFinancialTrace, listTrustVisibility } from '../services/financialTraceService';
+import ledgerEventService from '../services/ledgerEventService';
 
 function parseDate(value: unknown): Date | undefined {
   if (!value || typeof value !== 'string') return undefined;
@@ -46,6 +47,29 @@ export const getTrustVisibility = async (req: Request, res: Response) => {
     return res.json({ rows });
   } catch (error: any) {
     return res.status(500).json({ message: error?.message || 'Failed to load trust visibility' });
+  }
+};
+
+export const retryFailedLedgerEvent = async (req: Request, res: Response) => {
+  if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+  const companyId = String(req.user.companyId || '');
+  if (!companyId) return res.status(400).json({ message: 'companyId is required' });
+  try {
+    const result = await ledgerEventService.retryFailedEvent(String(req.params.id), companyId, {
+      userId: String((req.user as any).userId || (req.user as any).id || (req.user as any)._id || ''),
+      requestId: req.get('x-request-id') || undefined
+    });
+    return res.json(result);
+  } catch (error: any) {
+    const code = String(error?.code || '');
+    const status = code === 'LEDGER_EVENT_COMPANY_MISMATCH'
+      ? 404
+      : code === 'AUDIT_PERSIST_FAILED'
+        ? 503
+        : code === 'LEDGER_EVENT_NOT_RETRYABLE' || code === 'LEDGER_EVENT_ALREADY_CLAIMED'
+          ? 409
+          : 500;
+    return res.status(status).json({ message: error?.message || 'Ledger retry failed', code: code || undefined });
   }
 };
 

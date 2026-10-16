@@ -67,6 +67,29 @@ const TabPanel = memo((props: TabPanelProps) => {
   );
 });
 
+const toDateInput = (value: unknown): string => {
+  if (!value) return '';
+  const parsed = new Date(value as string);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const buildTaxProfilePayload = (source: any) => {
+  const vatNumber = String(source?.vatNumber || '').trim();
+  const effectiveDate = String(source?.taxProfile?.vatRegistrationEffectiveDate || '').trim();
+  const vatRegistered = Boolean(vatNumber && effectiveDate);
+  return {
+    vatRegistered,
+    vatRegistrationEffectiveDate: effectiveDate || null,
+    vatRegistrationCancelledAt: null,
+    vatCategory: source?.taxProfile?.vatCategory || '',
+    fiscalisationEnabled: Boolean(source?.taxProfile?.fiscalisationEnabled)
+  };
+};
+
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
@@ -104,7 +127,6 @@ const SettingsPage: React.FC = () => {
     taxProfile: {
       vatRegistered: false,
       vatRegistrationEffectiveDate: '',
-      vatRegistrationCancelledAt: '',
       vatCategory: '',
       fiscalisationEnabled: false
     },
@@ -225,13 +247,8 @@ const SettingsPage: React.FC = () => {
         tinNumber: company.tinNumber || '',
         vatNumber: company.vatNumber || '',
         taxProfile: {
-          vatRegistered: Boolean((company as any)?.taxProfile?.vatRegistered),
-          vatRegistrationEffectiveDate: (company as any)?.taxProfile?.vatRegistrationEffectiveDate
-            ? String((company as any).taxProfile.vatRegistrationEffectiveDate).slice(0, 10)
-            : '',
-          vatRegistrationCancelledAt: (company as any)?.taxProfile?.vatRegistrationCancelledAt
-            ? String((company as any).taxProfile.vatRegistrationCancelledAt).slice(0, 10)
-            : '',
+          vatRegistered: Boolean(String(company.vatNumber || '').trim() && (company as any)?.taxProfile?.vatRegistrationEffectiveDate),
+          vatRegistrationEffectiveDate: toDateInput((company as any)?.taxProfile?.vatRegistrationEffectiveDate),
           vatCategory: (company as any)?.taxProfile?.vatCategory || '',
           fiscalisationEnabled: Boolean((company as any)?.taxProfile?.fiscalisationEnabled)
         },
@@ -380,13 +397,7 @@ const SettingsPage: React.FC = () => {
         registrationNumber: settings.registrationNumber,
         tinNumber: settings.tinNumber,
         vatNumber: settings.vatNumber,
-        taxProfile: {
-          vatRegistered: Boolean((settings as any).taxProfile?.vatRegistered),
-          vatRegistrationEffectiveDate: (settings as any).taxProfile?.vatRegistrationEffectiveDate || null,
-          vatRegistrationCancelledAt: (settings as any).taxProfile?.vatRegistrationCancelledAt || null,
-          vatCategory: (settings as any).taxProfile?.vatCategory || '',
-          fiscalisationEnabled: Boolean((settings as any).taxProfile?.fiscalisationEnabled)
-        },
+        taxProfile: buildTaxProfilePayload(settings),
         address: settings.companyAddress,
         phone: settings.companyPhone,
         email: settings.companyEmail,
@@ -437,13 +448,7 @@ const SettingsPage: React.FC = () => {
           registrationNumber: settings.registrationNumber,
           tinNumber: settings.tinNumber,
           vatNumber: settings.vatNumber,
-          taxProfile: {
-            vatRegistered: Boolean((settings as any).taxProfile?.vatRegistered),
-            vatRegistrationEffectiveDate: (settings as any).taxProfile?.vatRegistrationEffectiveDate || null,
-            vatRegistrationCancelledAt: (settings as any).taxProfile?.vatRegistrationCancelledAt || null,
-            vatCategory: (settings as any).taxProfile?.vatCategory || '',
-            fiscalisationEnabled: Boolean((settings as any).taxProfile?.fiscalisationEnabled)
-          },
+          taxProfile: buildTaxProfilePayload(settings),
           address: settings.companyAddress,
           phone: settings.companyPhone,
           email: settings.companyEmail,
@@ -740,54 +745,49 @@ const SettingsPage: React.FC = () => {
                 label="VAT Number"
                 name="vatNumber"
                 value={settings.vatNumber}
-                onChange={handleInputChange}
+                onChange={(e) => {
+                  const vatNumber = e.target.value;
+                  setSettings((prev: any) => {
+                    const effectiveDate = String(prev.taxProfile?.vatRegistrationEffectiveDate || '').trim();
+                    return {
+                      ...prev,
+                      vatNumber,
+                      taxProfile: {
+                        ...(prev.taxProfile || {}),
+                        vatRegistered: Boolean(vatNumber.trim() && effectiveDate)
+                      }
+                    };
+                  });
+                }}
                 margin="normal"
               />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Boolean((settings as any).taxProfile?.vatRegistered)}
-                    onChange={(e) => setSettings((prev: any) => ({
-                      ...prev,
-                      taxProfile: { ...(prev.taxProfile || {}), vatRegistered: e.target.checked }
-                    }))}
-                    name="taxProfile.vatRegistered"
-                  />
-                }
-                label="VAT registered"
+              <TextField
+                fullWidth
+                type="date"
+                label="VAT start date"
+                value={(settings as any).taxProfile?.vatRegistrationEffectiveDate || ''}
+                onChange={(e) => setSettings((prev: any) => {
+                  const effectiveDate = e.target.value;
+                  return {
+                    ...prev,
+                    taxProfile: {
+                      ...(prev.taxProfile || {}),
+                      vatRegistrationEffectiveDate: effectiveDate,
+                      vatRegistered: Boolean(String(prev.vatNumber || '').trim() && effectiveDate)
+                    }
+                  };
+                })}
+                margin="normal"
+                InputLabelProps={{ shrink: true }}
+                helperText="VAT becomes active when a VAT number and this start date are saved. Transactions before this date do not charge VAT."
               />
               {!(settings as any).taxProfile?.vatRegistered ? (
-                <Alert severity="warning" sx={{ mt: 1 }}>VAT NOT ACTIVE. Property VAT flags cannot create VAT until company registration is configured.</Alert>
+                <Alert severity="warning" sx={{ mt: 1 }}>VAT NOT ACTIVE. Enter a VAT number and a start date, then save.</Alert>
               ) : (
                 <Alert severity="success" sx={{ mt: 1 }}>
-                  VAT ACTIVE FROM {(settings as any).taxProfile?.vatRegistrationEffectiveDate || 'the registration effective date'}
+                  VAT ACTIVE FROM {(settings as any).taxProfile?.vatRegistrationEffectiveDate}
                 </Alert>
               )}
-              <TextField
-                fullWidth
-                type="date"
-                label="VAT registration effective date"
-                value={(settings as any).taxProfile?.vatRegistrationEffectiveDate || ''}
-                onChange={(e) => setSettings((prev: any) => ({
-                  ...prev,
-                  taxProfile: { ...(prev.taxProfile || {}), vatRegistrationEffectiveDate: e.target.value }
-                }))}
-                margin="normal"
-                InputLabelProps={{ shrink: true }}
-                helperText="VAT is 0 for transactions before this date. A VAT number alone does not register the company."
-              />
-              <TextField
-                fullWidth
-                type="date"
-                label="VAT registration cancellation date"
-                value={(settings as any).taxProfile?.vatRegistrationCancelledAt || ''}
-                onChange={(e) => setSettings((prev: any) => ({
-                  ...prev,
-                  taxProfile: { ...(prev.taxProfile || {}), vatRegistrationCancelledAt: e.target.value }
-                }))}
-                margin="normal"
-                InputLabelProps={{ shrink: true }}
-              />
               <TextField
                 fullWidth
                 label="VAT category"

@@ -19,7 +19,7 @@ import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotif
 import { notifyOwnerOfRentPayment } from '../services/ownerRentNotificationService';
 import accountingIntegrationService from '../services/accountingIntegrationService';
 import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
-import { resolveCommissionVatPolicy, resolveSaleVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock } from '../services/vatPolicyService';
+import { resolveCommissionVatPolicy, resolveSaleVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock, stampVatDecision } from '../services/vatPolicyService';
 import { assertVatPeriodOpen } from '../services/vatReturnService';
 import { openReview } from '../services/taxObligationService';
 import { throwOnceIfArmed } from '../services/testFailureSeam';
@@ -188,10 +188,13 @@ const buildSaleCommissionDetails = async (input: {
   let vatOnCommissionRate = 0;
   if (applyVatOnCommission) {
     const explicit = Number(input.vatOnCommissionRate);
-    if (Number.isFinite(explicit) && explicit >= 0) {
+    if (Number.isFinite(explicit) && explicit > 0) {
       vatOnCommissionRate = Math.max(0, Math.min(1, explicit));
     } else {
       const lookedUp = await getVatRateForDate(companyObjectId);
+      if (!(lookedUp.decimal > 0) || lookedUp.source === 'none') {
+        throw new AppError('No centrally managed VAT rate applies on the payment date. The payment was not saved.', 400);
+      }
       vatOnCommissionRate = lookedUp.decimal;
     }
   }
@@ -792,6 +795,7 @@ export const createPayment = async (req: Request, res: Response) => {
       });
       paymentCommissionDetails = applyLevyPassThroughToSnapshot(paymentCommissionResult, amount, 0);
     }
+    paymentCommissionDetails = stampVatDecision(paymentCommissionDetails, commissionVatPolicy);
 
     try {
       resolveCreateTransactionDomain({
@@ -1147,7 +1151,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
     let rentalVatOnCommissionRate = 0;
     let rentalVatCommissionTreatment: 'inclusive' | 'exclusive' | undefined;
     let resolvedIntroductionLeaseId: string | undefined = rawLeaseId;
-    try {
+    {
       const isRental = resolvedPaymentType !== 'sale';
       const tenantObjectId = manualTenant ? undefined : (rawTenantId ? new mongoose.Types.ObjectId(rawTenantId) : undefined);
       const propertyObjectId = manualProperty ? undefined : (rawPropertyId ? new mongoose.Types.ObjectId(rawPropertyId) : undefined);
@@ -1277,20 +1281,9 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
         }
       }
 
-      // Always enforce server rule over client-provided commissionDetails
-      finalCommissionDetails = computed;
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      // Fallback: give full amount to owner
-      const amountNum = Number(amount || 0);
-      finalCommissionDetails = {
-        totalCommission: 0,
-        preaFee: 0,
-        agentShare: 0,
-        agencyShare: 0,
-        vatOnCommission: 0,
-        ownerAmount: amountNum
-      } as any;
+      // Always enforce server rule over client-provided commissionDetails.
+      // A calculation failure must not save a completed payment with commission and VAT zeroed.
+      finalCommissionDetails = stampVatDecision(computed, vatPolicy);
     }
 
     if (resolvedPaymentType === 'sale') {
@@ -3389,7 +3382,10 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
         vatRate: commissionVat.vatRate,
         paymentDate: paymentDate ? new Date(paymentDate) : new Date()
       });
-      publicCommissionDetails = applyLevyPassThroughToSnapshot(publicCommissionResult, amount, 0);
+      publicCommissionDetails = stampVatDecision(
+        applyLevyPassThroughToSnapshot(publicCommissionResult, amount, 0),
+        commissionVatPolicy
+      );
     }
 
     try {
@@ -4103,7 +4099,7 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     if (ownerId) {
       (payment as any).ownerId = new mongoose.Types.ObjectId(ownerId);
     }
-    payment.commissionDetails = finalCommission as any;
+    payment.commissionDetails = stampVatDecision(finalCommission as any, commissionVatPolicy);
     (payment as any).applyVatOnCommission = Boolean((finalCommission as any)?.vatOnCommission && Number((finalCommission as any)?.vatAmount || 0) > 0);
     (payment as any).vatOnCommissionRate = Number((finalCommission as any)?.vatRate || 0);
     (payment as any).vatCommissionTreatment = (finalCommission as any)?.vatTreatment;

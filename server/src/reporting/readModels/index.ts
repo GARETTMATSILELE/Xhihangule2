@@ -10,7 +10,8 @@ import { PropertyOwner } from '../../models/PropertyOwner';
 import { SalesOwner } from '../../models/SalesOwner';
 import { Tenant } from '../../models/Tenant';
 import { CanonicalLedgerEntry, LedgerQuery } from '../ledger';
-import { resolveStatementRentAmount } from '../statementRent';
+import { explainStatementRentAmount } from '../statementRent';
+import { resolveTotalAmountReceived } from '../totalAmountReceived';
 
 export interface OwnerReadModel {
   id?: string;
@@ -46,6 +47,9 @@ export interface PaymentCommissionSnapshot {
   paymentDate: Date;
   referenceNumber?: string;
   grossRent: number;
+  /** Cash received from the tenant, including levy only when it is part of that receipt. */
+  totalAmountReceived?: number;
+  receiptReviewRequired?: boolean;
   levy: number;
   commission: number;
   vatOnCommission: number;
@@ -464,13 +468,13 @@ class PaymentReportingReadService implements PaymentReadService {
       filter.paymentDate = { $gte: from, $lte: to };
     }
     const rows = await Payment.find(filter).select(
-      'paymentDate amount rentUsed rentAllocated levyAllocated levyUsed commissionDetails referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd vatOnCommissionRate vatCommissionTreatment'
+      'paymentDate amount depositAmount rentUsed rentAllocated levyAllocated levyUsed commissionDetails referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd vatOnCommissionRate vatCommissionTreatment'
     ).lean();
 
     return rows.map((row: any) => {
       const cd = row.commissionDetails || {};
       const levy = Number(cd.levy ?? row.levyAllocated ?? 0);
-      const rentAmount = resolveStatementRentAmount({
+      const explainedRent = explainStatementRentAmount({
         rentUsed: row.rentUsed,
         advanceMonthsPaid: row.advanceMonthsPaid,
         rentAllocated: row.rentAllocated,
@@ -479,6 +483,16 @@ class PaymentReportingReadService implements PaymentReadService {
         grossRent: cd.grossRent,
         amount: row.amount
       });
+      const allocationGross = Number(cd.paymentAllocation?.grossAmount);
+      const receipt = resolveTotalAmountReceived({
+        paymentAmount: row.amount,
+        depositAmount: row.depositAmount,
+        rentComponent: explainedRent.amount,
+        rentSource: explainedRent.source,
+        levy,
+        allocationGross: Number.isFinite(allocationGross) && allocationGross > 0 ? allocationGross : undefined
+      });
+      const rentAmount = explainedRent.amount;
       const vatRateRaw = cd.vatRate ?? row.vatOnCommissionRate;
       const vatRate = vatRateRaw == null || vatRateRaw === '' ? undefined : Number(vatRateRaw);
       const vatTreatment = cd.vatTreatment || row.vatCommissionTreatment;
@@ -487,6 +501,8 @@ class PaymentReportingReadService implements PaymentReadService {
         paymentDate: row.paymentDate,
         referenceNumber: row.referenceNumber ? String(row.referenceNumber) : undefined,
         grossRent: rentAmount ?? 0,
+        totalAmountReceived: receipt.totalAmountReceived,
+        receiptReviewRequired: receipt.reviewRequired,
         levy,
         commission: Number(cd.commissionNet ?? cd.totalCommission ?? 0),
         vatOnCommission: Number(cd.vatOnCommission ?? cd.vatAmount ?? 0),

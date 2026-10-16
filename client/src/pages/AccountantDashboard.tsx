@@ -13,7 +13,6 @@ import {
 import { 
   Notifications as NotificationsIcon,
   Logout as LogoutIcon,
-  Menu as MenuIcon,
   Settings as SettingsIcon
 } from '@mui/icons-material';
 import { useCompany } from '../contexts/CompanyContext';
@@ -22,11 +21,8 @@ import { AccountantSidebar } from '../components/Layout/AccountantSidebar';
 import { useAuth } from '../contexts/AuthContext';
 import DashboardOverview from './AccountantDashboard/DashboardOverview';
 
-const DRAWER_WIDTH = 280;
-
 const AccountantDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const { company } = useCompany();
   const navigate = useNavigate();
   const location = useLocation();
@@ -35,10 +31,6 @@ const AccountantDashboard: React.FC = () => {
   const isUserMenuOpen = Boolean(menuAnchorEl);
   const handleOpenUserMenu = (event: React.MouseEvent<HTMLElement>) => setMenuAnchorEl(event.currentTarget);
   const handleCloseUserMenu = () => setMenuAnchorEl(null);
-
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
 
   useEffect(() => {
     const path = location.pathname;
@@ -160,37 +152,23 @@ const AccountantDashboard: React.FC = () => {
           </Menu>
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', flexGrow: 1, pt: 8 }}>
-        {/* Sidebar fixed and visible across accountant routes */}
-        <Box sx={{ display: { xs: 'none', sm: 'block' }, position: 'fixed', zIndex: 1200 }}>
-          <AccountantSidebar
-            activeTab={activeTab}
-            onTabChange={handleSidebarTabChange}
-          />
-        </Box>
-        {/* Main content */}
+      <Box sx={{ display: 'flex', flexGrow: 1, pt: '64px', minWidth: 0 }}>
+        <AccountantSidebar
+          activeTab={activeTab}
+          onTabChange={handleSidebarTabChange}
+        />
         <Box
           component="main"
           sx={{
             flexGrow: 1,
+            minWidth: 0,
+            width: '100%',
             pt: 3,
-            pr: 3,
+            pr: { xs: 2, sm: 3 },
             pb: 3,
-            pl: 0,
-            width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
-            ml: { sm: `${DRAWER_WIDTH}px` },
+            pl: { xs: 2, sm: 3 },
           }}
         >
-          <Box sx={{ display: { sm: 'none' }, mb: 2 }}>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-            >
-              <MenuIcon />
-            </IconButton>
-          </Box>
           {renderMainContent()}
         </Box>
       </Box>

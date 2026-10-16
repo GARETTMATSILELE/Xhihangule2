@@ -45,6 +45,12 @@ export function nextLedgerEventStatusAfterFailure(): LedgerEventStatus {
   return 'failed';
 }
 
+export const LEDGER_RETRY_LIMIT = 8;
+
+export function ledgerRetryExhausted(attemptCount: number): boolean {
+  return attemptCount >= LEDGER_RETRY_LIMIT;
+}
+
 export function computeLedgerBackoffMs(attempt: number): number {
   const base = 5000;
   const cap = 10 * 60 * 1000;

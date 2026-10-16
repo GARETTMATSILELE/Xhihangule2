@@ -49,6 +49,14 @@ const paymentIdOf = (entry: CanonicalLedgerEntry): string | undefined => {
   return value ? String(value) : undefined;
 };
 
+/** Cash shown as Total Amount Received. Falls back to the stored rent component for older snapshots. */
+const amountReceivedOf = (snapshot?: PaymentCommissionSnapshot): number => {
+  if (!snapshot) return 0;
+  const explicit = Number(snapshot.totalAmountReceived);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return Number(snapshot.grossRent || 0);
+};
+
 const skipDuplicateTransactionPayout = (
   entry: CanonicalLedgerEntry,
   payoutRefs: Set<string>
@@ -182,13 +190,17 @@ export class OwnerStatementBuilder {
       const ownerAmount = rowType === 'Income' || entry.credit > 0
         ? money(entry.credit, currency)
         : money(-entry.debit, currency);
-      const rentAmount = rowType === 'Income' && snapshot && Number(snapshot.grossRent || 0) > 0
+      const received = amountReceivedOf(snapshot);
+      const rentAmount = rowType === 'Income' && received > 0
+        ? money(received, currency)
+        : undefined;
+      const contractualRent = rowType === 'Income' && snapshot && Number(snapshot.grossRent || 0) > 0
         ? money(snapshot.grossRent, currency)
         : undefined;
       const paymentId = paymentIdOf(entry);
-      const explained = rowType === 'Income' && snapshot
+      const explained = rowType === 'Income' && snapshot && received > 0
         ? explainOwnerWaterfall({
-            grossAmount: snapshot.grossRent,
+            grossAmount: received,
             commissionAmount: snapshot.commission,
             levyAmount: snapshot.levy,
             vatOnCommission: snapshot.vatOnCommission,
@@ -224,6 +236,9 @@ export class OwnerStatementBuilder {
         sourceReferences: [toSourceReference(entry)],
         rowType,
         rentAmount,
+        totalAmountReceived: rentAmount,
+        contractualRent,
+        receiptReviewRequired: Boolean(snapshot?.receiptReviewRequired),
         commission: rowType === 'Income' && snapshot ? money(snapshot.commission, currency) : undefined,
         vatOnCommission: rowType === 'Income' && snapshot ? money(snapshot.vatOnCommission, currency) : undefined,
         levies: rowType === 'Income' && snapshot ? money(snapshot.levy, currency) : undefined,
@@ -262,6 +277,7 @@ export class OwnerStatementBuilder {
         .map((row) => [row.paymentId, row])
     ).values());
     const settlementGrossRent = displayedSnapshots.reduce((sum, row) => sum + Number(row.grossRent || 0), 0);
+    const settlementAmountReceived = displayedSnapshots.reduce((sum, row) => sum + amountReceivedOf(row), 0);
     const settlementLevy = displayedSnapshots.reduce((sum, row) => sum + Number(row.levy || 0), 0);
     const settlementCommission = displayedSnapshots.reduce((sum, row) => sum + Number(row.commission || 0), 0);
     const settlementVat = displayedSnapshots.reduce((sum, row) => sum + Number(row.vatOnCommission || 0), 0);
@@ -374,7 +390,7 @@ export class OwnerStatementBuilder {
       .reduce((sum, row) => sum + Number(row.ownerAmount?.amount || 0), 0);
     const statementWaterfall = displayedSnapshots.length
       ? explainOwnerWaterfall({
-          grossAmount: settlementGrossRent,
+          grossAmount: settlementAmountReceived,
           commissionAmount: settlementCommission,
           levyAmount: settlementLevy,
           vatOnCommission: settlementVat,
@@ -397,6 +413,7 @@ export class OwnerStatementBuilder {
     const statementSummary = {
       openingBalance: money(openingBalanceAmount, currency),
       totalRent: money(settlementGrossRent, currency),
+      totalAmountReceived: money(settlementAmountReceived, currency),
       totalCommission: money(settlementCommission, currency),
       totalVat: money(settlementVat, currency),
       totalLevies: money(settlementLevy, currency),
@@ -420,6 +437,7 @@ export class OwnerStatementBuilder {
     const dataWarnings = [
       ...(periodRows.length === 0 && openingBalanceAmount === 0 ? ['No property account ledger entries found for this property and statement period.'] : []),
       ...(ownerMoneyWaterfall?.reviewRequired ? ['Review required. The stored payment allocation does not match the recorded owner income. No historical amount was changed.'] : []),
+      ...(displayedSnapshots.some((row) => row.receiptReviewRequired) ? ['Review required. One or more tenant receipts could not be split into rent and levy from the stored payment. The displayed total uses the stored receipt and does not add the levy again. No historical amount was changed.'] : []),
       ...(!property ? ['Property metadata was not found for this property ID.'] : []),
       ...(owner?.unresolvedReason ? [owner.unresolvedReason] : []),
       ...(!owner ? ['Owner metadata was not found for this property ID.'] : [])
