@@ -57,6 +57,7 @@ const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
 const mongoose_1 = __importDefault(require("mongoose"));
 const agentPaymentNotificationService_1 = require("../services/agentPaymentNotificationService");
+const ownerRentNotificationService_1 = require("../services/ownerRentNotificationService");
 const inspectionAutomationService_1 = require("../services/inspectionAutomationService");
 const propertyCommissionCalculator_1 = require("../services/propertyCommissionCalculator");
 const commissionService_1 = require("../services/commissionService");
@@ -1156,6 +1157,9 @@ const createAgentPayment = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         const { ensurePaymentAccountingPosted } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingReconciliation')));
         const postResult = yield ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
+        if (postResult.accountingComplete === true && String(payment.status) === 'completed' && !payment.isProvisional) {
+            void (0, ownerRentNotificationService_1.notifyOwnerOfRentPayment)(payment, { accountingComplete: true });
+        }
         // Notify agent by email with payment details (fire-and-forget)
         void (0, agentPaymentNotificationService_1.sendAgentPaymentNotificationEmail)(payment);
         res.status(201).json({

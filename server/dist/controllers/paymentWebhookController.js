@@ -372,12 +372,23 @@ const handlePaymentConfirmationWebhook = (req, res) => __awaiter(void 0, void 0,
             yield payment.save();
         }
         if (normalizedStatus === 'completed') {
+            let accountingComplete = false;
             try {
                 const { ensurePaymentAccountingPosted } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingReconciliation')));
-                yield ensurePaymentAccountingPosted(String(payment._id));
+                const postResult = yield ensurePaymentAccountingPosted(String(payment._id));
+                accountingComplete = postResult.accountingComplete === true;
             }
             catch (postErr) {
                 console.warn('Webhook payment accounting post failed:', (postErr === null || postErr === void 0 ? void 0 : postErr.message) || postErr);
+            }
+            if (accountingComplete) {
+                try {
+                    const { notifyOwnerOfRentPayment } = yield Promise.resolve().then(() => __importStar(require('../services/ownerRentNotificationService')));
+                    void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
+                }
+                catch (noticeErr) {
+                    console.warn('[owner-rent-notice] webhook notification was not queued', (noticeErr === null || noticeErr === void 0 ? void 0 : noticeErr.message) || noticeErr);
+                }
             }
             if ((0, transactionDomain_1.mayPostSaleTrust)(payment)) {
                 const updateResult = yield Payment_1.Payment.updateOne({ _id: payment._id, companyId: payment.companyId, trustEventEmittedAt: { $exists: false } }, { $set: { trustEventEmittedAt: new Date(), lastTrustEventSource: 'webhook.payment-confirmation' } });

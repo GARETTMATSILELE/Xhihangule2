@@ -2030,6 +2030,9 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
                 console.warn('Payment accounting post incomplete (update complete)', postResult.recon.missing);
             }
+            if (postResult.accountingComplete === true) {
+                void (0, ownerRentNotificationService_1.notifyOwnerOfRentPayment)(payment, { accountingComplete: true });
+            }
             yield emitPaymentConfirmedIfNeeded(payment, 'payment.update');
             yield logPaymentAudit({
                 paymentId: String(payment._id),
@@ -2531,6 +2534,9 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
             const postResult = yield (0, paymentAccountingReconciliation_1.ensurePaymentAccountingPosted)(String(payment._id), { createdBy: req.user.userId });
             if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
                 console.warn('Payment accounting post incomplete (status update)', postResult.recon.missing);
+            }
+            if (postResult.accountingComplete === true) {
+                void (0, ownerRentNotificationService_1.notifyOwnerOfRentPayment)(payment, { accountingComplete: true });
             }
             yield emitPaymentConfirmedIfNeeded(payment, 'payment.status.updated');
             yield logPaymentAudit({
@@ -3185,6 +3191,9 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
                 console.warn('Payment accounting post incomplete (public create)', postResult.recon.missing);
             }
+            if (postResult.accountingComplete === true) {
+                void (0, ownerRentNotificationService_1.notifyOwnerOfRentPayment)(payment, { accountingComplete: true });
+            }
         }
         if (process.env.NODE_ENV !== 'production') {
             console.log('Payment created successfully:', { id: payment._id });
@@ -3815,6 +3824,9 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
         const postResult = yield (0, paymentAccountingReconciliation_1.ensurePaymentAccountingPosted)(payment._id.toString(), { createdBy: req.user.userId });
         if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
             console.warn('Payment accounting post incomplete (finalize)', postResult.recon.missing);
+        }
+        if (postResult.accountingComplete === true && String(payment.status) === 'completed' && !payment.isProvisional) {
+            void (0, ownerRentNotificationService_1.notifyOwnerOfRentPayment)(payment, { accountingComplete: true });
         }
         yield emitPaymentConfirmedIfNeeded(payment, 'payment.finalized');
         const populated = yield Payment_1.Payment.findById(payment._id)

@@ -274,6 +274,24 @@ const PaymentSchema = new mongoose_1.Schema({
             collaboratorUserId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
             splitPercentOwner: { type: Number, required: false, min: 0, max: 100 },
             splitPercentCollaborator: { type: Number, required: false, min: 0, max: 100 },
+        },
+        paymentAllocation: {
+            grossAmount: { type: Number, required: false },
+            rent: { type: Number, required: false },
+            levy: { type: Number, required: false },
+            commissionBase: { type: Number, required: false },
+            commission: { type: Number, required: false },
+            commissionNet: { type: Number, required: false },
+            vatOnCommission: { type: Number, required: false },
+            otherDeductions: { type: Number, required: false },
+            ownerPayable: { type: Number, required: false },
+            levyPayable: { type: Number, required: false },
+            companyRevenue: { type: Number, required: false },
+            taxLiabilities: {
+                vatOnCommission: { type: Number, required: false }
+            },
+            trustLiability: { type: Number, required: false },
+            source: { type: String, required: false }
         }
     },
     vatIncluded: {

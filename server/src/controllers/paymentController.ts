@@ -2203,6 +2203,9 @@ export const updatePayment = async (req: Request, res: Response) => {
       if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
         console.warn('Payment accounting post incomplete (update complete)', postResult.recon.missing);
       }
+      if (postResult.accountingComplete === true) {
+        void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
+      }
       await emitPaymentConfirmedIfNeeded(payment, 'payment.update');
       await logPaymentAudit({
         paymentId: String(payment._id),
@@ -2703,6 +2706,9 @@ export const updatePaymentStatus = async (req: Request, res: Response) => {
       const postResult = await ensurePaymentAccountingPosted(String(payment._id), { createdBy: req.user.userId });
       if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
         console.warn('Payment accounting post incomplete (status update)', postResult.recon.missing);
+      }
+      if (postResult.accountingComplete === true) {
+        void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
       }
       await emitPaymentConfirmedIfNeeded(payment, 'payment.status.updated');
       await logPaymentAudit({
@@ -3446,6 +3452,9 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
       if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
         console.warn('Payment accounting post incomplete (public create)', postResult.recon.missing);
       }
+      if (postResult.accountingComplete === true) {
+        void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
+      }
     }
 
     if (process.env.NODE_ENV !== 'production') {
@@ -4116,6 +4125,9 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
     const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
     if (postResult.recon.status !== 'complete' && postResult.recon.status !== 'not_applicable') {
       console.warn('Payment accounting post incomplete (finalize)', postResult.recon.missing);
+    }
+    if (postResult.accountingComplete === true && String(payment.status) === 'completed' && !payment.isProvisional) {
+      void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
     }
 
     await emitPaymentConfirmedIfNeeded(payment, 'payment.finalized');

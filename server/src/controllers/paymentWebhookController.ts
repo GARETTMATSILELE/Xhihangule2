@@ -401,11 +401,21 @@ export const handlePaymentConfirmationWebhook = async (req: Request, res: Respon
     }
 
     if (normalizedStatus === 'completed') {
+      let accountingComplete = false;
       try {
         const { ensurePaymentAccountingPosted } = await import('../services/paymentAccountingReconciliation');
-        await ensurePaymentAccountingPosted(String(payment._id));
+        const postResult = await ensurePaymentAccountingPosted(String(payment._id));
+        accountingComplete = postResult.accountingComplete === true;
       } catch (postErr: any) {
         console.warn('Webhook payment accounting post failed:', postErr?.message || postErr);
+      }
+      if (accountingComplete) {
+        try {
+          const { notifyOwnerOfRentPayment } = await import('../services/ownerRentNotificationService');
+          void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
+        } catch (noticeErr: any) {
+          console.warn('[owner-rent-notice] webhook notification was not queued', noticeErr?.message || noticeErr);
+        }
       }
       if (mayPostSaleTrust(payment)) {
         const updateResult = await Payment.updateOne(

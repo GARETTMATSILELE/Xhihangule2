@@ -38,6 +38,7 @@
     "test:vat-reversal-idempotency": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runVatReversalIdempotencyTests.ts",
     "test:reversal-journal-idempotency": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runReversalJournalIdempotencyTests.ts",
     "test:financial-consistency": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runFinancialConsistencyTests.ts",
+    "test:owner-rent-notice": "ts-node --transpile-only src/scripts/runOwnerRentNotificationTests.ts",
     "test:cosmos-financial-probe": "ts-node --transpile-only src/scripts/runCosmosFinancialProbe.ts",
     "test:expense-sync": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runExpenseSyncTests.ts",
     "test:financial-recovery": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runFinancialRecoveryTests.ts",

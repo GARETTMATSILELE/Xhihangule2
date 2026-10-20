@@ -87,6 +87,27 @@ export interface IPayment extends Document {
       splitPercentOwner?: number; // percent applied to agentShare for owner
       splitPercentCollaborator?: number; // percent applied to agentShare for collaborator
     };
+    /**
+     * Canonical rental split from allocateRentalReceipt.
+     * Absent means the allocation was not stored. A stored zero is a real zero.
+     * No defaults: missing and zero must stay distinguishable.
+     */
+    paymentAllocation?: {
+      grossAmount: number;
+      rent: number;
+      levy: number;
+      commissionBase: number;
+      commission: number;
+      commissionNet: number;
+      vatOnCommission: number;
+      otherDeductions: number;
+      ownerPayable: number;
+      levyPayable: number;
+      companyRevenue: number;
+      taxLiabilities?: { vatOnCommission: number };
+      trustLiability: number;
+      source?: string;
+    };
   };
   vatIncluded?: boolean;
   vatRate?: number;
@@ -384,6 +405,24 @@ const PaymentSchema: Schema = new Schema({
       collaboratorUserId: { type: Schema.Types.ObjectId, ref: 'User', required: false },
       splitPercentOwner: { type: Number, required: false, min: 0, max: 100 },
       splitPercentCollaborator: { type: Number, required: false, min: 0, max: 100 },
+    },
+    paymentAllocation: {
+      grossAmount: { type: Number, required: false },
+      rent: { type: Number, required: false },
+      levy: { type: Number, required: false },
+      commissionBase: { type: Number, required: false },
+      commission: { type: Number, required: false },
+      commissionNet: { type: Number, required: false },
+      vatOnCommission: { type: Number, required: false },
+      otherDeductions: { type: Number, required: false },
+      ownerPayable: { type: Number, required: false },
+      levyPayable: { type: Number, required: false },
+      companyRevenue: { type: Number, required: false },
+      taxLiabilities: {
+        vatOnCommission: { type: Number, required: false }
+      },
+      trustLiability: { type: Number, required: false },
+      source: { type: String, required: false }
     }
   },
   vatIncluded: {

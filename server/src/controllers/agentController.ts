@@ -11,6 +11,7 @@ import { AppError } from '../middleware/errorHandler';
 import mongoose from 'mongoose';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
+import { notifyOwnerOfRentPayment } from '../services/ownerRentNotificationService';
 import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationService';
 import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
 import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
@@ -1275,6 +1276,9 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     const { ensurePaymentAccountingPosted } = await import('../services/paymentAccountingReconciliation');
     const postResult = await ensurePaymentAccountingPosted(payment._id.toString(), { createdBy: req.user.userId });
+    if (postResult.accountingComplete === true && String(payment.status) === 'completed' && !payment.isProvisional) {
+      void notifyOwnerOfRentPayment(payment, { accountingComplete: true });
+    }
 
     // Notify agent by email with payment details (fire-and-forget)
     void sendAgentPaymentNotificationEmail(payment);
