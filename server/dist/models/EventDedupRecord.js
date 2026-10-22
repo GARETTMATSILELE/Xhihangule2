@@ -42,7 +42,8 @@ const EventDedupRecordSchema = new mongoose_1.Schema({
     status: { type: String, enum: ['processed', 'failed'], default: 'processed', index: true },
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
     processedAt: { type: Date, required: false },
-    lastError: { type: String, required: false }
+    lastError: { type: String, required: false },
+    ownerToken: { type: String, required: false }
 }, { timestamps: true });
 EventDedupRecordSchema.index({ scope: 1, eventId: 1 }, { unique: true });
 exports.EventDedupRecord = mongoose_1.default.model('EventDedupRecord', EventDedupRecordSchema, collections_1.COLLECTIONS.EVENT_DEDUP_RECORDS);

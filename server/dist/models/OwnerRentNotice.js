@@ -41,7 +41,9 @@ const schema = new mongoose_1.Schema({
     paymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment', required: true },
     propertyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Property' },
     idempotencyKey: { type: String, required: true, unique: true },
-    status: { type: String, enum: ['PENDING', 'SENT', 'SKIPPED_OPT_OUT', 'FAILED'], required: true },
+    status: { type: String, enum: ['PENDING', 'SENT', 'SKIPPED_OPT_OUT', 'FAILED', 'AWAITING_SETTLEMENT'], required: true },
     failureReason: { type: String },
+    reversalPaymentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment' },
+    attemptCount: { type: Number, default: 0 },
 }, { timestamps: true, collection: 'owner_rent_notices' });
 exports.OwnerRentNotice = mongoose_1.default.model('OwnerRentNotice', schema);

@@ -26,6 +26,7 @@ import {
   isHistoricalUntrackedPayment
 } from './paymentAccountingProjection';
 import { computeOwnerIncomeAmount } from './paymentAccountingCompleteness';
+import { completedPaymentRequiresFinalizedCommission } from './accountingPostingPolicy';
 import { commissionVatSnapshotGap } from './vatPolicyService';
 import { idsEqual, roundMoney } from '../utils/money';
 
@@ -348,7 +349,16 @@ export async function applyReconciliationOutcome(
   let lastError = extra?.lastError;
   if (recon.accountingComplete) {
     const payment = await Payment.findById(paymentId);
-    const obligationGap = payment ? await missingOriginalVatObligation(payment) : null;
+    if (payment && completedPaymentRequiresFinalizedCommission(payment)) {
+      effective = {
+        ...recon,
+        status: 'incomplete',
+        accountingComplete: false,
+        missing: Array.from(new Set([...(recon.missing || []), 'agentCommission', 'companyCommission']))
+      };
+      lastError = 'Commission snapshot is not finalized, so agent and company projections are not settled.';
+    }
+    const obligationGap = payment && effective.accountingComplete ? await missingOriginalVatObligation(payment) : null;
     if (obligationGap) {
       effective = {
         ...recon,

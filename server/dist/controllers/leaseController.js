@@ -22,6 +22,7 @@ const Tenant_1 = require("../models/Tenant");
 const leaseBillingEngine_1 = require("../services/leaseBillingEngine");
 const inspectionAutomationService_1 = require("../services/inspectionAutomationService");
 const propertyAccess_1 = require("../utils/propertyAccess");
+const rentalPeriodCoverage_1 = require("../services/rentalPeriodCoverage");
 const LEASE_STATUSES = [
     'draft',
     'pending_approval',
@@ -548,9 +549,12 @@ class LeaseController {
                 }
                 const payments = yield Payment_1.Payment.find({
                     leaseId: lease._id,
-                    status: { $in: ['pending', 'completed'] }
+                    companyId: lease.companyId,
+                    status: { $in: ['pending', 'completed', 'paid', 'success'] }
                 });
-                const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+                const totalPaid = payments.reduce((sum, payment) => ((0, rentalPeriodCoverage_1.countsTowardRentReceipt)(payment, { leaseId: lease._id })
+                    ? sum + Math.max(0, (0, rentalPeriodCoverage_1.storedRentPortion)(payment))
+                    : sum), 0);
                 const generatedPeriods = leaseBillingEngine_1.LeaseBillingEngine.generateMonthlyPeriods(lease, lease.startDate, req.body.moveOutDate ? new Date(req.body.moveOutDate) : new Date());
                 const totalBilled = generatedPeriods.reduce((sum, period) => sum + period.totalAmount, 0);
                 const outstandingBalance = Math.max(0, totalBilled - totalPaid);

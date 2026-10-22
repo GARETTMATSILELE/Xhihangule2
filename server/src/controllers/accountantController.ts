@@ -241,7 +241,10 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
       const payments = await Payment.find({
         propertyId: { $in: propertyIds },
         status: 'completed',
-        commissionFinalized: true
+        commissionFinalized: true,
+        reversalOfPaymentId: { $exists: false },
+        reversalState: { $ne: 'reversed' },
+        amount: { $gte: 0 }
       }).populate('propertyId', 'name address');
 
       // Create a map of payments by property and month/year for filtering (using rental period)
@@ -319,6 +322,9 @@ export const getAgentCommissions = async (req: Request, res: Response) => {
         companyId,
         status: 'completed',
         commissionFinalized: true,
+        reversalOfPaymentId: { $exists: false },
+        reversalState: { $ne: 'reversed' },
+        amount: { $gte: 0 },
         paymentType: 'sale',
         agentId: agent._id
       }).populate('propertyId', 'name address');
@@ -459,7 +465,10 @@ export const getAgencyCommission = async (req: Request, res: Response) => {
     const payments = await Payment.find({ 
       companyId,
       status: 'completed',
-      commissionFinalized: true
+      commissionFinalized: true,
+        reversalOfPaymentId: { $exists: false },
+        reversalState: { $ne: 'reversed' },
+        amount: { $gte: 0 }
     }).populate('propertyId', 'name address');
 
     for (const payment of payments) {
@@ -601,7 +610,10 @@ export const getPREACommission = async (req: Request, res: Response) => {
     const payments = await Payment.find({
       companyId,
       status: 'completed',
-      commissionFinalized: true
+      commissionFinalized: true,
+        reversalOfPaymentId: { $exists: false },
+        reversalState: { $ne: 'reversed' },
+        amount: { $gte: 0 }
     }).populate('propertyId', 'name address');
 
     // Aggregate PREA by property after applying filters
@@ -793,7 +805,10 @@ export const getCommissionAccount = async (req: Request, res: Response) => {
     const payments = await Payment.find({
       companyId: companyObjectId,
       status: 'completed',
-      commissionFinalized: true
+      commissionFinalized: true,
+        reversalOfPaymentId: { $exists: false },
+        reversalState: { $ne: 'reversed' },
+        amount: { $gte: 0 }
     })
       .select('paymentDate commissionDetails propertyId manualPropertyAddress referenceNumber')
       .populate('propertyId', 'address')
@@ -935,6 +950,9 @@ export const getCommissionReports = async (req: Request, res: Response) => {
       companyId: companyObjectId,
       status: 'completed',
       commissionFinalized: true,
+        reversalOfPaymentId: { $exists: false },
+        reversalState: { $ne: 'reversed' },
+        amount: { $gte: 0 },
       isProvisional: { $ne: true },
       isInSuspense: { $ne: true }
     })

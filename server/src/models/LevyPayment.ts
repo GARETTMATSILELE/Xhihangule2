@@ -31,6 +31,12 @@ export interface ILevyPayment extends Document {
   advancePeriodEnd?: { month: number; year: number };
   /** When levy was collected as part of a combined rental payment. */
   parentPaymentId?: mongoose.Types.ObjectId;
+  /** Contra levy created when the parent receipt is reversed. Original status and notes stay. */
+  reversalOfLevyPaymentId?: mongoose.Types.ObjectId;
+  reversalLevyPaymentId?: mongoose.Types.ObjectId;
+  reversedAt?: Date;
+  reversedBy?: mongoose.Types.ObjectId;
+  reversalReason?: string;
   // payout fields
   payout?: {
     paidOut: boolean;
@@ -158,6 +164,19 @@ const LevyPaymentSchema: Schema = new Schema({
     required: false,
     index: true,
   },
+  reversalOfLevyPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'LevyPayment',
+    required: false
+  },
+  reversalLevyPaymentId: {
+    type: Schema.Types.ObjectId,
+    ref: 'LevyPayment',
+    required: false
+  },
+  reversedAt: { type: Date, required: false },
+  reversedBy: { type: Schema.Types.ObjectId, ref: 'User', required: false },
+  reversalReason: { type: String, required: false },
   payout: {
     paidOut: { type: Boolean, default: false },
     paidToName: { type: String },

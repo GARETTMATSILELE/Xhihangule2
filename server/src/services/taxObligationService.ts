@@ -85,6 +85,7 @@ export async function upsertPaymentTaxObligation(input: {
     taxType: input.taxType,
     reversalOf: null
   });
+  // A reversed original stays the original row. Backfill must not insert another active obligation.
   if (existing) return String(existing._id);
 
   const fx = resolveTaxFx({

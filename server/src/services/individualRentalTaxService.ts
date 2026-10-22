@@ -410,12 +410,20 @@ export const individualRentalTaxService = {
     return created;
   },
 
-  async safeReverseForSource(input: ReverseRentalTaxInput): Promise<void> {
+  async reportReverseForSource(input: ReverseRentalTaxInput): Promise<'reversed' | 'absent' | 'failed'> {
     try {
-      await this.reverseForSource(input);
+      const { throwOnceIfArmed } = await import('./testFailureSeam');
+      throwOnceIfArmed(String(input.sourceId), String(input.reason || ''), 'PHASE_FAIL_INDIVIDUAL_RENTAL_TAX');
+      const created = await this.reverseForSource(input);
+      return created ? 'reversed' : 'absent';
     } catch (error: any) {
       logger.warn('Individual rental tax reversal failed', { sourceId: input.sourceId, message: error?.message || error });
+      return 'failed';
     }
+  },
+
+  async safeReverseForSource(input: ReverseRentalTaxInput): Promise<void> {
+    await this.reportReverseForSource(input);
   },
 
   async recordPayment(input: {

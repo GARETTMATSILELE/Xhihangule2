@@ -43,7 +43,10 @@ const getUserCommissionSummary = (req, res) => __awaiter(void 0, void 0, void 0,
         const q = {
             agentId: new mongoose_1.default.Types.ObjectId(targetUserId),
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            status: 'completed'
+            status: 'completed',
+            reversalOfPaymentId: { $exists: false },
+            reversalState: { $ne: 'reversed' },
+            amount: { $gte: 0 }
         };
         if (String(saleOnly) === 'true') {
             q.paymentType = 'sale';

@@ -3,6 +3,7 @@ import {
   evaluatePermanentAccountingPolicy,
   shouldAttemptAccountingReversal
 } from './accountingPostingPolicy';
+import { isReversalDocument } from './paymentReversalPolicy';
 import ledgerEventService from './ledgerEventService';
 import propertyAccountService from './propertyAccountService';
 import agentAccountService from './agentAccountService';
@@ -315,6 +316,9 @@ export async function reversePaymentAccounting(
   if (!payment) {
     return { paymentId, status: 'failed', artifacts, errors: ['Payment not found'] };
   }
+  if (isReversalDocument(payment)) {
+    return { paymentId, status: 'failed', artifacts, errors: ['Reversal payments cannot be reversed'] };
+  }
   if (!shouldAttemptAccountingReversal(payment) && String(payment.status) !== 'reversed') {
     // Still allow explicit reversal of a completed payment whose status flip already committed.
     if (String(payment.status) !== 'completed' && String(payment.postingStatus) !== 'reversed') {
@@ -328,19 +332,26 @@ export async function reversePaymentAccounting(
       processedBy: opts?.processedBy,
       reason: opts?.reason
     });
-    artifacts.ownerIncome = income.countered ? 'reversed' : 'skipped';
-    artifacts.configuredExpense = 'reversed';
-    artifacts.passThrough = 'reversed';
+    artifacts.ownerIncome = income.countered ? 'reversed' : 'absent';
+    artifacts.configuredExpense = income.configuredExpense;
   } catch (e: any) {
     artifacts.ownerIncome = 'failed';
     artifacts.configuredExpense = 'failed';
-    artifacts.passThrough = 'failed';
     errors.push(`propertyAccount: ${e?.message || e}`);
   }
 
   try {
-    await agentAccountService.reverseCommissionForPayment(paymentId, opts?.reason);
-    artifacts.agentCommission = 'reversed';
+    artifacts.passThrough = await propertyAccountService.reversePassThroughCollectionsForPayment(paymentId, {
+      processedBy: opts?.processedBy,
+      reason: opts?.reason
+    });
+  } catch (e: any) {
+    artifacts.passThrough = 'failed';
+    errors.push(`passThrough: ${e?.message || e}`);
+  }
+
+  try {
+    artifacts.agentCommission = await agentAccountService.reverseCommissionForPayment(paymentId, opts?.reason);
   } catch (e: any) {
     artifacts.agentCommission = 'failed';
     errors.push(`agentCommission: ${e?.message || e}`);
@@ -400,6 +411,29 @@ export async function reversePaymentAccounting(
     artifacts.trust = 'skipped';
   }
 
+  const company = await Company.findById(payment.companyId).select('workspaceType plan').lean();
+  const individualWorkspace = (company as any)?.workspaceType === 'individual' || (company as any)?.plan === 'INDIVIDUAL';
+  if (individualWorkspace) {
+    const individualInput = {
+      companyId: String(payment.companyId),
+      sourceType: 'Payment' as const,
+      sourceId: paymentId,
+      reason: `${String((payment as any).notes || '')} ${String(opts?.reason || '')}`,
+      reversalTransactionId: opts?.reversalPaymentId,
+      userId: opts?.processedBy
+    };
+    artifacts.individualVat = await individualVatService.reportReverseForSource(individualInput);
+    artifacts.individualRentalTax = await individualRentalTaxService.reportReverseForSource(individualInput);
+    artifacts.individualIncomeTax = await individualIncomeTaxService.reportReverseForSource(individualInput);
+    for (const key of ['individualVat', 'individualRentalTax', 'individualIncomeTax'] as const) {
+      if (artifacts[key] === 'failed') errors.push(`${key}: reversal failed`);
+    }
+  } else {
+    artifacts.individualVat = 'skipped';
+    artifacts.individualRentalTax = 'skipped';
+    artifacts.individualIncomeTax = 'skipped';
+  }
+
   const progress: ReversalProgress = {
     ownerIncome: asState(artifacts.ownerIncome || 'absent'),
     configuredExpense: asState(artifacts.configuredExpense || 'absent'),
@@ -409,7 +443,10 @@ export async function reversePaymentAccounting(
     journal: asState(artifacts.journal || 'absent')
   };
   let status = classifyReversalOutcome(progress);
-  if (artifacts.tax === 'failed') status = status === 'failed' ? 'failed' : 'partial';
+  if (artifacts.tax === 'failed' || artifacts.passThrough === 'failed') status = status === 'failed' ? 'failed' : 'partial';
+  for (const key of ['individualVat', 'individualRentalTax', 'individualIncomeTax'] as const) {
+    if (artifacts[key] === 'failed') status = status === 'failed' ? 'failed' : 'partial';
+  }
   if (errors.length && status === 'reversed') status = 'partial';
   if (errors.length && status === 'already_reversed') status = 'partial';
 
@@ -425,34 +462,6 @@ export async function reversePaymentAccounting(
     logger.warn('Payment accounting reversal incomplete', { paymentId, artifacts, errors });
   }
 
-  const company = await Company.findById(payment.companyId).select('workspaceType plan').lean();
-  if ((company as any)?.workspaceType === 'individual' || (company as any)?.plan === 'INDIVIDUAL') {
-    await individualVatService.safeReverseForSource({
-      companyId: String(payment.companyId),
-      sourceType: 'Payment',
-      sourceId: paymentId,
-      reason: opts?.reason,
-      reversalTransactionId: opts?.reversalPaymentId,
-      userId: opts?.processedBy
-    });
-    await individualRentalTaxService.safeReverseForSource({
-      companyId: String(payment.companyId),
-      sourceType: 'Payment',
-      sourceId: paymentId,
-      reason: opts?.reason,
-      reversalTransactionId: opts?.reversalPaymentId,
-      userId: opts?.processedBy
-    });
-    await individualIncomeTaxService.safeReverseForSource({
-      companyId: String(payment.companyId),
-      sourceType: 'Payment',
-      sourceId: paymentId,
-      reason: opts?.reason,
-      reversalTransactionId: opts?.reversalPaymentId,
-      userId: opts?.processedBy
-    });
-  }
-
   const reversalComplete = status === 'reversed' || status === 'already_reversed';
   const reversalState = reversalComplete ? 'reversed' : 'reversal_incomplete';
   if (!reversalComplete) {
@@ -463,7 +472,12 @@ export async function reversePaymentAccounting(
     });
   }
   const reversalPaymentId = opts?.reversalPaymentId || (payment as any).reversalPaymentId;
-  await Payment.updateOne({ _id: payment._id }, { $set: { reversalState } });
+  await Payment.updateOne(
+    { _id: payment._id },
+    reversalComplete
+      ? { $set: { reversalState }, $unset: { idempotencyKey: 1 } }
+      : { $set: { reversalState } }
+  );
   if (reversalPaymentId) {
     await Payment.updateOne(
       { _id: reversalPaymentId },

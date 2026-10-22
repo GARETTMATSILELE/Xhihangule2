@@ -443,9 +443,13 @@ export class PropertyAccountService {
       const plain = account?.toObject ? account.toObject() : account;
       const type = this.normalizePassThroughType(plain?.type);
       const transactions = Array.isArray(plain?.transactions) ? plain.transactions : [];
-      const totalCollected = transactions
+      const grossCollected = transactions
         .filter((tx: any) => tx?.type === 'collection' && tx?.status === 'completed')
         .reduce((sum: number, tx: any) => sum + Number(tx?.amount || 0), 0);
+      const reversedCollected = transactions
+        .filter((tx: any) => tx?.type === 'collection_reversal' && tx?.status === 'completed')
+        .reduce((sum: number, tx: any) => sum + Number(tx?.amount || 0), 0);
+      const totalCollected = grossCollected - reversedCollected;
       const totalPaid = transactions
         .filter((tx: any) => tx?.type === 'payment' && tx?.status === 'completed')
         .reduce((sum: number, tx: any) => sum + Number(tx?.amount || 0), 0);
@@ -812,6 +816,83 @@ export class PropertyAccountService {
     });
 
     return this.reloadWritableAccount((account as any)._id, input.propertyId);
+  }
+
+  /**
+   * Counter the original pass-through collections for a payment.
+   * Uses the stored collection rows. Does not record a disbursement and does
+   * not consult the charge type's current category.
+   */
+  async reversePassThroughCollectionsForPayment(
+    paymentId: string,
+    opts?: { processedBy?: string; reason?: string }
+  ): Promise<'reversed' | 'absent'> {
+    if (!mongoose.Types.ObjectId.isValid(paymentId)) {
+      throw new AppError('Pass-through reversal requires a payment id', 400);
+    }
+    const paymentObjectId = new mongoose.Types.ObjectId(paymentId);
+    const accounts = await PropertyAccount.find({
+      isArchived: false,
+      isActive: { $ne: false },
+      'passThroughAccounts.transactions.paymentId': paymentObjectId
+    });
+    let reversed = 0;
+    for (const account of accounts) {
+      const buckets = Array.isArray((account as any).passThroughAccounts) ? (account as any).passThroughAccounts : [];
+      for (const bucket of buckets) {
+        const transactions = Array.isArray(bucket?.transactions) ? bucket.transactions : [];
+        for (const tx of transactions) {
+          if (String(tx?.type || '') !== 'collection') continue;
+          if (String(tx?.status || '') !== 'completed') continue;
+          if (String(tx?.paymentId || '') !== paymentId) continue;
+          const amount = Number(tx?.amount || 0);
+          if (!(amount > 0)) {
+            throw new AppError(`Pass-through collection ${String(tx?.idempotencyKey || '')} has no amount to reverse`, 409);
+          }
+          const originalKey = String(tx?.idempotencyKey || tx?._id || '');
+          if (!originalKey) {
+            throw new AppError('Pass-through collection is missing an identity and was not reversed', 409);
+          }
+          const idKey = `payment:${paymentId}:pass-through-collection-reversal:${originalKey}`;
+          const already = transactions.some((row: any) => String(row?.idempotencyKey || '') === idKey);
+          if (already) {
+            reversed += 1;
+            continue;
+          }
+          const chargeType = this.normalizePassThroughType(String(tx?.chargeTypeCode || bucket?.type || 'OTHER'));
+          const pushed = await this.pushPassThroughTransactionAtomic({
+            account: account as IPropertyAccount,
+            propertyId: String((account as any).propertyId),
+            chargeType,
+            idKey,
+            incrementCollected: -amount,
+            incrementPaid: 0,
+            transaction: {
+              type: 'collection_reversal',
+              amount,
+              date: new Date(),
+              paymentId: paymentObjectId,
+              levyPaymentId: tx?.levyPaymentId,
+              chargeTypeCode: tx?.chargeTypeCode,
+              chargeTypeId: tx?.chargeTypeId,
+              idempotencyKey: idKey,
+              reversesIdempotencyKey: originalKey,
+              description: `Reversal of pass-through collection ${originalKey}`,
+              referenceNumber: tx?.referenceNumber,
+              status: 'completed',
+              processedBy: opts?.processedBy && mongoose.Types.ObjectId.isValid(opts.processedBy)
+                ? new mongoose.Types.ObjectId(opts.processedBy)
+                : undefined,
+              notes: opts?.reason || 'Payment reversal',
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }
+          });
+          if (pushed === 'inserted' || pushed === 'duplicate') reversed += 1;
+        }
+      }
+    }
+    return reversed > 0 ? 'reversed' : 'absent';
   }
 
   async getCompanyPassThroughSummary(companyId: string): Promise<{
@@ -1692,7 +1773,7 @@ export class PropertyAccountService {
     }
   }
 
-  async reverseIncomeFromPayment(paymentId: string, opts?: { processedBy?: string; reason?: string }): Promise<{ countered: boolean }> {
+  async reverseIncomeFromPayment(paymentId: string, opts?: { processedBy?: string; reason?: string }): Promise<{ countered: boolean; configuredExpense: 'reversed' | 'absent' }> {
     try {
       const payment = await Payment.findById(paymentId);
       if (!payment) {
@@ -1725,11 +1806,8 @@ export class PropertyAccountService {
         'PHASE27_FAIL_OWNER'
       );
 
-      const chargeLines = isSale
-        ? []
-        : await chargeTypeService.getCompatibilityChargeLines(payment, payment.companyId);
-      const passThroughLines = chargeLines.filter(line => line.chargeType.category === 'PASS_THROUGH');
       let countered = false;
+      let configuredExpense: 'reversed' | 'absent' = 'absent';
 
       for (const target of targets) {
         const account = this.validateWritableAccount(
@@ -1737,30 +1815,6 @@ export class PropertyAccountService {
           target.id,
           'reverseIncomeFromPayment'
         );
-        const groupedPassThrough = new Map<string, { amount: number; line: any }>();
-        for (const line of passThroughLines) {
-          const existing = groupedPassThrough.get(line.chargeType.code) || { amount: 0, line };
-          existing.amount += Number(line.amount || 0);
-          groupedPassThrough.set(line.chargeType.code, existing);
-        }
-        for (const [code, row] of groupedPassThrough) {
-          if (row.amount <= 0) continue;
-          await this.recordPassThroughPayment({
-            propertyId: target.id,
-            companyId: payment.companyId ? String(payment.companyId) : undefined,
-            chargeType: code,
-            amount: row.amount,
-            date: new Date(),
-            paymentId,
-            levyPaymentId: code === 'LEVY' && (payment as any).linkedLevyPaymentId ? String((payment as any).linkedLevyPaymentId) : undefined,
-            referenceNumber: (payment as any).referenceNumber,
-            description: `${row.line.chargeType.name} reversal - ${(payment as any).referenceNumber || paymentId}`,
-            processedBy: opts?.processedBy,
-            notes: opts?.reason || 'Payment reversal',
-            idempotencyKey: `payment:${paymentId}:pass-through:${code}:reversal`,
-            ledgerType: target.ledger
-          });
-        }
         const originalIncome = (account.transactions || []).filter(
           (t: any) =>
             t.type === 'income' &&
@@ -1820,7 +1874,11 @@ export class PropertyAccountService {
           const expenseAlready = (account.transactions || []).some(
             (t: any) => String(t.idempotencyKey || '') === expenseKey
           );
-          if (expenseAlready || Number((expense as any).amount || 0) <= 0) continue;
+          if (Number((expense as any).amount || 0) <= 0) continue;
+          if (expenseAlready) {
+            configuredExpense = 'reversed';
+            continue;
+          }
           await PropertyAccount.updateOne(
             {
               _id: (account as any)._id,
@@ -1850,6 +1908,7 @@ export class PropertyAccountService {
               $set: { lastUpdated: new Date() }
             }
           );
+          configuredExpense = 'reversed';
         }
 
         const fresh = await PropertyAccount.findOne({ _id: (account as any)._id, isArchived: false, isActive: { $ne: false } }) as any;
@@ -1864,7 +1923,7 @@ export class PropertyAccountService {
           eventType: 'payment_reversed'
         });
       }
-      return { countered };
+      return { countered, configuredExpense };
     } catch (error) {
       logger.error('Error reversing income from payment:', error);
       throw error;

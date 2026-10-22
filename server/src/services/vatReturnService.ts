@@ -8,6 +8,7 @@ import { JournalLine } from '../models/JournalLine';
 import { GL } from './tax/chartAccounts';
 import { roundMoney } from '../utils/money';
 import { AppError } from '../middleware/errorHandler';
+import { isReversalDocument } from './paymentReversalPolicy';
 
 const toId = (value: string) => new mongoose.Types.ObjectId(value);
 
@@ -40,9 +41,11 @@ export async function glOutputVatForPeriod(companyId: string, filingPeriod: stri
         journalEntryId: { $in: entries.map((row) => row._id) }
       }
     },
-    { $group: { _id: null, credits: { $sum: '$credit' } } }
+    { $group: { _id: null, credits: { $sum: '$credit' }, debits: { $sum: '$debit' } } }
   ]);
-  return roundMoney(Number(summed[0]?.credits || 0));
+  // Net movement on the VAT payable account for journals dated in this filing period.
+  // A reversal journal dated in a later period does not reduce this period's credit.
+  return roundMoney(Number(summed[0]?.credits || 0) - Number(summed[0]?.debits || 0));
 }
 
 export async function prepareVatReturn(companyId: string, filingPeriod: string, preparedBy?: string) {
@@ -64,7 +67,7 @@ export async function prepareVatReturn(companyId: string, filingPeriod: string, 
     isProvisional: { $ne: true },
     reversalOfPaymentId: { $exists: false }
   })
-    .select('amount paymentDate paymentType commissionDetails vatAmount vatRate vatIncluded')
+    .select('amount paymentDate paymentType commissionDetails vatAmount vatRate vatIncluded reversalState reversalOfPaymentId isCorrectionEntry referenceNumber')
     .lean();
 
   const inPeriod = (date: Date) => {
@@ -77,6 +80,11 @@ export async function prepareVatReturn(companyId: string, filingPeriod: string, 
   let exemptSupplies = 0;
   let zeroRatedSupplies = 0;
   for (const payment of payments) {
+    // Historical status stays on the payment. A fully reversed original and its
+    // negative REV do not contribute taxable supplies again. The replacement does.
+    if (isReversalDocument(payment)) continue;
+    if (String((payment as any).reversalState || '') === 'reversed') continue;
+    if (Number((payment as any).amount || 0) < 0) continue;
     if (!inPeriod(payment.paymentDate as Date)) continue;
     const vatOnCommission = Number((payment as any)?.commissionDetails?.vatOnCommission || 0);
     const saleVat = Number((payment as any)?.vatAmount || 0);

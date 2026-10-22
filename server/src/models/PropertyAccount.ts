@@ -68,7 +68,7 @@ export interface Transaction {
 
 export interface PassThroughTransaction {
   _id?: Types.ObjectId;
-  type: 'collection' | 'payment' | 'adjustment';
+  type: 'collection' | 'payment' | 'adjustment' | 'collection_reversal';
   amount: number;
   date: Date;
   paymentId?: Types.ObjectId;
@@ -76,6 +76,7 @@ export interface PassThroughTransaction {
   chargeTypeCode?: string;
   chargeTypeId?: Types.ObjectId;
   idempotencyKey?: string;
+  reversesIdempotencyKey?: string;
   description: string;
   referenceNumber?: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled';
@@ -246,7 +247,7 @@ const TransactionSchema = new Schema<Transaction>({
 const PassThroughTransactionSchema = new Schema<PassThroughTransaction>({
   type: {
     type: String,
-    enum: ['collection', 'payment', 'adjustment'],
+    enum: ['collection', 'payment', 'adjustment', 'collection_reversal'],
     required: true
   },
   amount: {
@@ -279,6 +280,9 @@ const PassThroughTransactionSchema = new Schema<PassThroughTransaction>({
     required: false
   },
   idempotencyKey: {
+    type: String
+  },
+  reversesIdempotencyKey: {
     type: String
   },
   description: {
@@ -582,9 +586,13 @@ PropertyAccountSchema.pre('save', function(next) {
   let passThroughPaid = 0;
   passThroughAccounts.forEach((account: any) => {
     const entries = Array.isArray(account.transactions) ? account.transactions : [];
-    const collected = entries
+    const grossCollected = entries
       .filter((t: any) => t.type === 'collection' && t.status === 'completed')
       .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+    const reversedCollected = entries
+      .filter((t: any) => t.type === 'collection_reversal' && t.status === 'completed')
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+    const collected = grossCollected - reversedCollected;
     const paid = entries
       .filter((t: any) => t.type === 'payment' && t.status === 'completed')
       .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);

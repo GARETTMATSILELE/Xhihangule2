@@ -63,6 +63,18 @@ exports.COSMOS_UNVERIFIED_ASSUMPTIONS = [
         requiredTest: 'On isolated Cosmos, create only the declared companyexpenseclaims unique index and run two concurrent claim inserts for one company and key. Then repeat with the index absent and record whether both inserts succeed.'
     },
     {
+        id: 'reversal-document-transaction',
+        codePath: 'paymentController.reversePayment session.withTransaction and the code-20 sequential fallback',
+        consequence: 'The reversal lock, negative REV payment, levy contra, and CORR draft commit together only when multi-document transactions are enabled and the documents share a partition. Without that, a crash is recovered by the next reversal request, which must not be described as an atomic Cosmos transaction.',
+        requiredTest: 'On an isolated Cosmos account, reverse one payment inside a transaction and with transactions disabled, then interrupt between the REV insert and the CORR insert.'
+    },
+    {
+        id: 'rental-period-lock',
+        codePath: 'rentalPeriodCoverage.ts acquireRentalPeriodGuard and EventDedupRecord unique {scope, eventId}',
+        consequence: 'Lock ownership uses a single-document conditional update and a compare-and-delete on ownerToken. Cosmos DB enforces a unique index only inside one partition. If EventDedupRecord is partitioned on a key other than the lock identity, two partitions can hold the same rental month. Duplicate-key code 11000 and conditional update behaviour were not observed on Cosmos.',
+        requiredTest: 'On an isolated Cosmos account, create the EventDedupRecord unique index, confirm the partition key, then run two concurrent acquires, a compare-and-delete by a stale ownerToken, and a 429 retry. Do not create that index on a shared account.'
+    },
+    {
         id: 'concurrent-posting',
         codePath: 'ensureJournal and upsertPaymentTaxObligation',
         consequence: 'Two workers can both pass the find-before-insert check. Uniqueness then depends on the database index, which is unverified.',

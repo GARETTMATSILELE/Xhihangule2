@@ -14,6 +14,7 @@ import propertyAccountService from './propertyAccountService';
 import { PHASE8_CHART_SEEDS } from './tax/chartAccounts';
 import { assertPeriodAllowsPosting } from './accountingPeriodService';
 import { throwOnceIfArmed } from './testFailureSeam';
+import { CompanyAccount } from '../models/CompanyAccount';
 
 export interface PostJournalLineInput {
   accountCode: string;
@@ -71,11 +72,20 @@ const ensurePositive = (value?: number): number => {
   return n > 0 ? toMoney(n) : 0;
 };
 
+function dashboardCacheTtlMs(): number {
+  const configured = Number(process.env.ACCOUNTING_DASHBOARD_CACHE_TTL_MS);
+  const value = Number.isFinite(configured) ? configured : 15000;
+  if (process.env.MANTIS_TEST_SEAM === '1' && process.env.NODE_ENV !== 'production') {
+    return Math.max(0, value);
+  }
+  return Math.max(5000, value);
+}
+
 class AccountingService {
   private indexesEnsured = false;
   private readonly dashboardSummaryCache = new Map<string, { expiresAt: number; cachedAt: number; value: Record<string, number | string> }>();
   private readonly dashboardSummaryInFlight = new Map<string, Promise<Record<string, number | string>>>();
-  private readonly dashboardSummaryTtlMs = Math.max(5000, Number(process.env.ACCOUNTING_DASHBOARD_CACHE_TTL_MS || 15000));
+  private readonly dashboardSummaryTtlMs = dashboardCacheTtlMs();
   private readonly dashboardSummaryStaleMaxAgeMs = Math.max(
     this.dashboardSummaryTtlMs,
     Number(process.env.ACCOUNTING_DASHBOARD_STALE_MAX_AGE_MS || 600000)
@@ -401,6 +411,39 @@ class AccountingService {
     };
   }
 
+  /**
+   * Agency commission income. CompanyAccount commission rows are authoritative
+   * when any exist, including a negative reversal counter. Payment agency shares
+   * are the fallback and exclude reversal documents and fully reversed originals.
+   * Journal revenue is not added on top of either figure.
+   */
+  async agencyRevenue(companyId: string): Promise<number> {
+    const companyObjectId = toObjectId(companyId);
+    const account = await CompanyAccount.findOne({ companyId: companyObjectId }).select('transactions').lean();
+    const commissionRows = ((account as any)?.transactions || []).filter((row: any) => (
+      row
+      && row.isArchived !== true
+      && (row.source === 'rental_commission' || row.source === 'sales_commission')
+    ));
+    if (commissionRows.length > 0) {
+      return toMoney(commissionRows.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0));
+    }
+    const summed = await Payment.aggregate([
+      {
+        $match: {
+          companyId: companyObjectId,
+          status: 'completed',
+          commissionFinalized: { $ne: false },
+          reversalOfPaymentId: { $exists: false },
+          reversalState: { $ne: 'reversed' },
+          amount: { $gte: 0 }
+        }
+      },
+      { $group: { _id: null, amount: { $sum: '$commissionDetails.agencyShare' } } }
+    ]).option({ maxTimeMS: 10000 });
+    return toMoney(summed[0]?.amount || 0);
+  }
+
   async getDashboardSummary(companyId: string): Promise<Record<string, number | string>> {
     const now = Date.now();
     const cached = this.dashboardSummaryCache.get(companyId);
@@ -436,7 +479,16 @@ class AccountingService {
           { $group: { _id: null, amount: { $sum: { $subtract: ['$credit', '$debit'] } } } }
         ]).option({ maxTimeMS: 15000 }),
         Payment.aggregate([
-          { $match: { companyId: companyObjectId, status: 'completed' } },
+          {
+            $match: {
+              companyId: companyObjectId,
+              status: 'completed',
+              commissionFinalized: { $ne: false },
+              reversalOfPaymentId: { $exists: false },
+              reversalState: { $ne: 'reversed' },
+              amount: { $gte: 0 }
+            }
+          },
           {
             $group: {
               _id: null,
@@ -459,9 +511,19 @@ class AccountingService {
       const ledgerRevenue = toMoney(balance?.totalRevenue || 0);
       const paymentRevenue = toMoney(completedPaymentRevenue[0]?.amount || 0);
       const paymentRevenueCount = Number(completedPaymentRevenue[0]?.count || 0);
-      // Use persisted payment commission totals as the primary source of truth for company revenue.
-      // Keep a ledger fallback for legacy companies where payment commissions were not historically captured.
-      const totalRevenue = toMoney(paymentRevenueCount > 0 ? paymentRevenue : ledgerRevenue);
+      const companyAccount = await CompanyAccount.findOne({ companyId: companyObjectId }).select('transactions').lean();
+      const commissionRows = ((companyAccount as any)?.transactions || []).filter((row: any) => (
+        row
+        && row.isArchived !== true
+        && (row.source === 'rental_commission' || row.source === 'sales_commission')
+      ));
+      const companyRevenue = toMoney(commissionRows.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0));
+      // CompanyAccount commission rows are the source of truth once any exist.
+      // Payment agencyShare is the fallback, and it already excludes reversal rows.
+      // Ledger revenue is only used when neither source has a figure. Do not add them together.
+      const totalRevenue = commissionRows.length > 0
+        ? companyRevenue
+        : toMoney(paymentRevenueCount > 0 ? paymentRevenue : ledgerRevenue);
       const totalExpenses = toMoney(balance?.totalExpenses || 0);
       const netProfit = toMoney(totalRevenue - totalExpenses);
       // GET remains read-only: do not persist computed totals onto CompanyBalance.
@@ -604,7 +666,7 @@ class AccountingService {
       status: row._id.status,
       vatCollected: toMoney(row.vatCollected || 0),
       vatPaid: toMoney(row.vatPaid || 0),
-      vatPayable: toMoney((row.vatCollected || 0) - (row.vatPaid || 0))
+      vatPayable: String(row._id.status) === 'reversed' ? 0 : toMoney((row.vatCollected || 0) - (row.vatPaid || 0))
     }));
   }
 
@@ -864,7 +926,7 @@ class AccountingService {
       this.getProfitAndLoss(companyId),
       this.getCommissionLiability(companyId),
       VatRecord.aggregate([
-        { $match: { companyId: companyObjectId } },
+        { $match: { companyId: companyObjectId, status: { $ne: 'reversed' } } },
         { $group: { _id: null, vatCollected: { $sum: '$vatCollected' }, vatPaid: { $sum: '$vatPaid' } } }
       ])
     ]);

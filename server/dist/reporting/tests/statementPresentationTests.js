@@ -105,6 +105,19 @@ function runStatementPresentationTests() {
         }), 'July–September 2026 Rent');
         assert_1.default.strictEqual((0, rentalPeriod_1.formatRentPeriodDescription)({ rentalPeriodMonth: 11, rentalPeriodYear: 2026, advanceMonthsPaid: 3 }), 'November 2026–January 2027 Rent');
         assert_1.default.strictEqual((0, rentalPeriod_1.formatRentPeriodDescription)({}), undefined, 'Missing rental-period metadata must not be invented from a payment date.');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatPaidMonthLabel)({ rentalPeriodMonth: 6, rentalPeriodYear: 2026 }), 'June rent');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatPaidMonthLabel)({
+            rentalPeriodMonth: 6,
+            rentalPeriodYear: 2026,
+            advanceMonthsPaid: 3,
+            advancePeriodStart: { month: 6, year: 2026 },
+            advancePeriodEnd: { month: 8, year: 2026 }
+        }), 'June–August rent');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatAgentCommissionDescription)({ paymentType: 'rental', rentalPeriodMonth: 6, rentalPeriodYear: 2026 }), 'June rent');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatAgentCommissionDescription)({ paymentType: 'rental', rentalPeriodMonth: 7, rentalPeriodYear: 2026 }, { propertyName: 'Unit 31, 39 Suffolk Road' }), 'July rent — Unit 31, 39 Suffolk Road');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatAgentCommissionDescription)({ paymentType: 'rental', rentalPeriodMonth: 6, rentalPeriodYear: 2026 }, { reversal: true }), 'June rent reversal');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatAgentCommissionDescription)({ paymentType: 'sale' }), 'Sale commission');
+        assert_1.default.strictEqual((0, rentalPeriod_1.formatAgentCommissionDescription)({ paymentType: 'rental' }), undefined, 'A rental with no stored period must not invent a month from a receipt number.');
         assert_1.default.strictEqual((0, rentalPeriod_1.cleanStatementDescription)('Rental income - REF-1765198259150-5'), 'Rental Income');
         assert_1.default.strictEqual((0, statementRent_1.resolveStatementRentAmount)({ rentUsed: 1100, advanceMonthsPaid: 1, rentAllocated: 1100, commissionBase: 1100 }), 1100, 'Rent Amount must be the property rent, not cash received plus levy.');
         assert_1.default.strictEqual((0, statementRent_1.resolveStatementRentAmount)({ rentUsed: 1100, advanceMonthsPaid: 3 }), 3300, 'Multi-month rent should use rentUsed x months paid.');

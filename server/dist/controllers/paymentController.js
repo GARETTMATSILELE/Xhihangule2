@@ -67,6 +67,10 @@ const taxObligationService_1 = require("../services/taxObligationService");
 const testFailureSeam_1 = require("../services/testFailureSeam");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
 const paymentFinancialImmutability_1 = require("../services/paymentFinancialImmutability");
+const paymentReversalPolicy_1 = require("../services/paymentReversalPolicy");
+const rentalPeriodCoverage_1 = require("../services/rentalPeriodCoverage");
+const correctionCommissionSnapshot_1 = require("../services/correctionCommissionSnapshot");
+const paymentIdempotency_1 = require("../services/paymentIdempotency");
 const eventBus_1 = require("../events/eventBus");
 const trustEventRetryService_1 = __importDefault(require("../services/trustEventRetryService"));
 const transactionDomain_1 = require("../services/transactionDomain");
@@ -144,6 +148,10 @@ const emitPaymentConfirmedIfNeeded = (payment, sourceEvent) => __awaiter(void 0,
         yield trustEventRetryService_1.default.enqueueFailure('payment.confirmed', payload, (error === null || error === void 0 ? void 0 : error.message) || 'failed to emit payment.confirmed', String(payment.companyId || ''));
     }
 });
+const isDuplicateKeyError = (error) => {
+    var _a;
+    return (Number(error === null || error === void 0 ? void 0 : error.code) === 11000 || Number((_a = error === null || error === void 0 ? void 0 : error.cause) === null || _a === void 0 ? void 0 : _a.code) === 11000);
+};
 const hasFinancePrivileges = (user) => {
     const roles = ((user === null || user === void 0 ? void 0 : user.roles) || [user === null || user === void 0 ? void 0 : user.role]).map((r) => String(r || '').toLowerCase());
     return roles.some((r) => ['admin', 'accountant', 'principal', 'prea', 'finance'].includes(r));
@@ -307,7 +315,7 @@ const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, 
             query.saleMode = req.query.saleMode;
         }
         if (req.query.status && typeof req.query.status === 'string') {
-            query.status = req.query.status;
+            (0, paymentReversalPolicy_1.applyPaymentStatusFilter)(query, req.query.status);
         }
         if (req.query.paymentMethod && typeof req.query.paymentMethod === 'string') {
             query.paymentMethod = req.query.paymentMethod;
@@ -448,7 +456,7 @@ const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, 
                         }
                         else {
                             const key = (it === null || it === void 0 ? void 0 : it.referenceNumber) || (it === null || it === void 0 ? void 0 : it.manualPropertyAddress) || '';
-                            paidToDate = paidByLoose[key] || 0;
+                            paidToDate = (paidByLoose[key] || 0) + (paidByLoose[`REV-${key}`] || 0) + (paidByLoose[`CORR-${key}`] || 0);
                         }
                         it.outstanding = Math.max(0, totalSale - paidToDate);
                     }
@@ -532,7 +540,7 @@ const getCompanySalesPayments = (req, res) => __awaiter(void 0, void 0, void 0, 
                     }
                     else {
                         const key = (it === null || it === void 0 ? void 0 : it.referenceNumber) || (it === null || it === void 0 ? void 0 : it.manualPropertyAddress) || '';
-                        paidToDate = paidByLoose[key] || 0;
+                        paidToDate = (paidByLoose[key] || 0) + (paidByLoose[`REV-${key}`] || 0) + (paidByLoose[`CORR-${key}`] || 0);
                     }
                     it.outstanding = Math.max(0, totalSale - paidToDate);
                 }
@@ -612,8 +620,14 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
     }
     catch (_) { }
+    let releaseRentalGuard = () => __awaiter(void 0, void 0, void 0, function* () { });
     try {
         const { leaseId, amount, paymentDate, paymentMethod, status, companyId, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
+        const requestedCurrency = String(req.body.currency || 'USD').trim().toUpperCase();
+        if (requestedCurrency !== 'USD' && requestedCurrency !== 'ZWL') {
+            return res.status(400).json({ status: 'error', message: 'Currency must be USD or ZWL.' });
+        }
+        req.body.currency = requestedCurrency;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
@@ -624,15 +638,44 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!req.user.companyId) {
             return res.status(401).json({ status: 'error', message: 'Authentication required' });
         }
-        const authorizedLease = yield Lease_1.Lease.findOne({ _id: leaseId, companyId: req.user.companyId }).select('_id propertyId');
+        const authorizedLease = yield Lease_1.Lease.findOne({ _id: leaseId, companyId: req.user.companyId }).select('_id propertyId tenantId');
         if (!authorizedLease || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, String(authorizedLease.propertyId)))) {
             return res.status(404).json({ status: 'error', message: 'Lease not found' });
+        }
+        releaseRentalGuard = yield (0, rentalPeriodCoverage_1.acquireRentalPeriodGuardsForPayment)({
+            companyId: req.user.companyId,
+            propertyId: authorizedLease.propertyId,
+            tenantId: authorizedLease.tenantId,
+            rentalPeriodYear,
+            rentalPeriodMonth,
+            advanceMonthsPaid,
+            advancePeriodStart,
+            advancePeriodEnd,
+            paymentType: 'rental',
+            amount,
+            depositAmount: req.body.depositAmount,
+            leaseId,
+            currency: req.body.currency,
+        });
+        if (req.body.idempotencyKey) {
+            const dup = yield (0, paymentIdempotency_1.findLiveIdempotentPayment)({
+                companyId: req.user.companyId,
+                idempotencyKey: String(req.body.idempotencyKey)
+            });
+            if (dup) {
+                return res.status(200).json({ message: 'Payment processed successfully', payment: dup });
+            }
         }
         // Validate advance payment fields
         if (advanceMonthsPaid && advancePeriodStart && advancePeriodEnd) {
             // Check for overlapping advance payments for this lease
             const overlap = yield Payment_1.Payment.findOne({
                 leaseId,
+                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
+                status: { $in: ['pending', 'completed'] },
+                reversalOfPaymentId: { $exists: false },
+                amount: { $gte: 0 },
+                reversalState: { $ne: 'reversed' },
                 $or: [
                     {
                         'advancePeriodStart.year': { $lte: advancePeriodEnd.year },
@@ -647,6 +690,27 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 ]
             });
             if (overlap) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Overlapping advance payment already exists for this period.'
+                });
+            }
+            const coveredAdvance = yield (0, rentalPeriodCoverage_1.findCoveredAdvanceMonth)({
+                companyId: req.user.companyId,
+                propertyId: authorizedLease.propertyId,
+                tenantId: authorizedLease.tenantId,
+                rentalPeriodMonth,
+                rentalPeriodYear,
+                advanceMonthsPaid,
+                advancePeriodStart,
+                advancePeriodEnd,
+                leaseId,
+                currency: req.body.currency,
+            });
+            if ('error' in coveredAdvance) {
+                return res.status(400).json({ status: 'error', message: coveredAdvance.error, code: 'RENTAL_PERIOD_REQUIRED' });
+            }
+            if (coveredAdvance.covered) {
                 return res.status(400).json({
                     status: 'error',
                     message: 'Overlapping advance payment already exists for this period.'
@@ -686,23 +750,40 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
                 });
             }
+            const coveredAdvance = yield (0, rentalPeriodCoverage_1.findCoveredAdvanceMonth)({
+                companyId: req.user.companyId,
+                propertyId: lease.propertyId,
+                tenantId: lease.tenantId,
+                rentalPeriodMonth,
+                rentalPeriodYear,
+                advanceMonthsPaid,
+                advancePeriodStart,
+                advancePeriodEnd,
+                leaseId: lease._id,
+                currency: req.body.currency,
+            });
+            if ('error' in coveredAdvance) {
+                return res.status(400).json({ status: 'error', message: coveredAdvance.error, code: 'RENTAL_PERIOD_REQUIRED' });
+            }
+            if (coveredAdvance.covered) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Overlapping advance payment already exists for this period.'
+                });
+            }
         }
         else {
             // Allow partial payments for a single month up to remaining balance
-            const periodFilter = {
-                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-                paymentType: 'rental',
-                tenantId: lease.tenantId,
+            const alreadyPaid = yield (0, rentalPeriodCoverage_1.sumRentalPeriodReservation)({
+                companyId: req.user.companyId,
                 propertyId: lease.propertyId,
+                tenantId: lease.tenantId,
                 rentalPeriodYear,
                 rentalPeriodMonth,
-                status: { $in: ['pending', 'completed'] }
-            };
-            const [agg] = yield Payment_1.Payment.aggregate([
-                { $match: periodFilter },
-                { $group: { _id: null, total: { $sum: '$amount' } } }
-            ]);
-            const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                leaseId: lease._id,
+                currency: req.body.currency
+            });
+            const alreadyPaidCents = Math.round(alreadyPaid * 100);
             const rentCents = Math.round((rent || 0) * 100);
             const remainingCents = rentCents - alreadyPaidCents;
             if (remainingCents <= 0) {
@@ -711,16 +792,6 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             const amountCents = Math.round((amount || 0) * 100);
             if (amountCents > remainingCents) {
                 return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
-            }
-        }
-        // Idempotency check (optional client-provided key)
-        if (req.body.idempotencyKey) {
-            const dup = yield Payment_1.Payment.findOne({
-                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-                idempotencyKey: String(req.body.idempotencyKey)
-            }).lean();
-            if (dup) {
-                return res.status(200).json({ message: 'Payment processed successfully', payment: dup });
             }
         }
         const propertyVatRequested = Boolean(property === null || property === void 0 ? void 0 : property.vatOnCommission);
@@ -810,7 +881,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             rentalPeriodYear,
             advanceMonthsPaid,
             advancePeriodStart,
-            advancePeriodEnd, referenceNumber: '', notes: '', commissionDetails: paymentCommissionDetails, applyVatOnCommission: paymentCommissionResult.vatOnCommission, vatOnCommissionRate: paymentCommissionResult.vatRate || 0, vatCommissionTreatment: paymentCommissionResult.vatTreatment, rentUsed: rent, leaseId: lease._id, idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined }));
+            advancePeriodEnd, referenceNumber: '', notes: '', commissionDetails: paymentCommissionDetails, applyVatOnCommission: paymentCommissionResult.vatOnCommission, vatOnCommissionRate: paymentCommissionResult.vatRate || 0, vatCommissionTreatment: paymentCommissionResult.vatTreatment, rentUsed: rent, leaseId: lease._id, currency: requestedCurrency, idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined }));
         yield payment.save();
         // Generate reference number after save (using payment._id)
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
@@ -889,13 +960,16 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
     catch (error) {
         if (error instanceof errorHandler_1.AppError) {
-            return res.status(error.statusCode || 400).json({ message: error.message, code: 'VAT_RATE_UNAVAILABLE' });
+            return res.status(error.statusCode || 400).json({ message: error.message, code: error.code || 'VAT_RATE_UNAVAILABLE' });
         }
         console.error('Error processing payment:', error);
         res.status(500).json({
             message: 'Failed to process payment',
             error: error instanceof Error ? error.message : 'Unknown error',
         });
+    }
+    finally {
+        yield releaseRentalGuard();
     }
 });
 exports.createPayment = createPayment;
@@ -924,7 +998,11 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             return { error: { status: 400, message: 'Company ID is required' } };
         }
         if (req.body.idempotencyKey) {
-            const existing = yield Payment_1.Payment.findOne({ companyId: new mongoose_1.default.Types.ObjectId(user.companyId), idempotencyKey: String(req.body.idempotencyKey) }).lean();
+            const existing = yield (0, paymentIdempotency_1.findLiveIdempotentPayment)({
+                companyId: user.companyId,
+                idempotencyKey: String(req.body.idempotencyKey),
+                session
+            });
             if (existing) {
                 return { payment: existing };
             }
@@ -1072,6 +1150,10 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                 rentalPeriodMonth: Number(rentalPeriodMonth),
                 rentalPeriodYear: Number(rentalPeriodYear),
                 advanceMonthsPaid: Number(advanceMonthsPaid || 1),
+                advancePeriodStart,
+                advancePeriodEnd,
+                leaseId: rawLeaseId,
+                currency,
                 rentUsed: typeof rentUsed === 'number' ? Number(rentUsed) : undefined,
                 levyUsed: typeof req.body.levyUsed === 'number' ? Number(req.body.levyUsed) : undefined,
             });
@@ -1262,38 +1344,39 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                         return { error: { status: 400, message: `Amount must equal rent (${rentBaseline}) x months (${advanceMonthsPaid}) = ${(expectedCents / 100).toFixed(2)}` } };
                     }
                 }
-                // Skip per-month remaining enforcement for advance payments
+                if (tenantObjectId && propertyObjectId) {
+                    const coveredAdvance = yield (0, rentalPeriodCoverage_1.findCoveredAdvanceMonth)({
+                        companyId: user.companyId,
+                        propertyId: propertyObjectId,
+                        tenantId: tenantObjectId,
+                        rentalPeriodMonth,
+                        rentalPeriodYear,
+                        advanceMonthsPaid,
+                        advancePeriodStart,
+                        advancePeriodEnd,
+                        leaseId: rawLeaseId,
+                        currency,
+                    });
+                    if ('error' in coveredAdvance) {
+                        return { error: { status: 400, code: 'RENTAL_PERIOD_REQUIRED', message: coveredAdvance.error } };
+                    }
+                    if (coveredAdvance.covered) {
+                        return { error: { status: 400, message: 'Overlapping advance payment already exists for this period.' } };
+                    }
+                }
             }
             else {
                 // Only enforce when both real tenant and property are present (single-month payment)
                 if (tenantObjectId && propertyObjectId && rentalPeriodMonth && rentalPeriodYear) {
-                    const [agg] = yield Payment_1.Payment.aggregate([
-                        {
-                            $match: {
-                                companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
-                                paymentType: 'rental',
-                                tenantId: tenantObjectId,
-                                propertyId: propertyObjectId,
-                                rentalPeriodYear,
-                                rentalPeriodMonth,
-                                status: { $in: ['pending', 'completed'] }
-                            }
-                        },
-                        {
-                            $group: {
-                                _id: null,
-                                total: {
-                                    $sum: {
-                                        $cond: [
-                                            { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
-                                            '$rentAllocated',
-                                            '$amount'
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    ]);
+                    const alreadyPaid = yield (0, rentalPeriodCoverage_1.sumRentalPeriodReservation)({
+                        companyId: user.companyId,
+                        propertyId: propertyObjectId,
+                        tenantId: tenantObjectId,
+                        rentalPeriodYear,
+                        rentalPeriodMonth,
+                        leaseId: rawLeaseId,
+                        currency
+                    });
                     // Determine monthly rent baseline for single-month enforcement
                     let rentBaseline = typeof rentUsed === 'number' ? rentUsed : 0;
                     if (!rentBaseline) {
@@ -1304,7 +1387,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                         catch (_e) { }
                     }
                     const rentCents = Math.round((rentBaseline || 0) * 100);
-                    const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                    const alreadyPaidCents = Math.round(alreadyPaid * 100);
                     const remainingCents = rentCents - alreadyPaidCents;
                     if (rentCents > 0) {
                         const amountCents = Math.round((effectiveAmount || 0) * 100);
@@ -1464,9 +1547,34 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         return { payment };
     });
+    const bodyId = (value) => {
+        if (!value)
+            return undefined;
+        if (typeof value === 'string')
+            return value;
+        if (typeof value === 'object')
+            return value._id || value.id;
+        return undefined;
+    };
     let session = null;
     let useTransaction = false;
+    let releaseAccountantGuard = () => __awaiter(void 0, void 0, void 0, function* () { });
     try {
+        releaseAccountantGuard = yield (0, rentalPeriodCoverage_1.acquireRentalPeriodGuardsForPayment)({
+            companyId: currentUser.companyId,
+            propertyId: bodyId(req.body.propertyId),
+            tenantId: bodyId(req.body.tenantId),
+            rentalPeriodYear: req.body.rentalPeriodYear,
+            rentalPeriodMonth: req.body.rentalPeriodMonth,
+            advanceMonthsPaid: req.body.advanceMonthsPaid,
+            advancePeriodStart: req.body.advancePeriodStart,
+            advancePeriodEnd: req.body.advancePeriodEnd,
+            paymentType: req.body.paymentType || 'rental',
+            amount: req.body.amount,
+            depositAmount: req.body.depositAmount,
+            leaseId: bodyId(req.body.leaseId),
+            currency: req.body.currency,
+        });
         // Try to use a transaction; if unsupported, we will fallback
         try {
             session = yield mongoose_1.default.startSession();
@@ -1505,7 +1613,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
     catch (error) {
         if (error instanceof errorHandler_1.AppError) {
-            return res.status(error.statusCode || 400).json({ message: error.message, code: 'VAT_RATE_UNAVAILABLE' });
+            return res.status(error.statusCode || 400).json({ message: error.message, code: error.code || 'VAT_RATE_UNAVAILABLE' });
         }
         if (useTransaction && session) {
             try {
@@ -1555,6 +1663,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
         });
     }
     finally {
+        yield releaseAccountantGuard();
         if (session) {
             try {
                 session.endSession();
@@ -1609,10 +1718,10 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
             ? String(req.body.idempotencyKey)
             : undefined;
         if (salesIdempotencyKey) {
-            const existingSalesPayment = yield Payment_1.Payment.findOne({
-                companyId: new mongoose_1.default.Types.ObjectId(user.companyId),
+            const existingSalesPayment = yield (0, paymentIdempotency_1.findLiveIdempotentPayment)({
+                companyId: user.companyId,
                 idempotencyKey: salesIdempotencyKey
-            }).lean();
+            });
             if (existingSalesPayment) {
                 return res.status(200).json({
                     message: 'Sales payment processed successfully',
@@ -1933,7 +2042,7 @@ const createSalesPaymentAccountant = (req, res) => __awaiter(void 0, void 0, voi
 });
 exports.createSalesPaymentAccountant = createSalesPaymentAccountant;
 const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -1944,6 +2053,10 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         });
         if (!payment) {
             return res.status(404).json({ message: 'Payment not found' });
+        }
+        const requestedStatus = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.status) || payment.status || '').toLowerCase();
+        if (requestedStatus === 'completed' || String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.postingStatus) || '') === 'posted') {
+            yield (0, paymentReversalPolicy_1.assertCorrectionDraftCanComplete)(payment, String(req.user.companyId));
         }
         if ((0, paymentFinancialImmutability_1.isCompletedFinancialPayment)(payment)) {
             return res.status(409).json({ message: paymentFinancialImmutability_1.COMPLETED_PAYMENT_IMMUTABLE_MESSAGE });
@@ -1977,8 +2090,8 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             const grossAmount = Math.max(0, Number(payment.amount || 0));
             const rawDetails = payment.commissionDetails || {};
             const totalCommission = Number((rawDetails === null || rawDetails === void 0 ? void 0 : rawDetails.totalCommission) || 0);
-            const explicitCommissionPercent = Number((_a = req.body) === null || _a === void 0 ? void 0 : _a.commissionPercent) > 0
-                ? Number((_b = req.body) === null || _b === void 0 ? void 0 : _b.commissionPercent)
+            const explicitCommissionPercent = Number((_c = req.body) === null || _c === void 0 ? void 0 : _c.commissionPercent) > 0
+                ? Number((_d = req.body) === null || _d === void 0 ? void 0 : _d.commissionPercent)
                 : (() => {
                     const saleVatRate = Math.max(0, Math.min(1, Number(payment.vatRate || 0)));
                     const saleVatAmount = Boolean(payment.vatIncluded)
@@ -1996,7 +2109,7 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 vatIncluded: Boolean(payment.vatIncluded),
                 vatRate: Number(payment.vatRate || 0),
                 applyVatOnCommission: Boolean(payment.applyVatOnCommission),
-                vatOnCommissionRate: Number((_c = payment.vatOnCommissionRate) !== null && _c !== void 0 ? _c : 0),
+                vatOnCommissionRate: Number((_e = payment.vatOnCommissionRate) !== null && _e !== void 0 ? _e : 0),
                 existingSplit: rawDetails === null || rawDetails === void 0 ? void 0 : rawDetails.agentSplit,
                 commissionPercentOverride: explicitCommissionPercent
             });
@@ -2040,7 +2153,7 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 action: 'post',
                 oldValues: before,
                 newValues: paymentAuditSnapshot(payment),
-                reason: typeof ((_d = req.body) === null || _d === void 0 ? void 0 : _d.reason) === 'string' ? req.body.reason : 'Draft correction completed',
+                reason: typeof ((_f = req.body) === null || _f === void 0 ? void 0 : _f.reason) === 'string' ? req.body.reason : 'Draft correction completed',
                 userId: req.user.userId
             });
         }
@@ -2051,7 +2164,7 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 action: 'edit',
                 oldValues: before,
                 newValues: paymentAuditSnapshot(payment),
-                reason: typeof ((_e = req.body) === null || _e === void 0 ? void 0 : _e.reason) === 'string' ? req.body.reason : undefined,
+                reason: typeof ((_g = req.body) === null || _g === void 0 ? void 0 : _g.reason) === 'string' ? req.body.reason : undefined,
                 userId: req.user.userId
             });
         }
@@ -2059,7 +2172,11 @@ const updatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
     catch (error) {
         console.error('Error updating payment:', error);
-        res.status(500).json({ message: 'Error updating payment' });
+        const status = Number((error === null || error === void 0 ? void 0 : error.statusCode) || 500);
+        res.status(status >= 400 && status < 600 ? status : 500).json({
+            message: (error === null || error === void 0 ? void 0 : error.message) || 'Error updating payment',
+            code: error === null || error === void 0 ? void 0 : error.code
+        });
     }
 });
 exports.updatePayment = updatePayment;
@@ -2104,7 +2221,7 @@ const deletePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.deletePayment = deletePayment;
 // Get all payments for a company
 const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -2130,7 +2247,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         }
         // Status filter
         if (req.query.status) {
-            query.status = req.query.status;
+            (0, paymentReversalPolicy_1.applyPaymentStatusFilter)(query, String(req.query.status));
         }
         // Payment type filter (e.g., rental-only accountant list)
         if (req.query.paymentType && typeof req.query.paymentType === 'string') {
@@ -2145,7 +2262,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
             try {
                 query.propertyId = new mongoose_1.default.Types.ObjectId(String(req.query.propertyId));
             }
-            catch (_j) {
+            catch (_e) {
                 // ignore invalid id
             }
         }
@@ -2175,7 +2292,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
         if (paginate) {
             const [items, total] = yield Promise.all([
                 baseQuery
-                    .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd notes rentUsed')
+                    .select('paymentDate paymentType saleId propertyId amount depositAmount paymentMethod status postingStatus referenceNumber currency tenantId isProvisional manualPropertyAddress manualTenantName rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd notes rentUsed reversalState reversalPaymentId reversalOfPaymentId correctedPaymentId')
                     .populate('propertyId', 'name address rent')
                     .lean()
                     .skip((page - 1) * limit)
@@ -2219,7 +2336,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
                                 }
                             }
                         }
-                        catch (_k) {
+                        catch (_f) {
                             // ignore malformed rental row
                         }
                     }
@@ -2259,40 +2376,8 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
                 // Rentals: paid-to-date by (propertyId, tenantId, year, month)
                 const paidByRentalPeriod = {};
                 if (rentalKeys.length > 0) {
-                    const orPeriods = rentalKeys.map(k => {
-                        const out = {
-                            paymentType: 'rental',
-                            companyId: new mongoose_1.default.Types.ObjectId(String(companyId)),
-                            rentalPeriodYear: Number(k.year),
-                            rentalPeriodMonth: Number(k.month)
-                        };
-                        try {
-                            out.propertyId = new mongoose_1.default.Types.ObjectId(String(k.propertyId));
-                        }
-                        catch (_a) {
-                            out.propertyId = String(k.propertyId);
-                        }
-                        try {
-                            out.tenantId = new mongoose_1.default.Types.ObjectId(String(k.tenantId));
-                        }
-                        catch (_b) {
-                            out.tenantId = String(k.tenantId);
-                        }
-                        return out;
-                    });
-                    // Include both completed and pending so UI can show near-real-time remaining for current month
-                    const agg = yield Payment_1.Payment.aggregate([
-                        { $match: { $or: orPeriods, status: { $in: ['completed', 'pending'] } } },
-                        { $group: { _id: { propertyId: '$propertyId', tenantId: '$tenantId', year: '$rentalPeriodYear', month: '$rentalPeriodMonth' }, totalPaid: { $sum: '$amount' } } }
-                    ]).option({ maxTimeMS: LIST_QUERY_MAX_TIME_MS });
-                    for (const row of agg) {
-                        const pid = String((_c = row._id) === null || _c === void 0 ? void 0 : _c.propertyId);
-                        const tid = String((_d = row._id) === null || _d === void 0 ? void 0 : _d.tenantId);
-                        const y = Number((_e = row._id) === null || _e === void 0 ? void 0 : _e.year);
-                        const m = Number((_f = row._id) === null || _f === void 0 ? void 0 : _f.month);
-                        const key = `${pid}:${tid}:${y}:${m}`;
-                        paidByRentalPeriod[key] = Number(row.totalPaid || 0);
-                    }
+                    const covered = yield (0, rentalPeriodCoverage_1.coverageByRentalKeys)(String(companyId), rentalKeys);
+                    Object.assign(paidByRentalPeriod, covered);
                 }
                 // Helper to parse total sale price
                 const parseTotalSale = (notes) => {
@@ -2317,15 +2402,15 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
                                 }
                                 else {
                                     const key = (it === null || it === void 0 ? void 0 : it.referenceNumber) || (it === null || it === void 0 ? void 0 : it.manualPropertyAddress) || '';
-                                    paidToDate = paidByLoose[key] || 0;
+                                    paidToDate = (paidByLoose[key] || 0) + (paidByLoose[`REV-${key}`] || 0) + (paidByLoose[`CORR-${key}`] || 0);
                                 }
                                 it.outstanding = Math.max(0, totalSale - paidToDate);
                             }
                         }
                         else if (type === 'rental' || type === 'introduction' || type === 'management') {
                             // Determine period key for this row
-                            const propId = String(((_g = it === null || it === void 0 ? void 0 : it.propertyId) === null || _g === void 0 ? void 0 : _g._id) || (it === null || it === void 0 ? void 0 : it.propertyId) || '');
-                            const tenantId = String(((_h = it === null || it === void 0 ? void 0 : it.tenantId) === null || _h === void 0 ? void 0 : _h._id) || (it === null || it === void 0 ? void 0 : it.tenantId) || '');
+                            const propId = String(((_c = it === null || it === void 0 ? void 0 : it.propertyId) === null || _c === void 0 ? void 0 : _c._id) || (it === null || it === void 0 ? void 0 : it.propertyId) || '');
+                            const tenantId = String(((_d = it === null || it === void 0 ? void 0 : it.tenantId) === null || _d === void 0 ? void 0 : _d._id) || (it === null || it === void 0 ? void 0 : it.tenantId) || '');
                             const y = typeof (it === null || it === void 0 ? void 0 : it.rentalPeriodYear) === 'number' ? Number(it.rentalPeriodYear) : new Date(it.paymentDate).getFullYear();
                             const m = typeof (it === null || it === void 0 ? void 0 : it.rentalPeriodMonth) === 'number' ? Number(it.rentalPeriodMonth) : (new Date(it.paymentDate).getMonth() + 1);
                             const key = `${propId}:${tenantId}:${y}:${m}`;
@@ -2339,7 +2424,7 @@ const getCompanyPayments = (req, res) => __awaiter(void 0, void 0, void 0, funct
                             }
                         }
                     }
-                    catch (_l) {
+                    catch (_g) {
                         // best-effort; skip item if any error
                     }
                 }
@@ -2507,6 +2592,27 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (status === 'reversed') {
             return res.status(400).json({ message: 'Use /payments/:id/reverse endpoint for reversals.' });
         }
+        if (status === 'completed') {
+            yield (0, paymentReversalPolicy_1.assertCorrectionDraftCanComplete)(payment, String(req.user.companyId));
+            const looksLikeCorrection = Boolean(payment.isCorrectionEntry)
+                || String(payment.referenceNumber || '').startsWith('CORR-');
+            const paymentType = String(payment.paymentType || '');
+            if (looksLikeCorrection && (paymentType === 'rental' || paymentType === 'introduction')) {
+                if (!(0, correctionCommissionSnapshot_1.rentalCorrectionSnapshotAgrees)(payment.commissionDetails, Number(payment.amount || 0))) {
+                    const built = yield (0, correctionCommissionSnapshot_1.buildRentalCorrectionCommission)(payment);
+                    if (!built.agrees) {
+                        throw new errorHandler_1.AppError('Corrected payment commission snapshot does not reconcile.', 409, 'CORRECTION_SNAPSHOT_INCOMPLETE');
+                    }
+                    payment.commissionDetails = built.snapshot;
+                    payment.applyVatOnCommission = built.applyVatOnCommission;
+                    payment.vatOnCommissionRate = built.vatOnCommissionRate;
+                    if (built.vatCommissionTreatment) {
+                        payment.vatCommissionTreatment = built.vatCommissionTreatment;
+                    }
+                }
+                payment.commissionFinalized = true;
+            }
+        }
         if ((0, paymentFinancialImmutability_1.isCompletedFinancialPayment)(payment) && String(status) !== 'completed') {
             return res.status(409).json({ message: paymentFinancialImmutability_1.COMPLETED_PAYMENT_IMMUTABLE_MESSAGE });
         }
@@ -2567,9 +2673,10 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
     catch (error) {
         console.error('Error updating payment status:', error);
-        res.status(500).json({
-            message: 'Failed to update payment status',
-            error: error instanceof Error ? error.message : 'Unknown error',
+        const statusCode = Number((error === null || error === void 0 ? void 0 : error.statusCode) || 500);
+        res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
+            message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to update payment status',
+            code: error === null || error === void 0 ? void 0 : error.code
         });
     }
 });
@@ -2591,8 +2698,110 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
     const session = yield mongoose_1.default.startSession();
     try {
         let resultPayload = null;
-        const applyReversal = (opts) => __awaiter(void 0, void 0, void 0, function* () {
+        const findOrCreateCorrectionDraft = (source, dbSession) => __awaiter(void 0, void 0, void 0, function* () {
             var _a, _b;
+            if (source === null || source === void 0 ? void 0 : source.correctedPaymentId) {
+                const linkedQuery = Payment_1.Payment.findOne({ _id: source.correctedPaymentId, companyId: source.companyId });
+                const linked = dbSession ? yield linkedQuery.session(dbSession) : yield linkedQuery;
+                if (linked)
+                    return linked;
+            }
+            const referenceNumber = `CORR-${String(source.referenceNumber || source._id)}`;
+            const byRefQuery = Payment_1.Payment.findOne({
+                companyId: source.companyId,
+                referenceNumber,
+                isCorrectionEntry: true,
+                reversalOfPaymentId: { $exists: false }
+            });
+            const byRef = dbSession ? yield byRefQuery.session(dbSession) : yield byRefQuery;
+            if (byRef) {
+                yield Payment_1.Payment.updateOne({ _id: source._id }, { $set: { correctedPaymentId: byRef._id } }, dbSession ? { session: dbSession } : undefined);
+                return byRef;
+            }
+            const rentalCorrection = source.paymentType === 'rental' || source.paymentType === 'introduction';
+            const builtCorrection = rentalCorrection ? yield (0, correctionCommissionSnapshot_1.buildRentalCorrectionCommission)(source) : null;
+            const correctedCommissionDetails = builtCorrection
+                ? builtCorrection.snapshot
+                : yield buildSaleCommissionDetails({
+                    amount: Math.max(0, Number(source.amount || 0)),
+                    companyId: String(source.companyId || ''),
+                    propertyId: source.propertyId,
+                    vatIncluded: Boolean(source.vatIncluded),
+                    vatRate: Number(source.vatRate || 0),
+                    applyVatOnCommission: Boolean(source.applyVatOnCommission),
+                    vatOnCommissionRate: Number((_a = source.vatOnCommissionRate) !== null && _a !== void 0 ? _a : 0),
+                    existingSplit: (_b = source === null || source === void 0 ? void 0 : source.commissionDetails) === null || _b === void 0 ? void 0 : _b.agentSplit
+                });
+            const correctedDraft = new Payment_1.Payment({
+                paymentType: source.paymentType,
+                transactionDomain: (0, transactionDomain_1.historicalTransactionDomain)(source) || undefined,
+                saleMode: source.saleMode,
+                propertyType: source.propertyType,
+                propertyId: source.propertyId,
+                tenantId: source.tenantId,
+                agentId: source.agentId,
+                companyId: source.companyId,
+                paymentDate: source.paymentDate,
+                paymentMethod: source.paymentMethod,
+                amount: Number(source.amount || 0),
+                depositAmount: Number(source.depositAmount || 0),
+                referenceNumber,
+                rentalPeriodMonth: source.rentalPeriodMonth,
+                rentalPeriodYear: source.rentalPeriodYear,
+                advanceMonthsPaid: source.advanceMonthsPaid,
+                advancePeriodStart: source.advancePeriodStart,
+                advancePeriodEnd: source.advancePeriodEnd,
+                notes: `Correction draft for ${String(source.referenceNumber || source._id)}`,
+                processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
+                commissionDetails: correctedCommissionDetails,
+                vatIncluded: source.vatIncluded,
+                vatRate: source.vatRate,
+                vatAmount: source.vatAmount,
+                applyVatOnCommission: builtCorrection ? builtCorrection.applyVatOnCommission : source.applyVatOnCommission,
+                vatOnCommissionRate: builtCorrection ? builtCorrection.vatOnCommissionRate : source.vatOnCommissionRate,
+                vatCommissionTreatment: (builtCorrection === null || builtCorrection === void 0 ? void 0 : builtCorrection.vatCommissionTreatment) || source.vatCommissionTreatment,
+                rentAllocated: source.rentAllocated,
+                levyAllocated: source.levyAllocated,
+                rentUsed: source.rentUsed,
+                levyUsed: source.levyUsed,
+                status: 'pending',
+                postingStatus: 'draft',
+                currency: source.currency,
+                leaseId: source.leaseId,
+                manualPropertyAddress: source.manualPropertyAddress,
+                manualTenantName: source.manualTenantName,
+                buyerName: source.buyerName,
+                sellerName: source.sellerName,
+                isCorrectionEntry: true,
+                isProvisional: false,
+                isInSuspense: false,
+                commissionFinalized: Boolean(builtCorrection === null || builtCorrection === void 0 ? void 0 : builtCorrection.agrees),
+                developmentId: source.developmentId,
+                developmentUnitId: source.developmentUnitId,
+                saleId: source.saleId
+            });
+            try {
+                yield correctedDraft.save(dbSession ? { session: dbSession } : undefined);
+            }
+            catch (saveError) {
+                if (!isDuplicateKeyError(saveError))
+                    throw saveError;
+                const racedQuery = Payment_1.Payment.findOne({
+                    companyId: source.companyId,
+                    referenceNumber,
+                    isCorrectionEntry: true,
+                    reversalOfPaymentId: { $exists: false }
+                });
+                const raced = dbSession ? yield racedQuery.session(dbSession) : yield racedQuery;
+                if (!raced)
+                    throw saveError;
+                yield Payment_1.Payment.updateOne({ _id: source._id }, { $set: { correctedPaymentId: raced._id } }, dbSession ? { session: dbSession } : undefined);
+                return raced;
+            }
+            yield Payment_1.Payment.updateOne({ _id: source._id }, { $set: { correctedPaymentId: correctedDraft._id } }, dbSession ? { session: dbSession } : undefined);
+            return correctedDraft;
+        });
+        const applyReversal = (opts) => __awaiter(void 0, void 0, void 0, function* () {
             const dbSession = opts === null || opts === void 0 ? void 0 : opts.session;
             const originalQuery = Payment_1.Payment.findOne({
                 _id: req.params.id,
@@ -2604,6 +2813,10 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
             }
             if (isAccountingPeriodLocked(original.paymentDate)) {
                 throw new errorHandler_1.AppError('Accounting period is locked. Only adjustment entries are allowed.', 409);
+            }
+            yield (0, vatReturnService_1.assertVatPeriodOpen)(String(req.user.companyId), new Date(), { allowAdjustment: false });
+            if ((0, paymentReversalPolicy_1.isReversalDocument)(original)) {
+                throw new errorHandler_1.AppError('Reversal payments cannot be reversed.', 409, 'REVERSAL_OF_REVERSAL');
             }
             const postingStatus = String(original.postingStatus || '');
             const isPosted = postingStatus === 'posted' || String(original.status || '') === 'completed';
@@ -2618,10 +2831,14 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 if (!existingReversal) {
                     throw new errorHandler_1.AppError('Payment is already reversed.', 409);
                 }
+                if (String(existingReversal.reversalOfPaymentId || '') !== String(original._id)) {
+                    throw new errorHandler_1.AppError('Existing reversal does not belong to this payment.', 409, 'REVERSAL_LINK_MISMATCH');
+                }
+                const correctedDraft = yield findOrCreateCorrectionDraft(original, dbSession);
                 resultPayload = {
                     original,
                     reversal: existingReversal,
-                    correctedDraft: null,
+                    correctedDraft,
                     alreadyReversed: true,
                     skipAccounting: legacyReversed && String(original.reversalState || '') !== 'reversal_incomplete'
                 };
@@ -2655,34 +2872,92 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                     yield Payment_1.Payment.updateOne({ _id: original._id, reversalPaymentId: { $exists: false } }, { $set: { reversalPaymentId: existingReversal._id, reversalState: 'reversal_in_progress' } }, dbSession ? { session: dbSession } : undefined);
                     const linkedQuery = Payment_1.Payment.findById(original._id);
                     const linked = dbSession ? yield linkedQuery.session(dbSession) : yield linkedQuery;
-                    resultPayload = { original: linked, reversal: existingReversal, correctedDraft: null, alreadyReversed: true };
+                    const correctedDraft = yield findOrCreateCorrectionDraft(linked || original, dbSession);
+                    resultPayload = { original: linked, reversal: existingReversal, correctedDraft, alreadyReversed: true };
                     return;
                 }
-                const staleBefore = new Date(Date.now() - 60 * 1000);
-                const takeoverQuery = Payment_1.Payment.findOneAndUpdate({
-                    _id: original._id,
-                    companyId: req.user.companyId,
-                    reversalPaymentId: { $exists: false },
-                    reversalState: 'reversal_in_progress',
-                    $or: [
-                        { reversalLockAt: { $lt: staleBefore } },
-                        { reversalLockAt: { $exists: false }, updatedAt: { $lt: staleBefore } }
-                    ]
-                }, {
-                    $set: {
-                        reversalState: 'reversal_in_progress',
-                        reversalLockAt: new Date(),
-                        reversalLockBy: new mongoose_1.default.Types.ObjectId(req.user.userId)
+                const currentQuery = Payment_1.Payment.findById(original._id);
+                const current = dbSession ? yield currentQuery.session(dbSession) : yield currentQuery;
+                const currentState = String((current === null || current === void 0 ? void 0 : current.reversalState) || '');
+                if (currentState === 'reversal_incomplete') {
+                    throw new errorHandler_1.AppError('Payment reversal is incomplete and must be recovered, not started again.', 409, 'REVERSAL_INCOMPLETE');
+                }
+                if (current === null || current === void 0 ? void 0 : current.reversalPaymentId) {
+                    const reservedQuery = Payment_1.Payment.findById(current.reversalPaymentId);
+                    const reserved = dbSession ? yield reservedQuery.session(dbSession) : yield reservedQuery;
+                    if (reserved) {
+                        const correctedDraft = yield findOrCreateCorrectionDraft(current || original, dbSession);
+                        resultPayload = { original: current, reversal: reserved, correctedDraft, alreadyReversed: true };
+                        return;
                     }
-                }, { new: true });
-                lockedOriginal = dbSession ? yield takeoverQuery.session(dbSession) : yield takeoverQuery;
+                    lockedOriginal = current;
+                }
+                else if (currentState === 'reversal_in_progress') {
+                    const claimQuery = Payment_1.Payment.findOneAndUpdate({
+                        _id: original._id,
+                        companyId: req.user.companyId,
+                        reversalPaymentId: { $exists: false },
+                        reversalState: 'reversal_in_progress'
+                    }, {
+                        $set: {
+                            reversalState: 'reversal_in_progress',
+                            reversalLockAt: new Date(),
+                            reversalLockBy: new mongoose_1.default.Types.ObjectId(req.user.userId)
+                        }
+                    }, { new: true });
+                    lockedOriginal = dbSession ? yield claimQuery.session(dbSession) : yield claimQuery;
+                }
                 if (!lockedOriginal) {
-                    throw new errorHandler_1.AppError('Payment is no longer eligible for reversal (possibly already reversed).', 409);
+                    const racedQuery = Payment_1.Payment.findOne({
+                        reversalOfPaymentId: original._id,
+                        companyId: req.user.companyId,
+                        amount: { $lt: 0 }
+                    });
+                    const raced = dbSession ? yield racedQuery.session(dbSession) : yield racedQuery;
+                    if (raced) {
+                        const correctedDraft = yield findOrCreateCorrectionDraft(current || original, dbSession);
+                        resultPayload = { original: current, reversal: raced, correctedDraft, alreadyReversed: true };
+                        return;
+                    }
+                    throw new errorHandler_1.AppError('Another reversal attempt is in progress for this payment.', 409, 'REVERSAL_IN_PROGRESS');
                 }
             }
             (0, testFailureSeam_1.throwOnceIfArmed)(String(lockedOriginal._id), `${String(lockedOriginal.notes || '')} ${reason}`, 'PHASE28_FAIL_BEFORE_REVERSAL_SAVE');
             const before = paymentAuditSnapshot(original);
+            let reversalId = lockedOriginal.reversalPaymentId
+                ? new mongoose_1.default.Types.ObjectId(String(lockedOriginal.reversalPaymentId))
+                : new mongoose_1.default.Types.ObjectId();
+            if (!lockedOriginal.reversalPaymentId) {
+                const reserveQuery = Payment_1.Payment.findOneAndUpdate({
+                    _id: lockedOriginal._id,
+                    companyId: req.user.companyId,
+                    reversalPaymentId: { $exists: false },
+                    reversalState: 'reversal_in_progress'
+                }, { $set: { reversalPaymentId: reversalId } }, { new: true });
+                const reserved = dbSession ? yield reserveQuery.session(dbSession) : yield reserveQuery;
+                if (!reserved) {
+                    const winnerQuery = Payment_1.Payment.findOne({
+                        reversalOfPaymentId: lockedOriginal._id,
+                        companyId: req.user.companyId,
+                        amount: { $lt: 0 }
+                    });
+                    const winner = dbSession ? yield winnerQuery.session(dbSession) : yield winnerQuery;
+                    const currentQuery = Payment_1.Payment.findById(lockedOriginal._id);
+                    const current = dbSession ? yield currentQuery.session(dbSession) : yield currentQuery;
+                    const linked = winner || ((current === null || current === void 0 ? void 0 : current.reversalPaymentId)
+                        ? yield Payment_1.Payment.findById(current.reversalPaymentId)
+                        : null);
+                    if (linked) {
+                        const correctedDraft = yield findOrCreateCorrectionDraft(current || lockedOriginal, dbSession);
+                        resultPayload = { original: current || lockedOriginal, reversal: linked, correctedDraft, alreadyReversed: true };
+                        return;
+                    }
+                    throw new errorHandler_1.AppError('Another reversal attempt is in progress for this payment.', 409, 'REVERSAL_IN_PROGRESS');
+                }
+                lockedOriginal = reserved;
+            }
             const reversal = new Payment_1.Payment({
+                _id: reversalId,
                 paymentType: lockedOriginal.paymentType,
                 transactionDomain: (0, transactionDomain_1.historicalTransactionDomain)(lockedOriginal) || undefined,
                 saleMode: lockedOriginal.saleMode,
@@ -2734,63 +3009,25 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 developmentUnitId: lockedOriginal.developmentUnitId,
                 saleId: lockedOriginal.saleId,
             });
-            yield reversal.save(dbSession ? { session: dbSession } : undefined);
-            yield (0, combinedPaymentService_1.voidLinkedLevyPayment)(lockedOriginal.linkedLevyPaymentId, `Reversal of ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}: ${reason}`, dbSession);
-            const correctedCommissionDetails = yield buildSaleCommissionDetails({
-                amount: Math.max(0, Number(lockedOriginal.amount || 0)),
-                companyId: String(lockedOriginal.companyId || ''),
-                propertyId: lockedOriginal.propertyId,
-                vatIncluded: Boolean(lockedOriginal.vatIncluded),
-                vatRate: Number(lockedOriginal.vatRate || 0),
-                applyVatOnCommission: Boolean(lockedOriginal.applyVatOnCommission),
-                vatOnCommissionRate: Number((_a = lockedOriginal.vatOnCommissionRate) !== null && _a !== void 0 ? _a : 0),
-                existingSplit: (_b = lockedOriginal === null || lockedOriginal === void 0 ? void 0 : lockedOriginal.commissionDetails) === null || _b === void 0 ? void 0 : _b.agentSplit
-            });
-            // Create a draft correction copy for manual accountant adjustments.
-            const correctedDraft = new Payment_1.Payment({
-                paymentType: lockedOriginal.paymentType,
-                transactionDomain: (0, transactionDomain_1.historicalTransactionDomain)(lockedOriginal) || undefined,
-                saleMode: lockedOriginal.saleMode,
-                propertyType: lockedOriginal.propertyType,
-                propertyId: lockedOriginal.propertyId,
-                tenantId: lockedOriginal.tenantId,
-                agentId: lockedOriginal.agentId,
-                companyId: lockedOriginal.companyId,
-                paymentDate: lockedOriginal.paymentDate,
-                paymentMethod: lockedOriginal.paymentMethod,
-                amount: Number(lockedOriginal.amount || 0),
-                depositAmount: Number(lockedOriginal.depositAmount || 0),
-                referenceNumber: `CORR-${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
-                rentalPeriodMonth: lockedOriginal.rentalPeriodMonth,
-                rentalPeriodYear: lockedOriginal.rentalPeriodYear,
-                advanceMonthsPaid: lockedOriginal.advanceMonthsPaid,
-                advancePeriodStart: lockedOriginal.advancePeriodStart,
-                advancePeriodEnd: lockedOriginal.advancePeriodEnd,
-                notes: `Correction draft for ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}`,
-                processedBy: new mongoose_1.default.Types.ObjectId(req.user.userId),
-                commissionDetails: correctedCommissionDetails,
-                vatIncluded: lockedOriginal.vatIncluded,
-                vatRate: lockedOriginal.vatRate,
-                vatAmount: lockedOriginal.vatAmount,
-                applyVatOnCommission: lockedOriginal.applyVatOnCommission,
-                vatOnCommissionRate: lockedOriginal.vatOnCommissionRate,
-                status: 'pending',
-                postingStatus: 'draft',
-                currency: lockedOriginal.currency,
-                leaseId: lockedOriginal.leaseId,
-                manualPropertyAddress: lockedOriginal.manualPropertyAddress,
-                manualTenantName: lockedOriginal.manualTenantName,
-                buyerName: lockedOriginal.buyerName,
-                sellerName: lockedOriginal.sellerName,
-                isCorrectionEntry: true,
-                isProvisional: false,
-                isInSuspense: false,
-                commissionFinalized: false,
-                developmentId: lockedOriginal.developmentId,
-                developmentUnitId: lockedOriginal.developmentUnitId,
-                saleId: lockedOriginal.saleId,
-            });
-            yield correctedDraft.save(dbSession ? { session: dbSession } : undefined);
+            try {
+                yield reversal.save(dbSession ? { session: dbSession } : undefined);
+            }
+            catch (saveError) {
+                if (!isDuplicateKeyError(saveError))
+                    throw saveError;
+                const existingQuery = Payment_1.Payment.findOne({
+                    companyId: lockedOriginal.companyId,
+                    referenceNumber: reversal.referenceNumber
+                });
+                const existing = dbSession ? yield existingQuery.session(dbSession) : yield existingQuery;
+                if (!existing)
+                    throw saveError;
+                const correctedDraft = yield findOrCreateCorrectionDraft(lockedOriginal, dbSession);
+                resultPayload = { original: lockedOriginal, reversal: existing, correctedDraft, alreadyReversed: true };
+                return;
+            }
+            yield (0, combinedPaymentService_1.reverseLinkedLevyPayment)(lockedOriginal.linkedLevyPaymentId, `Reversal of ${String(lockedOriginal.referenceNumber || lockedOriginal._id)}: ${reason}`, { session: dbSession, reversedBy: req.user.userId });
+            const correctedDraft = yield findOrCreateCorrectionDraft(lockedOriginal, dbSession);
             yield Payment_1.Payment.updateOne({ _id: lockedOriginal._id }, {
                 $set: {
                     reversedAt: new Date(),
@@ -2853,12 +3090,14 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const original = resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.original;
         const reversal = resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.reversal;
         const propagationWarnings = [];
+        let accountingOutcome = (resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.skipAccounting) ? 'reversed' : 'failed';
         if (original && !(resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.skipAccounting)) {
             const reversalResult = yield (0, paymentAccountingOrchestrator_1.reversePaymentAccounting)(String(original._id), {
                 processedBy: req.user.userId,
                 reason,
                 reversalPaymentId: (reversal === null || reversal === void 0 ? void 0 : reversal._id) ? String(reversal._id) : undefined
             });
+            accountingOutcome = reversalResult.status;
             if (reversalResult.status === 'partial' || reversalResult.status === 'failed') {
                 for (const err of reversalResult.errors) {
                     propagationWarnings.push(err);
@@ -2866,7 +3105,7 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 console.error('Payment reversal accounting incomplete', reversalResult);
             }
             const reversalSettled = reversalResult.status === 'reversed' || reversalResult.status === 'already_reversed';
-            if (reversalSettled)
+            if (reversalSettled) {
                 try {
                     yield (0, eventBus_1.emitEvent)('payment.reversed', {
                         eventId: `payment.reversed:${String(original._id)}`,
@@ -2886,11 +3125,24 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
                         performedBy: String(req.user.userId),
                     }, (emitErr === null || emitErr === void 0 ? void 0 : emitErr.message) || 'failed to emit payment.reversed', String(original.companyId || ''));
                 }
+            }
+            try {
+                yield (0, ownerRentNotificationService_1.notifyOwnerOfRentReversal)(original, reason, { settled: reversalSettled });
+            }
+            catch (noticeErr) {
+                console.warn('Owner reversal notice failed', (noticeErr === null || noticeErr === void 0 ? void 0 : noticeErr.message) || noticeErr);
+            }
         }
-        return res.json({
-            message: propagationWarnings.length
-                ? 'Payment reversed. Draft correction created. Some ledgers are queued for retry.'
-                : 'Payment reversed. Draft correction created.',
+        const incomplete = accountingOutcome === 'partial' || accountingOutcome === 'failed';
+        const queued = incomplete && !propagationWarnings.some((warning) => String(warning).startsWith('reversal.enqueue'));
+        const httpStatus = !incomplete ? 200 : (queued ? 202 : 500);
+        return res.status(httpStatus).json({
+            outcome: !incomplete ? 'reversed' : (queued ? 'reversal_incomplete' : 'reversal_failed'),
+            message: !incomplete
+                ? 'Payment reversed. Draft correction created.'
+                : (queued
+                    ? 'Payment reversal is incomplete. Accounting recovery has been queued.'
+                    : 'Payment reversal is incomplete and could not be queued.'),
             originalPayment: resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.original,
             reversalPayment: resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.reversal,
             correctedPayment: resultPayload === null || resultPayload === void 0 ? void 0 : resultPayload.correctedDraft,
@@ -2901,7 +3153,8 @@ const reversePayment = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const status = Number((error === null || error === void 0 ? void 0 : error.statusCode) || (error === null || error === void 0 ? void 0 : error.status) || 500);
         console.error('Error reversing payment:', error);
         return res.status(status >= 400 && status < 600 ? status : 500).json({
-            message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to reverse payment'
+            message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to reverse payment',
+            code: error === null || error === void 0 ? void 0 : error.code
         });
     }
     finally {
@@ -2920,7 +3173,7 @@ const getPaymentsPublic = (req, res) => __awaiter(void 0, void 0, void 0, functi
         let query = { companyId: new mongoose_1.default.Types.ObjectId(companyId) };
         // Additional filtering options
         if (req.query.status) {
-            query.status = req.query.status;
+            (0, paymentReversalPolicy_1.applyPaymentStatusFilter)(query, String(req.query.status));
         }
         if (req.query.paymentType) {
             query.paymentType = req.query.paymentType;
@@ -3023,9 +3276,15 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
         }
     }
     catch (_) { }
+    let releasePublicRentalGuard = () => __awaiter(void 0, void 0, void 0, function* () { });
     try {
         const { leaseId, amount, paymentDate, paymentMethod, status, rentalPeriodMonth, rentalPeriodYear, advanceMonthsPaid, advancePeriodStart, advancePeriodEnd, } = req.body;
         const companyId = req.user.companyId;
+        const publicCurrency = String(req.body.currency || 'USD').trim().toUpperCase();
+        if (publicCurrency !== 'USD' && publicCurrency !== 'ZWL') {
+            return res.status(400).json({ status: 'error', message: 'Currency must be USD or ZWL.' });
+        }
+        req.body.currency = publicCurrency;
         // Validate required fields
         if (!leaseId || !amount || !paymentDate || !paymentMethod || !status) {
             return res.status(400).json({
@@ -3040,6 +3299,30 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
                 status: 'error',
                 message: 'Lease not found',
             });
+        }
+        releasePublicRentalGuard = yield (0, rentalPeriodCoverage_1.acquireRentalPeriodGuardsForPayment)({
+            companyId: lease.companyId,
+            propertyId: lease.propertyId,
+            tenantId: lease.tenantId,
+            rentalPeriodYear,
+            rentalPeriodMonth,
+            advanceMonthsPaid,
+            advancePeriodStart,
+            advancePeriodEnd,
+            paymentType: 'rental',
+            amount,
+            depositAmount: req.body.depositAmount,
+            leaseId: lease._id,
+            currency: req.body.currency,
+        });
+        if (req.body.idempotencyKey) {
+            const dup = yield (0, paymentIdempotency_1.findLiveIdempotentPayment)({
+                companyId: lease.companyId,
+                idempotencyKey: String(req.body.idempotencyKey)
+            });
+            if (dup) {
+                return res.status(200).json({ status: 'success', data: dup, message: 'Payment created successfully' });
+            }
         }
         // Get property details
         const property = yield Property_1.Property.findOne({ _id: lease.propertyId, companyId });
@@ -3056,23 +3339,40 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
                     message: `Amount must equal rent (${rent}) x months (${advanceMonthsPaid}) = ${expectedAmount}`
                 });
             }
+            const coveredAdvance = yield (0, rentalPeriodCoverage_1.findCoveredAdvanceMonth)({
+                companyId: lease.companyId,
+                propertyId: lease.propertyId,
+                tenantId: lease.tenantId,
+                rentalPeriodMonth,
+                rentalPeriodYear,
+                advanceMonthsPaid,
+                advancePeriodStart,
+                advancePeriodEnd,
+                leaseId: lease._id,
+                currency: req.body.currency,
+            });
+            if ('error' in coveredAdvance) {
+                return res.status(400).json({ status: 'error', message: coveredAdvance.error, code: 'RENTAL_PERIOD_REQUIRED' });
+            }
+            if (coveredAdvance.covered) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Overlapping advance payment already exists for this period.'
+                });
+            }
         }
         else {
             // Allow partial payments for a single month up to remaining balance
-            const periodFilter = {
-                companyId: new mongoose_1.default.Types.ObjectId(lease.companyId),
-                paymentType: 'rental',
-                tenantId: lease.tenantId,
+            const alreadyPaid = yield (0, rentalPeriodCoverage_1.sumRentalPeriodReservation)({
+                companyId: lease.companyId,
                 propertyId: lease.propertyId,
+                tenantId: lease.tenantId,
                 rentalPeriodYear,
                 rentalPeriodMonth,
-                status: { $in: ['pending', 'completed'] }
-            };
-            const [agg] = yield Payment_1.Payment.aggregate([
-                { $match: periodFilter },
-                { $group: { _id: null, total: { $sum: '$amount' } } }
-            ]);
-            const alreadyPaidCents = Math.round(((agg === null || agg === void 0 ? void 0 : agg.total) || 0) * 100);
+                leaseId: lease._id,
+                currency: req.body.currency
+            });
+            const alreadyPaidCents = Math.round(alreadyPaid * 100);
             const rentCents = Math.round((rent || 0) * 100);
             const remainingCents = rentCents - alreadyPaidCents;
             if (remainingCents <= 0) {
@@ -3081,16 +3381,6 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             const amountCents = Math.round((amount || 0) * 100);
             if (amountCents > remainingCents) {
                 return res.status(400).json({ status: 'error', message: `Only ${(remainingCents / 100).toFixed(2)} remains for this month. Enter an amount ≤ remaining.` });
-            }
-        }
-        // Idempotency check (optional client-provided key)
-        if (req.body.idempotencyKey) {
-            const dup = yield Payment_1.Payment.findOne({
-                companyId: new mongoose_1.default.Types.ObjectId(lease.companyId),
-                idempotencyKey: String(req.body.idempotencyKey)
-            }).lean();
-            if (dup) {
-                return res.status(200).json({ status: 'success', data: dup, message: 'Payment created successfully' });
             }
         }
         const propertyVatRequested = Boolean(property === null || property === void 0 ? void 0 : property.vatOnCommission);
@@ -3178,7 +3468,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
             rentalPeriodYear,
             advanceMonthsPaid,
             advancePeriodStart,
-            advancePeriodEnd, referenceNumber: '', notes: '', commissionDetails: publicCommissionDetails, applyVatOnCommission: publicCommissionResult.vatOnCommission, vatOnCommissionRate: publicCommissionResult.vatRate || 0, vatCommissionTreatment: publicCommissionResult.vatTreatment, rentUsed: rent, leaseId: lease._id, idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined }));
+            advancePeriodEnd, referenceNumber: '', notes: '', commissionDetails: publicCommissionDetails, applyVatOnCommission: publicCommissionResult.vatOnCommission, vatOnCommissionRate: publicCommissionResult.vatRate || 0, vatCommissionTreatment: publicCommissionResult.vatTreatment, rentUsed: rent, leaseId: lease._id, currency: publicCurrency, idempotencyKey: req.body.idempotencyKey ? String(req.body.idempotencyKey) : undefined }));
         yield payment.save();
         payment.referenceNumber = `RCPT-${payment._id.toString().slice(-6).toUpperCase()}-${rentalPeriodYear}-${String(rentalPeriodMonth).padStart(2, '0')}`;
         yield payment.save();
@@ -3206,17 +3496,17 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
     catch (error) {
         console.error('Error creating payment (public):', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error creating payment',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        const statusCode = error instanceof errorHandler_1.AppError ? (error.statusCode || 500) : 500;
+        res.status(statusCode).json(Object.assign({ status: 'error', message: error instanceof Error ? error.message : 'Error creating payment' }, (error instanceof errorHandler_1.AppError && error.code ? { code: error.code } : {})));
+    }
+    finally {
+        yield releasePublicRentalGuard();
     }
 });
 exports.createPaymentPublic = createPaymentPublic;
 // Public endpoint for downloading a payment receipt as blob (no authentication required)
 const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
     try {
         const { id } = req.params;
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -3228,7 +3518,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
         try {
             query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        catch (_u) {
+        catch (_t) {
             query.companyId = String(companyId);
         }
         const payment = yield Payment_1.Payment.findOne(query)
@@ -3262,23 +3552,18 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
             const periodMonth = typeof payment.rentalPeriodMonth === 'number'
                 ? Number(payment.rentalPeriodMonth)
                 : (new Date(payment.paymentDate).getMonth() + 1);
-            const match = {
+            const paidToDate = yield (0, rentalPeriodCoverage_1.sumRentCoverageForPeriod)({
                 companyId: payment.companyId,
-                paymentType: 'rental',
-                status: { $in: ['completed'] },
-                propertyId: ((_d = payment.propertyId) === null || _d === void 0 ? void 0 : _d._id) || payment.propertyId,
-                tenantId: ((_e = payment.tenantId) === null || _e === void 0 ? void 0 : _e._id) || payment.tenantId,
+                propertyId: (((_d = payment.propertyId) === null || _d === void 0 ? void 0 : _d._id) || payment.propertyId),
+                tenantId: (((_e = payment.tenantId) === null || _e === void 0 ? void 0 : _e._id) || payment.tenantId),
                 rentalPeriodYear: periodYear,
-                rentalPeriodMonth: periodMonth
-            };
-            const agg = yield Payment_1.Payment.aggregate([
-                { $match: match },
-                { $group: { _id: null, total: { $sum: '$amount' } } }
-            ]);
-            const paidToDate = Number(((_f = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _f === void 0 ? void 0 : _f.total) || 0);
+                rentalPeriodMonth: periodMonth,
+                leaseId: payment.leaseId,
+                currency: payment.currency
+            });
             rentalOutstanding = Math.max(0, Number(rentAmountForDisplay || 0) - paidToDate);
         }
-        catch (_v) {
+        catch (_u) {
             const rentPaidOnly = Number(payment.amount || 0);
             rentalOutstanding = Math.max(0, Number(rentAmountForDisplay || 0) - rentPaidOnly);
         }
@@ -3328,27 +3613,27 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
               </div>
               <div class="detail-row">
                 <span class="label">Payment Method:</span>
-                <span class="value">${((_g = payment.paymentMethod) === null || _g === void 0 ? void 0 : _g.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_f = payment.paymentMethod) === null || _f === void 0 ? void 0 : _f.replace('_', ' ').toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Status:</span>
-                <span class="value">${((_h = payment.status) === null || _h === void 0 ? void 0 : _h.toUpperCase()) || 'N/A'}</span>
+                <span class="value">${((_g = payment.status) === null || _g === void 0 ? void 0 : _g.toUpperCase()) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Property:</span>
-                <span class="value">${((_j = payment.propertyId) === null || _j === void 0 ? void 0 : _j.name) || 'N/A'}</span>
+                <span class="value">${((_h = payment.propertyId) === null || _h === void 0 ? void 0 : _h.name) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Tenant:</span>
-                <span class="value">${(_k = payment.tenantId) === null || _k === void 0 ? void 0 : _k.firstName} ${(_l = payment.tenantId) === null || _l === void 0 ? void 0 : _l.lastName}</span>
+                <span class="value">${(_j = payment.tenantId) === null || _j === void 0 ? void 0 : _j.firstName} ${(_k = payment.tenantId) === null || _k === void 0 ? void 0 : _k.lastName}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Agent:</span>
-                <span class="value">${(_m = payment.agentId) === null || _m === void 0 ? void 0 : _m.firstName} ${((_o = payment.agentId) === null || _o === void 0 ? void 0 : _o.lastName) || 'N/A'}</span>
+                <span class="value">${(_l = payment.agentId) === null || _l === void 0 ? void 0 : _l.firstName} ${((_m = payment.agentId) === null || _m === void 0 ? void 0 : _m.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Processed By:</span>
-                <span class="value">${(_p = payment.processedBy) === null || _p === void 0 ? void 0 : _p.firstName} ${((_q = payment.processedBy) === null || _q === void 0 ? void 0 : _q.lastName) || 'N/A'}</span>
+                <span class="value">${(_o = payment.processedBy) === null || _o === void 0 ? void 0 : _o.firstName} ${((_p = payment.processedBy) === null || _p === void 0 ? void 0 : _p.lastName) || 'N/A'}</span>
               </div>
               <div class="detail-row">
                 <span class="label">Rent Amount:</span>
@@ -3409,9 +3694,9 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
                 amountLabel: `$${totalPaid.toFixed(2)}`,
                 lines: [
                     { label: 'Payment Date', value: new Date(payment.paymentDate).toLocaleDateString() },
-                    { label: 'Payment Method', value: ((_r = payment.paymentMethod) === null || _r === void 0 ? void 0 : _r.replace('_', ' ').toUpperCase()) || 'N/A' },
-                    { label: 'Status', value: ((_s = payment.status) === null || _s === void 0 ? void 0 : _s.toUpperCase()) || 'N/A' },
-                    { label: 'Property', value: ((_t = payment.propertyId) === null || _t === void 0 ? void 0 : _t.name) || 'N/A' },
+                    { label: 'Payment Method', value: ((_q = payment.paymentMethod) === null || _q === void 0 ? void 0 : _q.replace('_', ' ').toUpperCase()) || 'N/A' },
+                    { label: 'Status', value: ((_r = payment.status) === null || _r === void 0 ? void 0 : _r.toUpperCase()) || 'N/A' },
+                    { label: 'Property', value: ((_s = payment.propertyId) === null || _s === void 0 ? void 0 : _s.name) || 'N/A' },
                     { label: 'Tenant', value: [tenant === null || tenant === void 0 ? void 0 : tenant.firstName, tenant === null || tenant === void 0 ? void 0 : tenant.lastName].filter(Boolean).join(' ') || 'N/A' },
                     { label: 'Agent', value: [agent === null || agent === void 0 ? void 0 : agent.firstName, agent === null || agent === void 0 ? void 0 : agent.lastName].filter(Boolean).join(' ') || 'N/A' },
                     { label: 'Processed By', value: [processedBy === null || processedBy === void 0 ? void 0 : processedBy.firstName, processedBy === null || processedBy === void 0 ? void 0 : processedBy.lastName].filter(Boolean).join(' ') || 'N/A' },
@@ -3446,7 +3731,7 @@ const getPaymentReceiptDownload = (req, res) => __awaiter(void 0, void 0, void 0
 exports.getPaymentReceiptDownload = getPaymentReceiptDownload;
 // Public endpoint for getting a payment receipt for printing
 const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e;
     try {
         const { id } = req.params;
         const companyId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -3457,7 +3742,7 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
         try {
             query.companyId = new mongoose_1.default.Types.ObjectId(String(companyId));
         }
-        catch (_g) {
+        catch (_f) {
             query.companyId = String(companyId);
         }
         const payment = yield Payment_1.Payment.findOne(query)
@@ -3532,7 +3817,7 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 receipt.levyAmount = Number(payment.levyUsed);
             }
         }
-        catch (_h) {
+        catch (_g) {
             // ignore
         }
         // Include rental outstanding aggregated across the rental period (rent - paid-to-date; deposit excluded)
@@ -3546,33 +3831,15 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
             const periodMonth = typeof payment.rentalPeriodMonth === 'number'
                 ? Number(payment.rentalPeriodMonth)
                 : (new Date(payment.paymentDate).getMonth() + 1);
-            const match = {
+            const paidToDate = yield (0, rentalPeriodCoverage_1.sumRentCoverageForPeriod)({
                 companyId: payment.companyId,
-                paymentType: 'rental',
-                status: { $in: ['completed'] },
-                propertyId: ((_c = payment.propertyId) === null || _c === void 0 ? void 0 : _c._id) || payment.propertyId,
-                tenantId: ((_d = payment.tenantId) === null || _d === void 0 ? void 0 : _d._id) || payment.tenantId,
+                propertyId: (((_c = payment.propertyId) === null || _c === void 0 ? void 0 : _c._id) || payment.propertyId),
+                tenantId: (((_d = payment.tenantId) === null || _d === void 0 ? void 0 : _d._id) || payment.tenantId),
                 rentalPeriodYear: periodYear,
-                rentalPeriodMonth: periodMonth
-            };
-            const agg = yield Payment_1.Payment.aggregate([
-                { $match: match },
-                {
-                    $group: {
-                        _id: null,
-                        total: {
-                            $sum: {
-                                $cond: [
-                                    { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
-                                    '$rentAllocated',
-                                    '$amount'
-                                ]
-                            }
-                        }
-                    }
-                }
-            ]);
-            const paidToDate = Number(((_e = agg === null || agg === void 0 ? void 0 : agg[0]) === null || _e === void 0 ? void 0 : _e.total) || 0);
+                rentalPeriodMonth: periodMonth,
+                leaseId: payment.leaseId,
+                currency: payment.currency
+            });
             const rentalOutstanding = Math.max(0, rentAmountForDisplay - paidToDate);
             receipt.paidToDate = paidToDate;
             receipt.rentalOutstanding = rentalOutstanding;
@@ -3581,7 +3848,7 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 const { sumLevyPaidForPeriod } = yield Promise.resolve().then(() => __importStar(require('../services/combinedPaymentService')));
                 const levyPaidToDate = yield sumLevyPaidForPeriod({
                     companyId: payment.companyId,
-                    propertyId: (((_f = payment.propertyId) === null || _f === void 0 ? void 0 : _f._id) || payment.propertyId),
+                    propertyId: (((_e = payment.propertyId) === null || _e === void 0 ? void 0 : _e._id) || payment.propertyId),
                     levyPeriodMonth: periodMonth,
                     levyPeriodYear: periodYear,
                 });
@@ -3589,7 +3856,7 @@ const getPaymentReceipt = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 receipt.levyOutstanding = Math.max(0, levyBaseline - levyPaidToDate);
             }
         }
-        catch (_j) {
+        catch (_h) {
             // ignore
         }
         // Generate a deterministic unique receipt code for sale payments

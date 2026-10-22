@@ -8,6 +8,8 @@ export interface IEventDedupRecord extends Document {
   companyId?: mongoose.Types.ObjectId;
   processedAt?: Date;
   lastError?: string;
+  /** Fencing token for the rental-period lock. Other scopes leave this unset. */
+  ownerToken?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,7 +21,8 @@ const EventDedupRecordSchema = new Schema<IEventDedupRecord>(
     status: { type: String, enum: ['processed', 'failed'], default: 'processed', index: true },
     companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: false, index: true },
     processedAt: { type: Date, required: false },
-    lastError: { type: String, required: false }
+    lastError: { type: String, required: false },
+    ownerToken: { type: String, required: false }
   },
   { timestamps: true }
 );

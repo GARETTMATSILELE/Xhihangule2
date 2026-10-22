@@ -1,0 +1,625 @@
+{
+  "runId": "mvi8ua8g",
+  "marker": "E2E-REVERSAL-AUDIT-mvi8ua8g",
+  "environment": {
+    "main": "mongodb://127.0.0.1:27017/mantis_e2e_reversal_audit_mvi8ua8g",
+    "accounting": "mongodb://127.0.0.1:27017/mantis_e2e_reversal_audit_acct_mvi8ua8g",
+    "host": "127.0.0.1",
+    "replicaSet": false,
+    "cosmos": false,
+    "emailProviderConfigured": false,
+    "paynowConfigured": false,
+    "externalHostsBlocked": []
+  },
+  "expected": {
+    "grossRent": 1800,
+    "commission": 270,
+    "vat": 41.85,
+    "ownerPayable": 1488.15,
+    "agentCommission": 157.14,
+    "companyIncome": 104.76,
+    "preaFee": 8.1,
+    "vatRate": 0.155,
+    "treatment": "COMMISSION_VAT_EXCLUSIVE",
+    "vatReason": "standard_taxable_registered"
+  },
+  "primary": {
+    "before": {
+      "label": "before",
+      "validRentCoverage": 0,
+      "ownerIncome": 0,
+      "agentCommission": 0,
+      "companyIncome": 0,
+      "companyTotalIncome": 0,
+      "vatLiability": 0,
+      "taxObligations": 0,
+      "trustBalance": null,
+      "passThroughBalance": null,
+      "levyBalance": null,
+      "propertyAccountBalance": 0,
+      "companyAccountBalance": 0,
+      "journalDebit": 0,
+      "journalCredit": 0,
+      "journalDifference": 0,
+      "dashboardRevenue": 0,
+      "dashboardVat": 0,
+      "outstandingRentals": 18000,
+      "statementCount": -1,
+      "statementBalance": 0,
+      "vatStatus": [],
+      "obligationCount": 0,
+      "activeObligationCount": 0
+    },
+    "afterOriginal": {
+      "label": "after-original",
+      "validRentCoverage": 1800,
+      "ownerIncome": 1488.15,
+      "agentCommission": 157.14,
+      "companyIncome": 104.76,
+      "companyTotalIncome": 104.76,
+      "vatLiability": 41.85,
+      "taxObligations": 41.85,
+      "trustBalance": null,
+      "passThroughBalance": null,
+      "levyBalance": null,
+      "propertyAccountBalance": 1488.15,
+      "companyAccountBalance": 104.76,
+      "journalDebit": 1957.14,
+      "journalCredit": 1957.14,
+      "journalDifference": 0,
+      "dashboardRevenue": 0,
+      "dashboardVat": 0,
+      "outstandingRentals": 16200,
+      "statementCount": 1,
+      "statementBalance": 1488.15,
+      "vatStatus": [
+        {
+          "filingPeriod": "2026-10",
+          "status": "pending",
+          "vatCollected": 41.85,
+          "vatPaid": 0,
+          "vatPayable": 41.85
+        }
+      ],
+      "obligationCount": 1,
+      "activeObligationCount": 1
+    },
+    "afterReversal": {
+      "label": "after-reversal",
+      "validRentCoverage": 0,
+      "ownerIncome": 0,
+      "agentCommission": 0,
+      "companyIncome": 0,
+      "companyTotalIncome": 0,
+      "vatLiability": 0,
+      "taxObligations": 0,
+      "trustBalance": null,
+      "passThroughBalance": null,
+      "levyBalance": null,
+      "propertyAccountBalance": 0,
+      "companyAccountBalance": 0,
+      "journalDebit": 3914.28,
+      "journalCredit": 3914.28,
+      "journalDifference": 0,
+      "dashboardRevenue": 0,
+      "dashboardVat": 0,
+      "outstandingRentals": 18000,
+      "statementCount": 2,
+      "statementBalance": 0,
+      "vatStatus": [
+        {
+          "filingPeriod": "2026-10",
+          "status": "reversed",
+          "vatCollected": 41.85,
+          "vatPaid": 0,
+          "vatPayable": 0
+        }
+      ],
+      "obligationCount": 2,
+      "activeObligationCount": 0
+    },
+    "afterReplacement": {
+      "label": "after-replacement",
+      "validRentCoverage": 1800,
+      "ownerIncome": 1488.15,
+      "agentCommission": 157.14,
+      "companyIncome": 104.76,
+      "companyTotalIncome": 104.76,
+      "vatLiability": 41.85,
+      "taxObligations": 83.7,
+      "trustBalance": null,
+      "passThroughBalance": null,
+      "levyBalance": null,
+      "propertyAccountBalance": 1488.15,
+      "companyAccountBalance": 104.76,
+      "journalDebit": 5871.42,
+      "journalCredit": 5871.42,
+      "journalDifference": 0,
+      "dashboardRevenue": 0,
+      "dashboardVat": 0,
+      "outstandingRentals": 16200,
+      "statementCount": 3,
+      "statementBalance": 1488.15,
+      "vatStatus": [
+        {
+          "filingPeriod": "2026-10",
+          "status": "pending",
+          "vatCollected": 83.7,
+          "vatPaid": 0,
+          "vatPayable": 83.7
+        },
+        {
+          "filingPeriod": "2026-10",
+          "status": "reversed",
+          "vatCollected": 41.85,
+          "vatPaid": 0,
+          "vatPayable": 0
+        }
+      ],
+      "obligationCount": 4,
+      "activeObligationCount": 2
+    },
+    "expected": {
+      "grossRent": 1800,
+      "commission": 270,
+      "vat": 41.85,
+      "ownerPayable": 1488.15,
+      "agentCommission": 157.14,
+      "companyIncome": 104.76,
+      "preaFee": 8.1,
+      "vatRate": 0.155,
+      "treatment": "COMMISSION_VAT_EXCLUSIVE",
+      "vatReason": "standard_taxable_registered"
+    },
+    "original": {
+      "id": "6ad8d578da1b4d372d0c79da",
+      "reference": "RCPT-0C79DA-2026-10",
+      "snapshot": {
+        "amount": 1800,
+        "currency": "USD",
+        "commission": {
+          "totalCommission": 270,
+          "preaFee": 8.1,
+          "agentShare": 157.14,
+          "agencyShare": 104.76,
+          "vatOnCommission": 41.85,
+          "ownerAmount": 1488.15,
+          "levy": 0,
+          "commissionBase": 1800,
+          "commissionRate": 15,
+          "commissionGross": 270,
+          "commissionNet": 270,
+          "vatTreatment": "exclusive",
+          "vatRate": 0.155,
+          "vatAmount": 41.85,
+          "vatJurisdiction": "ZW",
+          "vatRuleId": "6ad8d512f7ef79cf696fe7da",
+          "vatTaxPoint": "2026-10-15T00:00:00.000Z",
+          "vatDecision": {
+            "registrationStatus": true,
+            "registrationEffectiveDate": "2020-01-01T00:00:00.000Z",
+            "registrationCancelledAt": null,
+            "taxClassification": "STANDARD_TAXABLE",
+            "centralVatRate": 0.155,
+            "taxRateEffectiveDate": "2026-01-01T00:00:00.000Z",
+            "propertyVatApplicable": true,
+            "treatment": "exclusive",
+            "commissionBase": 1800,
+            "vatAmount": 41.85,
+            "reason": "standard_taxable_registered"
+          },
+          "paymentAllocation": {
+            "grossAmount": 1800,
+            "rent": 1800,
+            "levy": 0,
+            "commissionBase": 1800,
+            "commission": 270,
+            "commissionNet": 270,
+            "vatOnCommission": 41.85,
+            "otherDeductions": 0,
+            "ownerPayable": 1488.15,
+            "levyPayable": 0,
+            "companyRevenue": 270,
+            "taxLiabilities": {
+              "vatOnCommission": 41.85
+            },
+            "trustLiability": 1488.15,
+            "source": "canonical_payment_allocation"
+          },
+          "agentSplit": {
+            "ownerAgentShare": 0,
+            "collaboratorAgentShare": 0
+          }
+        },
+        "vatRate": 0.155,
+        "ownerAmount": 1488.15,
+        "vatAmount": 41.85
+      },
+      "unchanged": true
+    },
+    "reversal": {
+      "id": "6ad8d57fda1b4d372d0c7b08",
+      "reference": "REV-RCPT-0C79DA-2026-10",
+      "amount": -1800,
+      "reversalOf": "6ad8d578da1b4d372d0c79da"
+    },
+    "correction": {
+      "id": "6ad8d57fda1b4d372d0c7b1e",
+      "reference": "CORR-RCPT-0C79DA-2026-10",
+      "amount": 1800,
+      "commission": {
+        "totalCommission": 270,
+        "preaFee": 8.1,
+        "agentShare": 157.14,
+        "agencyShare": 104.76,
+        "vatOnCommission": 41.85,
+        "ownerAmount": 1488.15,
+        "levy": 0,
+        "commissionBase": 1800,
+        "commissionRate": 15,
+        "commissionGross": 270,
+        "commissionNet": 270,
+        "vatTreatment": "exclusive",
+        "vatRate": 0.155,
+        "vatAmount": 41.85,
+        "vatJurisdiction": "ZW",
+        "vatRuleId": "6ad8d512f7ef79cf696fe7da",
+        "vatTaxPoint": "2026-10-15T00:00:00.000Z",
+        "vatDecision": {
+          "registrationStatus": true,
+          "registrationEffectiveDate": "2020-01-01T00:00:00.000Z",
+          "registrationCancelledAt": null,
+          "taxClassification": "STANDARD_TAXABLE",
+          "centralVatRate": 0.155,
+          "taxRateEffectiveDate": "2026-01-01T00:00:00.000Z",
+          "propertyVatApplicable": true,
+          "treatment": "exclusive",
+          "commissionBase": 1800,
+          "vatAmount": 41.85,
+          "reason": "standard_taxable_registered"
+        },
+        "paymentAllocation": {
+          "grossAmount": 1800,
+          "rent": 1800,
+          "levy": 0,
+          "commissionBase": 1800,
+          "commission": 270,
+          "commissionNet": 270,
+          "vatOnCommission": 41.85,
+          "otherDeductions": 0,
+          "ownerPayable": 1488.15,
+          "levyPayable": 0,
+          "companyRevenue": 270,
+          "taxLiabilities": {
+            "vatOnCommission": 41.85
+          },
+          "trustLiability": 1488.15,
+          "source": "canonical_payment_allocation"
+        },
+        "agentSplit": {
+          "ownerAgentShare": 0,
+          "collaboratorAgentShare": 0
+        }
+      },
+      "accountingComplete": true
+    },
+    "vatReturnFinal": {
+      "vatOnCommission": 41.85,
+      "outputVat": 83.7,
+      "glOutputVat": 83.7,
+      "reconciliationDifference": 0,
+      "taxableSupplies": 270,
+      "reconciliationStatus": "MATCHED"
+    },
+    "notices": [
+      {
+        "key": "owner-rent-payment:6ad8d578da1b4d372d0c79da",
+        "status": "SENT",
+        "paymentId": "6ad8d578da1b4d372d0c79da",
+        "reversalPaymentId": ""
+      },
+      {
+        "key": "owner-rent-reversal:6ad8d578da1b4d372d0c79da:6ad8d57fda1b4d372d0c7b08",
+        "status": "SENT",
+        "paymentId": "6ad8d578da1b4d372d0c79da",
+        "reversalPaymentId": "6ad8d57fda1b4d372d0c7b08"
+      },
+      {
+        "key": "owner-rent-payment:6ad8d57fda1b4d372d0c7b1e",
+        "status": "SENT",
+        "paymentId": "6ad8d57fda1b4d372d0c7b1e",
+        "reversalPaymentId": ""
+      }
+    ],
+    "mail": [
+      {
+        "to": "e2e-agent-mvi8ua8g@example.test",
+        "subject": "Payment recorded: Rent – Audit Tenant",
+        "text": "Hi Audit Agent,\n\nA rent payment associated with you has been recorded.\n\nType: Rent\nAmount: USD 1,800\nDate: 15/10/2026\nTenant: Audit Tenant\nProperty: 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road\nRental period: 2026-10\n\nView details: https://www.mantisafrica.com/sales-dashboard/notifications"
+      },
+      {
+        "to": "e2e-owner-mvi8ua8g@example.test",
+        "subject": "Rental Payment Received — 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road — October 2026",
+        "text": "Dear Audit Owner,\n\nWe are pleased to inform you that rental payment for your property at 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road has been received and processed.\n\nRental Payment Details\n\nProperty Address: 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road\nRental Period Paid For: October 2026\nTotal Amount Paid (including levy, where applicable): USD 1,800.00\nLess: Commission: USD 270.00\nLess: VAT on Commission: USD 41.85\nLess: Levy: USD 0.00\nNet Amount Payable to Owner: USD 1,488.15\n\nPlease advise us of a convenient date and time when you intend to collect the funds, so that we can make the necessary arrangements.\n\nShould you require any clarification regarding the payment or the deductions reflected above, please do not hesitate to contact us.\n\nKind regards,\nThe Benjamins Realty\nProperty Management Team"
+      },
+      {
+        "to": "e2e-owner-mvi8ua8g@example.test",
+        "subject": "Rent receipt reversed — RCPT-0C79DA-2026-10",
+        "text": "Dear Audit Owner,\n\nA separate reversal has been recorded for 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road. The original transaction remains in the audit history.\n\nOriginal payment reference: RCPT-0C79DA-2026-10\nOriginal payment amount: USD 1,800.00\nRental period: October 2026\nReversal payment reference: REV-RCPT-0C79DA-2026-10\nReversal amount: -USD 1,800.00\nReversal date: 21 October 2026\nReason: E2E-REVERSAL-AUDIT-mvi8ua8g wrong allocation\n\nA correction draft is on record and has not been completed. It is not a receipt."
+      },
+      {
+        "to": "e2e-owner-mvi8ua8g@example.test",
+        "subject": "Rental Payment Received — 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road — October 2026",
+        "text": "Dear Audit Owner,\n\nWe are pleased to inform you that rental payment for your property at 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road has been received and processed.\n\nRental Payment Details\n\nProperty Address: 1 E2E-REVERSAL-AUDIT-mvi8ua8g Road\nRental Period Paid For: October 2026\nTotal Amount Paid (including levy, where applicable): USD 1,800.00\nLess: Commission: USD 270.00\nLess: VAT on Commission: USD 41.85\nLess: Levy: USD 0.00\nNet Amount Payable to Owner: USD 1,488.15\n\nPlease advise us of a convenient date and time when you intend to collect the funds, so that we can make the necessary arrangements.\n\nShould you require any clarification regarding the payment or the deductions reflected above, please do not hesitate to contact us.\n\nKind regards,\nThe Benjamins Realty\nProperty Management Team"
+      }
+    ]
+  },
+  "results": [
+    {
+      "name": "environment is a disposable local standalone MongoDB",
+      "status": "PASS",
+      "expected": "127.0.0.1 disposable databases, no replica set, no Cosmos claim",
+      "actual": "main=127.0.0.1/mantis_e2e_reversal_audit_mvi8ua8g; accounting=mantis_e2e_reversal_audit_acct_mvi8ua8g; replicaSet=none"
+    },
+    {
+      "name": "create the demo rental through createPayment",
+      "status": "PASS",
+      "expected": "HTTP 201 pending rental receipt",
+      "actual": "HTTP 201 Payment processed successfully accountingComplete=false",
+      "ids": {
+        "paymentId": "6ad8d578da1b4d372d0c79da"
+      }
+    },
+    {
+      "name": "pending non-correction receipt occupies the period and does not post accounting",
+      "status": "PASS",
+      "expected": "status pending, accounting not complete, coverage 1800",
+      "actual": "status=pending accountingComplete=false coverage=1800",
+      "ids": {
+        "paymentId": "6ad8d578da1b4d372d0c79da"
+      }
+    },
+    {
+      "name": "complete the original payment through updatePaymentStatus",
+      "status": "PASS",
+      "expected": "completed and accountingComplete",
+      "actual": "HTTP 200 status=completed posting=posted accounting=true recon=complete missing=",
+      "ids": {
+        "paymentId": "6ad8d578da1b4d372d0c79da",
+        "reference": "RCPT-0C79DA-2026-10"
+      },
+      "persisted": [
+        "payments",
+        "journalentries",
+        "taxobligations",
+        "vatrecords",
+        "propertyaccounts",
+        "companyaccounts",
+        "agentaccounts"
+      ]
+    },
+    {
+      "name": "duplicate receipt is blocked while the original covers the period",
+      "status": "PASS",
+      "expected": "HTTP 409",
+      "actual": "HTTP 409 This month is fully paid. Change rental month."
+    },
+    {
+      "name": "original waterfall matches the stored commission snapshot",
+      "status": "PASS",
+      "expected": "{\"grossRent\":1800,\"commission\":270,\"vat\":41.85,\"ownerPayable\":1488.15,\"agentCommission\":157.14,\"companyIncome\":104.76,\"preaFee\":8.1,\"vatRate\":0.155,\"treatment\":\"COMMISSION_VAT_EXCLUSIVE\",\"vatReason\":\"standard_taxable_registered\"}",
+      "actual": "{\"amount\":1800,\"currency\":\"USD\",\"commission\":{\"totalCommission\":270,\"preaFee\":8.1,\"agentShare\":157.14,\"agencyShare\":104.76,\"vatOnCommission\":41.85,\"ownerAmount\":1488.15,\"levy\":0,\"commissionBase\":1800,\"commissionRate\":15,\"commissionGross\":270,\"commissionNet\":270,\"vatTreatment\":\"exclusive\",\"vatRate\":0.155,\"vatAmount\":41.85,\"vatJurisdiction\":\"ZW\",\"vatRuleId\":\"6ad8d512f7ef79cf696fe7da\",\"vatTaxPoint\":\"2026-10-15T00:00:00.000Z\",\"vatDecision\":{\"registrationStatus\":true,\"registrationEffectiveDate\":\"2020-01-01T00:00:00.000Z\",\"registrationCancelledAt\":null,\"taxClassification\":\"STANDARD_TAXABLE\",\"centralVatRate\":0.155,\"taxRateEffectiveDate\":\"2026-01-01T00:00:00.000Z\",\"propertyVatApplicable\":true,\"treatment\":\"exclusive\",\"commissionBase\":1800,\"vatAmount\":41.85,\"reason\":\"standard_taxable_registered\"},\"paymentAllocation\":{\"grossAmount\":1800,\"rent\":1800,\"levy\":0,\"commissionBase\":1800,\"commission\":270,\"commissionNet\":270,\"vatOnCommission\":41.85,\"otherDeductions\":0,\"ownerPayable\":1488.15,\"levyPayable\":0,\"companyRevenue\":270,\"taxLiabilities\":{\"vatOnCommission\":41.85},\"trustLiability\":1488.15,\"source\":\"canonical_payment_allocation\"},\"agentSplit\":{\"ownerAgentShare\":0,\"collaboratorAgentShare\":0}},\"vatRate\":0.155,\"ownerAmount\":1488.15,\"vatAmount\":41.85}",
+      "ids": {
+        "paymentId": "6ad8d578da1b4d372d0c79da"
+      }
+    },
+    {
+      "name": "VAT return after the original receipt uses the active obligation",
+      "status": "PASS",
+      "expected": "taxable supplies 270, VAT 41.85, GL net 41.85, MATCHED",
+      "actual": "vatOnCommission=41.85 outputVat=41.85 glOutputVat=41.85 difference=0 taxableSupplies=270 status=MATCHED"
+    },
+    {
+      "name": "reverse the original through reversePayment",
+      "status": "PASS",
+      "expected": "HTTP 200, reversalState reversed, one negative reversal, one correction draft",
+      "actual": "HTTP 200 outcome=reversed state=reversed reversals=1 warnings=[]",
+      "ids": {
+        "paymentId": "6ad8d578da1b4d372d0c79da",
+        "reversalId": "6ad8d57fda1b4d372d0c7b08",
+        "correctionId": "6ad8d57fda1b4d372d0c7b1e"
+      }
+    },
+    {
+      "name": "original amount and financial snapshot stay unchanged",
+      "status": "PASS",
+      "expected": "amount 1800, owner 1488.15, VAT 41.85, status completed",
+      "actual": "amount=1800 owner=1488.15 vat=41.85 agent=157.14 status=completed"
+    },
+    {
+      "name": "payment journal reversal swaps the original posted lines",
+      "status": "PASS",
+      "expected": "reversal debits and credits swap the stored original lines",
+      "actual": "originalLines=4 reversalLines=4 match=true",
+      "ids": {
+        "originalJournalId": "6ad8d57bda1b4d372d0c7a4c",
+        "reversalJournalId": "6ad8d580da1b4d372d0c7b5b"
+      }
+    },
+    {
+      "name": "retrying a settled reversal does not create another reversal, draft, or journal",
+      "status": "PASS",
+      "expected": "one reversal, one draft, one reversal journal",
+      "actual": "HTTP 200 outcome=reversed reversals=1 drafts=1 journals=1"
+    },
+    {
+      "name": "VAT return after a same-period settled reversal nets the original",
+      "status": "PASS",
+      "expected": "taxable supplies 0, VAT obligation 0, GL net 0, MATCHED. Same filing period because the reversal journal is dated today and the original payment is October 2026.",
+      "actual": "taxableSupplies=0 vatOnCommission=0 glOutputVat=0 difference=0 status=MATCHED"
+    },
+    {
+      "name": "fully reversed period no longer counts the original as rent coverage",
+      "status": "PASS",
+      "expected": "coverage 0",
+      "actual": "coverage=0"
+    },
+    {
+      "name": "pending correction reserves the period and blocks competing receipts",
+      "status": "FAIL",
+      "expected": "reservation 1800 and HTTP 409 from lease, accountant, public, and agent creation",
+      "actual": "reservation=1800 lease=409 This month is fully paid. Change rental month. accountant=409 This month is fully paid. Change rental month. public=409 This month is fully paid. Change rental month. agent=500 Failed to process payment"
+    },
+    {
+      "name": "correction draft is pending and does not cover rent",
+      "status": "PASS",
+      "expected": "pending draft and coverage 0",
+      "actual": "status=pending posting=draft coverage=0",
+      "ids": {
+        "correctionId": "6ad8d57fda1b4d372d0c7b1e"
+      }
+    },
+    {
+      "name": "complete the correction draft through updatePaymentStatus",
+      "status": "PASS",
+      "expected": "HTTP 200 and accountingComplete",
+      "actual": "HTTP 200 Payment status updated successfully status=completed accounting=true recon=complete missing=",
+      "ids": {
+        "correctionId": "6ad8d57fda1b4d372d0c7b1e",
+        "reference": "CORR-RCPT-0C79DA-2026-10"
+      }
+    },
+    {
+      "name": "completed correction covers the period and blocks another receipt",
+      "status": "PASS",
+      "expected": "coverage 1800 and HTTP 409",
+      "actual": "coverage=1800 HTTP 409 This month is fully paid. Change rental month."
+    },
+    {
+      "name": "another reversal retry after replacement leaves one reversal",
+      "status": "PASS",
+      "expected": "one reversal",
+      "actual": "HTTP 200 reversals=1"
+    },
+    {
+      "name": "an unfinalized correction with stored shares still requires agent and company projections",
+      "status": "FAIL",
+      "expected": "positive shares stay required and an unfinalized completed correction cannot be treated as not applicable",
+      "actual": "requiresFinalized=true skipAgent=false skipCompany=false agentRequired=false companyRequired=true"
+    },
+    {
+      "name": "completed correction restores one owner, agent, and company posting",
+      "status": "PASS",
+      "expected": "owner 1488.15, agent 157.14, agency 104.76, allocation present, accountingComplete",
+      "actual": "owner=1488.15 agent=157.14 company=104.76 finalized=true accounting=true allocation=1800"
+    },
+    {
+      "name": "owner rent-received notice is sent once for the completed correction",
+      "status": "PASS",
+      "expected": "one SENT notice for the correction and the original notice is not resent",
+      "actual": "correctionNotices=1:SENT originalNotices=1"
+    },
+    {
+      "name": "agency revenue matches company-account income before and after cache refresh",
+      "status": "PASS",
+      "expected": "agency revenue 104.76 uncached and from the dashboard summary",
+      "actual": "uncached=104.76 cached=104.76 refreshed=104.76"
+    },
+    {
+      "name": "outstanding rent follows settled reversal and completed replacement",
+      "status": "PASS",
+      "expected": "outstanding falls by 1800 after the original, returns after reversal, and falls again after the correction",
+      "actual": "before=18000 afterOriginal=16200 afterReversal=18000 afterReplacement=16200"
+    },
+    {
+      "name": "VAT return after the completed correction counts the replacement once",
+      "status": "FAIL",
+      "expected": "taxable supplies 270, VAT 41.85, GL net 41.85, MATCHED",
+      "actual": "taxableSupplies=270 vatOnCommission=41.85 outputVat=83.7 glOutputVat=83.7 difference=0 status=MATCHED"
+    },
+    {
+      "name": "failure before reversal save then immediate retry",
+      "status": "PASS",
+      "expected": "abandoned in-progress lock with no REV is retried into one settled reversal",
+      "actual": "first=500 PHASE28_FAIL_BEFORE_REVERSAL_SAVE midState=reversal_in_progress blocked=409 retry=200 Payment reversed. Draft correction created. after=reversed reversals=1",
+      "ids": {
+        "paymentId": "6ad8d587da1b4d372d0c7dc2"
+      }
+    },
+    {
+      "name": "journal reversal failure then retry",
+      "status": "PASS",
+      "expected": "incomplete first, blocked competing receipt, blocked early correction, settled retry, one reversal journal",
+      "actual": "first=202 reversal_incomplete mid=reversal_incomplete blocked=409 earlyDraft=409 REVERSAL_NOT_SETTLED retry=200 reversed after=reversed journals=1",
+      "ids": {
+        "paymentId": "6ad8d58ada1b4d372d0c7f6e"
+      }
+    },
+    {
+      "name": "tax reversal failure then retry",
+      "status": "PASS",
+      "expected": "first incomplete, retry settled, no duplicate tax rows beyond original plus one reversal",
+      "actual": "first=202 reversal_incomplete mid=reversal_incomplete retry=200 reversed after=reversed obligationRows=2",
+      "ids": {
+        "paymentId": "6ad8d58eda1b4d372d0c8166"
+      }
+    },
+    {
+      "name": "separate accounting-connection company reversal failure then retry",
+      "status": "PASS",
+      "expected": "company reversal failure stays incomplete and retry settles",
+      "actual": "first=202 reversal_incomplete warnings=[\"companyCommission: PHASE27_FAIL_COMPANY\"] mid=reversal_incomplete retry=200 reversed after=reversed",
+      "ids": {
+        "paymentId": "6ad8d593da1b4d372d0c8368"
+      }
+    },
+    {
+      "name": "owner-income reversal failure then retry",
+      "status": "PASS",
+      "expected": "owner reversal failure stays incomplete and retry settles",
+      "actual": "first=202 reversal_incomplete mid=reversal_incomplete retry=200 reversed after=reversed",
+      "ids": {
+        "paymentId": "6ad8d597da1b4d372d0c857c"
+      }
+    },
+    {
+      "name": "concurrent reversal attempts create one reversal",
+      "status": "PASS",
+      "expected": "exactly one negative reversal",
+      "actual": "responses=200/200 outcomes=reversed/reversed reversals=1 state=reversed matchingDraftNotes=1",
+      "ids": {
+        "paymentId": "6ad8d599da1b4d372d0c8785"
+      }
+    },
+    {
+      "name": "owner notice failure does not change the financial payment",
+      "status": "PASS",
+      "expected": "payment amount unchanged; notice failure is recorded or the reversal mail path reports failure",
+      "actual": "HTTP 200 amount=1800 state=reversed notice=FAILED reason=AUDIT_INJECTED_MAIL_FAILURE",
+      "ids": {
+        "paymentId": "6ad8d59dda1b4d372d0c8a35"
+      }
+    },
+    {
+      "name": "2025 receipt keeps its dated VAT rate and a later reversal stays visible",
+      "status": "PASS",
+      "expected": "draft keeps the June 2025 15% VAT. June obligations net to 0 because both rows are REVERSED. The reversal journal is dated in the reversal month, so the June GL credit remains and the return stays RECONCILIATION_REQUIRED. Amounts are not rewritten.",
+      "actual": "HTTP 200 originalRate=0.15 originalVat=40.5 draftRate=0.15 draftVat=40.5 juneSupplies=0 juneObligation=0 juneGl=40.5 juneDifference=-40.5 juneStatus=RECONCILIATION_REQUIRED",
+      "ids": {
+        "paymentId": "6ad8d59fda1b4d372d0c8c2a"
+      }
+    },
+    {
+      "name": "currency isolation",
+      "status": "PASS",
+      "expected": "ZWL pending receipt does not stop a USD receipt for the same month",
+      "actual": "ZWL HTTP 201; USD create 201 complete 200"
+    },
+    {
+      "name": "deposit-only receipt through createPayment",
+      "status": "UNVERIFIED",
+      "expected": "deposit-only rent coverage is exercised only if this API accepts amount 0",
+      "actual": "HTTP 400 Missing required fields: leaseId, amount, paymentDate, paymentMethod, status"
+    }
+  ]
+}

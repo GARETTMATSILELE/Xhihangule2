@@ -21,7 +21,10 @@ export const getUserCommissionSummary = async (req: Request, res: Response) => {
     const q: any = {
       agentId: new mongoose.Types.ObjectId(targetUserId),
       companyId: new mongoose.Types.ObjectId(req.user.companyId),
-      status: 'completed'
+      status: 'completed',
+      reversalOfPaymentId: { $exists: false },
+      reversalState: { $ne: 'reversed' },
+      amount: { $gte: 0 }
     };
     if (String(saleOnly) === 'true') {
       q.paymentType = 'sale';

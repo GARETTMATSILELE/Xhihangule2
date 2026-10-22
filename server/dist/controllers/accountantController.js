@@ -91,7 +91,10 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
             const payments = yield Payment_1.Payment.find({
                 propertyId: { $in: propertyIds },
                 status: 'completed',
-                commissionFinalized: true
+                commissionFinalized: true,
+                reversalOfPaymentId: { $exists: false },
+                reversalState: { $ne: 'reversed' },
+                amount: { $gte: 0 }
             }).populate('propertyId', 'name address');
             // Create a map of payments by property and month/year for filtering (using rental period)
             const paymentMap = new Map();
@@ -165,6 +168,9 @@ const getAgentCommissions = (req, res) => __awaiter(void 0, void 0, void 0, func
                 companyId,
                 status: 'completed',
                 commissionFinalized: true,
+                reversalOfPaymentId: { $exists: false },
+                reversalState: { $ne: 'reversed' },
+                amount: { $gte: 0 },
                 paymentType: 'sale',
                 agentId: agent._id
             }).populate('propertyId', 'name address');
@@ -293,7 +299,10 @@ const getAgencyCommission = (req, res) => __awaiter(void 0, void 0, void 0, func
         const payments = yield Payment_1.Payment.find({
             companyId,
             status: 'completed',
-            commissionFinalized: true
+            commissionFinalized: true,
+            reversalOfPaymentId: { $exists: false },
+            reversalState: { $ne: 'reversed' },
+            amount: { $gte: 0 }
         }).populate('propertyId', 'name address');
         for (const payment of payments) {
             const property = payment.propertyId; // Cast to access populated fields
@@ -431,7 +440,10 @@ const getPREACommission = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const payments = yield Payment_1.Payment.find({
             companyId,
             status: 'completed',
-            commissionFinalized: true
+            commissionFinalized: true,
+            reversalOfPaymentId: { $exists: false },
+            reversalState: { $ne: 'reversed' },
+            amount: { $gte: 0 }
         }).populate('propertyId', 'name address');
         // Aggregate PREA by property after applying filters
         const propertyMap = new Map();
@@ -614,7 +626,10 @@ const getCommissionAccount = (req, res) => __awaiter(void 0, void 0, void 0, fun
         const payments = yield Payment_1.Payment.find({
             companyId: companyObjectId,
             status: 'completed',
-            commissionFinalized: true
+            commissionFinalized: true,
+            reversalOfPaymentId: { $exists: false },
+            reversalState: { $ne: 'reversed' },
+            amount: { $gte: 0 }
         })
             .select('paymentDate commissionDetails propertyId manualPropertyAddress referenceNumber')
             .populate('propertyId', 'address')
@@ -739,6 +754,9 @@ const getCommissionReports = (req, res) => __awaiter(void 0, void 0, void 0, fun
             companyId: companyObjectId,
             status: 'completed',
             commissionFinalized: true,
+            reversalOfPaymentId: { $exists: false },
+            reversalState: { $ne: 'reversed' },
+            amount: { $gte: 0 },
             isProvisional: { $ne: true },
             isInSuspense: { $ne: true }
         })

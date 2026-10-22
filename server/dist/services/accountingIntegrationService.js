@@ -424,7 +424,7 @@ class AccountingIntegrationService {
     }
     postReversalJournal(payment, opts) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+            var _a;
             const companyId = String(payment.companyId);
             const paymentId = String(payment._id);
             (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, `${String(payment.notes || '')} ${String((opts === null || opts === void 0 ? void 0 : opts.reason) || '')}`, 'PHASE27_FAIL_JOURNAL');
@@ -466,32 +466,7 @@ class AccountingIntegrationService {
                             .filter((line) => line.accountCode && ((line.debit || 0) > 0 || (line.credit || 0) > 0));
                     }
                     else {
-                        const amount = toMoney(Math.abs(payment.amount || 0));
-                        const vatOnCommission = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) || 0);
-                        const paymentVat = toMoney((payment === null || payment === void 0 ? void 0 : payment.vatAmount) || 0);
-                        const commissionNet = toMoney(Number(((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.commissionNet) || ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.totalCommission) || 0));
-                        const levyAmount = toMoney(Number((_f = (_e = (_d = payment.commissionDetails) === null || _d === void 0 ? void 0 : _d.levy) !== null && _e !== void 0 ? _e : payment === null || payment === void 0 ? void 0 : payment.levyAllocated) !== null && _f !== void 0 ? _f : 0));
-                        const allocation = (0, paymentAllocation_1.allocateRentalReceipt)({
-                            amount,
-                            rent: toMoney(Number((_j = (_g = payment === null || payment === void 0 ? void 0 : payment.rentAllocated) !== null && _g !== void 0 ? _g : (_h = payment.commissionDetails) === null || _h === void 0 ? void 0 : _h.commissionBase) !== null && _j !== void 0 ? _j : amount - levyAmount)),
-                            levy: levyAmount,
-                            commissionBase: toMoney(Number(((_k = payment.commissionDetails) === null || _k === void 0 ? void 0 : _k.commissionBase) || 0)),
-                            commissionNet,
-                            vatOnCommission
-                        });
-                        const reversalDomain = (0, transactionDomain_1.journalPaymentType)(payment);
-                        lines = amount > 0
-                            ? (0, principalAgentJournal_1.buildAgentReceiptReversal)({
-                                paymentType: reversalDomain,
-                                amount,
-                                ownerAmount: allocation.ownerPayable,
-                                commissionNet: allocation.commissionNet,
-                                vatAmount: toMoney(vatOnCommission + paymentVat),
-                                levyAmount: reversalDomain === 'sale' ? 0 : allocation.levyPayable,
-                                propertyId: (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : undefined,
-                                agentId: (payment === null || payment === void 0 ? void 0 : payment.agentId) ? String(payment.agentId) : undefined
-                            })
-                            : [];
+                        throw new Error('Original journal is missing. The reversal was not constructed from current configuration.');
                     }
                     if (original && lines.length === 0) {
                         throw new Error('Original journal lines could not be reversed');
@@ -512,7 +487,7 @@ class AccountingIntegrationService {
                         return 'skipped';
                     }
                 }
-                const agentShare = toMoney(((_l = payment.commissionDetails) === null || _l === void 0 ? void 0 : _l.agentShare) || 0);
+                const agentShare = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agentShare) || 0);
                 if (agentShare > 0) {
                     yield ensureJournal({
                         companyId: companyObjectId,

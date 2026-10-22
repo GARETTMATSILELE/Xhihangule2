@@ -16,6 +16,7 @@ exports.postPaymentAccounting = postPaymentAccounting;
 exports.reversePaymentAccounting = reversePaymentAccounting;
 const logger_1 = require("../utils/logger");
 const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
+const paymentReversalPolicy_1 = require("./paymentReversalPolicy");
 const ledgerEventService_1 = __importDefault(require("./ledgerEventService"));
 const propertyAccountService_1 = __importDefault(require("./propertyAccountService"));
 const agentAccountService_1 = __importDefault(require("./agentAccountService"));
@@ -299,6 +300,9 @@ function reversePaymentAccounting(paymentId, opts) {
         if (!payment) {
             return { paymentId, status: 'failed', artifacts, errors: ['Payment not found'] };
         }
+        if ((0, paymentReversalPolicy_1.isReversalDocument)(payment)) {
+            return { paymentId, status: 'failed', artifacts, errors: ['Reversal payments cannot be reversed'] };
+        }
         if (!(0, accountingPostingPolicy_1.shouldAttemptAccountingReversal)(payment) && String(payment.status) !== 'reversed') {
             // Still allow explicit reversal of a completed payment whose status flip already committed.
             if (String(payment.status) !== 'completed' && String(payment.postingStatus) !== 'reversed') {
@@ -311,19 +315,26 @@ function reversePaymentAccounting(paymentId, opts) {
                 processedBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
                 reason: opts === null || opts === void 0 ? void 0 : opts.reason
             });
-            artifacts.ownerIncome = income.countered ? 'reversed' : 'skipped';
-            artifacts.configuredExpense = 'reversed';
-            artifacts.passThrough = 'reversed';
+            artifacts.ownerIncome = income.countered ? 'reversed' : 'absent';
+            artifacts.configuredExpense = income.configuredExpense;
         }
         catch (e) {
             artifacts.ownerIncome = 'failed';
             artifacts.configuredExpense = 'failed';
-            artifacts.passThrough = 'failed';
             errors.push(`propertyAccount: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
         }
         try {
-            yield agentAccountService_1.default.reverseCommissionForPayment(paymentId, opts === null || opts === void 0 ? void 0 : opts.reason);
-            artifacts.agentCommission = 'reversed';
+            artifacts.passThrough = yield propertyAccountService_1.default.reversePassThroughCollectionsForPayment(paymentId, {
+                processedBy: opts === null || opts === void 0 ? void 0 : opts.processedBy,
+                reason: opts === null || opts === void 0 ? void 0 : opts.reason
+            });
+        }
+        catch (e) {
+            artifacts.passThrough = 'failed';
+            errors.push(`passThrough: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+        }
+        try {
+            artifacts.agentCommission = yield agentAccountService_1.default.reverseCommissionForPayment(paymentId, opts === null || opts === void 0 ? void 0 : opts.reason);
         }
         catch (e) {
             artifacts.agentCommission = 'failed';
@@ -384,6 +395,30 @@ function reversePaymentAccounting(paymentId, opts) {
         else {
             artifacts.trust = 'skipped';
         }
+        const company = yield Company_1.Company.findById(payment.companyId).select('workspaceType plan').lean();
+        const individualWorkspace = (company === null || company === void 0 ? void 0 : company.workspaceType) === 'individual' || (company === null || company === void 0 ? void 0 : company.plan) === 'INDIVIDUAL';
+        if (individualWorkspace) {
+            const individualInput = {
+                companyId: String(payment.companyId),
+                sourceType: 'Payment',
+                sourceId: paymentId,
+                reason: `${String(payment.notes || '')} ${String((opts === null || opts === void 0 ? void 0 : opts.reason) || '')}`,
+                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
+                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
+            };
+            artifacts.individualVat = yield individualVatService_1.default.reportReverseForSource(individualInput);
+            artifacts.individualRentalTax = yield individualRentalTaxService_1.default.reportReverseForSource(individualInput);
+            artifacts.individualIncomeTax = yield individualIncomeTaxService_1.default.reportReverseForSource(individualInput);
+            for (const key of ['individualVat', 'individualRentalTax', 'individualIncomeTax']) {
+                if (artifacts[key] === 'failed')
+                    errors.push(`${key}: reversal failed`);
+            }
+        }
+        else {
+            artifacts.individualVat = 'skipped';
+            artifacts.individualRentalTax = 'skipped';
+            artifacts.individualIncomeTax = 'skipped';
+        }
         const progress = {
             ownerIncome: asState(artifacts.ownerIncome || 'absent'),
             configuredExpense: asState(artifacts.configuredExpense || 'absent'),
@@ -393,8 +428,12 @@ function reversePaymentAccounting(paymentId, opts) {
             journal: asState(artifacts.journal || 'absent')
         };
         let status = (0, ledgerEventStateMachine_1.classifyReversalOutcome)(progress);
-        if (artifacts.tax === 'failed')
+        if (artifacts.tax === 'failed' || artifacts.passThrough === 'failed')
             status = status === 'failed' ? 'failed' : 'partial';
+        for (const key of ['individualVat', 'individualRentalTax', 'individualIncomeTax']) {
+            if (artifacts[key] === 'failed')
+                status = status === 'failed' ? 'failed' : 'partial';
+        }
         if (errors.length && status === 'reversed')
             status = 'partial';
         if (errors.length && status === 'already_reversed')
@@ -411,33 +450,6 @@ function reversePaymentAccounting(paymentId, opts) {
             }
             logger_1.logger.warn('Payment accounting reversal incomplete', { paymentId, artifacts, errors });
         }
-        const company = yield Company_1.Company.findById(payment.companyId).select('workspaceType plan').lean();
-        if ((company === null || company === void 0 ? void 0 : company.workspaceType) === 'individual' || (company === null || company === void 0 ? void 0 : company.plan) === 'INDIVIDUAL') {
-            yield individualVatService_1.default.safeReverseForSource({
-                companyId: String(payment.companyId),
-                sourceType: 'Payment',
-                sourceId: paymentId,
-                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
-                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
-                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
-            });
-            yield individualRentalTaxService_1.default.safeReverseForSource({
-                companyId: String(payment.companyId),
-                sourceType: 'Payment',
-                sourceId: paymentId,
-                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
-                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
-                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
-            });
-            yield individualIncomeTaxService_1.default.safeReverseForSource({
-                companyId: String(payment.companyId),
-                sourceType: 'Payment',
-                sourceId: paymentId,
-                reason: opts === null || opts === void 0 ? void 0 : opts.reason,
-                reversalTransactionId: opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId,
-                userId: opts === null || opts === void 0 ? void 0 : opts.processedBy
-            });
-        }
         const reversalComplete = status === 'reversed' || status === 'already_reversed';
         const reversalState = reversalComplete ? 'reversed' : 'reversal_incomplete';
         if (!reversalComplete) {
@@ -448,7 +460,9 @@ function reversePaymentAccounting(paymentId, opts) {
             });
         }
         const reversalPaymentId = (opts === null || opts === void 0 ? void 0 : opts.reversalPaymentId) || payment.reversalPaymentId;
-        yield Payment_1.Payment.updateOne({ _id: payment._id }, { $set: { reversalState } });
+        yield Payment_1.Payment.updateOne({ _id: payment._id }, reversalComplete
+            ? { $set: { reversalState }, $unset: { idempotencyKey: 1 } }
+            : { $set: { reversalState } });
         if (reversalPaymentId) {
             yield Payment_1.Payment.updateOne({ _id: reversalPaymentId }, { $set: { reversalState, accountingComplete: reversalComplete, status: 'completed' } });
         }

@@ -100,18 +100,12 @@ class TrustPaymentPostingService {
                     // Keep trust reversal successful even if settlement refresh is not applicable.
                     console.warn('Skipping trust settlement refresh after reversal:', (settlementError === null || settlementError === void 0 ? void 0 : settlementError.message) || settlementError);
                 }
-                try {
-                    yield trustAccountService_1.default.verifyAndRepairAccountInvariants({
-                        companyId: String(payload.companyId),
-                        trustAccountId,
-                        performedBy: payload.performedBy,
-                        sourceEvent: payload.sourceEvent || 'payment.reversed'
-                    });
-                }
-                catch (invariantError) {
-                    // Keep reversal resilient; invariants are repaired opportunistically.
-                    console.warn('Trust invariant check after reversal failed:', (invariantError === null || invariantError === void 0 ? void 0 : invariantError.message) || invariantError);
-                }
+                yield trustAccountService_1.default.verifyAndRepairAccountInvariants({
+                    companyId: String(payload.companyId),
+                    trustAccountId,
+                    performedBy: payload.performedBy,
+                    sourceEvent: payload.sourceEvent || 'payment.reversed'
+                });
             }
             return result;
         });

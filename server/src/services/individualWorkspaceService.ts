@@ -14,6 +14,7 @@ import { LandlordFinancialTransaction } from '../models/LandlordFinancialTransac
 import { TransactionTaxSnapshot } from '../models/TransactionTaxSnapshot';
 import { sumPropertyAccountPeriodPnl } from './propertyAccountTotals';
 import { daysInRange, resolveReportingPeriod } from './individualReportingPeriod';
+import { countsTowardRentReceipt } from './rentalPeriodCoverage';
 
 type EntryType = 'income' | 'expense' | 'maintenance';
 type ReportType =
@@ -299,6 +300,7 @@ export class IndividualWorkspaceService {
     for (const lease of leases) activeLeaseCountByProperty.set(String(lease.propertyId), (activeLeaseCountByProperty.get(String(lease.propertyId)) || 0) + 1);
     const collectedThisMonth = new Map<string, number>();
     for (const payment of payments) {
+      if (!countsTowardRentReceipt(payment as any)) continue;
       const date = new Date((payment as any).paymentDate || (payment as any).createdAt);
       if (date >= collectStart && date < collectEnd) {
         const pid = String((payment as any).propertyId || '');

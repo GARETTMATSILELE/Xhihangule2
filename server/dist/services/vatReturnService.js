@@ -28,6 +28,7 @@ const JournalLine_1 = require("../models/JournalLine");
 const chartAccounts_1 = require("./tax/chartAccounts");
 const money_1 = require("../utils/money");
 const errorHandler_1 = require("../middleware/errorHandler");
+const paymentReversalPolicy_1 = require("./paymentReversalPolicy");
 const toId = (value) => new mongoose_1.default.Types.ObjectId(value);
 const periodBounds = (filingPeriod) => {
     const [year, month] = filingPeriod.split('-').map(Number);
@@ -37,7 +38,7 @@ const periodBounds = (filingPeriod) => {
 };
 function glOutputVatForPeriod(companyId, filingPeriod) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
+        var _a, _b;
         const companyObjectId = toId(companyId);
         const account = yield ChartOfAccount_1.ChartOfAccount.findOne({
             companyId: companyObjectId,
@@ -61,9 +62,11 @@ function glOutputVatForPeriod(companyId, filingPeriod) {
                     journalEntryId: { $in: entries.map((row) => row._id) }
                 }
             },
-            { $group: { _id: null, credits: { $sum: '$credit' } } }
+            { $group: { _id: null, credits: { $sum: '$credit' }, debits: { $sum: '$debit' } } }
         ]);
-        return (0, money_1.roundMoney)(Number(((_a = summed[0]) === null || _a === void 0 ? void 0 : _a.credits) || 0));
+        // Net movement on the VAT payable account for journals dated in this filing period.
+        // A reversal journal dated in a later period does not reduce this period's credit.
+        return (0, money_1.roundMoney)(Number(((_a = summed[0]) === null || _a === void 0 ? void 0 : _a.credits) || 0) - Number(((_b = summed[0]) === null || _b === void 0 ? void 0 : _b.debits) || 0));
     });
 }
 function prepareVatReturn(companyId, filingPeriod, preparedBy) {
@@ -86,7 +89,7 @@ function prepareVatReturn(companyId, filingPeriod, preparedBy) {
             isProvisional: { $ne: true },
             reversalOfPaymentId: { $exists: false }
         })
-            .select('amount paymentDate paymentType commissionDetails vatAmount vatRate vatIncluded')
+            .select('amount paymentDate paymentType commissionDetails vatAmount vatRate vatIncluded reversalState reversalOfPaymentId isCorrectionEntry referenceNumber')
             .lean();
         const inPeriod = (date) => {
             const d = new Date(date);
@@ -97,6 +100,14 @@ function prepareVatReturn(companyId, filingPeriod, preparedBy) {
         let exemptSupplies = 0;
         let zeroRatedSupplies = 0;
         for (const payment of payments) {
+            // Historical status stays on the payment. A fully reversed original and its
+            // negative REV do not contribute taxable supplies again. The replacement does.
+            if ((0, paymentReversalPolicy_1.isReversalDocument)(payment))
+                continue;
+            if (String(payment.reversalState || '') === 'reversed')
+                continue;
+            if (Number(payment.amount || 0) < 0)
+                continue;
             if (!inPeriod(payment.paymentDate))
                 continue;
             const vatOnCommission = Number(((_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) || 0);

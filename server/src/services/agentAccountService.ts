@@ -2,6 +2,7 @@
 import mongoose from 'mongoose';
 import { AgentAccount, IAgentAccount, Transaction, AgentPayout } from '../models/AgentAccount';
 import { Payment } from '../models/Payment';
+import { Property } from '../models/Property';
 import { User } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
@@ -13,6 +14,44 @@ import {
   projectCommissionLanes
 } from './commissionProjection';
 import { computeAgentAccountTotals } from './propertyAccountTotals';
+import { formatAgentCommissionDescription } from '../reporting/rentalPeriod';
+
+const PAYMENT_OBJECT_ID = /^[a-f0-9]{24}$/i;
+
+function paymentIdFromTransaction(tx: { paymentId?: unknown; reference?: string }): string | null {
+  const direct = tx.paymentId ? String(tx.paymentId) : '';
+  if (PAYMENT_OBJECT_ID.test(direct)) return direct;
+  const ref = String(tx.reference || '');
+  const reversed = ref.match(/^REV-([a-f0-9]{24})-(?:agent|owner|collaborator)$/i);
+  if (reversed) return reversed[1];
+  const roleQualified = ref.match(/^([a-f0-9]{24})-(?:owner|collaborator)$/i);
+  if (roleQualified) return roleQualified[1];
+  if (PAYMENT_OBJECT_ID.test(ref)) return ref;
+  return null;
+}
+
+function receiptFromTransaction(tx: { description?: string; reference?: string; paymentId?: unknown }): string | null {
+  const description = String(tx.description || '').trim();
+  if (/^(?:RCPT|CORR)-/i.test(description)) return description;
+  const fromDescription = description.match(/\bpayment\s+(\S+)/i);
+  if (fromDescription) {
+    const receipt = fromDescription[1].replace(/[.,]$/, '');
+    if (receipt && !PAYMENT_OBJECT_ID.test(receipt)) return receipt;
+  }
+  const ref = String(tx.reference || '');
+  if (!ref || ref.startsWith('REV-') || paymentIdFromTransaction(tx)) return null;
+  return ref.replace(/-(?:owner|collaborator)$/i, '');
+}
+
+function isCommissionReversalTransaction(tx: { type?: string; reference?: string; description?: string }): boolean {
+  if (String(tx.reference || '').startsWith('REV-')) return true;
+  return /^commission reversal\b/i.test(String(tx.description || ''));
+}
+
+function shouldDescribeByPaidMonth(tx: { type?: string; reference?: string; description?: string }): boolean {
+  if (tx.type === 'commission') return true;
+  return tx.type === 'penalty' && isCommissionReversalTransaction(tx);
+}
 
 // Interface for populated commission data
 interface PopulatedCommissionData {
@@ -83,7 +122,7 @@ export class AgentAccountService {
   async syncCommissionForPayment(paymentId: string): Promise<void> {
     try {
       const payment = await Payment.findById(paymentId)
-        .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status reversalOfPaymentId')
+        .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status reversalOfPaymentId rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
         .lean();
       if (!payment) return;
       if (!shouldPostAgentCommission(payment)) return;
@@ -95,9 +134,10 @@ export class AgentAccountService {
           continue;
         }
         const referenceBase = String((payment as any).referenceNumber || '');
-        const description = lane.role === 'agent'
-          ? `Commission from payment ${referenceBase}`
-          : `Commission (${lane.role}) from payment ${referenceBase}`;
+        const description = formatAgentCommissionDescription(payment as any)
+          || (lane.role === 'agent'
+            ? `Commission from payment ${referenceBase}`
+            : `Commission (${lane.role}) from payment ${referenceBase}`);
         await this.addCommission(lane.agentId, {
           amount: lane.amount,
           date: new Date((payment as any).paymentDate || new Date()),
@@ -113,12 +153,13 @@ export class AgentAccountService {
     }
   }
 
-  async reverseCommissionForPayment(paymentId: string, reason?: string): Promise<void> {
+  async reverseCommissionForPayment(paymentId: string, reason?: string): Promise<'reversed' | 'absent'> {
     try {
       const payment = await Payment.findById(paymentId)
-        .select('_id paymentDate referenceNumber')
+        .select('_id paymentDate referenceNumber paymentType rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
         .lean();
-      if (!payment) return;
+      if (!payment) return 'absent';
+      let handled = false;
 
       const accounts = await AgentAccount.find({ 'transactions.paymentId': String(paymentId) });
       for (const account of accounts) {
@@ -126,6 +167,7 @@ export class AgentAccountService {
           (t: any) => t.type === 'commission' && String((t as any).paymentId || '') === String(paymentId) && String(t.status || '') === 'completed'
         );
         if (!commissionRows.length) continue;
+        handled = true;
 
         for (const row of commissionRows) {
           const role = inferCommissionRoleFromReference(String(row.reference || ''));
@@ -134,7 +176,8 @@ export class AgentAccountService {
             type: 'penalty',
             amount: Number(row.amount || 0),
             date: new Date(),
-            description: `Commission reversal for payment ${String((payment as any).referenceNumber || paymentId)}`,
+            description: formatAgentCommissionDescription(payment as any, { reversal: true })
+              || `Commission reversal for payment ${String((payment as any).referenceNumber || paymentId)}`,
             reference: reversalRef,
             status: 'completed',
             notes: reason || 'Manual payment reversal',
@@ -151,6 +194,7 @@ export class AgentAccountService {
           await this.recalculateBalance(fresh as any);
         }
       }
+      return handled ? 'reversed' : 'absent';
     } catch (error) {
       logger.error('Error reversing commission for payment:', error);
       throw error;
@@ -518,6 +562,72 @@ export class AgentAccountService {
   }
 
   /**
+   * Read-only labels for the transactions table. Stored ledger descriptions stay unchanged.
+   * Commission rows name the month being paid, for example "June rent".
+   */
+  private async describeTransactionsByPaidMonth(transactions: Transaction[]): Promise<Transaction[]> {
+    const rows = Array.isArray(transactions) ? transactions : [];
+    const ids = new Set<string>();
+    const receipts = new Set<string>();
+    for (const tx of rows) {
+      if (!shouldDescribeByPaidMonth(tx)) continue;
+      const paymentId = paymentIdFromTransaction(tx);
+      if (paymentId) ids.add(paymentId);
+      const receipt = receiptFromTransaction(tx);
+      if (receipt) receipts.add(receipt);
+    }
+    if (ids.size === 0 && receipts.size === 0) return rows;
+
+    const or: Record<string, unknown>[] = [];
+    if (ids.size > 0) {
+      or.push({ _id: { $in: Array.from(ids).map((id) => new mongoose.Types.ObjectId(id)) } });
+    }
+    if (receipts.size > 0) {
+      or.push({ referenceNumber: { $in: Array.from(receipts) } });
+    }
+    const payments = await Payment.find(or.length === 1 ? or[0] : { $or: or })
+      .select('paymentType referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd propertyId manualPropertyAddress')
+      .lean();
+
+    const byId = new Map<string, any>();
+    const byReceipt = new Map<string, any>();
+    const propertyIds: mongoose.Types.ObjectId[] = [];
+    for (const payment of payments) {
+      byId.set(String((payment as any)._id), payment);
+      const receipt = String((payment as any).referenceNumber || '');
+      if (receipt) byReceipt.set(receipt, payment);
+      const propertyId = String((payment as any).propertyId || '');
+      if (PAYMENT_OBJECT_ID.test(propertyId)) propertyIds.push(new mongoose.Types.ObjectId(propertyId));
+    }
+
+    const propertyNameById = new Map<string, string>();
+    if (propertyIds.length > 0) {
+      const properties = await Property.find({ _id: { $in: propertyIds } })
+        .select('name propertyName address')
+        .lean();
+      for (const property of properties) {
+        const name = String((property as any).name || (property as any).propertyName || (property as any).address || '').trim();
+        if (name) propertyNameById.set(String((property as any)._id), name);
+      }
+    }
+
+    return rows.map((tx) => {
+      if (!shouldDescribeByPaidMonth(tx)) return tx;
+      const payment = byId.get(paymentIdFromTransaction(tx) || '')
+        || byReceipt.get(receiptFromTransaction(tx) || '');
+      if (!payment) return tx;
+      const propertyName = propertyNameById.get(String(payment.propertyId || ''))
+        || String(payment.manualPropertyAddress || '').trim();
+      const description = formatAgentCommissionDescription(payment, {
+        reversal: isCommissionReversalTransaction(tx),
+        propertyName
+      });
+      if (!description) return tx;
+      return { ...tx, description };
+    });
+  }
+
+  /**
    * Get agent account with summary and commission data from payments
    */
   async getAgentAccount(agentId: string): Promise<IAgentAccount & { commissionData?: PopulatedCommissionData[] }> {
@@ -578,6 +688,7 @@ export class AgentAccountService {
       console.log('Found commission data:', commissionData.length, 'records');
 
       const accountData = updatedAccount.toObject();
+      accountData.transactions = await this.describeTransactionsByPaidMonth(accountData.transactions || []);
       const result = { ...accountData, commissionData } as IAgentAccount & { commissionData?: PopulatedCommissionData[] };
       
       console.log('Returning agent account with commission data:', {

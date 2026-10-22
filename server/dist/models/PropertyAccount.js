@@ -112,7 +112,7 @@ const TransactionSchema = new mongoose_1.Schema({
 const PassThroughTransactionSchema = new mongoose_1.Schema({
     type: {
         type: String,
-        enum: ['collection', 'payment', 'adjustment'],
+        enum: ['collection', 'payment', 'adjustment', 'collection_reversal'],
         required: true
     },
     amount: {
@@ -145,6 +145,9 @@ const PassThroughTransactionSchema = new mongoose_1.Schema({
         required: false
     },
     idempotencyKey: {
+        type: String
+    },
+    reversesIdempotencyKey: {
         type: String
     },
     description: {
@@ -425,9 +428,13 @@ PropertyAccountSchema.pre('save', function (next) {
     let passThroughPaid = 0;
     passThroughAccounts.forEach((account) => {
         const entries = Array.isArray(account.transactions) ? account.transactions : [];
-        const collected = entries
+        const grossCollected = entries
             .filter((t) => t.type === 'collection' && t.status === 'completed')
             .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const reversedCollected = entries
+            .filter((t) => t.type === 'collection_reversal' && t.status === 'completed')
+            .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const collected = grossCollected - reversedCollected;
         const paid = entries
             .filter((t) => t.type === 'payment' && t.status === 'completed')
             .reduce((sum, t) => sum + Number(t.amount || 0), 0);

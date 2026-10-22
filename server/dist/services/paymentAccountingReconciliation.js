@@ -49,6 +49,7 @@ Object.defineProperty(exports, "deriveAccountingComplete", { enumerable: true, g
 Object.defineProperty(exports, "deriveAccountingStatus", { enumerable: true, get: function () { return paymentAccountingProjection_1.deriveAccountingStatus; } });
 Object.defineProperty(exports, "evaluateAccountingReconciliation", { enumerable: true, get: function () { return paymentAccountingProjection_1.evaluateAccountingReconciliation; } });
 const paymentAccountingCompleteness_1 = require("./paymentAccountingCompleteness");
+const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const vatPolicyService_1 = require("./vatPolicyService");
 const money_1 = require("../utils/money");
 function asObjectId(paymentId) {
@@ -331,7 +332,11 @@ function applyReconciliationOutcome(paymentId, recon, extra) {
         let lastError = extra === null || extra === void 0 ? void 0 : extra.lastError;
         if (recon.accountingComplete) {
             const payment = yield Payment_1.Payment.findById(paymentId);
-            const obligationGap = payment ? yield missingOriginalVatObligation(payment) : null;
+            if (payment && (0, accountingPostingPolicy_1.completedPaymentRequiresFinalizedCommission)(payment)) {
+                effective = Object.assign(Object.assign({}, recon), { status: 'incomplete', accountingComplete: false, missing: Array.from(new Set([...(recon.missing || []), 'agentCommission', 'companyCommission'])) });
+                lastError = 'Commission snapshot is not finalized, so agent and company projections are not settled.';
+            }
+            const obligationGap = payment && effective.accountingComplete ? yield missingOriginalVatObligation(payment) : null;
             if (obligationGap) {
                 effective = Object.assign(Object.assign({}, recon), { status: 'incomplete', accountingComplete: false, missing: Array.from(new Set([...(recon.missing || []), 'vat'])) });
                 lastError = obligationGap;

@@ -24,6 +24,7 @@ const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const Company_1 = __importDefault(require("../models/Company"));
 const introductionCommissionService_1 = require("./introductionCommissionService");
+const rentalPeriodCoverage_1 = require("./rentalPeriodCoverage");
 const outstandingLeaseCalculation_1 = require("./outstandingLeaseCalculation");
 Object.defineProperty(exports, "computeOutstandingForLease", { enumerable: true, get: function () { return outstandingLeaseCalculation_1.computeOutstandingForLease; } });
 Object.defineProperty(exports, "getOutstandingRangeForLease", { enumerable: true, get: function () { return outstandingLeaseCalculation_1.getOutstandingRangeForLease; } });
@@ -166,7 +167,7 @@ class DashboardKpiService {
                     status: { $in: ['completed'] },
                     paymentType: { $nin: ['sale'] }
                 })
-                    .select('propertyId tenantId leaseId paymentDate paymentType status rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd amount depositAmount reversalOfPaymentId commissionDetails.commissionBase commissionDetails.totalCommission')
+                    .select('propertyId tenantId leaseId paymentDate paymentType status postingStatus rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd amount depositAmount rentAllocated currency reversalState reversalPaymentId reversalOfPaymentId isCorrectionEntry referenceNumber commissionDetails.commissionBase commissionDetails.totalCommission')
                     .lean(),
                 LevyPayment_1.LevyPayment.find({
                     companyId: companyObjectId,
@@ -195,16 +196,19 @@ class DashboardKpiService {
                     leasesByProperty.set(propertyId, []);
                 leasesByProperty.get(propertyId).push(lease);
             }
-            const rentalPaidByProperty = this.markCoveredMonths(completedRentalPayments.filter((payment) => {
+            const rentReceipts = completedRentalPayments.filter((payment) => {
                 const paymentType = String((payment === null || payment === void 0 ? void 0 : payment.paymentType) || '').toLowerCase();
-                return paymentType !== 'levy' && paymentType !== 'municipal' && paymentType !== 'sale';
-            }), (payment) => ((payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : ''), (payment) => {
+                if (paymentType === 'levy' || paymentType === 'municipal' || paymentType === 'sale')
+                    return false;
+                return (0, rentalPeriodCoverage_1.countsTowardRentReceipt)(payment);
+            });
+            const rentalPaidByProperty = this.markCoveredMonths(rentReceipts, (payment) => ((payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : ''), (payment) => {
                 const month = Number((payment === null || payment === void 0 ? void 0 : payment.rentalPeriodMonth) || ((payment === null || payment === void 0 ? void 0 : payment.paymentDate) ? new Date(payment.paymentDate).getMonth() + 1 : 0));
                 const year = Number((payment === null || payment === void 0 ? void 0 : payment.rentalPeriodYear) || ((payment === null || payment === void 0 ? void 0 : payment.paymentDate) ? new Date(payment.paymentDate).getFullYear() : 0));
                 return year && month ? { year, month } : null;
             });
             const rentalTypeByProperty = new Map(rentalProperties.map((property) => [String(property._id), String((property === null || property === void 0 ? void 0 : property.rentalType) || '').toLowerCase()]));
-            for (const payment of completedRentalPayments) {
+            for (const payment of rentReceipts) {
                 const propertyId = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : '';
                 if (!propertyId || rentalTypeByProperty.get(propertyId) !== 'introduction')
                     continue;
@@ -238,7 +242,7 @@ class DashboardKpiService {
             });
             const introductionRemainingByKey = new Map();
             const introPaymentsByKey = new Map();
-            for (const payment of completedRentalPayments) {
+            for (const payment of rentReceipts) {
                 const paymentType = String((payment === null || payment === void 0 ? void 0 : payment.paymentType) || '').toLowerCase();
                 if (paymentType === 'levy' || paymentType === 'municipal' || paymentType === 'sale')
                     continue;

@@ -2,7 +2,7 @@ import assert from 'assert';
 import { OwnerStatementBuilder } from '../builders';
 import { CanonicalLedgerEntry, LedgerQuery } from '../ledger';
 import { PaymentCommissionSnapshot, ReportingReadModels } from '../readModels';
-import { cleanStatementDescription, formatRentPeriodDescription } from '../rentalPeriod';
+import { cleanStatementDescription, formatAgentCommissionDescription, formatPaidMonthLabel, formatRentPeriodDescription } from '../rentalPeriod';
 import { resolveStatementRentAmount } from '../statementRent';
 import { resolveTotalAmountReceived } from '../totalAmountReceived';
 
@@ -95,6 +95,41 @@ export async function runStatementPresentationTests(): Promise<void> {
     'November 2026–January 2027 Rent'
   );
   assert.strictEqual(formatRentPeriodDescription({}), undefined, 'Missing rental-period metadata must not be invented from a payment date.');
+  assert.strictEqual(formatPaidMonthLabel({ rentalPeriodMonth: 6, rentalPeriodYear: 2026 }), 'June rent');
+  assert.strictEqual(
+    formatPaidMonthLabel({
+      rentalPeriodMonth: 6,
+      rentalPeriodYear: 2026,
+      advanceMonthsPaid: 3,
+      advancePeriodStart: { month: 6, year: 2026 },
+      advancePeriodEnd: { month: 8, year: 2026 }
+    }),
+    'June–August rent'
+  );
+  assert.strictEqual(
+    formatAgentCommissionDescription({ paymentType: 'rental', rentalPeriodMonth: 6, rentalPeriodYear: 2026 }),
+    'June rent'
+  );
+  assert.strictEqual(
+    formatAgentCommissionDescription(
+      { paymentType: 'rental', rentalPeriodMonth: 7, rentalPeriodYear: 2026 },
+      { propertyName: 'Unit 31, 39 Suffolk Road' }
+    ),
+    'July rent — Unit 31, 39 Suffolk Road'
+  );
+  assert.strictEqual(
+    formatAgentCommissionDescription(
+      { paymentType: 'rental', rentalPeriodMonth: 6, rentalPeriodYear: 2026 },
+      { reversal: true }
+    ),
+    'June rent reversal'
+  );
+  assert.strictEqual(formatAgentCommissionDescription({ paymentType: 'sale' }), 'Sale commission');
+  assert.strictEqual(
+    formatAgentCommissionDescription({ paymentType: 'rental' }),
+    undefined,
+    'A rental with no stored period must not invent a month from a receipt number.'
+  );
   assert.strictEqual(cleanStatementDescription('Rental income - REF-1765198259150-5'), 'Rental Income');
 
   assert.strictEqual(

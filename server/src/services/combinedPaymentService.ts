@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { Property } from '../models/Property';
-import { Payment } from '../models/Payment';
 import { LevyPayment } from '../models/LevyPayment';
+import { AppError } from '../middleware/errorHandler';
+import { findCoveredAdvanceMonth, sumRentalPeriodReservation, sumRentCoverageForPeriod } from './rentalPeriodCoverage';
 
 export type CombinedAllocationResult = {
   rentAllocated: number;
@@ -16,42 +17,17 @@ export type CombinedAllocationError = { status: number; message: string };
 
 const cents = (n: number) => Math.round(Number(n || 0) * 100);
 
-/** Sum rent applied for a rental period (uses rentAllocated when present). */
+/** Effective posted rent for a period. Reversed originals and pending correction drafts are not receipts. */
 export async function sumRentPaidForPeriod(params: {
   companyId: mongoose.Types.ObjectId;
   propertyId: mongoose.Types.ObjectId;
   tenantId: mongoose.Types.ObjectId;
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
+  leaseId?: unknown;
+  currency?: string;
 }): Promise<number> {
-  const [agg] = await Payment.aggregate([
-    {
-      $match: {
-        companyId: params.companyId,
-        paymentType: 'rental',
-        propertyId: params.propertyId,
-        tenantId: params.tenantId,
-        rentalPeriodYear: params.rentalPeriodYear,
-        rentalPeriodMonth: params.rentalPeriodMonth,
-        status: { $in: ['pending', 'completed'] },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        total: {
-          $sum: {
-            $cond: [
-              { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
-              '$rentAllocated',
-              '$amount',
-            ],
-          },
-        },
-      },
-    },
-  ]);
-  return Number(agg?.total || 0);
+  return sumRentCoverageForPeriod(params);
 }
 
 /** Sum levy paid for a property period (from LevyPayment collection). */
@@ -117,6 +93,10 @@ export async function resolveCombinedRentalAllocation(input: {
   rentalPeriodMonth: number;
   rentalPeriodYear: number;
   advanceMonthsPaid?: number;
+  advancePeriodStart?: { month?: number; year?: number } | null;
+  advancePeriodEnd?: { month?: number; year?: number } | null;
+  leaseId?: unknown;
+  currency?: string;
   rentUsed?: number;
   levyUsed?: number;
 }): Promise<CombinedAllocationResult | CombinedAllocationError> {
@@ -142,6 +122,24 @@ export async function resolveCombinedRentalAllocation(input: {
   }
 
   if (isAdvance) {
+    const coveredAdvance = await findCoveredAdvanceMonth({
+      companyId: input.companyId,
+      propertyId: input.propertyId,
+      tenantId: input.tenantId,
+      rentalPeriodMonth: input.rentalPeriodMonth,
+      rentalPeriodYear: input.rentalPeriodYear,
+      advanceMonthsPaid: advanceMonths,
+      advancePeriodStart: input.advancePeriodStart,
+      advancePeriodEnd: input.advancePeriodEnd,
+      leaseId: input.leaseId,
+      currency: input.currency,
+    });
+    if ('error' in coveredAdvance) {
+      return { status: 400, message: coveredAdvance.error };
+    }
+    if (coveredAdvance.covered) {
+      return { status: 409, message: 'Overlapping advance payment already exists for this period.' };
+    }
     const expectedRentCents = cents(rentUsed) * advanceMonths;
     const expectedLevyCents = cents(levyUsed) * advanceMonths;
     const expectedTotalCents = expectedRentCents + expectedLevyCents;
@@ -168,12 +166,14 @@ export async function resolveCombinedRentalAllocation(input: {
     levyPeriodMonth: input.rentalPeriodMonth,
     levyPeriodYear: input.rentalPeriodYear,
   });
-  const rentPaid = await sumRentPaidForPeriod({
+  const rentPaid = await sumRentalPeriodReservation({
     companyId: input.companyId,
     propertyId: input.propertyId,
     tenantId: input.tenantId,
     rentalPeriodMonth: input.rentalPeriodMonth,
     rentalPeriodYear: input.rentalPeriodYear,
+    leaseId: input.leaseId,
+    currency: input.currency,
   });
 
   const levyRemaining = Math.max(0, levyUsed - levyPaid);
@@ -263,21 +263,90 @@ export async function createLinkedLevyPayment(
   return levyPayment._id as mongoose.Types.ObjectId;
 }
 
-/** Void linked levy when a rental payment is reversed. */
+/**
+ * Preserve the original levy and append one contra levy.
+ * Original status and notes are not rewritten.
+ */
+export async function reverseLinkedLevyPayment(
+  linkedLevyPaymentId: mongoose.Types.ObjectId | string | undefined,
+  reason: string,
+  opts?: { session?: mongoose.ClientSession; reversedBy?: string }
+): Promise<'reversed' | 'absent'> {
+  if (!linkedLevyPaymentId) return 'absent';
+  const session = opts?.session;
+  const originalQuery = LevyPayment.findById(linkedLevyPaymentId);
+  const original = session ? await originalQuery.session(session) : await originalQuery;
+  if (!original) {
+    throw new AppError('Linked levy payment was not found. The reversal was not invented.', 409);
+  }
+  const amount = Number(original.amount || 0);
+  if (!(amount > 0)) {
+    throw new AppError('Linked levy payment has no amount to reverse.', 409);
+  }
+  const existingQuery = LevyPayment.findOne({ reversalOfLevyPaymentId: original._id });
+  const existing = session ? await existingQuery.session(session) : await existingQuery;
+  if (existing) {
+    if (!original.reversalLevyPaymentId) {
+      await LevyPayment.updateOne(
+        { _id: original._id },
+        {
+          $set: {
+            reversalLevyPaymentId: existing._id,
+            reversedAt: original.reversedAt || new Date(),
+            reversalReason: original.reversalReason || reason
+          }
+        },
+        session ? { session } : undefined
+      );
+    }
+    return 'reversed';
+  }
+  const contra = new LevyPayment({
+    paymentType: 'levy',
+    propertyId: original.propertyId,
+    companyId: original.companyId,
+    paymentDate: new Date(),
+    paymentMethod: original.paymentMethod,
+    amount: -Math.abs(amount),
+    referenceNumber: `REV-LEVY-${String(original.referenceNumber || original._id)}`,
+    notes: `Reversal of levy ${String(original.referenceNumber || original._id)}. ${reason}`,
+    processedBy: opts?.reversedBy && mongoose.Types.ObjectId.isValid(opts.reversedBy)
+      ? new mongoose.Types.ObjectId(opts.reversedBy)
+      : original.processedBy,
+    status: 'completed',
+    currency: original.currency || 'USD',
+    monthlyLevies: original.monthlyLevies,
+    levyPeriodMonth: original.levyPeriodMonth,
+    levyPeriodYear: original.levyPeriodYear,
+    advanceMonthsPaid: original.advanceMonthsPaid,
+    advancePeriodStart: original.advancePeriodStart,
+    advancePeriodEnd: original.advancePeriodEnd,
+    parentPaymentId: original.parentPaymentId,
+    reversalOfLevyPaymentId: original._id
+  });
+  await contra.save(session ? { session } : undefined);
+  await LevyPayment.updateOne(
+    { _id: original._id, reversalLevyPaymentId: { $exists: false } },
+    {
+      $set: {
+        reversalLevyPaymentId: contra._id,
+        reversedAt: new Date(),
+        reversedBy: opts?.reversedBy && mongoose.Types.ObjectId.isValid(opts.reversedBy)
+          ? new mongoose.Types.ObjectId(opts.reversedBy)
+          : undefined,
+        reversalReason: reason
+      }
+    },
+    session ? { session } : undefined
+  );
+  return 'reversed';
+}
+
+/** @deprecated Use reverseLinkedLevyPayment. Kept so older callers do not overwrite levy history. */
 export async function voidLinkedLevyPayment(
   linkedLevyPaymentId: mongoose.Types.ObjectId | string | undefined,
   reason: string,
   session?: mongoose.ClientSession
 ): Promise<void> {
-  if (!linkedLevyPaymentId) return;
-  await LevyPayment.updateOne(
-    { _id: new mongoose.Types.ObjectId(String(linkedLevyPaymentId)) },
-    {
-      $set: {
-        status: 'failed',
-        notes: `Voided: ${reason}`,
-      },
-    },
-    session ? { session } : undefined
-  );
+  await reverseLinkedLevyPayment(linkedLevyPaymentId, reason, { session });
 }

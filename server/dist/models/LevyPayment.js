@@ -150,6 +150,19 @@ const LevyPaymentSchema = new mongoose_1.Schema({
         required: false,
         index: true,
     },
+    reversalOfLevyPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'LevyPayment',
+        required: false
+    },
+    reversalLevyPaymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'LevyPayment',
+        required: false
+    },
+    reversedAt: { type: Date, required: false },
+    reversedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
+    reversalReason: { type: String, required: false },
     payout: {
         paidOut: { type: Boolean, default: false },
         paidToName: { type: String },

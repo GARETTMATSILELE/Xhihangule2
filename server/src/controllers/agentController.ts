@@ -12,6 +12,8 @@ import mongoose from 'mongoose';
 import agentAccountService from '../services/agentAccountService';
 import { sendAgentPaymentNotificationEmail } from '../services/agentPaymentNotificationService';
 import { notifyOwnerOfRentPayment } from '../services/ownerRentNotificationService';
+import { acquireRentalPeriodGuardsForPayment, findCoveredAdvanceMonth, sumRentalPeriodReservation } from '../services/rentalPeriodCoverage';
+import { findLiveIdempotentPayment } from '../services/paymentIdempotency';
 import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationService';
 import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
 import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
@@ -924,6 +926,7 @@ export const restoreAgentProperty = async (req: Request, res: Response) => {
 
 // Create a new payment for the agent
 export const createAgentPayment = async (req: Request, res: Response) => {
+  let releaseAgentRentalGuard: () => Promise<void> = async () => {};
   try {
     if (!req.user?.userId) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -958,7 +961,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
       advancePeriodEnd,
     } = req.body;
     // Accept idempotency key from header or body
-    const idempotencyKey = (req.headers['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
+    const idempotencyKey = (req.headers?.['idempotency-key'] as string) || (req.body?.idempotencyKey as string) || undefined;
 
     // Validate required fields (allow deposit-only: amount=0 with depositAmount>0)
     const numericAmount = Number(amount || 0);
@@ -1009,10 +1012,10 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     // Short-circuit for duplicate submissions using idempotency key
     if (idempotencyKey) {
-      const existing = await Payment.findOne({
-        companyId: new mongoose.Types.ObjectId(req.user.companyId),
+      const existing = await findLiveIdempotentPayment({
+        companyId: req.user.companyId,
         idempotencyKey: String(idempotencyKey)
-      }).lean();
+      });
       if (existing) {
         return res.status(200).json({
           status: 'success',
@@ -1024,6 +1027,57 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     // Prevent double-paying the same rental month; allow partials up to remaining
     let combinedAllocation: import('../services/combinedPaymentService').CombinedAllocationResult | null = null;
+    if (resolvedPaymentType !== 'sale' && !(numericAmount <= 0 && numericDeposit > 0)) {
+      releaseAgentRentalGuard = await acquireRentalPeriodGuardsForPayment({
+        companyId: req.user.companyId,
+        propertyId,
+        tenantId,
+        rentalPeriodYear,
+        rentalPeriodMonth,
+        advanceMonthsPaid,
+        advancePeriodStart,
+        advancePeriodEnd,
+        paymentType: resolvedPaymentType,
+        amount: numericAmount,
+        depositAmount: numericDeposit,
+        leaseId,
+        currency,
+      });
+      const coveredAdvance = await findCoveredAdvanceMonth({
+        companyId: req.user.companyId,
+        propertyId,
+        tenantId,
+        rentalPeriodMonth,
+        rentalPeriodYear,
+        advanceMonthsPaid,
+        advancePeriodStart,
+        advancePeriodEnd,
+        leaseId,
+        currency,
+      });
+      if ('error' in coveredAdvance) {
+        return res.status(400).json({ status: 'error', message: coveredAdvance.error, code: 'RENTAL_PERIOD_REQUIRED' });
+      }
+      if (coveredAdvance.covered) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Overlapping advance payment already exists for this period.',
+        });
+      }
+      if (idempotencyKey) {
+        const existingAfterLock = await findLiveIdempotentPayment({
+          companyId: req.user.companyId,
+          idempotencyKey: String(idempotencyKey)
+        });
+        if (existingAfterLock) {
+          return res.status(200).json({
+            status: 'success',
+            data: existingAfterLock,
+            message: 'Payment processed successfully',
+          });
+        }
+      }
+    }
     if (resolvedPaymentType !== 'sale' && typeof rentalPeriodMonth === 'number' && typeof rentalPeriodYear === 'number') {
       const allocationResult = await (await import('../services/combinedPaymentService')).resolveCombinedRentalAllocation({
         companyId: new mongoose.Types.ObjectId(req.user.companyId),
@@ -1034,6 +1088,10 @@ export const createAgentPayment = async (req: Request, res: Response) => {
         rentalPeriodMonth,
         rentalPeriodYear,
         advanceMonthsPaid: Number(advanceMonthsPaid || 1),
+        advancePeriodStart,
+        advancePeriodEnd,
+        leaseId,
+        currency,
         rentUsed: typeof (req.body as any).rentUsed === 'number' ? Number((req.body as any).rentUsed) : Number((property as any)?.rent || 0),
         levyUsed: typeof (req.body as any).levyUsed === 'number' ? Number((req.body as any).levyUsed) : undefined,
       });
@@ -1058,33 +1116,15 @@ export const createAgentPayment = async (req: Request, res: Response) => {
           }
         }
       } else if (rent > 0) {
-        const periodFilter: any = {
-          companyId: new mongoose.Types.ObjectId(req.user.companyId),
-          paymentType: 'rental',
-          tenantId: new mongoose.Types.ObjectId(tenantId),
-          propertyId: new mongoose.Types.ObjectId(propertyId),
+        const alreadyPaid = await sumRentalPeriodReservation({
+          companyId: req.user.companyId,
+          propertyId,
+          tenantId,
           rentalPeriodYear,
           rentalPeriodMonth,
-          status: { $in: ['pending', 'completed'] }
-        };
-        const [agg] = await Payment.aggregate([
-          { $match: periodFilter },
-          {
-            $group: {
-              _id: null,
-              total: {
-                $sum: {
-                  $cond: [
-                    { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
-                    '$rentAllocated',
-                    '$amount'
-                  ]
-                }
-              }
-            }
-          }
-        ]);
-        const alreadyPaidCents = Math.round(((agg?.total as number) || 0) * 100);
+          currency: (req.body as any).currency
+        });
+        const alreadyPaidCents = Math.round(alreadyPaid * 100);
         const rentCents = Math.round((rent || 0) * 100);
         const remainingCents = rentCents - alreadyPaidCents;
         const amountCents = Math.round((Number(amount) || 0) * 100);
@@ -1294,11 +1334,15 @@ export const createAgentPayment = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error creating agent payment:', error);
-    res.status(500).json({
+    const statusCode = error instanceof AppError ? (error.statusCode || 500) : 500;
+    res.status(statusCode).json({
       status: 'error',
-      message: 'Failed to process payment',
+      message: error instanceof AppError ? error.message : 'Failed to process payment',
       error: error instanceof Error ? error.message : 'Unknown error',
+      ...(error instanceof AppError && error.code ? { code: error.code } : {})
     });
+  } finally {
+    await releaseAgentRentalGuard();
   }
 };
 

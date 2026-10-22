@@ -29,6 +29,7 @@ const LandlordFinancialTransaction_1 = require("../models/LandlordFinancialTrans
 const TransactionTaxSnapshot_1 = require("../models/TransactionTaxSnapshot");
 const propertyAccountTotals_1 = require("./propertyAccountTotals");
 const individualReportingPeriod_1 = require("./individualReportingPeriod");
+const rentalPeriodCoverage_1 = require("./rentalPeriodCoverage");
 const INCOME_CATEGORIES = ['Rent', 'Parking', 'Levy Recovery', 'Utilities Recovery', 'Storage Income', 'Other Income'];
 const EXPENSE_CATEGORIES = ['Maintenance', 'Municipal', 'Levies', 'Security', 'Insurance', 'Gardening', 'Cleaning', 'Repairs', 'Utilities', 'Legal', 'Other'];
 function asObjectId(value) {
@@ -305,6 +306,8 @@ class IndividualWorkspaceService {
                 activeLeaseCountByProperty.set(String(lease.propertyId), (activeLeaseCountByProperty.get(String(lease.propertyId)) || 0) + 1);
             const collectedThisMonth = new Map();
             for (const payment of payments) {
+                if (!(0, rentalPeriodCoverage_1.countsTowardRentReceipt)(payment))
+                    continue;
                 const date = new Date(payment.paymentDate || payment.createdAt);
                 if (date >= collectStart && date < collectEnd) {
                     const pid = String(payment.propertyId || '');

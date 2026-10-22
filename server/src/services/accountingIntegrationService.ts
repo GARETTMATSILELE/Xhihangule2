@@ -489,36 +489,7 @@ class AccountingIntegrationService {
             }))
             .filter((line) => line.accountCode && ((line.debit || 0) > 0 || (line.credit || 0) > 0));
         } else {
-          const amount = toMoney(Math.abs(payment.amount || 0));
-          const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
-          const paymentVat = toMoney((payment as any)?.vatAmount || 0);
-          const commissionNet = toMoney(
-            Number((payment.commissionDetails as any)?.commissionNet || (payment.commissionDetails as any)?.totalCommission || 0)
-          );
-          const levyAmount = toMoney(
-            Number((payment.commissionDetails as any)?.levy ?? (payment as any)?.levyAllocated ?? 0)
-          );
-          const allocation = allocateRentalReceipt({
-            amount,
-            rent: toMoney(Number((payment as any)?.rentAllocated ?? (payment.commissionDetails as any)?.commissionBase ?? amount - levyAmount)),
-            levy: levyAmount,
-            commissionBase: toMoney(Number((payment.commissionDetails as any)?.commissionBase || 0)),
-            commissionNet,
-            vatOnCommission
-          });
-          const reversalDomain = journalPaymentType(payment);
-          lines = amount > 0
-            ? buildAgentReceiptReversal({
-                paymentType: reversalDomain,
-                amount,
-                ownerAmount: allocation.ownerPayable,
-                commissionNet: allocation.commissionNet,
-                vatAmount: toMoney(vatOnCommission + paymentVat),
-                levyAmount: reversalDomain === 'sale' ? 0 : allocation.levyPayable,
-                propertyId: (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined,
-                agentId: (payment as any)?.agentId ? String((payment as any).agentId) : undefined
-              })
-            : [];
+          throw new Error('Original journal is missing. The reversal was not constructed from current configuration.');
         }
         if (original && lines.length === 0) {
           throw new Error('Original journal lines could not be reversed');

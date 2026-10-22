@@ -8,6 +8,7 @@ import { Tenant } from '../models/Tenant';
 import { LeaseBillingEngine } from '../services/leaseBillingEngine';
 import { ensureLeaseInspectionSchedule, ensureMoveOutInspection } from '../services/inspectionAutomationService';
 import { callerCanAccessProperty, propertyIdsForCaller } from '../utils/propertyAccess';
+import { countsTowardRentReceipt, storedRentPortion } from '../services/rentalPeriodCoverage';
 
 const LEASE_STATUSES: LeaseStatus[] = [
   'draft',
@@ -542,9 +543,14 @@ export class LeaseController {
 
       const payments = await Payment.find({
         leaseId: lease._id,
-        status: { $in: ['pending', 'completed'] }
+        companyId: lease.companyId,
+        status: { $in: ['pending', 'completed', 'paid', 'success'] }
       });
-      const totalPaid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      const totalPaid = payments.reduce((sum, payment) => (
+        countsTowardRentReceipt(payment, { leaseId: lease._id })
+          ? sum + Math.max(0, storedRentPortion(payment))
+          : sum
+      ), 0);
       const generatedPeriods = LeaseBillingEngine.generateMonthlyPeriods(lease, lease.startDate, req.body.moveOutDate ? new Date(req.body.moveOutDate) : new Date());
       const totalBilled = generatedPeriods.reduce((sum, period) => sum + period.totalAmount, 0);
       const outstandingBalance = Math.max(0, totalBilled - totalPaid);

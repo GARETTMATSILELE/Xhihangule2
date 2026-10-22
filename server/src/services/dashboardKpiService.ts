@@ -9,6 +9,7 @@ import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
 import Company from '../models/Company';
 import { introductionConsumedFromPayments } from './introductionCommissionService';
+import { countsTowardRentReceipt } from './rentalPeriodCoverage';
 import {
   computeOutstandingForLease,
   formatOutstandingMonthLabel,
@@ -223,7 +224,7 @@ class DashboardKpiService {
           status: { $in: ['completed'] },
           paymentType: { $nin: ['sale'] }
         })
-          .select('propertyId tenantId leaseId paymentDate paymentType status rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd amount depositAmount reversalOfPaymentId commissionDetails.commissionBase commissionDetails.totalCommission')
+          .select('propertyId tenantId leaseId paymentDate paymentType status postingStatus rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd amount depositAmount rentAllocated currency reversalState reversalPaymentId reversalOfPaymentId isCorrectionEntry referenceNumber commissionDetails.commissionBase commissionDetails.totalCommission')
           .lean(),
         LevyPayment.find({
           companyId: companyObjectId,
@@ -257,11 +258,13 @@ class DashboardKpiService {
       leasesByProperty.get(propertyId)!.push(lease);
     }
 
+    const rentReceipts = (completedRentalPayments as any[]).filter((payment) => {
+      const paymentType = String(payment?.paymentType || '').toLowerCase();
+      if (paymentType === 'levy' || paymentType === 'municipal' || paymentType === 'sale') return false;
+      return countsTowardRentReceipt(payment);
+    });
     const rentalPaidByProperty = this.markCoveredMonths(
-      (completedRentalPayments as any[]).filter((payment) => {
-        const paymentType = String(payment?.paymentType || '').toLowerCase();
-        return paymentType !== 'levy' && paymentType !== 'municipal' && paymentType !== 'sale';
-      }),
+      rentReceipts,
       (payment) => (payment?.propertyId ? String(payment.propertyId) : ''),
       (payment) => {
         const month = Number(payment?.rentalPeriodMonth || (payment?.paymentDate ? new Date(payment.paymentDate).getMonth() + 1 : 0));
@@ -273,7 +276,7 @@ class DashboardKpiService {
     const rentalTypeByProperty = new Map<string, string>(
       (rentalProperties as any[]).map((property) => [String(property._id), String(property?.rentalType || '').toLowerCase()])
     );
-    for (const payment of completedRentalPayments as any[]) {
+    for (const payment of rentReceipts) {
       const propertyId = payment?.propertyId ? String(payment.propertyId) : '';
       if (!propertyId || rentalTypeByProperty.get(propertyId) !== 'introduction') continue;
       const monthsPaid = Number(payment?.advanceMonthsPaid || 1);
@@ -308,7 +311,7 @@ class DashboardKpiService {
 
     const introductionRemainingByKey = new Map<string, number>();
     const introPaymentsByKey = new Map<string, any[]>();
-    for (const payment of completedRentalPayments as any[]) {
+    for (const payment of rentReceipts) {
       const paymentType = String(payment?.paymentType || '').toLowerCase();
       if (paymentType === 'levy' || paymentType === 'municipal' || paymentType === 'sale') continue;
       const propertyId = payment?.propertyId ? String(payment.propertyId) : '';

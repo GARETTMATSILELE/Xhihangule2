@@ -100,6 +100,10 @@ function introductionConsumedFromPayments(payments) {
     for (const payment of payments || []) {
         if (payment === null || payment === void 0 ? void 0 : payment.reversalOfPaymentId)
             continue;
+        if (String((payment === null || payment === void 0 ? void 0 : payment.reversalState) || '') === 'reversed')
+            continue;
+        if (Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0) < 0)
+            continue;
         const deposit = Number((payment === null || payment === void 0 ? void 0 : payment.depositAmount) || 0);
         const amount = Number((payment === null || payment === void 0 ? void 0 : payment.amount) || 0);
         if (deposit > 0 && amount <= 0)

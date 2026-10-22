@@ -3,11 +3,13 @@
  * Every writer (controllers, change streams, jobs, LedgerEvent processor)
  * must consult this module rather than adding local `if (isProvisional)` guards.
  */
+import { hasReversalInEffect, isReversalDocument } from './paymentReversalPolicy';
 
 export type AccountingSkipReason =
   | 'missing_payment'
   | 'reversal_row'
   | 'negative_amount'
+  | 'reversed_original'
   | 'not_completed'
   | 'deposit_only'
   | 'provisional'
@@ -51,7 +53,7 @@ const allowAll = (): PermanentAccountingDecision => ({
 });
 
 export function isReversalRow(payment: any): boolean {
-  return Boolean(payment?.reversalOfPaymentId) || Number(payment?.amount || 0) < 0;
+  return isReversalDocument(payment);
 }
 
 export function isProvisionalPayment(payment: any): boolean {
@@ -80,6 +82,7 @@ export function evaluatePermanentAccountingPolicy(payment: any): PermanentAccoun
   if (!payment) return deny('missing_payment');
   if (payment.reversalOfPaymentId) return deny('reversal_row');
   if (Number(payment.amount || 0) < 0) return deny('negative_amount');
+  if (hasReversalInEffect(payment)) return deny('reversed_original');
   if (String(payment.status || '') !== 'completed') return deny('not_completed');
   if (payment.isProvisional === true) return deny('provisional');
   if (payment.isInSuspense === true) return deny('suspense');
@@ -89,8 +92,13 @@ export function evaluatePermanentAccountingPolicy(payment: any): PermanentAccoun
 
   const decision = allowAll();
   if (payment.commissionFinalized === false) {
-    decision.skipAgentCommission = true;
-    decision.skipCompanyCommission = true;
+    // A stored positive share is still a required projection. Missing
+    // finalization must not reclassify it as not applicable. A genuine zero
+    // share (no agent or no agency commission) remains not applicable.
+    const agentShare = Number(payment?.commissionDetails?.agentShare || 0);
+    const agencyShare = Number(payment?.commissionDetails?.agencyShare || 0);
+    if (!(agentShare > 0)) decision.skipAgentCommission = true;
+    if (!(agencyShare > 0)) decision.skipCompanyCommission = true;
   }
   // Trust posting is sale-only; rental/introduction never post buyer trust receipts.
   if (String(payment.paymentType || '') !== 'sale') {
@@ -130,10 +138,32 @@ export function shouldPostTrust(payment: any): boolean {
  */
 export function shouldAttemptAccountingReversal(payment: any): boolean {
   if (!payment) return false;
-  if (payment.reversalOfPaymentId) return false;
+  if (isReversalDocument(payment)) return false;
   const status = String(payment.status || '');
   const postingStatus = String(payment.postingStatus || '');
-  return status === 'reversed' || postingStatus === 'reversed' || Boolean(payment.reversalPaymentId);
+  return status === 'reversed'
+    || postingStatus === 'reversed'
+    || Boolean(payment.reversalPaymentId)
+    || reversalStateAllowsRetry(payment);
+}
+
+function reversalStateAllowsRetry(payment: any): boolean {
+  const state = String(payment?.reversalState || '');
+  return state === 'reversal_in_progress' || state === 'reversal_incomplete' || state === 'reversed';
+}
+
+/**
+ * A completed rental or correction that was explicitly left unfinalized is not
+ * accounted, even if other writers already ran. The model default is true, so
+ * historical rows that never set the flag are left alone.
+ */
+export function completedPaymentRequiresFinalizedCommission(payment: any): boolean {
+  if (!payment || payment.commissionFinalized !== false) return false;
+  if (String(payment.status || '') !== 'completed') return false;
+  if (isReversalDocument(payment)) return false;
+  const type = String(payment.paymentType || '');
+  const correction = payment.isCorrectionEntry === true || String(payment.referenceNumber || '').startsWith('CORR-');
+  return type === 'rental' || type === 'introduction' || correction;
 }
 
 export const COMPANY_REVENUE_SOURCE_OF_TRUTH =

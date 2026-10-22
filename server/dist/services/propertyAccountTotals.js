@@ -39,9 +39,13 @@ function computePropertyAccountTotals(account) {
     let passThroughPaid = 0;
     for (const bucket of passThroughAccounts) {
         const entries = Array.isArray(bucket === null || bucket === void 0 ? void 0 : bucket.transactions) ? bucket.transactions : [];
-        passThroughCollected += entries
+        const collected = entries
             .filter((t) => (t === null || t === void 0 ? void 0 : t.type) === 'collection' && isActiveStatus(t.status))
             .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const reversed = entries
+            .filter((t) => (t === null || t === void 0 ? void 0 : t.type) === 'collection_reversal' && isActiveStatus(t.status))
+            .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        passThroughCollected += collected - reversed;
         passThroughPaid += entries
             .filter((t) => (t === null || t === void 0 ? void 0 : t.type) === 'payment' && isActiveStatus(t.status))
             .reduce((sum, t) => sum + Number(t.amount || 0), 0);

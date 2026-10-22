@@ -380,17 +380,22 @@ const AccountantPaymentsPage: React.FC = () => {
       const original = (resp as any)?.originalPayment;
       const reversal = (resp as any)?.reversalPayment;
       const corrected = (resp as any)?.correctedPayment;
+      const outcome = String((resp as any)?.outcome || '');
       setPayments((prev) => {
-        const withoutOriginal = prev.filter((p) => p._id !== payment._id);
-        const next = [
-          ...(corrected ? [corrected as Payment] : []),
-          ...(reversal ? [reversal as Payment] : []),
-          ...(original ? [original as Payment] : []),
-          ...withoutOriginal
-        ];
-        return sortPayments(next);
+        const map = new Map(prev.map((row) => [String(row._id), row]));
+        for (const row of [corrected, reversal, original]) {
+          if (row?._id) map.set(String(row._id), row as Payment);
+        }
+        const rows: Payment[] = [];
+        map.forEach((row) => rows.push(row));
+        return sortPayments(rows);
       });
-      setSuccessMessage((resp as any)?.message || 'Payment reversed and correction draft created');
+      const message = (resp as any)?.message || 'Payment reversed and correction draft created';
+      if (outcome === 'reversal_incomplete' || outcome === 'reversal_failed') {
+        setError(message);
+      } else {
+        setSuccessMessage(message);
+      }
       try {
         dispatchPaymentsChanged({ type: 'reversed', payment });
       } catch {}

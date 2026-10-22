@@ -1,4 +1,5 @@
 import api from '../api/axios';
+import { reservationForMonth } from '../utils/rentalPeriodCoverage';
 import { Payment, PaymentFormData, PaymentFilter } from '../types/payment';
 import { DatabaseService } from './databaseService';
 
@@ -610,17 +611,9 @@ class PaymentService {
     const { tenantId, propertyId, rentalPeriodMonth, rentalPeriodYear, rent } = params;
     try {
       const page1 = await this.getPaymentsPage({ paginate: true, page: 1, limit: 200, propertyId });
-      const relevant = page1.items.filter(p => String(p.tenantId) === String(tenantId)
-        && p.paymentType === 'rental'
-        && p.rentalPeriodMonth === rentalPeriodMonth
-        && p.rentalPeriodYear === rentalPeriodYear
-        && (p.status === 'completed' || p.status === 'pending'));
-      const totalPaid = relevant.reduce((sum, p) => {
-        const rentPart = typeof (p as any).rentAllocated === 'number' && (p as any).rentAllocated > 0
-          ? (p as any).rentAllocated
-          : (p.amount || 0);
-        return sum + rentPart;
-      }, 0);
+      const totalPaid = page1.items
+        .filter(p => String(p.tenantId) === String(tenantId) && p.paymentType === 'rental')
+        .reduce((sum, p) => sum + reservationForMonth(p as any, rentalPeriodYear, rentalPeriodMonth), 0);
       const remaining = Math.max(0, (rent || 0) - totalPaid);
       return { remaining, totalPaid };
     } catch (error: any) {

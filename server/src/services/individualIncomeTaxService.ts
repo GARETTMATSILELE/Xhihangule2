@@ -460,12 +460,20 @@ export const individualIncomeTaxService = {
     return created;
   },
 
-  async safeReverseForSource(input: ReverseIncomeTaxInput): Promise<void> {
+  async reportReverseForSource(input: ReverseIncomeTaxInput): Promise<'reversed' | 'absent' | 'failed'> {
     try {
-      await this.reverseForSource(input);
+      const { throwOnceIfArmed } = await import('./testFailureSeam');
+      throwOnceIfArmed(String(input.sourceId), String(input.reason || ''), 'PHASE_FAIL_INDIVIDUAL_INCOME_TAX');
+      const created = await this.reverseForSource(input);
+      return created ? 'reversed' : 'absent';
     } catch (error: any) {
       logger.warn('Individual income tax reversal failed', { sourceId: input.sourceId, message: error?.message || error });
+      return 'failed';
     }
+  },
+
+  async safeReverseForSource(input: ReverseIncomeTaxInput): Promise<void> {
+    await this.reportReverseForSource(input);
   },
 
   async createAdjustment(input: {

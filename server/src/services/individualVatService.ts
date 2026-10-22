@@ -360,12 +360,20 @@ export const individualVatService = {
     return created;
   },
 
-  async safeReverseForSource(input: ReverseVatInput): Promise<void> {
+  async reportReverseForSource(input: ReverseVatInput): Promise<'reversed' | 'absent' | 'failed'> {
     try {
-      await this.reverseForSource(input);
+      const { throwOnceIfArmed } = await import('./testFailureSeam');
+      throwOnceIfArmed(String(input.sourceId), String(input.reason || ''), 'PHASE_FAIL_INDIVIDUAL_VAT');
+      const created = await this.reverseForSource(input);
+      return created ? 'reversed' : 'absent';
     } catch (error: any) {
       logger.warn('Individual VAT reversal failed', { sourceId: input.sourceId, message: error?.message || error });
+      return 'failed';
     }
+  },
+
+  async safeReverseForSource(input: ReverseVatInput): Promise<void> {
+    await this.reportReverseForSource(input);
   },
 
   async workingPaper(companyId: string, periodKey?: string) {

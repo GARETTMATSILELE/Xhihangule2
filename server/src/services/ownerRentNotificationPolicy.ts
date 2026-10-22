@@ -379,3 +379,133 @@ export function composeOwnerRentNotice(input: {
     }),
   };
 }
+
+export type RentalPeriodNoticeStatus = 'replacement_completed' | 'correction_draft' | 'no_replacement' | 'unknown';
+
+export function ownerReversalIdempotencyKey(originalPaymentId: string, reversalPaymentId?: string): string {
+  const original = String(originalPaymentId || '');
+  const reversal = String(reversalPaymentId || '');
+  return reversal ? `owner-rent-reversal:${original}:${reversal}` : `owner-rent-reversal:${original}`;
+}
+
+/** Plain reversal reason for an email. Drops control characters, markup, and secret-looking values. */
+export function sanitizeReversalReason(reason: unknown): string {
+  const text = String(reason ?? '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\b(password|secret|token|api[_-]?key|authorization)\b\s*[:=]\s*\S+/gi, '[removed]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  if (/at\s+\S+\s+\(.+:\d+:\d+\)/.test(text) || /\b(stack|node_modules|ECONN|mongodb(\+srv)?:\/\/)/i.test(text)) {
+    return '';
+  }
+  return text.slice(0, 240);
+}
+
+export function describeRentalPeriodAfterReversal(input: {
+  periodKnown: boolean;
+  payments: Array<Record<string, any>>;
+  originalPaymentId: string;
+}): { status: RentalPeriodNoticeStatus; replacement?: { reference: string; amount: number } } {
+  if (!input.periodKnown) return { status: 'unknown' };
+  const originalId = String(input.originalPaymentId || '');
+  const candidates = (input.payments || []).filter((payment) => {
+    if (!payment) return false;
+    if (String(payment._id || '') === originalId) return false;
+    if (payment.reversalOfPaymentId) return false;
+    if (Number(payment.amount || 0) < 0) return false;
+    return true;
+  });
+  const completed = candidates.find((payment) => {
+    const status = String(payment.status || '').toLowerCase();
+    if (status !== 'completed' && status !== 'paid' && status !== 'success') return false;
+    const state = String(payment.reversalState || '');
+    if (state === 'reversed' || state === 'reversal_in_progress' || state === 'reversal_incomplete') return false;
+    return true;
+  });
+  if (completed) {
+    const allocated = Number(completed.rentAllocated);
+    const amount = Number.isFinite(allocated) && allocated > 0 ? allocated : Number(completed.amount || 0);
+    return {
+      status: 'replacement_completed',
+      replacement: {
+        reference: String(completed.referenceNumber || completed._id || ''),
+        amount
+      }
+    };
+  }
+  const draft = candidates.find((payment) => {
+    const status = String(payment.status || '').toLowerCase();
+    const ref = String(payment.referenceNumber || '');
+    const looksLikeCorrection = payment.isCorrectionEntry === true || ref.startsWith('CORR-') || String(payment.postingStatus || '') === 'draft';
+    return looksLikeCorrection && (status === 'pending' || String(payment.postingStatus || '') === 'draft');
+  });
+  if (draft) return { status: 'correction_draft' };
+  return { status: 'no_replacement' };
+}
+
+function reversalStatusSentence(
+  position: { status: RentalPeriodNoticeStatus; replacement?: { reference: string; amount: number } },
+  currency: string
+): string {
+  if (position.status === 'replacement_completed' && position.replacement) {
+    return `A completed payment ${position.replacement.reference} of ${formatOwnerNoticeMoney(currency, position.replacement.amount)} is on record for this rental period.`;
+  }
+  if (position.status === 'correction_draft') {
+    return 'A correction draft is on record and has not been completed. It is not a receipt.';
+  }
+  if (position.status === 'no_replacement') {
+    return 'No completed replacement payment is on record for this rental period.';
+  }
+  return 'This notice confirms the reversal. It does not state whether the rental period has since been paid.';
+}
+
+export function composeOwnerReversalNotice(input: {
+  ownerName: string;
+  propertyLabel: string;
+  currency: string;
+  originalReference: string;
+  originalAmount: number;
+  reversalReference?: string;
+  reversalAmount?: number;
+  reversalDate?: Date | string | null;
+  reason?: string;
+  periodLabel?: string;
+  position: { status: RentalPeriodNoticeStatus; replacement?: { reference: string; amount: number } };
+}): { subject: string; text: string; html: string } {
+  const currency = input.currency || 'USD';
+  const propertyLabel = singleLine(input.propertyLabel) || 'the property';
+  const originalReference = singleLine(input.originalReference) || 'the original receipt';
+  const reversalReference = input.reversalReference ? singleLine(input.reversalReference) : '';
+  const reason = sanitizeReversalReason(input.reason);
+  const period = input.periodLabel ? singleLine(input.periodLabel) : '';
+  const reversalDate = input.reversalDate ? new Date(input.reversalDate) : null;
+  const reversalDateLabel = reversalDate && !Number.isNaN(reversalDate.getTime())
+    ? reversalDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+  const statusLine = reversalStatusSentence(input.position, currency);
+  const lines = [
+    `Dear ${singleLine(input.ownerName) || 'Owner'},`,
+    '',
+    `A separate reversal has been recorded for ${propertyLabel}. The original transaction remains in the audit history.`,
+    '',
+    `Original payment reference: ${originalReference}`,
+    `Original payment amount: ${formatOwnerNoticeMoney(currency, Number(input.originalAmount || 0))}`,
+    period ? `Rental period: ${period}` : 'Rental period: taken from the stored payment record, which did not name a period.',
+    reversalReference
+      ? `Reversal payment reference: ${reversalReference}`
+      : 'Reversal payment reference: not available on the payment record.',
+    input.reversalAmount != null
+      ? `Reversal amount: ${formatOwnerNoticeMoney(currency, Number(input.reversalAmount))}`
+      : 'Reversal amount: not available on the payment record.',
+    reversalDateLabel ? `Reversal date: ${reversalDateLabel}` : 'Reversal date: not available on the payment record.',
+    reason ? `Reason: ${reason}` : 'Reason: not stated.',
+    '',
+    statusLine
+  ];
+  const text = lines.join('\n');
+  const subject = `Rent receipt reversed — ${originalReference}`;
+  const html = `<p>${escapeHtml(text).replace(/\n/g, '<br>')}</p>`;
+  return { subject, text, html };
+}

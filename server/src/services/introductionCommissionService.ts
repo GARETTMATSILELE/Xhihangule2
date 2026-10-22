@@ -89,6 +89,8 @@ export function introductionConsumedFromPayments(payments: Array<{
   let consumed = 0;
   for (const payment of payments || []) {
     if (payment?.reversalOfPaymentId) continue;
+    if (String((payment as any)?.reversalState || '') === 'reversed') continue;
+    if (Number(payment?.amount || 0) < 0) continue;
     const deposit = Number(payment?.depositAmount || 0);
     const amount = Number(payment?.amount || 0);
     if (deposit > 0 && amount <= 0) continue;

@@ -18,43 +18,18 @@ exports.loadPropertyCombinedBaselines = loadPropertyCombinedBaselines;
 exports.allocateCombinedAmount = allocateCombinedAmount;
 exports.resolveCombinedRentalAllocation = resolveCombinedRentalAllocation;
 exports.createLinkedLevyPayment = createLinkedLevyPayment;
+exports.reverseLinkedLevyPayment = reverseLinkedLevyPayment;
 exports.voidLinkedLevyPayment = voidLinkedLevyPayment;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Property_1 = require("../models/Property");
-const Payment_1 = require("../models/Payment");
 const LevyPayment_1 = require("../models/LevyPayment");
+const errorHandler_1 = require("../middleware/errorHandler");
+const rentalPeriodCoverage_1 = require("./rentalPeriodCoverage");
 const cents = (n) => Math.round(Number(n || 0) * 100);
-/** Sum rent applied for a rental period (uses rentAllocated when present). */
+/** Effective posted rent for a period. Reversed originals and pending correction drafts are not receipts. */
 function sumRentPaidForPeriod(params) {
     return __awaiter(this, void 0, void 0, function* () {
-        const [agg] = yield Payment_1.Payment.aggregate([
-            {
-                $match: {
-                    companyId: params.companyId,
-                    paymentType: 'rental',
-                    propertyId: params.propertyId,
-                    tenantId: params.tenantId,
-                    rentalPeriodYear: params.rentalPeriodYear,
-                    rentalPeriodMonth: params.rentalPeriodMonth,
-                    status: { $in: ['pending', 'completed'] },
-                },
-            },
-            {
-                $group: {
-                    _id: null,
-                    total: {
-                        $sum: {
-                            $cond: [
-                                { $gt: [{ $ifNull: ['$rentAllocated', 0] }, 0] },
-                                '$rentAllocated',
-                                '$amount',
-                            ],
-                        },
-                    },
-                },
-            },
-        ]);
-        return Number((agg === null || agg === void 0 ? void 0 : agg.total) || 0);
+        return (0, rentalPeriodCoverage_1.sumRentCoverageForPeriod)(params);
     });
 }
 /** Sum levy paid for a property period (from LevyPayment collection). */
@@ -118,6 +93,24 @@ function resolveCombinedRentalAllocation(input) {
             return { rentAllocated: 0, levyAllocated: 0, rentUsed, levyUsed, hasLevy: true, monthlyLevy: baselines.monthlyLevy };
         }
         if (isAdvance) {
+            const coveredAdvance = yield (0, rentalPeriodCoverage_1.findCoveredAdvanceMonth)({
+                companyId: input.companyId,
+                propertyId: input.propertyId,
+                tenantId: input.tenantId,
+                rentalPeriodMonth: input.rentalPeriodMonth,
+                rentalPeriodYear: input.rentalPeriodYear,
+                advanceMonthsPaid: advanceMonths,
+                advancePeriodStart: input.advancePeriodStart,
+                advancePeriodEnd: input.advancePeriodEnd,
+                leaseId: input.leaseId,
+                currency: input.currency,
+            });
+            if ('error' in coveredAdvance) {
+                return { status: 400, message: coveredAdvance.error };
+            }
+            if (coveredAdvance.covered) {
+                return { status: 409, message: 'Overlapping advance payment already exists for this period.' };
+            }
             const expectedRentCents = cents(rentUsed) * advanceMonths;
             const expectedLevyCents = cents(levyUsed) * advanceMonths;
             const expectedTotalCents = expectedRentCents + expectedLevyCents;
@@ -143,12 +136,14 @@ function resolveCombinedRentalAllocation(input) {
             levyPeriodMonth: input.rentalPeriodMonth,
             levyPeriodYear: input.rentalPeriodYear,
         });
-        const rentPaid = yield sumRentPaidForPeriod({
+        const rentPaid = yield (0, rentalPeriodCoverage_1.sumRentalPeriodReservation)({
             companyId: input.companyId,
             propertyId: input.propertyId,
             tenantId: input.tenantId,
             rentalPeriodMonth: input.rentalPeriodMonth,
             rentalPeriodYear: input.rentalPeriodYear,
+            leaseId: input.leaseId,
+            currency: input.currency,
         });
         const levyRemaining = Math.max(0, levyUsed - levyPaid);
         const rentRemaining = Math.max(0, rentUsed - rentPaid);
@@ -212,16 +207,78 @@ function createLinkedLevyPayment(payment, session) {
         return levyPayment._id;
     });
 }
-/** Void linked levy when a rental payment is reversed. */
-function voidLinkedLevyPayment(linkedLevyPaymentId, reason, session) {
+/**
+ * Preserve the original levy and append one contra levy.
+ * Original status and notes are not rewritten.
+ */
+function reverseLinkedLevyPayment(linkedLevyPaymentId, reason, opts) {
     return __awaiter(this, void 0, void 0, function* () {
         if (!linkedLevyPaymentId)
-            return;
-        yield LevyPayment_1.LevyPayment.updateOne({ _id: new mongoose_1.default.Types.ObjectId(String(linkedLevyPaymentId)) }, {
+            return 'absent';
+        const session = opts === null || opts === void 0 ? void 0 : opts.session;
+        const originalQuery = LevyPayment_1.LevyPayment.findById(linkedLevyPaymentId);
+        const original = session ? yield originalQuery.session(session) : yield originalQuery;
+        if (!original) {
+            throw new errorHandler_1.AppError('Linked levy payment was not found. The reversal was not invented.', 409);
+        }
+        const amount = Number(original.amount || 0);
+        if (!(amount > 0)) {
+            throw new errorHandler_1.AppError('Linked levy payment has no amount to reverse.', 409);
+        }
+        const existingQuery = LevyPayment_1.LevyPayment.findOne({ reversalOfLevyPaymentId: original._id });
+        const existing = session ? yield existingQuery.session(session) : yield existingQuery;
+        if (existing) {
+            if (!original.reversalLevyPaymentId) {
+                yield LevyPayment_1.LevyPayment.updateOne({ _id: original._id }, {
+                    $set: {
+                        reversalLevyPaymentId: existing._id,
+                        reversedAt: original.reversedAt || new Date(),
+                        reversalReason: original.reversalReason || reason
+                    }
+                }, session ? { session } : undefined);
+            }
+            return 'reversed';
+        }
+        const contra = new LevyPayment_1.LevyPayment({
+            paymentType: 'levy',
+            propertyId: original.propertyId,
+            companyId: original.companyId,
+            paymentDate: new Date(),
+            paymentMethod: original.paymentMethod,
+            amount: -Math.abs(amount),
+            referenceNumber: `REV-LEVY-${String(original.referenceNumber || original._id)}`,
+            notes: `Reversal of levy ${String(original.referenceNumber || original._id)}. ${reason}`,
+            processedBy: (opts === null || opts === void 0 ? void 0 : opts.reversedBy) && mongoose_1.default.Types.ObjectId.isValid(opts.reversedBy)
+                ? new mongoose_1.default.Types.ObjectId(opts.reversedBy)
+                : original.processedBy,
+            status: 'completed',
+            currency: original.currency || 'USD',
+            monthlyLevies: original.monthlyLevies,
+            levyPeriodMonth: original.levyPeriodMonth,
+            levyPeriodYear: original.levyPeriodYear,
+            advanceMonthsPaid: original.advanceMonthsPaid,
+            advancePeriodStart: original.advancePeriodStart,
+            advancePeriodEnd: original.advancePeriodEnd,
+            parentPaymentId: original.parentPaymentId,
+            reversalOfLevyPaymentId: original._id
+        });
+        yield contra.save(session ? { session } : undefined);
+        yield LevyPayment_1.LevyPayment.updateOne({ _id: original._id, reversalLevyPaymentId: { $exists: false } }, {
             $set: {
-                status: 'failed',
-                notes: `Voided: ${reason}`,
-            },
+                reversalLevyPaymentId: contra._id,
+                reversedAt: new Date(),
+                reversedBy: (opts === null || opts === void 0 ? void 0 : opts.reversedBy) && mongoose_1.default.Types.ObjectId.isValid(opts.reversedBy)
+                    ? new mongoose_1.default.Types.ObjectId(opts.reversedBy)
+                    : undefined,
+                reversalReason: reason
+            }
         }, session ? { session } : undefined);
+        return 'reversed';
+    });
+}
+/** @deprecated Use reverseLinkedLevyPayment. Kept so older callers do not overwrite levy history. */
+function voidLinkedLevyPayment(linkedLevyPaymentId, reason, session) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield reverseLinkedLevyPayment(linkedLevyPaymentId, reason, { session });
     });
 }

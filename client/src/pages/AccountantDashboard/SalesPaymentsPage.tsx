@@ -255,16 +255,19 @@ const SalesPaymentsPage: React.FC = () => {
       const original = (resp as any)?.originalPayment;
       const reversal = (resp as any)?.reversalPayment;
       const corrected = (resp as any)?.correctedPayment;
+      const outcome = String((resp as any)?.outcome || '');
       setPayments((prev) => {
-        const withoutOriginal = prev.filter((p) => p._id !== payment._id);
-        const next = [
-          ...(corrected ? [corrected as Payment] : []),
-          ...(reversal ? [reversal as Payment] : []),
-          ...(original ? [original as Payment] : []),
-          ...withoutOriginal
-        ];
-        return sortSalesPayments(next);
+        const map = new Map(prev.map((row) => [String(row._id), row]));
+        for (const row of [corrected, reversal, original]) {
+          if (row?._id) map.set(String(row._id), row as Payment);
+        }
+        const rows: Payment[] = [];
+        map.forEach((row) => rows.push(row));
+        return sortSalesPayments(rows);
       });
+      if (outcome === 'reversal_incomplete' || outcome === 'reversal_failed') {
+        setError((resp as any)?.message || 'Payment reversal is incomplete');
+      }
       try { dispatchPaymentsChanged({ type: 'reversed', payment }); } catch {}
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to reverse payment');

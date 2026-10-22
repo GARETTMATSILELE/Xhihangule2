@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { coverageForMonth } from '../../utils/rentalPeriodCoverage';
 import {
   Box,
   Paper,
@@ -121,7 +122,21 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
   const isPaymentReversible = useCallback((payment: Payment) => {
     const postingStatus = String((payment as any).postingStatus || '').toLowerCase();
     const status = String((payment as any).status || '').toLowerCase();
-    return postingStatus === 'posted' && status !== 'reversed';
+    const state = String((payment as any).reversalState || '');
+    if ((payment as any).reversalOfPaymentId) return false;
+    if ((payment as any).reversalPaymentId) return false;
+    if (state === 'reversal_in_progress' || state === 'reversal_incomplete' || state === 'reversed') return false;
+    if (Number((payment as any).amount || 0) < 0) return false;
+    if (status === 'reversed' || postingStatus === 'reversed' || postingStatus === 'voided' || postingStatus === 'draft') return false;
+    return postingStatus === 'posted' || status === 'completed' || status === 'paid' || status === 'success';
+  }, []);
+  const displayStatus = useCallback((payment: Payment) => {
+    if ((payment as any).reversalOfPaymentId || Number((payment as any).amount || 0) < 0) return 'reversal';
+    const state = String((payment as any).reversalState || '');
+    if (state === 'reversal_incomplete') return 'reversal incomplete';
+    if (state === 'reversal_in_progress') return 'reversal in progress';
+    if (state === 'reversed' || (payment as any).reversalPaymentId) return 'reversed';
+    return String(payment.status || 'unknown');
   }, []);
 
   type PropertyFilterOption = {
@@ -329,11 +344,7 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
         const paidToDate = (payments || [])
           .filter((p: any) => normalizedType(p) === 'rental')
           .filter(isSamePeriod)
-          .filter((p: any) => {
-            const st = String(p?.status || '').toLowerCase();
-            return st === 'completed' || st === 'pending' || st === 'paid' || st === 'success';
-          })
-          .reduce((sum: number, p: any) => sum + Number(p?.amount || 0), 0);
+          .reduce((sum: number, p: any) => sum + coverageForMonth(p, Number(periodYear), Number(periodMonth)), 0);
         return Math.max(0, rentAmount - paidToDate);
       }
       return null;
@@ -796,8 +807,8 @@ const PaymentList: React.FC<PaymentListProps> = (props) => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={payment.status || 'unknown'}
-                      color={getStatusColor(payment.status || 'unknown')}
+                      label={displayStatus(payment)}
+                      color={getStatusColor(displayStatus(payment).includes('incomplete') || displayStatus(payment).includes('progress') ? 'pending' : (displayStatus(payment) === 'reversal' || displayStatus(payment) === 'reversed' ? 'reversed' : (payment.status || 'unknown')))}
                       size="small"
                     />
                   </TableCell>

@@ -16,6 +16,7 @@ exports.AgentAccountService = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const AgentAccount_1 = require("../models/AgentAccount");
 const Payment_1 = require("../models/Payment");
+const Property_1 = require("../models/Property");
 const User_1 = require("../models/User");
 const errorHandler_1 = require("../middleware/errorHandler");
 const logger_1 = require("../utils/logger");
@@ -23,6 +24,48 @@ const money_1 = require("../utils/money");
 const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const commissionProjection_1 = require("./commissionProjection");
 const propertyAccountTotals_1 = require("./propertyAccountTotals");
+const rentalPeriod_1 = require("../reporting/rentalPeriod");
+const PAYMENT_OBJECT_ID = /^[a-f0-9]{24}$/i;
+function paymentIdFromTransaction(tx) {
+    const direct = tx.paymentId ? String(tx.paymentId) : '';
+    if (PAYMENT_OBJECT_ID.test(direct))
+        return direct;
+    const ref = String(tx.reference || '');
+    const reversed = ref.match(/^REV-([a-f0-9]{24})-(?:agent|owner|collaborator)$/i);
+    if (reversed)
+        return reversed[1];
+    const roleQualified = ref.match(/^([a-f0-9]{24})-(?:owner|collaborator)$/i);
+    if (roleQualified)
+        return roleQualified[1];
+    if (PAYMENT_OBJECT_ID.test(ref))
+        return ref;
+    return null;
+}
+function receiptFromTransaction(tx) {
+    const description = String(tx.description || '').trim();
+    if (/^(?:RCPT|CORR)-/i.test(description))
+        return description;
+    const fromDescription = description.match(/\bpayment\s+(\S+)/i);
+    if (fromDescription) {
+        const receipt = fromDescription[1].replace(/[.,]$/, '');
+        if (receipt && !PAYMENT_OBJECT_ID.test(receipt))
+            return receipt;
+    }
+    const ref = String(tx.reference || '');
+    if (!ref || ref.startsWith('REV-') || paymentIdFromTransaction(tx))
+        return null;
+    return ref.replace(/-(?:owner|collaborator)$/i, '');
+}
+function isCommissionReversalTransaction(tx) {
+    if (String(tx.reference || '').startsWith('REV-'))
+        return true;
+    return /^commission reversal\b/i.test(String(tx.description || ''));
+}
+function shouldDescribeByPaidMonth(tx) {
+    if (tx.type === 'commission')
+        return true;
+    return tx.type === 'penalty' && isCommissionReversalTransaction(tx);
+}
 class AgentAccountService {
     static getInstance() {
         if (!AgentAccountService.instance) {
@@ -62,7 +105,7 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId)
-                    .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status reversalOfPaymentId')
+                    .select('paymentDate amount commissionDetails referenceNumber paymentType agentId companyId propertyId tenantId isProvisional isInSuspense commissionFinalized status reversalOfPaymentId rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
                     .lean();
                 if (!payment)
                     return;
@@ -75,9 +118,10 @@ class AgentAccountService {
                         continue;
                     }
                     const referenceBase = String(payment.referenceNumber || '');
-                    const description = lane.role === 'agent'
-                        ? `Commission from payment ${referenceBase}`
-                        : `Commission (${lane.role}) from payment ${referenceBase}`;
+                    const description = (0, rentalPeriod_1.formatAgentCommissionDescription)(payment)
+                        || (lane.role === 'agent'
+                            ? `Commission from payment ${referenceBase}`
+                            : `Commission (${lane.role}) from payment ${referenceBase}`);
                     yield this.addCommission(lane.agentId, {
                         amount: lane.amount,
                         date: new Date(payment.paymentDate || new Date()),
@@ -98,15 +142,17 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId)
-                    .select('_id paymentDate referenceNumber')
+                    .select('_id paymentDate referenceNumber paymentType rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
                     .lean();
                 if (!payment)
-                    return;
+                    return 'absent';
+                let handled = false;
                 const accounts = yield AgentAccount_1.AgentAccount.find({ 'transactions.paymentId': String(paymentId) });
                 for (const account of accounts) {
                     const commissionRows = (account.transactions || []).filter((t) => t.type === 'commission' && String(t.paymentId || '') === String(paymentId) && String(t.status || '') === 'completed');
                     if (!commissionRows.length)
                         continue;
+                    handled = true;
                     for (const row of commissionRows) {
                         const role = (0, commissionProjection_1.inferCommissionRoleFromReference)(String(row.reference || ''));
                         const reversalRef = (0, commissionProjection_1.commissionReversalReference)(String(paymentId), role);
@@ -114,7 +160,8 @@ class AgentAccountService {
                             type: 'penalty',
                             amount: Number(row.amount || 0),
                             date: new Date(),
-                            description: `Commission reversal for payment ${String(payment.referenceNumber || paymentId)}`,
+                            description: (0, rentalPeriod_1.formatAgentCommissionDescription)(payment, { reversal: true })
+                                || `Commission reversal for payment ${String(payment.referenceNumber || paymentId)}`,
                             reference: reversalRef,
                             status: 'completed',
                             notes: reason || 'Manual payment reversal',
@@ -127,6 +174,7 @@ class AgentAccountService {
                         yield this.recalculateBalance(fresh);
                     }
                 }
+                return handled ? 'reversed' : 'absent';
             }
             catch (error) {
                 logger_1.logger.error('Error reversing commission for payment:', error);
@@ -459,6 +507,79 @@ class AgentAccountService {
         });
     }
     /**
+     * Read-only labels for the transactions table. Stored ledger descriptions stay unchanged.
+     * Commission rows name the month being paid, for example "June rent".
+     */
+    describeTransactionsByPaidMonth(transactions) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const rows = Array.isArray(transactions) ? transactions : [];
+            const ids = new Set();
+            const receipts = new Set();
+            for (const tx of rows) {
+                if (!shouldDescribeByPaidMonth(tx))
+                    continue;
+                const paymentId = paymentIdFromTransaction(tx);
+                if (paymentId)
+                    ids.add(paymentId);
+                const receipt = receiptFromTransaction(tx);
+                if (receipt)
+                    receipts.add(receipt);
+            }
+            if (ids.size === 0 && receipts.size === 0)
+                return rows;
+            const or = [];
+            if (ids.size > 0) {
+                or.push({ _id: { $in: Array.from(ids).map((id) => new mongoose_1.default.Types.ObjectId(id)) } });
+            }
+            if (receipts.size > 0) {
+                or.push({ referenceNumber: { $in: Array.from(receipts) } });
+            }
+            const payments = yield Payment_1.Payment.find(or.length === 1 ? or[0] : { $or: or })
+                .select('paymentType referenceNumber rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd propertyId manualPropertyAddress')
+                .lean();
+            const byId = new Map();
+            const byReceipt = new Map();
+            const propertyIds = [];
+            for (const payment of payments) {
+                byId.set(String(payment._id), payment);
+                const receipt = String(payment.referenceNumber || '');
+                if (receipt)
+                    byReceipt.set(receipt, payment);
+                const propertyId = String(payment.propertyId || '');
+                if (PAYMENT_OBJECT_ID.test(propertyId))
+                    propertyIds.push(new mongoose_1.default.Types.ObjectId(propertyId));
+            }
+            const propertyNameById = new Map();
+            if (propertyIds.length > 0) {
+                const properties = yield Property_1.Property.find({ _id: { $in: propertyIds } })
+                    .select('name propertyName address')
+                    .lean();
+                for (const property of properties) {
+                    const name = String(property.name || property.propertyName || property.address || '').trim();
+                    if (name)
+                        propertyNameById.set(String(property._id), name);
+                }
+            }
+            return rows.map((tx) => {
+                if (!shouldDescribeByPaidMonth(tx))
+                    return tx;
+                const payment = byId.get(paymentIdFromTransaction(tx) || '')
+                    || byReceipt.get(receiptFromTransaction(tx) || '');
+                if (!payment)
+                    return tx;
+                const propertyName = propertyNameById.get(String(payment.propertyId || ''))
+                    || String(payment.manualPropertyAddress || '').trim();
+                const description = (0, rentalPeriod_1.formatAgentCommissionDescription)(payment, {
+                    reversal: isCommissionReversalTransaction(tx),
+                    propertyName
+                });
+                if (!description)
+                    return tx;
+                return Object.assign(Object.assign({}, tx), { description });
+            });
+        });
+    }
+    /**
      * Get agent account with summary and commission data from payments
      */
     getAgentAccount(agentId) {
@@ -517,6 +638,7 @@ class AgentAccountService {
                     .lean(); // Use lean() for better performance
                 console.log('Found commission data:', commissionData.length, 'records');
                 const accountData = updatedAccount.toObject();
+                accountData.transactions = yield this.describeTransactionsByPaidMonth(accountData.transactions || []);
                 const result = Object.assign(Object.assign({}, accountData), { commissionData });
                 console.log('Returning agent account with commission data:', {
                     agentId: result.agentId,
