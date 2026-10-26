@@ -327,6 +327,10 @@ const accountingService = {
     const res = await api.get('/accounting/tax-compliance');
     return res.data?.data;
   },
+  async getTaxPosition(asOf?: string): Promise<any> {
+    const res = await api.get('/accounting/tax-position', { params: asOf ? { asOf } : undefined });
+    return res.data?.data;
+  },
   async getTaxObligations(params?: { taxType?: string; period?: string }): Promise<any[]> {
     const res = await api.get('/accounting/tax-obligations', { params });
     return res.data?.data || [];

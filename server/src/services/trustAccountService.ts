@@ -10,6 +10,7 @@ import { Payment } from '../models/Payment';
 import { loadCgtRates } from './vatPolicyService';
 import { upsertPaymentTaxObligation, openReview } from './taxObligationService';
 import { GL } from './tax/chartAccounts';
+import { filingPeriodFromDate } from './tax/vatCalculation';
 import accountingService from './accountingService';
 import { buildWithholdingJournal } from './tax/principalAgentJournal';
 import { TaxOverride } from '../models/TaxOverride';
@@ -821,14 +822,16 @@ class TrustAccountService {
         }
 
         const taxType = normalizedType as 'CGT' | 'VAT' | 'VAT_ON_COMMISSION' | 'CAPITAL_GAINS_WITHHOLDING_TAX';
+        const taxPoint = settlement.settlementDate ? new Date(settlement.settlementDate) : new Date();
+        const taxPeriod = filingPeriodFromDate(taxPoint);
         if (taxType === 'CGT') {
           await upsertPaymentTaxObligation({
             companyId: input.companyId,
             taxType: 'CAPITAL_GAINS_TAX',
             paymentId: String(settlement._id),
             propertyId: String(account.propertyId),
-            taxPeriod: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
-            transactionDate: settlement.settlementDate || new Date(),
+            taxPeriod,
+            transactionDate: taxPoint,
             taxableAmount: Number((settlement as any).salePrice || 0),
             taxRate: Number((settlement as any)?.cgtSnapshot?.cgtRate || 0),
             taxAmount: deltaToApply,
@@ -889,8 +892,8 @@ class TrustAccountService {
           taxType: canonicalTaxType as any,
           paymentId: String(settlement._id),
           propertyId: String(account.propertyId),
-          taxPeriod: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
-          transactionDate: new Date(),
+          taxPeriod,
+          transactionDate: taxPoint,
           taxableAmount: Number((settlement as any).salePrice || 0),
           taxRate: 0,
           taxAmount: deltaToApply,

@@ -53,6 +53,7 @@ const taxUpload = (0, multer_1.default)({
     }
 });
 router.get('/tax-compliance', roles_1.canViewCommissions, taxComplianceController_1.getTaxComplianceDashboard);
+router.get('/tax-position', roles_1.canViewCommissions, taxComplianceController_1.getTaxPosition);
 router.get('/tax-obligations', roles_1.canViewCommissions, taxComplianceController_1.listTaxObligations);
 router.get('/tax-reconciliation', roles_1.canViewCommissions, taxComplianceController_1.getTaxReconciliation);
 router.get('/tax-payments', roles_1.canViewCommissions, taxComplianceController_1.listTaxPayments);

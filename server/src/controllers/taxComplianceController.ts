@@ -14,6 +14,8 @@ import { GL } from '../services/tax/chartAccounts';
 import { roundMoney } from '../utils/money';
 import { AppError } from '../middleware/errorHandler';
 import { buildTrustReconciliationReport } from '../services/tax/trustReconciliation';
+import { loadCompanyTaxPosition } from '../services/tax/taxPositionRead';
+import { loadNewTaxIntegrity } from '../services/tax/newTaxIntegrityRead';
 
 const companyIdOf = (req: Request): string => {
   const id = req.user?.companyId;
@@ -158,6 +160,22 @@ export const getTaxComplianceDashboard = asyncHandler(async (req: Request, res: 
       }
     }
   });
+});
+
+export const getTaxPosition = asyncHandler(async (req: Request, res: Response) => {
+  const asOfRaw = req.query.asOf ? String(req.query.asOf) : '';
+  let asOf: Date | undefined;
+  if (asOfRaw) {
+    asOf = /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw)
+      ? new Date(`${asOfRaw}T23:59:59.999Z`)
+      : new Date(asOfRaw);
+    if (Number.isNaN(asOf.getTime())) {
+      return res.status(400).json({ message: 'asOf must be a valid date' });
+    }
+  }
+  const position = await loadCompanyTaxPosition(companyIdOf(req), asOf);
+  const newPeriod = await loadNewTaxIntegrity(companyIdOf(req));
+  return res.json({ status: 'success', data: { ...position, newPeriod } });
 });
 
 export const listTaxObligations = asyncHandler(async (req: Request, res: Response) => {

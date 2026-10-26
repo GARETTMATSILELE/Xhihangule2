@@ -23,7 +23,13 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import accountantService, { TaxLedgersResponse, TaxPropertyLedger, TaxType } from '../../services/accountantService';
+import accountantService, { TaxLedgersResponse, TaxType } from '../../services/accountantService';
+import { buildUnifiedTaxAccounts, UnifiedTaxAccount } from './mergeTaxLedgers';
+
+type TaxAccountsPageProps = {
+  position?: any | null;
+  onLedgerChange?: () => void;
+};
 
 type PayoutDialogState = {
   open: boolean;
@@ -59,7 +65,7 @@ const defaultDialogState: PayoutDialogState = {
   notes: ''
 };
 
-const TaxAccountsPage: React.FC = () => {
+const TaxAccountsPage: React.FC<TaxAccountsPageProps> = ({ position, onLedgerChange }) => {
   const [taxLedgers, setTaxLedgers] = useState<TaxLedgersResponse>({ VAT: [], VAT_ON_COMMISSION: [], CGT: [], CGWT: [] });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,36 +94,27 @@ const TaxAccountsPage: React.FC = () => {
     void loadLedgers();
   }, []);
 
-  const totals = useMemo(() => {
-    const calc = (items: TaxPropertyLedger[]) => {
-      const debit = items.reduce((sum, item) => sum + Number(item.totalDebit || 0), 0);
-      const credit = items.reduce((sum, item) => sum + Number(item.totalCredit || 0), 0);
-      return {
-        debit: Number(debit.toFixed(2)),
-        credit: Number(credit.toFixed(2)),
-        outstanding: Number((debit - credit).toFixed(2))
-      };
-    };
-
-    return {
-      VAT: calc(taxLedgers.VAT),
-      VAT_ON_COMMISSION: calc(taxLedgers.VAT_ON_COMMISSION),
-      CGT: calc(taxLedgers.CGT),
-      CGWT: calc(taxLedgers.CGWT || [])
-    };
-  }, [taxLedgers]);
+  const accounts = useMemo(() => buildUnifiedTaxAccounts({
+    canonicalAccounts: position?.accounts || [],
+    trustLedgers: taxLedgers,
+    discrepancies: position?.discrepancies || [],
+    hasCanonicalPosition: Boolean(position)
+  }), [position, taxLedgers]);
 
   const toggleExpanded = (rowKey: string) => {
     setExpandedRows((prev) => ({ ...prev, [rowKey]: !prev[rowKey] }));
   };
 
-  const openPayoutDialog = (ledger: TaxPropertyLedger, taxType: TaxType) => {
-    const outstanding = Number(Math.max(0, ledger.closingBalance).toFixed(2));
+  const openPayoutDialog = (
+    row: { propertyId: string; propertyName: string; propertyAddress: string; trustOutstanding: number },
+    taxType: TaxType
+  ) => {
+    const outstanding = Number(Math.max(0, row.trustOutstanding).toFixed(2));
     setDialog({
       open: true,
-      propertyId: ledger.propertyId,
+      propertyId: row.propertyId,
       taxType,
-      propertyLabel: ledger.propertyAddress || ledger.propertyName || 'Property',
+      propertyLabel: row.propertyAddress || row.propertyName || 'Property',
       amount: outstanding > 0 ? String(outstanding) : '',
       payoutDate: new Date().toISOString().slice(0, 10),
       reference: '',
@@ -150,6 +147,7 @@ const TaxAccountsPage: React.FC = () => {
       });
       closeDialog();
       await loadLedgers();
+      onLedgerChange?.();
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to record payout');
     } finally {
@@ -157,58 +155,64 @@ const TaxAccountsPage: React.FC = () => {
     }
   };
 
-  const renderTaxSection = (taxType: TaxType, items: TaxPropertyLedger[]) => (
-    <Card sx={{ mb: 3 }}>
+  const renderTaxSection = (account: UnifiedTaxAccount) => (
+    <Card sx={{ mb: 3 }} data-tax-account={account.canonicalType}>
       <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, gap: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>
-            {taxLabelByType[taxType]} Account
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <Chip size="small" label={`Dr ${formatMoney(totals[taxType].debit)}`} color="warning" />
-            <Chip size="small" label={`Cr ${formatMoney(totals[taxType].credit)}`} color="success" />
-            <Chip size="small" label={`Outstanding ${formatMoney(totals[taxType].outstanding)}`} color="default" />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, gap: 2 }}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              {account.label}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Canonical figures come from posted obligations and posted ZIMRA allocations. Trust-book figures come from historical TaxRecord debits and TaxPayout credits. The trust balance is not added to canonical outstanding.
+            </Typography>
           </Box>
+          <Chip size="small" label={account.status.replace(/_/g, ' ')} color={account.status === 'RECONCILED' ? 'success' : 'warning'} />
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+          <Chip size="small" variant="outlined" label={`Canonical recognised ${formatMoney(account.recognised)}`} />
+          <Chip size="small" variant="outlined" label={`Canonical paid ${formatMoney(account.paid)}`} />
+          <Chip size="small" variant="outlined" label={`Canonical outstanding ${formatMoney(account.outstanding)}`} color="primary" />
+          <Chip size="small" variant="outlined" label={`Reversed ${formatMoney(account.reversed)}`} />
+          <Chip size="small" label={`Trust debit ${formatMoney(account.trustDebit)}`} color="warning" />
+          <Chip size="small" label={`Trust credit ${formatMoney(account.trustCredit)}`} color="success" />
+          <Chip size="small" label={`Trust outstanding ${formatMoney(account.trustOutstanding)}`} />
         </Box>
 
-        {items.length === 0 && <Typography color="text.secondary">No {taxLabelByType[taxType]} records found.</Typography>}
+        {account.properties.length === 0 && (
+          <Typography color="text.secondary">No property records for this tax account.</Typography>
+        )}
 
-        {items.map((ledger) => {
-          const rowKey = `${taxType}:${ledger.propertyId}`;
+        {account.properties.map((row) => {
+          const rowKey = `${account.canonicalType}:${row.propertyId}`;
           const isExpanded = Boolean(expandedRows[rowKey]);
-          const hasOutstanding = Number(ledger.closingBalance || 0) > 0;
-          const latestPayoutEntry = [...(ledger.entries || [])]
+          const legacyType = account.legacyType;
+          const isVatSection = legacyType === 'VAT';
+          const latestPayoutEntry = [...row.trustEntries]
             .reverse()
             .find((entry) => entry.sourceType === 'payout' && entry.payoutId);
-          const isVatSection = taxType === 'VAT';
-          const isPaidOut = Number(ledger.totalCredit || 0) > 0 && Number(ledger.closingBalance || 0) <= 0.005;
           const canUploadReceipt = isVatSection && Boolean(latestPayoutEntry?.payoutId);
           return (
-            <Card key={rowKey} variant="outlined" sx={{ mb: 1.5 }}>
+            <Card key={rowKey} variant="outlined" sx={{ mb: 1.5 }} data-property-id={row.propertyId}>
               <CardContent sx={{ pb: 1 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
                   <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                      {ledger.propertyName || 'Property'}
+                      {row.propertyName || 'Property'}
                     </Typography>
                     <Button
                       variant="text"
                       sx={{ p: 0, minWidth: 0, textTransform: 'none', justifyContent: 'flex-start' }}
                       onClick={() => toggleExpanded(rowKey)}
                     >
-                      {ledger.propertyAddress || 'Property address'}
+                      {row.propertyAddress || 'Expand property detail'}
                     </Button>
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-                    <Chip size="small" label={`Outstanding ${formatMoney(ledger.closingBalance)}`} color={hasOutstanding ? 'warning' : 'success'} />
-                    {isVatSection && (
-                      <Chip
-                        size="small"
-                        color={isPaidOut ? 'success' : 'warning'}
-                        label={isPaidOut ? 'Tax Paid Out' : 'Not Fully Paid'}
-                      />
-                    )}
-                    <IconButton onClick={() => toggleExpanded(rowKey)} size="small">
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <Chip size="small" variant="outlined" label={`Canonical ${formatMoney(row.outstanding)}`} />
+                    <Chip size="small" label={`Trust ${formatMoney(row.trustOutstanding)}`} color={row.trustOutstanding > 0 ? 'warning' : 'success'} />
+                    <Chip size="small" label={row.status.replace(/_/g, ' ')} />
+                    <IconButton onClick={() => toggleExpanded(rowKey)} size="small" aria-label={`Expand ${row.propertyName}`}>
                       {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                     </IconButton>
                   </Box>
@@ -217,18 +221,54 @@ const TaxAccountsPage: React.FC = () => {
 
               <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                 <CardContent sx={{ pt: 0 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Opening debit comes from tax records. Credits are payouts to ZIMRA.
-                    </Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 1 }}>Canonical tax position</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Recognised {formatMoney(row.recognised)} · Paid {formatMoney(row.paid)} · Reversed {formatMoney(row.reversed)} · Outstanding {formatMoney(row.outstanding)}
+                  </Typography>
+                  {row.lines.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>No canonical obligation for this property.</Typography>
+                  ) : (
+                    <Table size="small" sx={{ mb: 2 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Source</TableCell>
+                          <TableCell>Tax period</TableCell>
+                          <TableCell>Status</TableCell>
+                          <TableCell align="right">Recognised</TableCell>
+                          <TableCell align="right">Paid</TableCell>
+                          <TableCell align="right">Outstanding</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {row.lines.map((line) => (
+                          <TableRow key={line.obligationId}>
+                            <TableCell>{line.paymentId || line.obligationId}</TableCell>
+                            <TableCell>{line.taxPeriod}</TableCell>
+                            <TableCell>{line.status}</TableCell>
+                            <TableCell align="right">{formatMoney(line.recognised)}</TableCell>
+                            <TableCell align="right">{formatMoney(line.paid)}</TableCell>
+                            <TableCell align="right">{formatMoney(line.outstanding)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, gap: 1, flexWrap: 'wrap' }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Historical trust tax ledger</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Debits are TaxRecord entries. Credits are trust-book TaxPayout entries. A trust payout is not a posted ZIMRA remittance.
+                      </Typography>
+                    </Box>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                      {isVatSection && (
+                      {isVatSection && row.trustEntries.length > 0 && (
                         <>
                           <Button
                             variant="outlined"
                             size="small"
                             onClick={() => {
-                              void accountantService.openTaxPropertyReport(ledger.propertyId, 'VAT').catch((err: any) => {
+                              void accountantService.openTaxPropertyReport(row.propertyId, 'VAT').catch((err: any) => {
                                 setError(err?.response?.data?.message || err?.message || 'Failed to open VAT report');
                               });
                             }}
@@ -266,41 +306,64 @@ const TaxAccountsPage: React.FC = () => {
                           )}
                         </>
                       )}
-                      <Button
-                        variant="contained"
-                        size="small"
-                        onClick={() => openPayoutDialog(ledger, taxType)}
-                        disabled={!hasOutstanding}
-                      >
-                        Record Payout
-                      </Button>
+                      {legacyType && (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => openPayoutDialog(row, legacyType)}
+                          disabled={!row.canRecordPayout}
+                        >
+                          Record Payout
+                        </Button>
+                      )}
                     </Box>
                   </Box>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Description</TableCell>
-                        <TableCell align="right">Dr</TableCell>
-                        <TableCell align="right">Cr</TableCell>
-                        <TableCell align="right">Balance</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {ledger.entries.map((entry) => (
-                        <TableRow key={entry.entryId}>
-                          <TableCell>{formatDate(entry.date)}</TableCell>
-                          <TableCell>
-                            {entry.description}
-                            {entry.reference ? ` (${entry.reference})` : ''}
-                          </TableCell>
-                          <TableCell align="right">{entry.debit > 0 ? formatMoney(entry.debit) : '-'}</TableCell>
-                          <TableCell align="right">{entry.credit > 0 ? formatMoney(entry.credit) : '-'}</TableCell>
-                          <TableCell align="right">{formatMoney(entry.balance)}</TableCell>
+                  {row.trustEntries.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      No historical trust ledger for this property. Record Payout stays unavailable because the existing settlement requires a trust-book balance.
+                    </Typography>
+                  ) : (
+                    <Table size="small" sx={{ mb: 2 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Description</TableCell>
+                          <TableCell align="right">Dr</TableCell>
+                          <TableCell align="right">Cr</TableCell>
+                          <TableCell align="right">Balance</TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHead>
+                      <TableBody>
+                        {row.trustEntries.map((entry) => (
+                          <TableRow key={entry.entryId}>
+                            <TableCell>{formatDate(entry.date)}</TableCell>
+                            <TableCell>
+                              {entry.description}
+                              {entry.reference ? ` (${entry.reference})` : ''}
+                            </TableCell>
+                            <TableCell align="right">{entry.debit > 0 ? formatMoney(entry.debit) : '-'}</TableCell>
+                            <TableCell align="right">{entry.credit > 0 ? formatMoney(entry.credit) : '-'}</TableCell>
+                            <TableCell align="right">{formatMoney(entry.balance)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Reconciliation</Typography>
+                  {row.discrepancies.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      {row.status === 'RECONCILED'
+                        ? 'Canonical outstanding and the historical trust-book outstanding agree for this property.'
+                        : row.status.replace(/_/g, ' ')}
+                    </Typography>
+                  ) : (
+                    row.discrepancies.map((item) => (
+                      <Typography key={`${item.kind}-${item.detail}`} variant="body2" color="text.secondary">
+                        {item.kind}: {item.detail}
+                      </Typography>
+                    ))
+                  )}
                 </CardContent>
               </Collapse>
             </Card>
@@ -314,30 +377,66 @@ const TaxAccountsPage: React.FC = () => {
     <Box sx={{ width: '100%' }}>
       <Box sx={{ mb: 3 }}>
         <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          Property tax ledgers
+          Property ledgers
         </Typography>
         <Typography color="text.secondary">
-          Existing property-level tax books. A receipt upload is not the same as tax paid. Use Tax → ZIMRA payments to clear GL liabilities.
+          Each tax account is shown once. Canonical outstanding is the posted obligation position. Trust outstanding is the historical TaxRecord and TaxPayout book. Recording a payout updates the trust book only.
         </Typography>
       </Box>
 
       {loading && <Typography>Loading tax ledgers...</Typography>}
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
+      {!loading && Array.isArray(position?.gl) && position.gl.length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>General ledger control accounts</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Chart balances are stored as debit minus credit. A tax liability that is still owed is a negative stored balance. The comparison uses the credit-normal amount and does not change the chart.
+            </Typography>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Account</TableCell>
+                  <TableCell align="right">Stored balance</TableCell>
+                  <TableCell align="right">Credit-normal liability</TableCell>
+                  <TableCell align="right">Canonical outstanding</TableCell>
+                  <TableCell align="right">Difference</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {position.gl.map((row: any) => (
+                  <TableRow key={row.code}>
+                    <TableCell>{row.code} {row.name}</TableCell>
+                    <TableCell align="right">{formatMoney(row.storedBalance)}</TableCell>
+                    <TableCell align="right">{formatMoney(row.creditNormalBalance)}</TableCell>
+                    <TableCell align="right">{formatMoney(row.canonicalOutstanding)}</TableCell>
+                    <TableCell align="right">{formatMoney(row.difference)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {Number(position.unallocatedPayments || 0) > 0 && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Unallocated posted ZIMRA payments: {formatMoney(position.unallocatedPayments)}. This amount is not applied to a property liability.
+              </Typography>
+            )}
+            {(position.discrepancies || []).filter((item: any) => String(item.kind).startsWith('GL_')).map((item: any) => (
+              <Typography key={`${item.kind}-${item.taxType}`} variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {item.kind}: {item.detail}
+              </Typography>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {!loading && (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            {renderTaxSection('VAT', taxLedgers.VAT)}
-          </Grid>
-          <Grid item xs={12}>
-            {renderTaxSection('VAT_ON_COMMISSION', taxLedgers.VAT_ON_COMMISSION)}
-          </Grid>
-          <Grid item xs={12}>
-            {renderTaxSection('CGT', taxLedgers.CGT)}
-          </Grid>
-          <Grid item xs={12}>
-            {renderTaxSection('CGWT', taxLedgers.CGWT || [])}
-          </Grid>
+          {accounts.map((account) => (
+            <Grid item xs={12} key={account.canonicalType}>
+              {renderTaxSection(account)}
+            </Grid>
+          ))}
         </Grid>
       )}
 
@@ -345,7 +444,7 @@ const TaxAccountsPage: React.FC = () => {
         <DialogTitle>Record {taxLabelByType[dialog.taxType]} payout</DialogTitle>
         <DialogContent sx={{ display: 'grid', gap: 2, pt: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            Property: {dialog.propertyLabel}
+            Property: {dialog.propertyLabel}. This records a trust-book TaxPayout. It does not reduce canonical outstanding tax and it does not post a ZIMRA remittance.
           </Typography>
           <TextField
             label="Amount"

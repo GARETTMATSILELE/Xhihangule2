@@ -57,6 +57,7 @@ const Payment_1 = require("../models/Payment");
 const vatPolicyService_1 = require("./vatPolicyService");
 const taxObligationService_1 = require("./taxObligationService");
 const chartAccounts_1 = require("./tax/chartAccounts");
+const vatCalculation_1 = require("./tax/vatCalculation");
 const accountingService_1 = __importDefault(require("./accountingService"));
 const principalAgentJournal_1 = require("./tax/principalAgentJournal");
 const TaxOverride_1 = require("../models/TaxOverride");
@@ -717,14 +718,16 @@ class TrustAccountService {
                         continue;
                     }
                     const taxType = normalizedType;
+                    const taxPoint = settlement.settlementDate ? new Date(settlement.settlementDate) : new Date();
+                    const taxPeriod = (0, vatCalculation_1.filingPeriodFromDate)(taxPoint);
                     if (taxType === 'CGT') {
                         yield (0, taxObligationService_1.upsertPaymentTaxObligation)({
                             companyId: input.companyId,
                             taxType: 'CAPITAL_GAINS_TAX',
                             paymentId: String(settlement._id),
                             propertyId: String(account.propertyId),
-                            taxPeriod: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
-                            transactionDate: settlement.settlementDate || new Date(),
+                            taxPeriod,
+                            transactionDate: taxPoint,
                             taxableAmount: Number(settlement.salePrice || 0),
                             taxRate: Number(((_a = settlement === null || settlement === void 0 ? void 0 : settlement.cgtSnapshot) === null || _a === void 0 ? void 0 : _a.cgtRate) || 0),
                             taxAmount: deltaToApply,
@@ -777,8 +780,8 @@ class TrustAccountService {
                         taxType: canonicalTaxType,
                         paymentId: String(settlement._id),
                         propertyId: String(account.propertyId),
-                        taxPeriod: `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, '0')}`,
-                        transactionDate: new Date(),
+                        taxPeriod,
+                        transactionDate: taxPoint,
                         taxableAmount: Number(settlement.salePrice || 0),
                         taxRate: 0,
                         taxAmount: deltaToApply,

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listTaxPayments = exports.getComplianceMigrationReport = exports.runCompanyTaxIntegrity = exports.resolveTaxReview = exports.listTaxReviews = exports.patchVatReturn = exports.listCompanyVatReturns = exports.prepareCompanyVatReturn = exports.uploadZimraPaymentReceipt = exports.postZimraPayment = exports.getTaxReconciliation = exports.listTaxObligations = exports.getTaxComplianceDashboard = void 0;
+exports.listTaxPayments = exports.getComplianceMigrationReport = exports.runCompanyTaxIntegrity = exports.resolveTaxReview = exports.listTaxReviews = exports.patchVatReturn = exports.listCompanyVatReturns = exports.prepareCompanyVatReturn = exports.uploadZimraPaymentReceipt = exports.postZimraPayment = exports.getTaxReconciliation = exports.listTaxObligations = exports.getTaxPosition = exports.getTaxComplianceDashboard = void 0;
 const TaxObligation_1 = require("../models/TaxObligation");
 const TaxPayment_1 = require("../models/TaxPayment");
 const TaxReviewItem_1 = require("../models/TaxReviewItem");
@@ -25,6 +25,8 @@ const chartAccounts_1 = require("../services/tax/chartAccounts");
 const money_1 = require("../utils/money");
 const errorHandler_1 = require("../middleware/errorHandler");
 const trustReconciliation_1 = require("../services/tax/trustReconciliation");
+const taxPositionRead_1 = require("../services/tax/taxPositionRead");
+const newTaxIntegrityRead_1 = require("../services/tax/newTaxIntegrityRead");
 const companyIdOf = (req) => {
     var _a;
     const id = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -167,6 +169,21 @@ exports.getTaxComplianceDashboard = asyncHandler((req, res) => __awaiter(void 0,
             }
         }
     });
+}));
+exports.getTaxPosition = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const asOfRaw = req.query.asOf ? String(req.query.asOf) : '';
+    let asOf;
+    if (asOfRaw) {
+        asOf = /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw)
+            ? new Date(`${asOfRaw}T23:59:59.999Z`)
+            : new Date(asOfRaw);
+        if (Number.isNaN(asOf.getTime())) {
+            return res.status(400).json({ message: 'asOf must be a valid date' });
+        }
+    }
+    const position = yield (0, taxPositionRead_1.loadCompanyTaxPosition)(companyIdOf(req), asOf);
+    const newPeriod = yield (0, newTaxIntegrityRead_1.loadNewTaxIntegrity)(companyIdOf(req));
+    return res.json({ status: 'success', data: Object.assign(Object.assign({}, position), { newPeriod }) });
 }));
 exports.listTaxObligations = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const companyId = companyIdOf(req);

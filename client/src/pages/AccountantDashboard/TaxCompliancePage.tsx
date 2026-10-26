@@ -44,6 +44,8 @@ const TaxCompliancePage: React.FC = () => {
   const [vatReturns, setVatReturns] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [taxPosition, setTaxPosition] = useState<any>(null);
+  const [cutoff, setCutoff] = useState('');
   const [migration, setMigration] = useState<any>(null);
   const [integrity, setIntegrity] = useState<any>(null);
   const [filingPeriod, setFilingPeriod] = useState(currentPeriod());
@@ -70,13 +72,14 @@ const TaxCompliancePage: React.FC = () => {
       accountingService.getTaxObligations(),
       accountingService.listVatReturns(),
       accountingService.listTaxPayments(),
-      accountingService.listTaxReviews()
+      accountingService.listTaxReviews(),
+      accountingService.getTaxPosition(cutoff || undefined)
     ]);
     const failed = settled
       .map((result, index) => {
         if (result.status !== 'rejected') return null;
         const err: any = result.reason;
-        const urls = ['tax-compliance', 'tax-obligations', 'vat-returns', 'tax-payments', 'tax-reviews'];
+        const urls = ['tax-compliance', 'tax-obligations', 'vat-returns', 'tax-payments', 'tax-reviews', 'tax-position'];
         return `${urls[index]}: ${err?.response?.data?.message || err?.message || 'request failed'}`;
       })
       .filter(Boolean) as string[];
@@ -85,9 +88,10 @@ const TaxCompliancePage: React.FC = () => {
     if (settled[2].status === 'fulfilled') setVatReturns(settled[2].value);
     if (settled[3].status === 'fulfilled') setPayments(settled[3].value);
     if (settled[4].status === 'fulfilled') setReviews(settled[4].value);
+    if (settled[5].status === 'fulfilled') setTaxPosition(settled[5].value);
     if (failed.length) setError(failed.join(' · '));
     setLoading(false);
-  }, []);
+  }, [cutoff]);
 
   useEffect(() => {
     void load();
@@ -249,6 +253,19 @@ const TaxCompliancePage: React.FC = () => {
   const trust = dashboard?.trust;
   const categories = dashboard?.categories;
   const complianceLabel = dashboard?.allClear ? 'Controls passed' : (dashboard?.complianceLabel || 'Attention required');
+  const positionAccount = (taxType: string) =>
+    (taxPosition?.accounts || []).find((account: any) => account.taxType === taxType);
+  const positionSum = (types: string[], field: 'recognised' | 'paid' | 'outstanding' | 'reversed') =>
+    Number(types.reduce((sum, taxType) => sum + Number(positionAccount(taxType)?.[field] || 0), 0).toFixed(2));
+  const legacyVatCalculated = Number(dashboard?.byType?.VAT_OUTPUT?.calculated || 0) + Number(dashboard?.byType?.VAT_ON_COMMISSION?.calculated || 0);
+  const vatRecognised = taxPosition ? positionSum(['VAT_OUTPUT', 'VAT_ON_COMMISSION'], 'recognised') : legacyVatCalculated;
+  const vatPaid = taxPosition ? positionSum(['VAT_OUTPUT', 'VAT_ON_COMMISSION'], 'paid') : Number(dashboard?.vatPaid || 0);
+  const vatOutstanding = taxPosition ? positionSum(['VAT_OUTPUT', 'VAT_ON_COMMISSION'], 'outstanding') : Number(dashboard?.vatOutstanding || 0);
+  const vatReversed = taxPosition ? positionSum(['VAT_OUTPUT', 'VAT_ON_COMMISSION'], 'reversed') : 0;
+  const cgtOutstanding = taxPosition ? positionSum(['CAPITAL_GAINS_TAX'], 'outstanding') : Number(dashboard?.cgtOutstanding || 0);
+  const cgwtRecognised = taxPosition ? positionSum(['CAPITAL_GAINS_WITHHOLDING_TAX'], 'recognised') : Number(dashboard?.cgwtWithheld || 0);
+  const cgwtPaid = taxPosition ? positionSum(['CAPITAL_GAINS_WITHHOLDING_TAX'], 'paid') : Number(dashboard?.cgwtRemitted || 0);
+  const cgwtOutstanding = taxPosition ? positionSum(['CAPITAL_GAINS_WITHHOLDING_TAX'], 'outstanding') : Number(dashboard?.cgwtOutstanding || 0);
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -262,6 +279,39 @@ const TaxCompliancePage: React.FC = () => {
           {error}
         </Alert>
       )}
+
+      {taxPosition?.newPeriod && (
+        <Alert severity={taxPosition.newPeriod.status === 'RECONCILED' ? 'success' : 'warning'} sx={{ mb: 2 }}>
+          New-period tax path: {String(taxPosition.newPeriod.status || '').replace(/_/g, ' ')}.
+          {' '}Go-live {taxPosition.newPeriod.goLive ? new Date(taxPosition.newPeriod.goLive).toLocaleString() : 'not demonstrated'}.
+          {' '}Eligible sources {taxPosition.newPeriod.eligibleSources}. Obligations {taxPosition.newPeriod.createdObligations} of {taxPosition.newPeriod.expectedObligations}.
+          {' '}Active outstanding {money(taxPosition.newPeriod.activeOutstanding)}. Account 2101 for those sources {money(taxPosition.newPeriod.newGlCreditNormal)}.
+          {' '}Legacy taxable sources are listed separately and are not added to this outstanding amount.
+        </Alert>
+      )}
+      {taxPosition && (
+        <Alert severity={taxPosition.status === 'RECONCILED' ? 'success' : 'warning'} sx={{ mb: 2 }}>
+          Reconciliation: {String(taxPosition.status || '').replace(/_/g, ' ')}.
+          {' '}Reporting cutoff: {taxPosition.asOf ? new Date(taxPosition.asOf).toLocaleString() : 'latest posted records'}.
+          {' '}Unallocated tax payments: {money(taxPosition.unallocatedPayments || 0)}.
+          {' '}Dashboard totals and property ledgers use the same posted obligations. Historical trust tax books stay separate and are not adjusted.
+        </Alert>
+      )}
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+        <TextField
+          label="Reporting cutoff"
+          type="date"
+          size="small"
+          value={cutoff}
+          onChange={(event) => setCutoff(event.target.value)}
+          InputLabelProps={{ shrink: true }}
+          helperText="Reads posted records as at this date. It does not change accounting entries."
+        />
+        {cutoff && (
+          <Button size="small" onClick={() => setCutoff('')}>Clear cutoff</Button>
+        )}
+      </Box>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2 }}>
         <Tab label="Dashboard" />
@@ -278,23 +328,27 @@ const TaxCompliancePage: React.FC = () => {
           <Grid container spacing={2} sx={{ mb: 2 }}>
             <Grid item xs={12} sm={6} md={3}>
               <Card><CardContent>
-                <Typography variant="overline">VAT Payable</Typography>
-                <Typography variant="h5">{money(dashboard.vatPayable)}</Typography>
-                {obligations.filter((row) => String(row.taxType || '').startsWith('VAT')).length === 0 && (
-                  <Typography variant="caption" color="text.secondary" display="block">NO LIVE VAT OBLIGATIONS</Typography>
+                <Typography variant="overline">VAT recognised</Typography>
+                <Typography variant="h5">{money(vatRecognised)}</Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Output VAT plus VAT on agency commission. Reversed amounts are excluded.
+                </Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card><CardContent>
+                <Typography variant="overline">VAT paid</Typography>
+                <Typography variant="h5">{money(vatPaid)}</Typography>
+                <Typography variant="caption" color="text.secondary" display="block">Posted ZIMRA allocations only</Typography>
+              </CardContent></Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card><CardContent>
+                <Typography variant="overline">VAT outstanding</Typography>
+                <Typography variant="h5">{money(vatOutstanding)}</Typography>
+                {taxPosition && Number(vatReversed) > 0 && (
+                  <Typography variant="caption" color="text.secondary" display="block">Reversed {money(vatReversed)}</Typography>
                 )}
-              </CardContent></Card>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card><CardContent>
-                <Typography variant="overline">VAT Paid</Typography>
-                <Typography variant="h5">{money(dashboard.vatPaid)}</Typography>
-              </CardContent></Card>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card><CardContent>
-                <Typography variant="overline">VAT Outstanding</Typography>
-                <Typography variant="h5">{money(dashboard.vatOutstanding)}</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
@@ -309,34 +363,34 @@ const TaxCompliancePage: React.FC = () => {
             <Grid item xs={12} sm={6} md={3}>
               <Card><CardContent>
                 <Typography variant="overline">Capital Gains Tax outstanding</Typography>
-                <Typography variant="h5">{money(dashboard.cgtOutstanding || 0)}</Typography>
-                {Number(dashboard.cgtOutstanding || 0) === 0 && (
+                <Typography variant="h5">{money(cgtOutstanding)}</Typography>
+                {Number(cgtOutstanding) === 0 && (
                   <Typography variant="caption" color="text.secondary" display="block">No live Capital Gains Tax obligation</Typography>
                 )}
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Card><CardContent>
-                <Typography variant="overline">Capital Gains Withholding Tax Withheld</Typography>
-                <Typography variant="h5">{money(dashboard.cgwtWithheld)}</Typography>
+                <Typography variant="overline">Capital Gains Withholding Tax recognised</Typography>
+                <Typography variant="h5">{money(cgwtRecognised)}</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Card><CardContent>
-                <Typography variant="overline">Capital Gains Withholding Tax Remitted</Typography>
-                <Typography variant="h5">{money(dashboard.cgwtRemitted)}</Typography>
+                <Typography variant="overline">Capital Gains Withholding Tax paid</Typography>
+                <Typography variant="h5">{money(cgwtPaid)}</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Card><CardContent>
-                <Typography variant="overline">Capital Gains Withholding Tax Outstanding</Typography>
-                <Typography variant="h5">{money(dashboard.cgwtOutstanding)}</Typography>
+                <Typography variant="overline">Capital Gains Withholding Tax outstanding</Typography>
+                <Typography variant="h5">{money(cgwtOutstanding)}</Typography>
               </CardContent></Card>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <Card><CardContent>
-                <Typography variant="overline">Trust tax outstanding</Typography>
-                <Typography variant="h5">{money(dashboard.trustTaxOutstanding)}</Typography>
+                <Typography variant="overline">Output VAT and withholding outstanding</Typography>
+                <Typography variant="h5">{money(taxPosition ? positionSum(['VAT_OUTPUT', 'CAPITAL_GAINS_WITHHOLDING_TAX'], 'outstanding') : dashboard.trustTaxOutstanding)}</Typography>
               </CardContent></Card>
             </Grid>
           </Grid>
@@ -418,6 +472,9 @@ const TaxCompliancePage: React.FC = () => {
 
       {tab === 1 && (
         <Paper sx={{ overflow: 'auto' }}>
+          <Alert severity="info" sx={{ m: 2 }}>
+            Reversed obligations remain in this list for audit. Their outstanding amount is zero, and the shared tax position does not add them to the payable balance.
+          </Alert>
           <Table size="small">
             <TableHead>
               <TableRow>
@@ -633,12 +690,7 @@ const TaxCompliancePage: React.FC = () => {
       )}
 
       {tab === 6 && (
-        <Box>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Property tax ledgers below are the existing trust tax books. New ZIMRA remittances that clear GL should be recorded on the ZIMRA payments tab, not as a ledger-only payout.
-          </Alert>
-          <TaxAccountsPage />
-        </Box>
+        <TaxAccountsPage position={taxPosition} onLedgerChange={() => { void load(); }} />
       )}
 
       <Dialog open={payOpen} onClose={() => !busy && setPayOpen(false)} maxWidth="sm" fullWidth>

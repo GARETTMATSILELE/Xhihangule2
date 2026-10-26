@@ -133,8 +133,9 @@ router.get('/:id', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)
 router.post('/', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), roles_1.canCreateProperty, limits_1.enforcePropertyLimit, propertyController_1.createProperty);
 // Sales route for creating property with sales fields
 router.post('/sales', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), propertyController_1.createSalesProperty);
-// Allow sales/agents to update their own sales properties (controller enforces ownership)
+// Allow sales/agents to update and delete their own sales properties (controller enforces ownership)
 router.put('/sales/:id', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), propertyController_1.updateProperty);
+router.delete('/sales/:id', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), propertyController_1.deleteProperty);
 router.put('/:id', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), roles_1.isAdmin, propertyController_1.updateProperty);
 router.delete('/:id', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), roles_1.isAdmin, propertyController_1.deleteProperty);
 router.put('/:id/restore', auth_1.authWithCompany, (0, auth_1.requireActiveSubscription)(), roles_1.isAdmin, propertyController_1.restoreProperty);

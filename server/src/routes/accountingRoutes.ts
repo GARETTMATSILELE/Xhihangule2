@@ -37,7 +37,8 @@ import {
   resolveTaxReview,
   getComplianceMigrationReport,
   listTaxPayments,
-  runCompanyTaxIntegrity
+  runCompanyTaxIntegrity,
+  getTaxPosition
 } from '../controllers/taxComplianceController';
 import {
   getFinancialControlsDashboard,
@@ -100,6 +101,7 @@ const taxUpload = multer({
 });
 
 router.get('/tax-compliance', canViewCommissions, getTaxComplianceDashboard);
+router.get('/tax-position', canViewCommissions, getTaxPosition);
 router.get('/tax-obligations', canViewCommissions, listTaxObligations);
 router.get('/tax-reconciliation', canViewCommissions, getTaxReconciliation);
 router.get('/tax-payments', canViewCommissions, listTaxPayments);

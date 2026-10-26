@@ -279,16 +279,28 @@ export const usePropertyService = () => {
 
     const deleteProperty = async (id: string): Promise<Property> => {
       try {
-        validateUserAndCompany(user);
+        const validatedUser = validateUserAndCompany(user);
 
         if (!id) {
           throw new Error('Property ID is required');
         }
 
-        const response = await api.delete(`/properties/${id}`);
+        const accountRoles = user && Array.isArray(user.roles) ? user.roles : [];
+        const roles = [
+          activeRole,
+          validatedUser.role,
+          ...accountRoles,
+        ];
+        const endpoint = roles.some((role) => role === 'sales' || role === 'agent')
+          ? `/properties/sales/${id}`
+          : `/properties/${id}`;
+        const response = await api.delete(endpoint);
         console.log('Delete Property API Response:', response.data);
 
-        return extractPropertyData(response.data);
+        const body = response.data;
+        const candidate = isApiResponse<Property>(body) ? body.data : (body?.data ?? body?.property ?? body);
+        if (isProperty(candidate)) return candidate;
+        return extractPropertyData(body);
       } catch (error) {
         return handleApiError(error);
       }
