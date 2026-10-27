@@ -68,6 +68,7 @@ import { startTrustReconciliationJob, stopTrustReconciliationJob } from './jobs/
 // Removed legacy bootstrap imports
 import { provisionBreakGlassSystemAdmin } from './services/systemAdminBootstrap';
 import { productionStartupProblems } from './config/productionConfig';
+import { evaluatePaynowDeployment } from './services/registrationPaymentPolicy';
 import { getEmailConfigStatus, verifySmtpConnection } from './services/emailService';
 import { getClientIpForRateLimit, redactHeaders } from './utils/requestSecurity';
 import { getRuntimeFeatures } from './config/runtimeRole';
@@ -168,6 +169,17 @@ if (productionConfigProblems.length > 0) {
   // eslint-disable-next-line no-console
   console.error(`Missing required environment variables in production: ${productionConfigProblems.join(', ')}`);
   process.exit(1);
+}
+
+if (process.env.NODE_ENV === 'production') {
+  const paynowDeployment = evaluatePaynowDeployment(process.env, {
+    nodeEnv: process.env.NODE_ENV,
+    requestHost: process.env.CANONICAL_HOST || process.env.PUBLIC_BASE_URL || ''
+  });
+  if (!paynowDeployment.ok) {
+    // eslint-disable-next-line no-console
+    console.warn(`Paynow checkout is blocked until configuration is corrected: ${paynowDeployment.issues.join(', ')}`);
+  }
 }
 
 // Optional canonical host redirect (configure via env to enable)

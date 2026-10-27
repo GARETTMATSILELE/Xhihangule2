@@ -1,7 +1,7 @@
 import { PaymentSession } from '../models/PaymentSession';
 import { BillingPayment } from '../models/BillingPayment';
 import { activateSubscriptionFromPayment } from './billingActivationService';
-import { evaluateProviderPoll, ProviderPoll } from './registrationPaymentPolicy';
+import { evaluateProviderPoll, paynowModeMatchesSession, ProviderPoll } from './registrationPaymentPolicy';
 import { recordAuditEvent } from './auditService';
 import { upsertFinancialReview } from './financialOperationVisibility';
 import { logger } from '../utils/logger';
@@ -99,6 +99,13 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
     };
   }
   const session = resolved.session;
+  const terminal = session.status === 'paid' || session.status === 'reconciled' || session.status === 'cancelled' || session.status === 'failed' || session.status === 'expired';
+  if (!terminal && !paynowModeMatchesSession((session.metadata as { paynowMode?: string } | undefined)?.paynowMode)) {
+    const error: any = new Error('Paynow application mode does not match the checkout that created this payment');
+    error.statusCode = 409;
+    error.code = 'PAYNOW_MODE_MISMATCH';
+    throw error;
+  }
   const decision = evaluateProviderPoll(
     { amount: Number(session.amount), currency: session.currency || 'USD', providerRef: session.providerRef },
     poll
@@ -106,7 +113,6 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
   const lateStatus = decision.outcome === 'failed' && (decision.status === 'refunded' || decision.status === 'disputed')
     ? decision.status
     : '';
-  const terminal = session.status === 'paid' || session.status === 'reconciled' || session.status === 'cancelled' || session.status === 'failed' || session.status === 'expired';
   if (terminal && lateStatus) {
     await notePaynowLateStatus(reference, lateStatus, session);
     return {
@@ -157,7 +163,11 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
       action: 'payment.verified',
       entityType: 'PaymentSession',
       entityId: String(session._id),
-      metadata: { providerRef: session.providerRef }
+      metadata: {
+        providerRef: session.providerRef,
+        paynowMode: (session.metadata as { paynowMode?: string } | undefined)?.paynowMode || undefined,
+        testTransaction: (session.metadata as { paynowMode?: string } | undefined)?.paynowMode === 'test'
+      }
     });
     if (!audited) {
       const error: any = new Error('Payment activation was not started because the audit event could not be stored');
