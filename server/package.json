@@ -53,6 +53,7 @@
     "test:paynow-lifecycle": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runPaynowLifecycleTests.ts",
     "paynow:preflight": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/paynowConfigPreflight.ts",
     "paynow:diagnose": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/diagnosePaynowSession.ts",
+    "test:signup-availability": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runSignupAvailabilityTests.ts",
     "test:integrity-gaps": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runIntegrityGapTests.ts",
     "test:phase3c": "npm run build && node dist/scripts/runPhase3cDuplicateConsolidationTests.js",
     "test:phase3d": "npm run build && node dist/scripts/runPhase3dLegacyCleanupTests.js",

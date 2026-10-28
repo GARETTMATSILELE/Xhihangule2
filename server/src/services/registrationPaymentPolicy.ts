@@ -201,6 +201,13 @@ export function paynowCallbackTargetDiffers(resultUrl: string, requestHost: stri
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
 
+/** The Host header only. X-Forwarded-Host is not a trusted checkout host. */
+export function paynowRequestHost(headers: { host?: string | string[] | undefined } | undefined): string {
+  const raw = headers?.host;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return String(value || '').split(',')[0].trim();
+}
+
 export function paynowHostname(value: string): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -319,6 +326,9 @@ export function evaluatePaynowDeployment(
 
   const resultHost = result?.hostname || '';
   const returnHost = returning?.hostname || '';
+  if (!production && resultHost && isReservedProductionPaynowHost(resultHost) && !issues.includes('callback_host_mismatch')) {
+    issues.push('callback_host_mismatch');
+  }
   if (resultHost && requestHost && resultHost !== requestHost) {
     const override = paynowHostname(env.PAYNOW_CALLBACK_HOST || '');
     const canonical = paynowHostname(env.CANONICAL_HOST || env.PUBLIC_BASE_URL || '');

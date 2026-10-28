@@ -16,8 +16,10 @@ import {
   paynowCallbackTargetDiffers,
   paynowConfigurationState,
   paynowCustomerAuthEmail,
-  paynowPayloadHash
+  paynowPayloadHash,
+  paynowRequestHost
 } from '../services/registrationPaymentPolicy';
+import { canonicalRedirectTarget } from '../utils/canonicalHost';
 import paynowRoutes from '../routes/paynowRoutes';
 import { Company } from '../models/Company';
 import { User } from '../models/User';
@@ -231,6 +233,68 @@ async function main() {
   } as NodeJS.ProcessEnv;
   const productionReady = evaluatePaynowDeployment(productionEnv, { nodeEnv: 'production', requestHost: 'www.mantisafrica.com' });
   record('Production callback configuration is accepted when the host matches', productionReady.ok && productionReady.issues.length === 0);
+  const wwwWithoutApex = evaluatePaynowDeployment({
+    ...productionEnv,
+    CANONICAL_HOST: 'https://www.mantisafrica.com',
+    REDIRECT_FROM_HOSTS: ''
+  }, { nodeEnv: 'production', requestHost: 'www.mantisafrica.com' });
+  record('Checkout through www.mantisafrica.com does not require the apex domain',
+    wwwWithoutApex.ok
+    && wwwWithoutApex.resultHost === 'www.mantisafrica.com'
+    && wwwWithoutApex.resultPath === '/api/paynow/result'
+    && wwwWithoutApex.returnHost === 'www.mantisafrica.com'
+    && wwwWithoutApex.returnPath === '/api/paynow/return');
+  const apexCheckout = evaluatePaynowDeployment({
+    ...productionEnv,
+    CANONICAL_HOST: 'www.mantisafrica.com'
+  }, { nodeEnv: 'production', requestHost: 'mantisafrica.com' });
+  record('The apex hostname is not accepted as the checkout host',
+    !apexCheckout.ok && apexCheckout.issues.includes('callback_host_mismatch') && wwwWithoutApex.ok);
+  const signupQuery = '/signup?plan=INDIVIDUAL&checkout=paid&cycle=monthly';
+  record('A request already on www keeps the signup parameters',
+    canonicalRedirectTarget({
+      hostHeader: 'www.mantisafrica.com',
+      protocol: 'https',
+      originalUrl: signupQuery,
+      method: 'GET',
+      canonicalHost: 'https://www.mantisafrica.com',
+      redirectFromHosts: ''
+    }) === null);
+  record('A listed alias redirects to www and keeps the signup parameters',
+    canonicalRedirectTarget({
+      hostHeader: 'mantisafrica.azurewebsites.net',
+      protocol: 'https',
+      originalUrl: signupQuery,
+      method: 'GET',
+      canonicalHost: 'www.mantisafrica.com',
+      redirectFromHosts: 'mantisafrica.azurewebsites.net'
+    }) === `https://www.mantisafrica.com${signupQuery}`);
+  record('The apex host is not redirected unless it is explicitly listed',
+    canonicalRedirectTarget({
+      hostHeader: 'mantisafrica.com',
+      protocol: 'https',
+      originalUrl: signupQuery,
+      method: 'GET',
+      canonicalHost: 'www.mantisafrica.com',
+      redirectFromHosts: ''
+    }) === null
+    && canonicalRedirectTarget({
+      hostHeader: 'mantisafrica.com',
+      protocol: 'https',
+      originalUrl: signupQuery,
+      method: 'GET',
+      canonicalHost: 'www.mantisafrica.com',
+      redirectFromHosts: 'mantisafrica.com'
+    }) === `https://www.mantisafrica.com${signupQuery}`);
+  record('Paynow result posts are not redirected',
+    canonicalRedirectTarget({
+      hostHeader: 'mantisafrica.azurewebsites.net',
+      protocol: 'https',
+      originalUrl: '/api/paynow/result',
+      method: 'POST',
+      canonicalHost: 'www.mantisafrica.com',
+      redirectFromHosts: 'mantisafrica.azurewebsites.net'
+    }) === null);
   const localhostCallback = evaluatePaynowDeployment({
     ...productionEnv,
     PAYNOW_RESULT_URL: 'http://localhost:5000/api/paynow/result',
@@ -256,6 +320,21 @@ async function main() {
     PAYNOW_CALLBACK_HOST: 'www.mantisafrica.com'
   }, { nodeEnv: 'development', requestHost: 'localhost:5000' });
   record('A local server cannot send callbacks to the production host', !localToProduction.ok && localToProduction.issues.includes('callback_host_mismatch'));
+  const spoofedHost = evaluatePaynowDeployment({
+    ...productionEnv,
+    NODE_ENV: 'development',
+    PAYNOW_MODE: 'test',
+    PAYNOW_MERCHANT_EMAIL: 'merchant@example.test'
+  }, { nodeEnv: 'development', requestHost: 'www.mantisafrica.com' });
+  record('A spoofed Host header cannot aim a local server at production', !spoofedHost.ok && spoofedHost.issues.includes('callback_host_mismatch'));
+  record('Checkout trusts the Host header and ignores X-Forwarded-Host',
+    paynowRequestHost({ host: 'localhost:5000', 'x-forwarded-host': 'www.mantisafrica.com' } as { host: string }) === 'localhost:5000');
+  const forwardedSpoof = evaluatePaynowDeployment(productionEnv, {
+    nodeEnv: 'production',
+    requestHost: paynowRequestHost({ host: 'evil.example', 'x-forwarded-host': 'www.mantisafrica.com' } as { host: string })
+  });
+  record('An untrusted hostname is rejected even when a forwarded host names www',
+    forwardedSpoof.issues.includes('callback_host_mismatch') && !forwardedSpoof.ok);
   const testWithoutMerchant = evaluatePaynowDeployment({
     ...productionEnv,
     NODE_ENV: 'development',

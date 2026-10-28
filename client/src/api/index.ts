@@ -43,6 +43,7 @@ export const apiService = {
   getCurrentCompany: () => apiInstance.get('/companies/current'),
   createCompany: (data: any) => apiInstance.post('/companies', data),
   updateCompany: (data: any) => apiInstance.put('/companies/current', data),
+  getSignupAvailability: () => apiInstance.get('/onboarding/availability'),
   startOnboarding: (data: any, idempotencyKey?: string) => apiInstance.post('/onboarding/start', data, {
     headers: idempotencyKey ? { 'idempotency-key': idempotencyKey } : undefined
   }),

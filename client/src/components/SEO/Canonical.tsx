@@ -13,10 +13,23 @@ function getBaseUrl(): string {
   return '';
 }
 
+function signupParameterSearch(pathname: string, search: string): string {
+  if (pathname !== '/signup' && pathname !== '/admin-signup') return '';
+  const incoming = new URLSearchParams(search);
+  const kept = new URLSearchParams();
+  for (const key of ['plan', 'checkout', 'cycle']) {
+    const value = incoming.get(key);
+    if (value) kept.set(key, value);
+  }
+  const text = kept.toString();
+  return text ? `?${text}` : '';
+}
+
 export const Canonical: React.FC = () => {
   const location = useLocation();
   const base = getBaseUrl();
-  const canonicalUrl = base ? `${base}${location.pathname}` : location.pathname;
+  const path = `${location.pathname}${signupParameterSearch(location.pathname, location.search)}`;
+  const canonicalUrl = base ? `${base}${path}` : path;
   return (
     <Helmet>
       <link rel="canonical" href={canonicalUrl} />

@@ -19,14 +19,40 @@ Set these on the `mantisafrica` App Service, Production slot, as server-side app
 | `PAYNOW_RETURN_URL` | `https://www.mantisafrica.com/api/paynow/return` |
 | `PUBLIC_BASE_URL` | `https://www.mantisafrica.com` |
 | `CLIENT_URL` | `https://www.mantisafrica.com` |
-| `CANONICAL_HOST` | `www.mantisafrica.com` |
-| `REDIRECT_FROM_HOSTS` | `mantisafrica.azurewebsites.net` if that hostname should redirect to the custom domain. |
+| `CANONICAL_HOST` | `www.mantisafrica.com`. Requests that are already on this host stay there. |
+| `REDIRECT_FROM_HOSTS` | Not required for a test that starts on `https://www.mantisafrica.com`. Optional: `mantisafrica.azurewebsites.net` if that Azure hostname should redirect to `www`. The apex name is not part of this test. |
+| `ALLOW_PUBLIC_SIGNUP` | `true` only while you are accepting new companies. Missing or any other value keeps production signup closed. |
+| `SIGNUP_EMAIL_ALLOWLIST` | Optional comma-separated emails. When set, only those addresses can register. Leaving it empty does not open signup. Unrestricted signup is only `ALLOW_PUBLIC_SIGNUP=true` with this value blank. A non-blank value with no valid email addresses allows nobody. |
+| `MONGODB_URI` | The Azure Cosmos connection for this App Service. Do not point it at a laptop database. |
 
 `POST /api/paynow/result` is unauthenticated because Paynow cannot send your user token. Hash verification is what authenticates it. Do not put that route behind an extra login wall.
 
-The repository has no Azure Front Door or separate API host. The custom domain and `mantisafrica.azurewebsites.net` must both reach this App Service. Checkout from `www.mantisafrica.com` sends Paynow to `www.mantisafrica.com`. A request that arrives on the `azurewebsites.net` hostname is accepted only when the result URL host is the canonical host. Any other host is rejected, so a session cannot be stored on one server while Paynow notifies another.
+The GitHub workflows in this repository do not create Azure Front Door. The live `www.mantisafrica.com` name is a CNAME to the Front Door endpoint `default-webapp-endpoint-c40e861c-fce3gafpadgfckac.z01.azurefd.net`. Checkout from `www.mantisafrica.com` sends Paynow to `www.mantisafrica.com`. A request that arrives on the `azurewebsites.net` hostname is accepted only when the result URL host is the canonical host. Any other host is rejected, so a session cannot be stored on one server while Paynow notifies another.
 
 There is no staging slot in the workflows. A staging test needs its own hostname, its own database, and result and return URLs on that same hostname.
+
+## 1a. Production signup
+
+`SAAS_ONBOARDING_V2` and `REACT_APP_SAAS_ONBOARDING_V2` are not read by the current server. The signup page always calls `POST /api/onboarding/start`. Paid plans always create a pending company and a payment session. The browser cannot choose the price. A trial does not start Paynow. The first user of a new company is that company's `admin`, not a system administrator.
+
+`GET /api/onboarding/availability` tells the signup page whether registration is open, whether an allowlist is active, and that paid registration requires payment. It does not return email addresses, Paynow settings, database names, or connection details. Confirm in Azure that `MONGODB_URI` is the Cosmos connection for this App Service. Use `npm run paynow:preflight` on the server for callback diagnostics.
+
+Checkout from `https://www.mantisafrica.com` is sufficient for the controlled test. It does not require `mantisafrica.com` to resolve or to be listed in `REDIRECT_FROM_HOSTS`. The result and return URLs stay on `www`, so Paynow notifies the same application that created the session. A request host other than `www.mantisafrica.com` is rejected unless it is the production `*.azurewebsites.net` hostname, or it is explicitly listed in `REDIRECT_FROM_HOSTS`, and the canonical host equals the result host. `X-Forwarded-Host` is ignored. A development process cannot send callbacks to `www.mantisafrica.com`, `mantisafrica.com`, or `*.azurewebsites.net`.
+
+After deployment:
+
+1. Set `ALLOW_PUBLIC_SIGNUP=true` and, for a controlled test, `SIGNUP_EMAIL_ALLOWLIST` to the address you will use.
+2. Open `https://www.mantisafrica.com/signup?plan=INDIVIDUAL&checkout=paid&cycle=monthly`.
+3. Confirm the form is visible. With signup left unset, the page says `Public signup is disabled` and does not submit.
+4. `GET https://www.mantisafrica.com/api/onboarding/availability` should show `signupEnabled` true and `paidRegistrationRequiresPayment` true. It does not include a database name, connection status, email addresses, credentials, or a connection string. Confirm the Cosmos connection in the Azure application setting `MONGODB_URI`, not in this response.
+5. Submit the form with the allowlisted email. The response creates a pending company. Continue to checkout only after the Paynow preflight passes.
+6. Set `ALLOW_PUBLIC_SIGNUP=false` when the test is finished. Existing companies can still sign in.
+
+Paid registration does not activate the subscription. Activation still requires a verified Paynow result on this same server.
+
+## 1b. Apex domain, separate from the Paynow test
+
+On 28 October 2026, `mantisafrica.com` resolved to `15.197.225.128` and `3.33.251.168`. A browser request to `https://mantisafrica.com/` received a 301 to `https://www.mantisafrica.com` from an AWS host. A browser request to `https://mantisafrica.com/signup` received a 404 from that host and was not redirected. This is a website-routing concern. It does not block checkout, signup, or Paynow callbacks on `https://www.mantisafrica.com`. No DNS or Front Door change is required before the controlled test. The signup query is kept when the browser is already on `www`. A GET or HEAD redirect from a host listed in `REDIRECT_FROM_HOSTS` also keeps the path and query. Paynow POST requests are not redirected.
 
 ## 2. Confirm the Paynow dashboard
 

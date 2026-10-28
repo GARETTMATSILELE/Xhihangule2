@@ -26,9 +26,17 @@ function paidPoll(reference: string) {
   return { status: 'paid', amount: 600, currency: 'USD', reference };
 }
 
+function disposableLocalDatabase(uri: string): boolean {
+  return /^mongodb:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/mantis_paynow_[a-z0-9_]+$/i.test(uri);
+}
+
 async function main() {
   process.env.MANTIS_TEST_SEAM = '1';
   process.env.NODE_ENV = 'development';
+  if (!disposableLocalDatabase(DB) || !disposableLocalDatabase(ACCOUNTING_DB)) {
+    console.error('FAIL Paynow callback tests refused a database that is not a local disposable test database');
+    process.exit(1);
+  }
   try {
     await mongoose.connect(DB, { serverSelectionTimeoutMS: 4000 });
   } catch (error: any) {

@@ -9,6 +9,7 @@ import { PLAN_CONFIG, Plan } from '../types/plan';
 import { chargeForPlan } from '../services/systemPlanService';
 import {
 	evaluatePaynowDeployment,
+	paynowRequestHost,
 	isAllowedPaynowPollUrl,
 	paynowCheckoutDecision,
 	paynowConfigurationState,
@@ -76,7 +77,7 @@ function deploymentForRequest(req: Request) {
 		PUBLIC_BASE_URL: env.PUBLIC_BASE_URL || process.env.PUBLIC_BASE_URL
 	}, {
 		nodeEnv: process.env.NODE_ENV,
-		requestHost: req.get('host') || ''
+		requestHost: paynowRequestHost(req.headers)
 	});
 }
 
@@ -191,7 +192,7 @@ export async function initiatePaynowCheckout(req: Request, input: {
 		? String(session.providerRef).trim()
 		: `SUBS-${session._id.toString()}`;
 
-	const requestHost = String(req.get('host') || '');
+	const requestHost = paynowRequestHost(req.headers);
 	paynowLog('info', 'paynow_checkout_started', {
 		correlationId: ref,
 		reference: ref,

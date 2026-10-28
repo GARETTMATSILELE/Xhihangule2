@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import compression from 'compression';
 import cors from 'cors';
 import { buildAllowedOrigins, isOriginAllowed } from './config/corsOrigins';
+import { canonicalRedirectTarget } from './utils/canonicalHost';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -182,27 +183,19 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-// Optional canonical host redirect (configure via env to enable)
-const CANONICAL_HOST = process.env.CANONICAL_HOST;
-const REDIRECT_FROM_HOSTS = (process.env.REDIRECT_FROM_HOSTS || '')
-  .split(',')
-  .map((h) => h.trim())
-  .filter(Boolean);
-
-if (CANONICAL_HOST && REDIRECT_FROM_HOSTS.length > 0) {
-  app.use((req, res, next) => {
-    const hostHeader = req.headers.host || '';
-    const currentHost = String(hostHeader).split(':')[0];
-    if (currentHost && REDIRECT_FROM_HOSTS.includes(currentHost)) {
-      if (req.method === 'GET' || req.method === 'HEAD') {
-        const target = `${req.protocol}://${CANONICAL_HOST}${req.originalUrl}`;
-        return res.redirect(301, target);
-      }
-      // Do not redirect non-idempotent API requests to avoid breaking clients
-    }
-    return next();
+// Optional canonical host redirect. www is not redirected. The apex is not required.
+app.use((req, res, next) => {
+  const target = canonicalRedirectTarget({
+    hostHeader: String(req.headers.host || ''),
+    protocol: req.protocol,
+    originalUrl: req.originalUrl,
+    method: req.method,
+    canonicalHost: process.env.CANONICAL_HOST,
+    redirectFromHosts: process.env.REDIRECT_FROM_HOSTS
   });
-}
+  if (target) return res.redirect(301, target);
+  return next();
+});
 
 // Middleware
 const allowedOrigins = buildAllowedOrigins(process.env);

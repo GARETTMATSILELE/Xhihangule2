@@ -45,9 +45,8 @@ New registrations can use the feature-flagged v2 flow:
 
 ## Recommended Environment Variables
 
-- `SAAS_ONBOARDING_V2=false` initially.
-- `REACT_APP_SAAS_ONBOARDING_V2=false` initially.
-- `ALLOW_PUBLIC_SIGNUP=true` only when intentionally accepting signups.
+- `ALLOW_PUBLIC_SIGNUP=true` only when intentionally accepting signups. The server does not read `SAAS_ONBOARDING_V2`.
+- `SIGNUP_EMAIL_ALLOWLIST` when a production test should accept only named addresses.
 - `COOKIE_DOMAIN=.mantisafrica.com` in production.
 - `JWT_SECRET`, `JWT_REFRESH_SECRET` with strong rotated secrets.
 - `PAYNOW_INTEGRATION_ID`, `PAYNOW_INTEGRATION_KEY`, `PAYNOW_RESULT_URL`, `PAYNOW_RETURN_URL`.

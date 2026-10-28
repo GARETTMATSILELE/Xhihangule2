@@ -18,6 +18,7 @@ import {
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { billingPlanFromOnboarding, readOnboardingState, writeOnboardingState } from '../../utils/onboardingState';
+import { SignupAvailabilityNotice, useSignupAvailability } from '../../hooks/useSignupAvailability';
 
 const steps = ['Account Details'];
 
@@ -26,6 +27,7 @@ export interface AdminSignupProps {}
 const AdminSignup: React.FC<AdminSignupProps> = () => {
   const navigate = useNavigate();
   const { signup } = useAuth();
+  const availability = useSignupAvailability();
   const savedOnboarding = readOnboardingState();
   const planLocked = Boolean(savedOnboarding.selectedPlan || savedOnboarding.role);
   const [activeStep, setActiveStep] = useState(0);
@@ -200,6 +202,10 @@ const AdminSignup: React.FC<AdminSignupProps> = () => {
         return null;
     }
   };
+
+  if (availability.state !== 'open') {
+    return <SignupAvailabilityNotice state={availability.state} />;
+  }
 
   return (
     <Container component="main" maxWidth="md">

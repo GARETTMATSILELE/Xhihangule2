@@ -4,7 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import { OnboardingService } from '../services/onboardingService';
 import { AuthService } from '../services/authService';
 import { recordAuditEvent } from '../services/auditService';
-import { isPublicSignupAllowed } from '../utils/publicSignupCompany';
+import { publicSignupDecision } from '../utils/publicSignupCompany';
 
 const onboardingService = OnboardingService.getInstance();
 const authService = AuthService.getInstance();
@@ -52,11 +52,30 @@ function setAuthCookies(res: Response, token: string, refreshToken: string) {
   });
 }
 
+function assertSignupOpen(email?: string) {
+  const decision = publicSignupDecision(process.env, email);
+  if (!decision.signupEnabled) {
+    throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
+  }
+  if (!decision.emailAllowed) {
+    throw new AppError('This email is not authorised for registration.', 403, 'SIGNUP_NOT_INVITED');
+  }
+}
+
+export const getSignupAvailability = (_req: Request, res: Response) => {
+  const decision = publicSignupDecision(process.env);
+  res.json({
+    signupEnabled: decision.signupEnabled,
+    onboardingEnabled: true,
+    allowlistRestricted: decision.allowlistRestricted,
+    paidRegistrationRequiresPayment: true,
+    trialRequiresPayment: false
+  });
+};
+
 export const startOnboarding = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isPublicSignupAllowed(process.env)) {
-      throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
-    }
+    assertSignupOpen(req.body?.email);
 
     const idempotencyKey = req.get('idempotency-key') || req.body?.idempotencyKey;
     const result = await onboardingService.start({

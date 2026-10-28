@@ -11,7 +11,7 @@ import { sendMail } from '../services/emailService';
 import { SubscriptionService } from '../services/subscriptionService';
 import { recordAuditEvent } from '../services/auditService';
 import { normalizeEmail, normalizeWorkspaceType } from '../utils/normalization';
-import { isPublicSignupAllowed, publicSignupCompanyFields } from '../utils/publicSignupCompany';
+import { publicSignupCompanyFields, publicSignupDecision } from '../utils/publicSignupCompany';
 import { OnboardingService } from '../services/onboardingService';
 
 const authService = AuthService.getInstance();
@@ -51,12 +51,15 @@ function clearAuthCookies(res: Response) {
 // Signup with company details
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!isPublicSignupAllowed(process.env)) {
-      throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
-    }
-
     const { email: rawEmail, password, name, company, plan: inputPlan } = req.body;
     const email = normalizeEmail(rawEmail);
+    const signupDecision = publicSignupDecision(process.env, email);
+    if (!signupDecision.signupEnabled) {
+      throw new AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
+    }
+    if (!signupDecision.emailAllowed) {
+      throw new AppError('This email is not authorised for registration.', 403, 'SIGNUP_NOT_INVITED');
+    }
 
     if (!email || !password || !name) {
       throw new AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');

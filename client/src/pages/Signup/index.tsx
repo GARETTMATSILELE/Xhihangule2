@@ -15,6 +15,7 @@ import { apiService } from '../../api';
 import { validateOnboardingForm, handleRegistrationError } from '../../utils/registrationUtils';
 import { billingPlanFromOnboarding, readOnboardingState, workspaceTypeFromOnboarding, writeOnboardingState } from '../../utils/onboardingState';
 import { getDashboardPath } from '../../utils/registrationUtils';
+import { SignupAvailabilityNotice, useSignupAvailability } from '../../hooks/useSignupAvailability';
 
 const useOnboardingV2 = true;
 
@@ -81,6 +82,7 @@ const Signup: React.FC = () => {
   });
   const [error, setError] = useState('');
   const [accountHelp, setAccountHelp] = useState(false);
+  const availability = useSignupAvailability();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.name === 'plan') {
@@ -191,6 +193,10 @@ const Signup: React.FC = () => {
     }
   };
 
+  if (availability.state !== 'open') {
+    return <SignupAvailabilityNotice state={availability.state} />;
+  }
+
   return (
     <Container component="main" maxWidth="xs">
       <Box
@@ -205,6 +211,11 @@ const Signup: React.FC = () => {
           <Typography component="h1" variant="h5" align="center" gutterBottom>
             Set Up Your Property Management Workspace
           </Typography>
+          {availability.allowlistRestricted && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Registration is limited to authorised email addresses.
+            </Alert>
+          )}
           <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
             {savedOnboarding.role
               ? `Continuing as ${savedOnboarding.role.replace('-', ' ')}${savedOnboarding.intent ? ` · ${savedOnboarding.intent.replace(/-/g, ' ')}` : ''}. Create your admin account to finish setup.`
