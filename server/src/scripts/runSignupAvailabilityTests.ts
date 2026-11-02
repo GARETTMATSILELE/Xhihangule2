@@ -1,6 +1,8 @@
 /**
  * Signup gate tests. They do not connect to MongoDB, call Paynow, or create a company.
  */
+import fs from 'fs';
+import path from 'path';
 import http from 'http';
 import express from 'express';
 import mongoose from 'mongoose';
@@ -48,7 +50,11 @@ async function main() {
   const closed = publicSignupDecision({ NODE_ENV: 'production' } as NodeJS.ProcessEnv);
   record('Signup disabled in production when the flag is missing', closed.signupEnabled === false && closed.code === 'SIGNUP_DISABLED');
   const opened = publicSignupDecision({ NODE_ENV: 'production', ALLOW_PUBLIC_SIGNUP: 'true' } as NodeJS.ProcessEnv);
-  record('Signup enabled only when production explicitly allows it', opened.signupEnabled === true && opened.emailAllowed === true);
+  record('Signup enabled only when production explicitly allows it', opened.signupEnabled === true && opened.emailAllowed === true && opened.allowlistRestricted === false);
+  const closedFlag = publicSignupDecision({ NODE_ENV: 'production', ALLOW_PUBLIC_SIGNUP: 'false', SIGNUP_EMAIL_ALLOWLIST: '' } as NodeJS.ProcessEnv, 'owner@example.com');
+  record('Signup stays closed when the production flag is false', closedFlag.signupEnabled === false && closedFlag.code === 'SIGNUP_DISABLED' && closedFlag.emailAllowed === false);
+  const blankAllowlist = publicSignupDecision({ NODE_ENV: 'production', ALLOW_PUBLIC_SIGNUP: 'true' } as NodeJS.ProcessEnv, 'owner@example.com');
+  record('An unset allowlist does not block registration when the flag is true', blankAllowlist.signupEnabled === true && blankAllowlist.allowlistRestricted === false && blankAllowlist.emailAllowed === true);
   const allowlistAlone = publicSignupDecision({ NODE_ENV: 'production', SIGNUP_EMAIL_ALLOWLIST: 'owner@example.com' } as NodeJS.ProcessEnv, 'owner@example.com');
   record('An allowlist does not open production signup by itself', allowlistAlone.signupEnabled === false && allowlistAlone.code === 'SIGNUP_DISABLED');
   const invalidAllowlist = publicSignupDecision({ NODE_ENV: 'production', ALLOW_PUBLIC_SIGNUP: 'true', SIGNUP_EMAIL_ALLOWLIST: 'not-an-email' } as NodeJS.ProcessEnv, 'owner@example.com');
@@ -59,6 +65,11 @@ async function main() {
   const stranger = publicSignupDecision({ NODE_ENV: 'production', ALLOW_PUBLIC_SIGNUP: 'true', SIGNUP_EMAIL_ALLOWLIST: 'owner@example.com' } as NodeJS.ProcessEnv, 'other@example.com');
   record('The allowlist accepts only the authorised email', invited.emailAllowed === true && stranger.code === 'SIGNUP_NOT_INVITED');
   record('Development signup remains available', publicSignupDecision({ NODE_ENV: 'development' } as NodeJS.ProcessEnv).signupEnabled === true);
+  const hookSource = fs.readFileSync(path.resolve(__dirname, '../../../client/src/hooks/useSignupAvailability.tsx'), 'utf8');
+  record('A failed availability request does not open the signup form',
+    hookSource.includes("setState(response.data?.signupEnabled ? 'open' : 'closed')")
+    && hookSource.includes("setState(code === 'DB_NOT_READY' ? 'database' : 'unavailable')")
+    && !hookSource.includes("setState('open')"));
 
   const paid = resolvePublicRegistration({ plan: 'INDIVIDUAL', registrationMode: 'paid', billingCycle: 'monthly' });
   const trial = resolvePublicRegistration({ plan: 'SME', registrationMode: 'trial', billingCycle: 'yearly' });
@@ -92,7 +103,31 @@ async function main() {
       && !('database' in hidden.json) && !('checkout' in hidden.json) && !/mongodb|allowlist@|SIGNUP_EMAIL/i.test(hidden.text)
       && rejected.status === 403 && rejected.json.code === 'SIGNUP_DISABLED' && !rejected.text.includes('mongodb'));
 
+    process.env.ALLOW_PUBLIC_SIGNUP = 'false';
+    delete process.env.SIGNUP_EMAIL_ALLOWLIST;
+    const explicitlyClosed = await request(port, 'GET', '/api/onboarding/availability');
+    const explicitlyRejected = await request(port, 'POST', '/api/onboarding/start', { email: 'owner@example.com', password: 'Secret123', name: 'Owner' });
+    record('The backend stays closed when ALLOW_PUBLIC_SIGNUP is false',
+      explicitlyClosed.json.signupEnabled === false && explicitlyClosed.json.allowlistRestricted === false
+      && explicitlyRejected.status === 403 && explicitlyRejected.json.code === 'SIGNUP_DISABLED');
+
     process.env.ALLOW_PUBLIC_SIGNUP = 'true';
+    delete process.env.SIGNUP_EMAIL_ALLOWLIST;
+    const open = await request(port, 'GET', '/api/onboarding/availability');
+    const gatePassed = await request(port, 'POST', '/api/onboarding/start', {
+      email: 'owner@example.com',
+      password: 'Secret123',
+      name: 'Owner',
+      plan: 'INDIVIDUAL',
+      registrationMode: 'paid',
+      billingCycle: 'monthly',
+      company: { name: 'Owner Co', country: 'Zimbabwe', companyType: 'INDIVIDUAL_LANDLORD' }
+    });
+    record('An empty allowlist reports public signup open and the backend does not reject it',
+      open.status === 200 && open.json.signupEnabled === true && open.json.onboardingEnabled === true && open.json.allowlistRestricted === false
+      && open.json.paidRegistrationRequiresPayment === true
+      && gatePassed.status !== 403 && gatePassed.json.code !== 'SIGNUP_DISABLED' && gatePassed.json.code !== 'SIGNUP_NOT_INVITED');
+
     process.env.SIGNUP_EMAIL_ALLOWLIST = 'owner@example.com';
     const visible = await request(port, 'GET', '/api/onboarding/availability');
     const blocked = await request(port, 'POST', '/api/onboarding/start', { email: 'other@example.com', password: 'Secret123', name: 'Other', company: { name: 'Other Co' } });

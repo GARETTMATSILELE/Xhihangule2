@@ -21,7 +21,7 @@ Set these on the `mantisafrica` App Service, Production slot, as server-side app
 | `CLIENT_URL` | `https://www.mantisafrica.com` |
 | `CANONICAL_HOST` | `www.mantisafrica.com`. Requests that are already on this host stay there. |
 | `REDIRECT_FROM_HOSTS` | Not required for a test that starts on `https://www.mantisafrica.com`. Optional: `mantisafrica.azurewebsites.net` if that Azure hostname should redirect to `www`. The apex name is not part of this test. |
-| `ALLOW_PUBLIC_SIGNUP` | `true` only while you are accepting new companies. Missing or any other value keeps production signup closed. |
+| `ALLOW_PUBLIC_SIGNUP` | `true` while public registration is open. Missing, `false`, or any other value keeps production signup closed. A local `.env` file does not reach the container. Set this on the `mantisafrica` App Service. The API deploy workflow sets it to `true`. |
 | `SIGNUP_EMAIL_ALLOWLIST` | Optional comma-separated emails. When set, only those addresses can register. Leaving it empty does not open signup. Unrestricted signup is only `ALLOW_PUBLIC_SIGNUP=true` with this value blank. A non-blank value with no valid email addresses allows nobody. |
 | `MONGODB_URI` | The Azure Cosmos connection for this App Service. Do not point it at a laptop database. |
 
@@ -36,6 +36,8 @@ There is no staging slot in the workflows. A staging test needs its own hostname
 `SAAS_ONBOARDING_V2` and `REACT_APP_SAAS_ONBOARDING_V2` are not read by the current server. The signup page always calls `POST /api/onboarding/start`. Paid plans always create a pending company and a payment session. The browser cannot choose the price. A trial does not start Paynow. The first user of a new company is that company's `admin`, not a system administrator.
 
 `GET /api/onboarding/availability` tells the signup page whether registration is open, whether an allowlist is active, and that paid registration requires payment. It does not return email addresses, Paynow settings, database names, or connection details. Confirm in Azure that `MONGODB_URI` is the Cosmos connection for this App Service. Use `npm run paynow:preflight` on the server for callback diagnostics.
+
+The container image excludes `.env` files, and the application does not treat a missing flag as open. On 2 November 2026 the live availability response was `signupEnabled` false and `allowlistRestricted` false, so production is not reading `ALLOW_PUBLIC_SIGNUP=true`. Set that one App Service setting to `true` and leave `SIGNUP_EMAIL_ALLOWLIST` empty. No new image is required for that setting to take effect. Do not change `MONGODB_URI`.
 
 Checkout from `https://www.mantisafrica.com` is sufficient for the controlled test. It does not require `mantisafrica.com` to resolve or to be listed in `REDIRECT_FROM_HOSTS`. The result and return URLs stay on `www`, so Paynow notifies the same application that created the session. A request host other than `www.mantisafrica.com` is rejected unless it is the production `*.azurewebsites.net` hostname, or it is explicitly listed in `REDIRECT_FROM_HOSTS`, and the canonical host equals the result host. `X-Forwarded-Host` is ignored. A development process cannot send callbacks to `www.mantisafrica.com`, `mantisafrica.com`, or `*.azurewebsites.net`.
 
