@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startOnboarding = void 0;
+exports.startOnboarding = exports.getSignupAvailability = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const onboardingService_1 = require("../services/onboardingService");
@@ -44,15 +44,33 @@ function setAuthCookies(res, token, refreshToken) {
     res.cookie('accessToken', token, Object.assign(Object.assign({ httpOnly: true, secure: prod, sameSite: prod ? 'strict' : 'lax', path: '/' }, scoped), { maxAge: 24 * 60 * 60 * 1000 }));
     res.cookie('refreshCsrf', crypto_1.default.randomBytes(32).toString('hex'), Object.assign(Object.assign({ httpOnly: false, secure: prod, sameSite: prod ? 'strict' : 'lax', path: '/' }, scoped), { maxAge: 7 * 24 * 60 * 60 * 1000 }));
 }
+function assertSignupOpen(email) {
+    const decision = (0, publicSignupCompany_1.publicSignupDecision)(process.env, email);
+    if (!decision.signupEnabled) {
+        throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
+    }
+    if (!decision.emailAllowed) {
+        throw new errorHandler_1.AppError('This email is not authorised for registration.', 403, 'SIGNUP_NOT_INVITED');
+    }
+}
+const getSignupAvailability = (_req, res) => {
+    const decision = (0, publicSignupCompany_1.publicSignupDecision)(process.env);
+    res.json({
+        signupEnabled: decision.signupEnabled,
+        onboardingEnabled: true,
+        allowlistRestricted: decision.allowlistRestricted,
+        paidRegistrationRequiresPayment: true,
+        trialRequiresPayment: false
+    });
+};
+exports.getSignupAvailability = getSignupAvailability;
 const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     try {
-        if (!(0, publicSignupCompany_1.isPublicSignupAllowed)(process.env)) {
-            throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
-        }
-        const idempotencyKey = req.get('idempotency-key') || ((_a = req.body) === null || _a === void 0 ? void 0 : _a.idempotencyKey);
+        assertSignupOpen((_a = req.body) === null || _a === void 0 ? void 0 : _a.email);
+        const idempotencyKey = req.get('idempotency-key') || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.idempotencyKey);
         const result = yield onboardingService.start(Object.assign(Object.assign({}, req.body), { idempotencyKey }));
-        const userId = (_d = (_c = (_b = result.user) === null || _b === void 0 ? void 0 : _b._id) === null || _c === void 0 ? void 0 : _c.toString) === null || _d === void 0 ? void 0 : _d.call(_c);
+        const userId = (_e = (_d = (_c = result.user) === null || _c === void 0 ? void 0 : _c._id) === null || _d === void 0 ? void 0 : _d.toString) === null || _e === void 0 ? void 0 : _e.call(_d);
         let token;
         if (userId) {
             const session = yield authService.createSessionForUserId(userId);
@@ -62,14 +80,14 @@ const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
         yield (0, auditService_1.recordAuditEvent)({
             req,
             userId,
-            companyId: (_g = (_f = (_e = result.company) === null || _e === void 0 ? void 0 : _e._id) === null || _f === void 0 ? void 0 : _f.toString) === null || _g === void 0 ? void 0 : _g.call(_f),
+            companyId: (_h = (_g = (_f = result.company) === null || _f === void 0 ? void 0 : _f._id) === null || _g === void 0 ? void 0 : _g.toString) === null || _h === void 0 ? void 0 : _h.call(_g),
             action: 'onboarding.start',
             entityType: 'OnboardingSession',
-            entityId: (_j = (_h = result.onboardingSession._id) === null || _h === void 0 ? void 0 : _h.toString) === null || _j === void 0 ? void 0 : _j.call(_h),
+            entityId: (_k = (_j = result.onboardingSession._id) === null || _j === void 0 ? void 0 : _j.toString) === null || _k === void 0 ? void 0 : _k.call(_j),
             metadata: { plan: result.onboardingSession.plan, alreadyProcessed: result.alreadyProcessed }
         });
         const resume = result.resume;
-        const nextStep = (resume === null || resume === void 0 ? void 0 : resume.nextStep) || (((_k = result.company) === null || _k === void 0 ? void 0 : _k.onboardingStatus) === 'PENDING_PAYMENT' ? 'payment' : 'dashboard');
+        const nextStep = (resume === null || resume === void 0 ? void 0 : resume.nextStep) || (((_l = result.company) === null || _l === void 0 ? void 0 : _l.onboardingStatus) === 'PENDING_PAYMENT' ? 'payment' : 'dashboard');
         res.status(result.alreadyProcessed ? 200 : 201).json({
             onboardingSession: {
                 _id: result.onboardingSession._id,
@@ -117,7 +135,7 @@ const startOnboarding = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
                 }
             } : null,
             registration: {
-                status: ((_l = result.company) === null || _l === void 0 ? void 0 : _l.onboardingStatus) || result.onboardingSession.status,
+                status: ((_m = result.company) === null || _m === void 0 ? void 0 : _m.onboardingStatus) || result.onboardingSession.status,
                 nextStep,
                 paymentRequired: nextStep === 'payment',
                 code: resume === null || resume === void 0 ? void 0 : resume.code,

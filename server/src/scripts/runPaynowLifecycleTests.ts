@@ -72,7 +72,7 @@ function tokenFor(user: { _id: unknown; role: string; companyId?: unknown }) {
   }, JWT_CONFIG.SECRET, { expiresIn: '2h', issuer: JWT_CONFIG.ISSUER, audience: JWT_CONFIG.AUDIENCE });
 }
 
-function request(port: number, method: string, requestPath: string, token: string | undefined, body?: unknown, contentType = 'application/json', host = 'payments.example.test'): Promise<{ status: number; json: any; text: string; location: string }> {
+function request(port: number, method: string, requestPath: string, token: string | undefined, body?: unknown, contentType = 'application/json', host = 'payments.example.test', extraHeaders?: Record<string, string>): Promise<{ status: number; json: any; text: string; location: string }> {
   const payload = body === undefined ? '' : (contentType === 'application/json' ? JSON.stringify(body) : String(body));
   return new Promise((resolve, reject) => {
     const req = http.request({
@@ -82,6 +82,7 @@ function request(port: number, method: string, requestPath: string, token: strin
       path: requestPath,
       headers: {
         Host: host,
+        ...(extraHeaders || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(payload ? { 'Content-Type': contentType, 'Content-Length': Buffer.byteLength(payload) } : {})
       },
@@ -464,6 +465,37 @@ async function main() {
       second.status === 200 && second.json.status === 'duplicate' && second.json.activated === false && verifiedAudits === 1 && paidBilling?.status === 'paid');
 
     resetDouble();
+    const newPaynowIp = await world('new-paynow-ip');
+    await request(port, 'POST', '/api/paynow/web/create', newPaynowIp.token, { paymentSessionId: String(newPaynowIp.session._id) });
+    paynowTestDouble.pollStatus = 'Paid';
+    paynowTestDouble.pollReference = `SUBS-${newPaynowIp.company._id.toString()}`;
+    const newIpNotice = statusMessage('Paid', paynowTestDouble.pollReference);
+    const newIpResult = await request(port, 'POST', '/api/paynow/result', undefined, newIpNotice, 'application/x-www-form-urlencoded', 'payments.example.test', { 'X-Forwarded-For': '196.43.102.11' });
+    record('A valid notification presented as the new Paynow address is accepted',
+      newIpResult.status === 200 && newIpResult.json.activated === true && (await Subscription.findById(newPaynowIp.subscription._id))?.status === 'active');
+    const newIpDuplicate = await request(port, 'POST', '/api/paynow/result', undefined, newIpNotice, 'application/x-www-form-urlencoded', 'payments.example.test', { 'X-Forwarded-For': '196.43.102.11' });
+    record('A repeated notification from the new Paynow address does not activate again',
+      newIpDuplicate.json.status === 'duplicate' && newIpDuplicate.json.activated === false && await AuditLog.countDocuments({ entityId: String(newPaynowIp.session._id), action: 'payment.verified' }) === 1);
+
+    resetDouble();
+    const otherSource = await world('other-source-ip');
+    await request(port, 'POST', '/api/paynow/web/create', otherSource.token, { paymentSessionId: String(otherSource.session._id) });
+    paynowTestDouble.pollStatus = 'Paid';
+    paynowTestDouble.pollReference = `SUBS-${otherSource.company._id.toString()}`;
+    const otherNotice = statusMessage('Paid', paynowTestDouble.pollReference);
+    const otherResult = await request(port, 'POST', '/api/paynow/result', undefined, otherNotice, 'application/x-www-form-urlencoded', 'payments.example.test', { 'X-Forwarded-For': '203.0.113.10' });
+    record('The result endpoint does not reject a valid notification because of its source address',
+      otherResult.status === 200 && otherResult.json.activated === true && (await Subscription.findById(otherSource.subscription._id))?.status === 'active');
+
+    resetDouble();
+    const spoofedIp = await world('spoofed-paynow-ip');
+    await request(port, 'POST', '/api/paynow/web/create', spoofedIp.token, { paymentSessionId: String(spoofedIp.session._id) });
+    const spoofedNotice = statusMessage('Paid', `SUBS-${spoofedIp.company._id.toString()}`).replace(/hash=[^&]+/, 'hash=NOTVALID');
+    const spoofedResult = await request(port, 'POST', '/api/paynow/result', undefined, spoofedNotice, 'application/x-www-form-urlencoded', 'payments.example.test', { 'X-Forwarded-For': '196.43.102.11' });
+    record('A forwarded Paynow address does not bypass hash verification',
+      spoofedResult.status === 401 && (await Subscription.findById(spoofedIp.subscription._id))?.status === 'past_due' && (await PaymentSession.findById(spoofedIp.session._id))?.status === 'provider_created');
+
+    resetDouble();
     const badHash = await world('bad-hash');
     await request(port, 'POST', '/api/paynow/web/create', badHash.token, { paymentSessionId: String(badHash.session._id) });
     const tampered = statusMessage('Paid', `SUBS-${badHash.company._id.toString()}`).replace(/hash=[^&]+/, 'hash=NOTVALID');
@@ -475,8 +507,9 @@ async function main() {
     record('D Missing hash is rejected', missingHash.status === 401 && badSubscription?.status === 'past_due');
 
     resetDouble();
+    const activeBeforeUnknown = await Subscription.countDocuments({ status: 'active' });
     const unknown = await request(port, 'POST', '/api/paynow/result', undefined, statusMessage('Paid', 'SUBS-does-not-exist'), 'application/x-www-form-urlencoded');
-    record('D Unknown reference does not activate a subscription', unknown.status === 200 && unknown.json.activated !== true && await Subscription.countDocuments({ status: 'active' }) === 1);
+    record('D Unknown reference does not activate a subscription', unknown.status === 200 && unknown.json.activated !== true && await Subscription.countDocuments({ status: 'active' }) === activeBeforeUnknown);
 
     resetDouble();
     const other = await world('other-company');

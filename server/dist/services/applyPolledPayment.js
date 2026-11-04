@@ -109,6 +109,7 @@ function notePaynowLateStatus(reference, status, knownSession) {
 }
 function applyPolledPayment(reference, poll) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const resolved = yield resolvePaynowProviderRef(reference);
         if (resolved.kind === 'missing')
             return { found: false, activated: false };
@@ -122,11 +123,17 @@ function applyPolledPayment(reference, poll) {
             };
         }
         const session = resolved.session;
+        const terminal = session.status === 'paid' || session.status === 'reconciled' || session.status === 'cancelled' || session.status === 'failed' || session.status === 'expired';
+        if (!terminal && !(0, registrationPaymentPolicy_1.paynowModeMatchesSession)((_a = session.metadata) === null || _a === void 0 ? void 0 : _a.paynowMode)) {
+            const error = new Error('Paynow application mode does not match the checkout that created this payment');
+            error.statusCode = 409;
+            error.code = 'PAYNOW_MODE_MISMATCH';
+            throw error;
+        }
         const decision = (0, registrationPaymentPolicy_1.evaluateProviderPoll)({ amount: Number(session.amount), currency: session.currency || 'USD', providerRef: session.providerRef }, poll);
         const lateStatus = decision.outcome === 'failed' && (decision.status === 'refunded' || decision.status === 'disputed')
             ? decision.status
             : '';
-        const terminal = session.status === 'paid' || session.status === 'reconciled' || session.status === 'cancelled' || session.status === 'failed' || session.status === 'expired';
         if (terminal && lateStatus) {
             yield notePaynowLateStatus(reference, lateStatus, session);
             return {
@@ -176,7 +183,11 @@ function applyPolledPayment(reference, poll) {
                 action: 'payment.verified',
                 entityType: 'PaymentSession',
                 entityId: String(session._id),
-                metadata: { providerRef: session.providerRef }
+                metadata: {
+                    providerRef: session.providerRef,
+                    paynowMode: ((_b = session.metadata) === null || _b === void 0 ? void 0 : _b.paynowMode) || undefined,
+                    testTransaction: ((_c = session.metadata) === null || _c === void 0 ? void 0 : _c.paynowMode) === 'test'
+                }
             });
             if (!audited) {
                 const error = new Error('Payment activation was not started because the audit event could not be stored');

@@ -99,11 +99,15 @@ function clearAuthCookies(res) {
 const signup = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     try {
-        if (!(0, publicSignupCompany_1.isPublicSignupAllowed)(process.env)) {
-            throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
-        }
         const { email: rawEmail, password, name, company, plan: inputPlan } = req.body;
         const email = (0, normalization_1.normalizeEmail)(rawEmail);
+        const signupDecision = (0, publicSignupCompany_1.publicSignupDecision)(process.env, email);
+        if (!signupDecision.signupEnabled) {
+            throw new errorHandler_1.AppError('Public signup is disabled', 403, 'SIGNUP_DISABLED');
+        }
+        if (!signupDecision.emailAllowed) {
+            throw new errorHandler_1.AppError('This email is not authorised for registration.', 403, 'SIGNUP_NOT_INVITED');
+        }
         if (!email || !password || !name) {
             throw new errorHandler_1.AppError('Email, password and name are required', 400, 'VALIDATION_ERROR');
         }

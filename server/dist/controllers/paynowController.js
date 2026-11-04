@@ -46,8 +46,9 @@ function readEnv() {
         RETURN_URL: process.env.PAYNOW_RETURN_URL,
         PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL
     };
-    // Fallback: allow reading from server/config/local.paynow.json in development
-    if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && (process.env.NODE_ENV !== 'production')) {
+    // Local development can keep keys in server/config/local.paynow.json.
+    // Automated tests set PAYNOW_DISABLE_LOCAL_CONFIG so they cannot pick up merchant keys.
+    if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && process.env.NODE_ENV !== 'production' && process.env.PAYNOW_DISABLE_LOCAL_CONFIG !== '1') {
         try {
             const cfgPath = path_1.default.resolve(__dirname, '..', '..', 'config', 'local.paynow.json');
             if (fs_1.default.existsSync(cfgPath)) {
@@ -66,31 +67,40 @@ function readEnv() {
     }
     return env;
 }
-function resolveBaseUrl(req, env) {
-    if (env.PUBLIC_BASE_URL)
-        return env.PUBLIC_BASE_URL.replace(/\/+$/, '');
-    const host = req.get('host');
-    const proto = req.protocol;
-    return `${proto}://${host}`;
+function deploymentForRequest(req) {
+    const env = readEnv();
+    return (0, registrationPaymentPolicy_1.evaluatePaynowDeployment)(Object.assign(Object.assign({}, process.env), { PAYNOW_INTEGRATION_ID: env.INTEGRATION_ID, PAYNOW_INTEGRATION_KEY: env.INTEGRATION_KEY, PAYNOW_RESULT_URL: env.RESULT_URL, PAYNOW_RETURN_URL: env.RETURN_URL, PUBLIC_BASE_URL: env.PUBLIC_BASE_URL || process.env.PUBLIC_BASE_URL }), {
+        nodeEnv: process.env.NODE_ENV,
+        requestHost: (0, registrationPaymentPolicy_1.paynowRequestHost)(req.headers)
+    });
+}
+function assertPaynowReady(req) {
+    const decision = deploymentForRequest(req);
+    if (decision.ok)
+        return decision;
+    if (decision.issues.includes('credentials_missing')) {
+        throw httpError('Checkout is temporarily unavailable.', 503, 'PAYNOW_NOT_CONFIGURED');
+    }
+    if (decision.issues.includes('mode_invalid') || decision.issues.includes('mode_required')) {
+        throw httpError('Paynow mode is not supported. Use test, sandbox, or live.', 503, 'PAYNOW_MODE_INVALID');
+    }
+    if (decision.issues.includes('test_merchant_email_required')) {
+        throw httpError('Paynow test mode requires the merchant email that owns the integration.', 503, 'PAYNOW_TEST_MERCHANT_EMAIL_REQUIRED');
+    }
+    const error = httpError('Paynow callback URL does not belong to this server.', 503, 'PAYNOW_CALLBACK_URL_REJECTED');
+    error.issue = decision.issues.find((issue) => issue !== 'credentials_missing') || decision.issues[0];
+    throw error;
 }
 function getPaynowForRequest(req) {
     const env = readEnv();
-    if (!env.INTEGRATION_ID || !env.INTEGRATION_KEY) {
-        throw httpError('Checkout is temporarily unavailable.', 503, 'PAYNOW_NOT_CONFIGURED');
-    }
-    if ((0, registrationPaymentPolicy_1.paynowConfigurationState)().mode === 'invalid') {
-        throw httpError('Paynow mode is not supported. Use test, sandbox, or live.', 503, 'PAYNOW_MODE_INVALID');
-    }
+    const decision = assertPaynowReady(req);
     const paynow = new Paynow(env.INTEGRATION_ID, env.INTEGRATION_KEY);
-    // Configure result/return URLs for this request (fall back to server-computed URLs)
-    const base = resolveBaseUrl(req, env);
-    paynow.resultUrl = (env.RESULT_URL && env.RESULT_URL.trim().length > 0)
-        ? env.RESULT_URL
-        : `${base}/api/paynow/result`;
-    paynow.returnUrl = (env.RETURN_URL && env.RETURN_URL.trim().length > 0)
-        ? env.RETURN_URL
-        : `${base}/api/paynow/return`;
+    paynow.resultUrl = decision.resultUrl;
+    paynow.returnUrl = decision.returnUrl;
     return paynow;
+}
+function paynowLog(level, event, fields) {
+    logger_1.logger[level](event, fields);
 }
 function httpError(message, statusCode, code) {
     const error = new Error(message);
@@ -100,7 +110,7 @@ function httpError(message, statusCode, code) {
 }
 function initiatePaynowCheckout(req, input) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
+        var _a, _b, _c;
         if (!input.paymentSessionId) {
             throw httpError('A payment session is required', 400, 'PAYMENT_SESSION_REQUIRED');
         }
@@ -152,9 +162,35 @@ function initiatePaynowCheckout(req, input) {
             const user = yield User_1.User.findById(session.userId).select('email').lean();
             email = String((user === null || user === void 0 ? void 0 : user.email) || '');
         }
+        email = (0, registrationPaymentPolicy_1.paynowCustomerAuthEmail)(email);
         const ref = session.providerRef && String(session.providerRef).trim()
             ? String(session.providerRef).trim()
             : `SUBS-${session._id.toString()}`;
+        const requestHost = (0, registrationPaymentPolicy_1.paynowRequestHost)(req.headers);
+        paynowLog('info', 'paynow_checkout_started', {
+            correlationId: ref,
+            reference: ref,
+            paymentSessionId: String(session._id),
+            amount: priced,
+            currency: 'USD',
+            mode: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode,
+            testTransaction: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode === 'test'
+        });
+        let deployment;
+        try {
+            deployment = assertPaynowReady(req);
+        }
+        catch (error) {
+            if ((error === null || error === void 0 ? void 0 : error.code) === 'PAYNOW_CALLBACK_URL_REJECTED') {
+                paynowLog('warn', 'paynow_callback_target_differs', {
+                    correlationId: ref,
+                    reference: ref,
+                    requestHost,
+                    issue: error.issue
+                });
+            }
+            throw error;
+        }
         const paynow = getPaynowForRequest(req);
         const payment = paynow.createPayment(ref, email || '');
         payment.add(input.description || `Mantis ${plan} ${cycle} subscription`, priced);
@@ -163,6 +199,12 @@ function initiatePaynowCheckout(req, input) {
             response = yield paynow.send(payment);
         }
         catch (error) {
+            paynowLog('warn', 'paynow_checkout_rejected', {
+                correlationId: ref,
+                reference: ref,
+                paymentSessionId: String(session._id),
+                code: 'PAYNOW_CHECKOUT_FAILED'
+            });
             yield (0, auditService_1.recordAuditEvent)({
                 userId: session.userId ? String(session.userId) : undefined,
                 companyId: String(session.companyId),
@@ -184,6 +226,12 @@ function initiatePaynowCheckout(req, input) {
                 status: 'failure',
                 metadata: { code: 'PAYNOW_CHECKOUT_FAILED' }
             });
+            paynowLog('warn', 'paynow_checkout_rejected', {
+                correlationId: ref,
+                reference: ref,
+                paymentSessionId: String(session._id),
+                code: 'PAYNOW_CHECKOUT_FAILED'
+            });
             const error = httpError(String((response === null || response === void 0 ? void 0 : response.error) || 'Failed to create Paynow payment'), 502, 'PAYNOW_CHECKOUT_FAILED');
             throw error;
         }
@@ -197,6 +245,7 @@ function initiatePaynowCheckout(req, input) {
         session.status = 'provider_created';
         session.amount = priced;
         session.currency = 'USD';
+        session.metadata = Object.assign(Object.assign({}, (session.metadata || {})), { paynowMode: deployment.mode, testTransaction: deployment.mode === 'test' });
         session.rawProviderResponse = {
             redirectUrl: String(response.redirectUrl),
             pollUrl
@@ -205,6 +254,26 @@ function initiatePaynowCheckout(req, input) {
         if (session.billingPaymentId) {
             yield BillingPayment_1.BillingPayment.findByIdAndUpdate(session.billingPaymentId, { $set: { providerRef: ref, amount: priced, currency: 'USD' } });
         }
+        yield rememberPaynowReference(req, session);
+        const audited = yield (0, auditService_1.recordAuditEvent)({
+            userId: session.userId ? String(session.userId) : undefined,
+            companyId: String(session.companyId),
+            action: 'checkout.initiated',
+            entityType: 'PaymentSession',
+            entityId: String(session._id),
+            metadata: { providerRef: ref, amount: priced, currency: 'USD' }
+        });
+        if (!audited) {
+            paynowLog('warn', 'paynow_checkout_audit_missing', { correlationId: ref, reference: ref });
+        }
+        paynowLog('info', 'paynow_checkout_accepted', {
+            correlationId: ref,
+            reference: ref,
+            paymentSessionId: String(session._id),
+            amount: priced,
+            currency: 'USD',
+            paynowReference: String(((_c = session.rawProviderResponse) === null || _c === void 0 ? void 0 : _c.paynowReference) || '') || undefined
+        });
         return {
             reference: ref,
             redirectUrl: String(response.redirectUrl),
@@ -213,29 +282,84 @@ function initiatePaynowCheckout(req, input) {
         };
     });
 }
+function rememberPaynowReference(req, session) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
+        const pollUrl = String(session.pollUrl || '');
+        if (!pollUrl)
+            return;
+        const reference = String(session.providerRef || '');
+        try {
+            const polled = yield readPaynowStatus(req, pollUrl);
+            const paynowReference = String(((_a = polled.parsed) === null || _a === void 0 ? void 0 : _a.paynowReference) || ((_b = polled.fields) === null || _b === void 0 ? void 0 : _b.paynowreference) || '').trim();
+            paynowLog('info', 'paynow_poll_completed', {
+                correlationId: reference,
+                reference,
+                paymentStatus: String(((_c = polled.parsed) === null || _c === void 0 ? void 0 : _c.status) || ''),
+                paynowReference: paynowReference || undefined
+            });
+            if (!paynowReference)
+                return;
+            const current = (session.rawProviderResponse && typeof session.rawProviderResponse === 'object')
+                ? session.rawProviderResponse
+                : {};
+            if (current.paynowReference === paynowReference)
+                return;
+            session.rawProviderResponse = Object.assign(Object.assign({}, current), { paynowReference });
+            session.markModified('rawProviderResponse');
+            yield session.save();
+        }
+        catch (error) {
+            paynowLog('warn', 'paynow_poll_failed', {
+                correlationId: reference,
+                reference,
+                error: String((error === null || error === void 0 ? void 0 : error.message) || error).slice(0, 160)
+            });
+        }
+    });
+}
 function readPaynowStatus(req, pollUrl) {
     return __awaiter(this, void 0, void 0, function* () {
         if (!(0, registrationPaymentPolicy_1.isAllowedPaynowPollUrl)(pollUrl)) {
             throw httpError('Payment status URL is not allowed', 400, 'PAYNOW_POLL_URL_REJECTED');
         }
         const paynow = getPaynowForRequest(req);
-        const response = yield axios_1.default.post(pollUrl, null, {
-            timeout: 15000,
-            responseType: 'text',
-            maxRedirects: 0
-        });
-        const raw = typeof response.data === 'string' ? response.data : String(response.data || '');
-        const parsed = paynow.parseStatusUpdate(raw);
-        const fields = paynow.parseQuery(raw);
-        return { parsed, fields };
+        let pollHost = '';
+        try {
+            pollHost = new URL(pollUrl).host;
+        }
+        catch (_a) {
+            pollHost = '';
+        }
+        paynowLog('info', 'paynow_poll_started', { pollHost });
+        try {
+            const response = yield axios_1.default.post(pollUrl, null, {
+                timeout: 15000,
+                responseType: 'text',
+                maxRedirects: 0
+            });
+            const raw = typeof response.data === 'string' ? response.data : String(response.data || '');
+            const parsed = paynow.parseStatusUpdate(raw);
+            const fields = paynow.parseQuery(raw);
+            return { parsed, fields };
+        }
+        catch (error) {
+            paynowLog('warn', 'paynow_poll_failed', {
+                pollHost,
+                error: String((error === null || error === void 0 ? void 0 : error.message) || error).slice(0, 160)
+            });
+            throw error;
+        }
     });
 }
 function confirmSessionPayment(req, reference, verifiedPoll) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
         const resolved = yield (0, applyPolledPayment_1.resolvePaynowProviderRef)(reference);
-        if (resolved.kind === 'missing')
+        if (resolved.kind === 'missing') {
+            paynowLog('warn', 'paynow_payment_unmatched', { correlationId: reference, reference });
             return { found: false, activated: false, ignored: false };
+        }
         if (resolved.kind === 'ambiguous') {
             return { found: true, activated: false, ignored: true, reviewRequired: true, paymentStatus: 'review_required' };
         }
@@ -255,17 +379,40 @@ function confirmSessionPayment(req, reference, verifiedPoll) {
                 session: applied.session || session
             };
         }
+        if (!(0, registrationPaymentPolicy_1.paynowModeMatchesSession)((_a = session.metadata) === null || _a === void 0 ? void 0 : _a.paynowMode)) {
+            throw httpError('Paynow application mode does not match the checkout that created this payment.', 409, 'PAYNOW_MODE_MISMATCH');
+        }
         if (!session.pollUrl) {
             return { found: true, paymentStatus: session.status, activated: false, ignored: false, session };
         }
         const polled = yield readPaynowStatus(req, session.pollUrl);
-        const applied = yield (0, applyPolledPayment_1.applyPolledPayment)(reference, {
-            status: (_a = polled.parsed) === null || _a === void 0 ? void 0 : _a.status,
-            amount: (_b = polled.parsed) === null || _b === void 0 ? void 0 : _b.amount,
-            currency: ((_c = polled.fields) === null || _c === void 0 ? void 0 : _c.currency) || ((_d = polled.fields) === null || _d === void 0 ? void 0 : _d.Currency),
-            reference: (_e = polled.parsed) === null || _e === void 0 ? void 0 : _e.reference,
-            paynowReference: (_f = polled.parsed) === null || _f === void 0 ? void 0 : _f.paynowReference
+        const paynowReference = String(((_b = polled.parsed) === null || _b === void 0 ? void 0 : _b.paynowReference) || ((_c = polled.fields) === null || _c === void 0 ? void 0 : _c.paynowreference) || '').trim();
+        paynowLog('info', 'paynow_poll_completed', {
+            correlationId: reference,
+            reference,
+            paymentStatus: String(((_d = polled.parsed) === null || _d === void 0 ? void 0 : _d.status) || ''),
+            paynowReference: paynowReference || undefined
         });
+        if (paynowReference) {
+            const current = (session.rawProviderResponse && typeof session.rawProviderResponse === 'object')
+                ? session.rawProviderResponse
+                : {};
+            if (current.paynowReference !== paynowReference) {
+                session.rawProviderResponse = Object.assign(Object.assign({}, current), { paynowReference });
+                session.markModified('rawProviderResponse');
+                yield session.save();
+            }
+        }
+        const applied = yield (0, applyPolledPayment_1.applyPolledPayment)(reference, {
+            status: (_e = polled.parsed) === null || _e === void 0 ? void 0 : _e.status,
+            amount: (_f = polled.parsed) === null || _f === void 0 ? void 0 : _f.amount,
+            currency: ((_g = polled.fields) === null || _g === void 0 ? void 0 : _g.currency) || ((_h = polled.fields) === null || _h === void 0 ? void 0 : _h.Currency),
+            reference: (_j = polled.parsed) === null || _j === void 0 ? void 0 : _j.reference,
+            paynowReference: (_k = polled.parsed) === null || _k === void 0 ? void 0 : _k.paynowReference
+        });
+        if (applied.activated === true) {
+            paynowLog('info', 'paynow_subscription_activated', { correlationId: reference, reference });
+        }
         return {
             found: applied.found,
             paymentStatus: applied.paymentStatus || session.status,
@@ -279,13 +426,19 @@ function getStatus(_req, res) {
     try {
         const env = readEnv();
         const state = (0, registrationPaymentPolicy_1.paynowConfigurationState)();
+        const deployment = deploymentForRequest(_req);
         return res.json({
             status: state.configured ? 'ok' : 'disabled',
             mode: state.mode,
             hasIntegrationId: Boolean(env.INTEGRATION_ID),
             hasIntegrationKey: Boolean(env.INTEGRATION_KEY),
-            resultUrl: env.RESULT_URL || null,
-            returnUrl: env.RETURN_URL || null
+            resultHost: deployment.resultHost || null,
+            resultPath: deployment.resultPath || null,
+            returnHost: deployment.returnHost || null,
+            returnPath: deployment.returnPath || null,
+            callbackReady: deployment.ok,
+            issues: deployment.issues,
+            providerDashboardModeChecked: false
         });
     }
     catch (e) {
@@ -307,11 +460,7 @@ function createWebPayment(req, res) {
             return res.json(Object.assign({ status: 'ok' }, result));
         }
         catch (e) {
-            return res.status((e === null || e === void 0 ? void 0 : e.statusCode) || 500).json({
-                status: 'error',
-                message: (e === null || e === void 0 ? void 0 : e.message) || 'Paynow error',
-                code: (e === null || e === void 0 ? void 0 : e.code) || 'PAYNOW_ERROR'
-            });
+            return res.status((e === null || e === void 0 ? void 0 : e.statusCode) || 500).json(Object.assign({ status: 'error', message: (e === null || e === void 0 ? void 0 : e.message) || 'Paynow error', code: (e === null || e === void 0 ? void 0 : e.code) || 'PAYNOW_ERROR' }, ((e === null || e === void 0 ? void 0 : e.issue) ? { issue: e.issue } : {})));
         }
     });
 }
@@ -361,7 +510,7 @@ function createMobilePayment(req, res) {
                 return res.status(400).json({ status: 'error', message: `method must be one of: ${allowed.join(', ')}` });
             }
             // Create a standard payment, then invoke sendMobile(payment, phone, method)
-            const payment = paynow.createPayment(ref, email || '');
+            const payment = paynow.createPayment(ref, (0, registrationPaymentPolicy_1.paynowCustomerAuthEmail)(email || ''));
             payment.add('Payment', amt);
             const response = yield paynow.sendMobile(payment, phone, normalizedMethod);
             if (response && response.success) {
@@ -373,6 +522,7 @@ function createMobilePayment(req, res) {
                 session.providerRef = ref;
                 session.pollUrl = pollUrl;
                 session.status = 'provider_created';
+                session.metadata = Object.assign(Object.assign({}, (session.metadata || {})), { paynowMode: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode, testTransaction: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode === 'test' });
                 session.rawProviderResponse = { pollUrl, instructions: response.instructions || null };
                 yield session.save();
                 return res.json({
@@ -423,22 +573,27 @@ function pollTransaction(req, res) {
 // Paynow server-to-server notification (Instant Payment Notification)
 function handleResult(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
+        var _a, _b, _c, _d;
         try {
             const env = readEnv();
             if (!env.INTEGRATION_KEY) {
                 return res.status(503).json({ status: 'error', message: 'Paynow is not configured', code: 'PAYNOW_NOT_CONFIGURED' });
             }
             const payload = Object.assign(Object.assign({}, (req.query || {})), (req.body || {}));
+            const reference = String(payload.reference || payload.Reference || '').trim();
+            paynowLog('info', 'paynow_result_received', {
+                correlationId: reference || 'paynow',
+                reference: reference || undefined,
+                hasHash: Boolean(payload.hash || payload.Hash)
+            });
             if (!(0, registrationPaymentPolicy_1.verifyPaynowPayload)(payload, env.INTEGRATION_KEY)) {
-                const unverifiedReference = String(payload.reference || payload.Reference || '').trim();
+                const unverifiedReference = reference || String(payload.reference || payload.Reference || '').trim();
                 (0, operationalSignal_1.signalOperationalFailure)('paynow_callback_unverified', {
                     correlationId: unverifiedReference || 'paynow',
                     reference: unverifiedReference || undefined
                 });
                 return res.status(401).json({ status: 'error', message: 'Invalid Paynow signature' });
             }
-            const reference = String(payload.reference || payload.Reference || '').trim();
             const eventId = String(payload.hash || payload.pollurl || payload.pollUrl || reference);
             const payloadFingerprint = [
                 reference,
@@ -469,15 +624,32 @@ function handleResult(req, res) {
                 })
             });
             if (outcome.status === 'duplicate' || outcome.status === 'in_progress' || outcome.status === 'payload_conflict') {
+                paynowLog('info', outcome.status === 'duplicate' ? 'paynow_result_duplicate' : 'paynow_result_skipped', {
+                    correlationId: reference,
+                    reference,
+                    result: outcome.status
+                });
                 return res.status(200).json({ status: outcome.status, activated: false });
             }
+            paynowLog('info', 'paynow_result_processed', {
+                correlationId: reference,
+                reference,
+                result: outcome.status,
+                activated: outcome.activated === true
+            });
             return res.status(200).json({ status: outcome.status, activated: outcome.activated });
         }
         catch (e) {
             if ((e === null || e === void 0 ? void 0 : e.statusCode) === 409) {
+                const rejectedReference = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.reference) || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.reference) || '').trim();
+                paynowLog('warn', 'paynow_result_rejected', {
+                    correlationId: rejectedReference || 'paynow',
+                    reference: rejectedReference || undefined,
+                    code: (e === null || e === void 0 ? void 0 : e.code) || 'PAYMENT_MISMATCH'
+                });
                 return res.status(200).json({ status: 'ignored', message: e.message });
             }
-            const failedReference = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.reference) || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.reference) || '').trim();
+            const failedReference = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.reference) || ((_d = req.query) === null || _d === void 0 ? void 0 : _d.reference) || '').trim();
             logger_1.logger.warn('paynow_callback_failed', {
                 correlationId: failedReference || 'paynow',
                 reference: failedReference || undefined,

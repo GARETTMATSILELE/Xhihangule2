@@ -6,5 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const onboardingController_1 = require("../controllers/onboardingController");
 const router = express_1.default.Router();
+router.get('/availability', onboardingController_1.getSignupAvailability);
 router.post('/start', onboardingController_1.startOnboarding);
 exports.default = router;

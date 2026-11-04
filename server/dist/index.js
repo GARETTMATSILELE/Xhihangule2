@@ -49,6 +49,7 @@ const express_1 = __importDefault(require("express"));
 const compression_1 = __importDefault(require("compression"));
 const cors_1 = __importDefault(require("cors"));
 const corsOrigins_1 = require("./config/corsOrigins");
+const canonicalHost_1 = require("./utils/canonicalHost");
 const dotenv_1 = __importDefault(require("dotenv"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const helmet_1 = __importDefault(require("helmet"));
@@ -115,6 +116,7 @@ const trustReconciliationJob_1 = require("./jobs/trustReconciliationJob");
 // Removed legacy bootstrap imports
 const systemAdminBootstrap_1 = require("./services/systemAdminBootstrap");
 const productionConfig_1 = require("./config/productionConfig");
+const registrationPaymentPolicy_1 = require("./services/registrationPaymentPolicy");
 const emailService_1 = require("./services/emailService");
 const requestSecurity_1 = require("./utils/requestSecurity");
 const runtimeRole_1 = require("./config/runtimeRole");
@@ -208,26 +210,30 @@ if (productionConfigProblems.length > 0) {
     console.error(`Missing required environment variables in production: ${productionConfigProblems.join(', ')}`);
     process.exit(1);
 }
-// Optional canonical host redirect (configure via env to enable)
-const CANONICAL_HOST = process.env.CANONICAL_HOST;
-const REDIRECT_FROM_HOSTS = (process.env.REDIRECT_FROM_HOSTS || '')
-    .split(',')
-    .map((h) => h.trim())
-    .filter(Boolean);
-if (CANONICAL_HOST && REDIRECT_FROM_HOSTS.length > 0) {
-    app.use((req, res, next) => {
-        const hostHeader = req.headers.host || '';
-        const currentHost = String(hostHeader).split(':')[0];
-        if (currentHost && REDIRECT_FROM_HOSTS.includes(currentHost)) {
-            if (req.method === 'GET' || req.method === 'HEAD') {
-                const target = `${req.protocol}://${CANONICAL_HOST}${req.originalUrl}`;
-                return res.redirect(301, target);
-            }
-            // Do not redirect non-idempotent API requests to avoid breaking clients
-        }
-        return next();
+if (process.env.NODE_ENV === 'production') {
+    const paynowDeployment = (0, registrationPaymentPolicy_1.evaluatePaynowDeployment)(process.env, {
+        nodeEnv: process.env.NODE_ENV,
+        requestHost: process.env.CANONICAL_HOST || process.env.PUBLIC_BASE_URL || ''
     });
+    if (!paynowDeployment.ok) {
+        // eslint-disable-next-line no-console
+        console.warn(`Paynow checkout is blocked until configuration is corrected: ${paynowDeployment.issues.join(', ')}`);
+    }
 }
+// Optional canonical host redirect. www is not redirected. The apex is not required.
+app.use((req, res, next) => {
+    const target = (0, canonicalHost_1.canonicalRedirectTarget)({
+        hostHeader: String(req.headers.host || ''),
+        protocol: req.protocol,
+        originalUrl: req.originalUrl,
+        method: req.method,
+        canonicalHost: process.env.CANONICAL_HOST,
+        redirectFromHosts: process.env.REDIRECT_FROM_HOSTS
+    });
+    if (target)
+        return res.redirect(301, target);
+    return next();
+});
 // Middleware
 const allowedOrigins = (0, corsOrigins_1.buildAllowedOrigins)(process.env);
 // Security headers (production)

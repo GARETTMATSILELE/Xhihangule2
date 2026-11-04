@@ -71,6 +71,7 @@ const introductionCommissionService_1 = require("../services/introductionCommiss
 const introductionLeaseContext_1 = require("../services/introductionLeaseContext");
 const salePaymentCompleteness_1 = require("../services/salePaymentCompleteness");
 const propertyAccess_1 = require("../utils/propertyAccess");
+const access_1 = require("../utils/access");
 const contentDisposition_1 = require("../utils/contentDisposition");
 function visiblePropertyIdList(req) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -1669,33 +1670,27 @@ const updateAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
         if (!((_b = req.user) === null || _b === void 0 ? void 0 : _b.companyId)) {
             return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
         }
-        // Only allow agents
-        if (req.user.role !== 'agent') {
+        if (!(0, access_1.hasAnyRole)(req, ['agent', 'sales'])) {
             return res.status(403).json({ message: 'Only agents can update property owners via this endpoint.' });
         }
         const { id } = req.params;
         const { firstName, lastName, email, phone, propertyIds } = req.body;
-        // Find the property owner and ensure it belongs to the agent's company
+        const companyId = new mongoose_1.default.Types.ObjectId(req.user.companyId);
         const owner = yield PropertyOwner_1.PropertyOwner.findOne({
             _id: id,
-            companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
+            companyId,
         });
-        if (!owner || !(yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, String(owner._id)))) {
+        if (!owner) {
             return res.status(404).json({ message: 'Property owner not found' });
         }
-        if (propertyIds && propertyIds.length > 0 && !(yield propertiesAreVisible(req, propertyIds))) {
-            return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
+        const canEditProfile = yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, String(owner._id));
+        const assigningProperties = Array.isArray(propertyIds);
+        if (!canEditProfile && !assigningProperties) {
+            return res.status(404).json({ message: 'Property owner not found' });
         }
-        if (propertyIds && propertyIds.length > 0) {
-            const companyProperties = yield Property_1.Property.find({
-                _id: { $in: propertyIds.map((id) => new mongoose_1.default.Types.ObjectId(id)) },
-                companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId)
-            });
-            if (companyProperties.length !== propertyIds.length) {
-                return res.status(403).json({ message: 'All properties must belong to your company.' });
-            }
+        if (assigningProperties && !canEditProfile && !(yield (0, propertyAccess_1.callerCanReadPropertyOwner)(req, String(owner._id)))) {
+            return res.status(404).json({ message: 'Property owner not found' });
         }
-        // Update owner data
         const updateData = {};
         if (firstName)
             updateData.firstName = firstName;
@@ -1705,11 +1700,53 @@ const updateAgentPropertyOwner = (req, res) => __awaiter(void 0, void 0, void 0,
             updateData.email = email;
         if (phone)
             updateData.phone = phone;
-        if (propertyIds)
-            updateData.properties = propertyIds;
+        let removedPropertyIds = [];
+        let selectedByCaller = [];
+        if (assigningProperties) {
+            const requestedIds = propertyIds.map((propertyId) => String(propertyId));
+            if (requestedIds.some((propertyId) => !mongoose_1.default.Types.ObjectId.isValid(propertyId))) {
+                return res.status(400).json({ message: 'One or more property IDs are invalid.' });
+            }
+            const accessible = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+            const assignment = (0, propertyAccess_1.planOwnerPropertyAssignment)((owner.properties || []).map((propertyId) => String(propertyId)), requestedIds, accessible === 'company' ? 'company' : accessible.map(String));
+            if (assignment.rejected.length > 0) {
+                return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
+            }
+            const accessibleRequested = assignment.properties.filter((propertyId) => accessible === 'company' || accessible.some((row) => String(row) === propertyId));
+            if (accessibleRequested.length > 0) {
+                const companyProperties = yield Property_1.Property.find({
+                    _id: { $in: accessibleRequested.map((propertyId) => new mongoose_1.default.Types.ObjectId(propertyId)) },
+                    companyId,
+                    isDeleted: { $ne: true },
+                }).select('_id propertyOwnerId');
+                if (companyProperties.length !== accessibleRequested.length) {
+                    return res.status(403).json({ message: 'All properties must belong to your company.' });
+                }
+                const assignedElsewhere = companyProperties.find((property) => property.propertyOwnerId && String(property.propertyOwnerId) !== String(owner._id));
+                if (assignedElsewhere) {
+                    return res.status(403).json({ message: 'One or more properties are already assigned to another owner.' });
+                }
+            }
+            updateData.properties = assignment.properties;
+            selectedByCaller = accessibleRequested;
+            removedPropertyIds = assignment.removed;
+        }
         const updatedOwner = yield PropertyOwner_1.PropertyOwner.findByIdAndUpdate(id, updateData, { new: true });
-        // Note: Do not modify Property.ownerId here. Keep property ownership with the agent (User).
-        // The owner-to-property linkage is handled by the PropertyOwner.properties field above.
+        // Property.ownerId stays the agent User. propertyOwnerId is the landlord link.
+        if (selectedByCaller.length > 0) {
+            yield Property_1.Property.updateMany({
+                _id: { $in: selectedByCaller.map((propertyId) => new mongoose_1.default.Types.ObjectId(propertyId)) },
+                companyId,
+                isDeleted: { $ne: true },
+            }, { $set: { propertyOwnerId: owner._id } });
+        }
+        if (removedPropertyIds.length > 0) {
+            yield Property_1.Property.updateMany({
+                _id: { $in: removedPropertyIds.map((propertyId) => new mongoose_1.default.Types.ObjectId(propertyId)) },
+                companyId,
+                propertyOwnerId: owner._id,
+            }, { $unset: { propertyOwnerId: 1 } });
+        }
         res.json(updatedOwner);
     }
     catch (error) {

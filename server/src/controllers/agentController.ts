@@ -24,7 +24,8 @@ import { COMPLETED_PAYMENT_IMMUTABLE_MESSAGE, assertCompletedPaymentFinanciallyI
 import { prepareIntroductionRentalCommission } from '../services/introductionCommissionService';
 import { introductionContextErrorResponse } from '../services/introductionLeaseContext';
 import { salePaymentIncompleteResponse, validateSalePaymentCompleteness } from '../services/salePaymentCompleteness';
-import { callerCanAccessProperty, callerCanMutatePropertyOwner, propertyIdsForCaller } from '../utils/propertyAccess';
+import { callerCanAccessProperty, callerCanMutatePropertyOwner, callerCanReadPropertyOwner, planOwnerPropertyAssignment, propertyIdsForCaller } from '../utils/propertyAccess';
+import { hasAnyRole } from '../utils/access';
 import { safeAttachmentFilename } from '../utils/contentDisposition';
 
 async function visiblePropertyIdList(req: Request): Promise<mongoose.Types.ObjectId[] | null> {
@@ -1839,45 +1840,80 @@ export const updateAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
     }
 
-    // Only allow agents
-    if (req.user.role !== 'agent') {
+    if (!hasAnyRole(req, ['agent', 'sales'])) {
       return res.status(403).json({ message: 'Only agents can update property owners via this endpoint.' });
     }
 
     const { id } = req.params;
     const { firstName, lastName, email, phone, propertyIds } = req.body;
+    const companyId = new mongoose.Types.ObjectId(req.user.companyId);
 
-    // Find the property owner and ensure it belongs to the agent's company
-    const owner = await PropertyOwner.findOne({ 
-      _id: id, 
-      companyId: new mongoose.Types.ObjectId(req.user.companyId) 
+    const owner = await PropertyOwner.findOne({
+      _id: id,
+      companyId,
     });
-
-    if (!owner || !(await callerCanMutatePropertyOwner(req, String(owner._id)))) {
+    if (!owner) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    if (propertyIds && propertyIds.length > 0 && !(await propertiesAreVisible(req, propertyIds))) {
-      return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
+    const canEditProfile = await callerCanMutatePropertyOwner(req, String(owner._id));
+    const assigningProperties = Array.isArray(propertyIds);
+    if (!canEditProfile && !assigningProperties) {
+      return res.status(404).json({ message: 'Property owner not found' });
     }
-    if (propertyIds && propertyIds.length > 0) {
-      const companyProperties = await Property.find({ 
-        _id: { $in: propertyIds.map((id: string) => new mongoose.Types.ObjectId(id)) },
-        companyId: new mongoose.Types.ObjectId(req.user.companyId)
-      });
-      
-      if (companyProperties.length !== propertyIds.length) {
-        return res.status(403).json({ message: 'All properties must belong to your company.' });
-      }
+    if (assigningProperties && !canEditProfile && !(await callerCanReadPropertyOwner(req, String(owner._id)))) {
+      return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    // Update owner data
     const updateData: any = {};
     if (firstName) updateData.firstName = firstName;
     if (lastName) updateData.lastName = lastName;
     if (email) updateData.email = email;
     if (phone) updateData.phone = phone;
-    if (propertyIds) updateData.properties = propertyIds;
+
+    let removedPropertyIds: string[] = [];
+    let selectedByCaller: string[] = [];
+    if (assigningProperties) {
+      const requestedIds = propertyIds.map((propertyId: unknown) => String(propertyId));
+      if (requestedIds.some((propertyId: string) => !mongoose.Types.ObjectId.isValid(propertyId))) {
+        return res.status(400).json({ message: 'One or more property IDs are invalid.' });
+      }
+
+      const accessible = await propertyIdsForCaller(req);
+      const assignment = planOwnerPropertyAssignment(
+        (owner.properties || []).map((propertyId) => String(propertyId)),
+        requestedIds,
+        accessible === 'company' ? 'company' : accessible.map(String),
+      );
+      if (assignment.rejected.length > 0) {
+        return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
+      }
+
+      const accessibleRequested = assignment.properties.filter(
+        (propertyId) => accessible === 'company' || accessible.some((row) => String(row) === propertyId)
+      );
+      if (accessibleRequested.length > 0) {
+        const companyProperties = await Property.find({
+          _id: { $in: accessibleRequested.map((propertyId) => new mongoose.Types.ObjectId(propertyId)) },
+          companyId,
+          isDeleted: { $ne: true },
+        }).select('_id propertyOwnerId');
+
+        if (companyProperties.length !== accessibleRequested.length) {
+          return res.status(403).json({ message: 'All properties must belong to your company.' });
+        }
+        const assignedElsewhere = companyProperties.find((property) =>
+          property.propertyOwnerId && String(property.propertyOwnerId) !== String(owner._id)
+        );
+        if (assignedElsewhere) {
+          return res.status(403).json({ message: 'One or more properties are already assigned to another owner.' });
+        }
+      }
+
+      updateData.properties = assignment.properties;
+      selectedByCaller = accessibleRequested;
+      removedPropertyIds = assignment.removed;
+    }
 
     const updatedOwner = await PropertyOwner.findByIdAndUpdate(
       id,
@@ -1885,8 +1921,27 @@ export const updateAgentPropertyOwner = async (req: Request, res: Response) => {
       { new: true }
     );
 
-    // Note: Do not modify Property.ownerId here. Keep property ownership with the agent (User).
-    // The owner-to-property linkage is handled by the PropertyOwner.properties field above.
+    // Property.ownerId stays the agent User. propertyOwnerId is the landlord link.
+    if (selectedByCaller.length > 0) {
+      await Property.updateMany(
+        {
+          _id: { $in: selectedByCaller.map((propertyId) => new mongoose.Types.ObjectId(propertyId)) },
+          companyId,
+          isDeleted: { $ne: true },
+        },
+        { $set: { propertyOwnerId: owner._id } }
+      );
+    }
+    if (removedPropertyIds.length > 0) {
+      await Property.updateMany(
+        {
+          _id: { $in: removedPropertyIds.map((propertyId) => new mongoose.Types.ObjectId(propertyId)) },
+          companyId,
+          propertyOwnerId: owner._id,
+        },
+        { $unset: { propertyOwnerId: 1 } }
+      );
+    }
 
     res.json(updatedOwner);
   } catch (error) {

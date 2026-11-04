@@ -127,7 +127,15 @@ The command only reads. `writeAllowed` is always false.
 
 The 19 October 2026 session `SUBS-6ad5f314dc4ca083c259d767` (Paynow reference `65682257`) was created in the local `property-management` database while its result URL pointed at `https://www.mantisafrica.com`. Do not mark it paid, do not run confirm for it, and do not repair it from production. A later reconciliation needs a separate authorised process and verified evidence on the database that owns the session.
 
-## 7. Local development
+## 7. Paynow source address
+
+Paynow notified merchants that `paynow.co.zw` will use `196.43.102.11` from 11 November 2026, and that the previous address should stay allowed until Paynow confirms the move.
+
+`POST /api/paynow/result` does not allow or deny the caller by IP address. The hash is what authenticates the notice. A valid hash is processed from any source address, including `196.43.102.11`. An invalid hash is rejected even when `X-Forwarded-For` names that address. The application does not keep a Paynow IP list, so there is no old address to remove and no new address to insert in code.
+
+`www.mantisafrica.com` is served through Azure Front Door. This repository has no Front Door WAF rule, network security group, or App Service access restriction. Those Azure controls were not changed. If the portal has an IP allow rule for Paynow, add `196.43.102.11` beside the address already listed and leave the old address in place until Paynow says the migration is finished. Do not add an application allowlist that trusts `X-Forwarded-For`: a caller can set that header, and Front Door's own address is what the app socket sees.
+
+## 8. Local development
 
 Checkout is refused when the result host is `www.mantisafrica.com` or `*.azurewebsites.net` and the request host is localhost. That is the failure that left the October session unreconciled.
 

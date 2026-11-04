@@ -158,3 +158,45 @@ export async function callerCanMutatePropertyOwner(req: Request, ownerId: string
   }
   return true;
 }
+
+function uniquePropertyIdStrings(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    const value = String(id);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+/**
+ * Keep landlord links the caller cannot see, and add or remove only properties
+ * already in that caller's portfolio. A shared owner can gain another property
+ * without one agent being able to drop another agent's existing link.
+ */
+export function planOwnerPropertyAssignment(
+  existingPropertyIds: string[],
+  requestedPropertyIds: string[],
+  accessiblePropertyIds: string[] | 'company',
+): { properties: string[]; added: string[]; removed: string[]; rejected: string[] } {
+  const existing = uniquePropertyIdStrings(existingPropertyIds);
+  const requested = uniquePropertyIdStrings(requestedPropertyIds);
+  const canAccess = (id: string) =>
+    accessiblePropertyIds === 'company' || accessiblePropertyIds.some((row) => String(row) === id);
+
+  const preserved = existing.filter((id) => !canAccess(id));
+  const preservedSet = new Set(preserved);
+  const rejected = requested.filter((id) => !canAccess(id) && !preservedSet.has(id));
+  const accessibleRequested = requested.filter((id) => canAccess(id));
+  const previousAccessible = new Set(existing.filter((id) => canAccess(id)));
+  const nextAccessible = new Set(accessibleRequested);
+
+  return {
+    properties: [...preserved, ...accessibleRequested],
+    added: accessibleRequested.filter((id) => !previousAccessible.has(id)),
+    removed: [...previousAccessible].filter((id) => !nextAccessible.has(id)),
+    rejected,
+  };
+}

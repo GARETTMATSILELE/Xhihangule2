@@ -13,6 +13,14 @@ exports.paynowCheckoutDecision = paynowCheckoutDecision;
 exports.isAllowedPaynowPollUrl = isAllowedPaynowPollUrl;
 exports.paynowPayloadHash = paynowPayloadHash;
 exports.verifyPaynowPayload = verifyPaynowPayload;
+exports.paynowCustomerAuthEmail = paynowCustomerAuthEmail;
+exports.paynowCallbackTargetDiffers = paynowCallbackTargetDiffers;
+exports.paynowRequestHost = paynowRequestHost;
+exports.paynowHostname = paynowHostname;
+exports.isReservedProductionPaynowHost = isReservedProductionPaynowHost;
+exports.evaluatePaynowDeployment = evaluatePaynowDeployment;
+exports.paynowModeMatchesSession = paynowModeMatchesSession;
+exports.explainUnreconciledPaynowSession = explainUnreconciledPaynowSession;
 exports.paynowConfigurationState = paynowConfigurationState;
 exports.productionApiUrl = productionApiUrl;
 const plan_1 = require("../types/plan");
@@ -156,8 +164,9 @@ function paynowPayloadHash(values, integrationKey) {
     const sha512 = require('js-sha512').sha512;
     let material = '';
     for (const key of Object.keys(values)) {
-        if (key !== 'hash')
-            material += values[key] == null ? '' : String(values[key]);
+        if (key.toLowerCase() === 'hash')
+            continue;
+        material += values[key] == null ? '' : String(values[key]);
     }
     material += String(integrationKey || '').toLowerCase();
     return sha512(material).toUpperCase();
@@ -167,6 +176,196 @@ function verifyPaynowPayload(values, integrationKey) {
     if (!hash || !integrationKey)
         return false;
     return hash === paynowPayloadHash(values, integrationKey);
+}
+/**
+ * Paynow test mode can complete "TESTING: Faked Success" only when authemail is the
+ * merchant account that owns the integration. Live checkout keeps the customer email.
+ * A blank merchant email leaves the customer email unchanged.
+ */
+function paynowCustomerAuthEmail(customerEmail, env = process.env) {
+    const customer = String(customerEmail || '').trim();
+    if (paynowConfigurationState(env).mode !== 'test')
+        return customer;
+    const merchant = String(env.PAYNOW_MERCHANT_EMAIL || '').trim();
+    return merchant || customer;
+}
+/** True when Paynow will notify a different host from the one that created the checkout. */
+function paynowCallbackTargetDiffers(resultUrl, requestHost) {
+    const request = paynowHostname(requestHost);
+    if (!request)
+        return false;
+    return Boolean(paynowHostname(resultUrl)) && paynowHostname(resultUrl) !== request;
+}
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
+/** The Host header only. X-Forwarded-Host is not a trusted checkout host. */
+function paynowRequestHost(headers) {
+    const raw = headers === null || headers === void 0 ? void 0 : headers.host;
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    return String(value || '').split(',')[0].trim();
+}
+function paynowHostname(value) {
+    const raw = String(value || '').trim();
+    if (!raw)
+        return '';
+    try {
+        return new URL(raw.includes('://') ? raw : `http://${raw}`).hostname.toLowerCase();
+    }
+    catch (_a) {
+        return '';
+    }
+}
+function isLoopbackHost(hostname) {
+    return LOOPBACK_HOSTS.has(hostname);
+}
+/** Hosts that belong to the deployed Mantis site. A local process must not send Paynow there. */
+function isReservedProductionPaynowHost(hostname) {
+    const host = hostname.toLowerCase();
+    return host === 'mantisafrica.com' || host === 'www.mantisafrica.com' || host.endsWith('.azurewebsites.net');
+}
+function inspectedUrl(value) {
+    try {
+        const url = new URL(value);
+        return {
+            protocol: url.protocol,
+            hostname: url.hostname.toLowerCase(),
+            pathname: url.pathname.replace(/\/+$/, '') || '/'
+        };
+    }
+    catch (_a) {
+        return null;
+    }
+}
+/**
+ * Decide whether this process may create a Paynow checkout.
+ * PAYNOW_MODE does not change the merchant integration's mode on Paynow.
+ * A loopback process cannot nominate the production host as its callback.
+ */
+function evaluatePaynowDeployment(env, input = {}) {
+    var _a, _b;
+    const nodeEnv = (_b = (_a = input.nodeEnv) !== null && _a !== void 0 ? _a : env.NODE_ENV) !== null && _b !== void 0 ? _b : '';
+    const production = nodeEnv === 'production';
+    const state = paynowConfigurationState(env);
+    const issues = [];
+    if (!state.configured)
+        issues.push('credentials_missing');
+    if (state.mode === 'invalid')
+        issues.push('mode_invalid');
+    if (state.configured && (state.mode === 'unspecified' || state.mode === 'unconfigured'))
+        issues.push('mode_required');
+    if (state.mode === 'test' && !isRegistrationEmail(String(env.PAYNOW_MERCHANT_EMAIL || ''))) {
+        issues.push('test_merchant_email_required');
+    }
+    const requestHost = paynowHostname(input.requestHost || '');
+    let resultUrl = String(env.PAYNOW_RESULT_URL || '').trim();
+    let returnUrl = String(env.PAYNOW_RETURN_URL || '').trim();
+    if (!resultUrl && !production && isLoopbackHost(requestHost)) {
+        resultUrl = `http://${String(input.requestHost || '').trim()}/api/paynow/result`;
+    }
+    if (!returnUrl && resultUrl) {
+        const derived = inspectedUrl(resultUrl);
+        if (derived) {
+            const url = new URL(resultUrl);
+            url.pathname = '/api/paynow/return';
+            url.search = '';
+            returnUrl = url.toString();
+        }
+    }
+    const result = resultUrl ? inspectedUrl(resultUrl) : null;
+    const returning = returnUrl ? inspectedUrl(returnUrl) : null;
+    if (!result)
+        issues.push(resultUrl ? 'result_url_not_https' : 'result_url_required');
+    if (!returning)
+        issues.push(returnUrl ? 'return_url_not_https' : 'return_url_required');
+    if (result) {
+        const secure = result.protocol === 'https:' || (!production && isLoopbackHost(result.hostname) && result.protocol === 'http:');
+        if (!secure)
+            issues.push('result_url_not_https');
+        if (production && isLoopbackHost(result.hostname))
+            issues.push('result_url_localhost');
+        if (result.pathname !== '/api/paynow/result')
+            issues.push('result_path_invalid');
+    }
+    if (returning) {
+        const secure = returning.protocol === 'https:' || (!production && isLoopbackHost(returning.hostname) && returning.protocol === 'http:');
+        if (!secure)
+            issues.push('return_url_not_https');
+        if (production && isLoopbackHost(returning.hostname))
+            issues.push('return_url_localhost');
+        if (returning.pathname !== '/api/paynow/return')
+            issues.push('return_path_invalid');
+    }
+    const resultHost = (result === null || result === void 0 ? void 0 : result.hostname) || '';
+    const returnHost = (returning === null || returning === void 0 ? void 0 : returning.hostname) || '';
+    if (!production && resultHost && isReservedProductionPaynowHost(resultHost) && !issues.includes('callback_host_mismatch')) {
+        issues.push('callback_host_mismatch');
+    }
+    if (resultHost && requestHost && resultHost !== requestHost) {
+        const override = paynowHostname(env.PAYNOW_CALLBACK_HOST || '');
+        const canonical = paynowHostname(env.CANONICAL_HOST || env.PUBLIC_BASE_URL || '');
+        const redirects = String(env.REDIRECT_FROM_HOSTS || '').split(',').map((item) => paynowHostname(item)).filter(Boolean);
+        const harness = !production && isLoopbackHost(requestHost) && override === resultHost && !isReservedProductionPaynowHost(resultHost);
+        const azureAlias = production && requestHost.endsWith('.azurewebsites.net') && Boolean(canonical) && canonical === resultHost;
+        const redirectAlias = production && Boolean(canonical) && resultHost === canonical && redirects.includes(requestHost);
+        if (!harness && !azureAlias && !redirectAlias)
+            issues.push('callback_host_mismatch');
+    }
+    const publicHost = paynowHostname(env.PUBLIC_BASE_URL || '');
+    if (publicHost && resultHost && publicHost !== resultHost)
+        issues.push('public_base_mismatch');
+    const clientHost = paynowHostname(env.CLIENT_URL || env.PUBLIC_BASE_URL || '');
+    if (returnHost && resultHost && returnHost !== resultHost && returnHost !== clientHost)
+        issues.push('return_host_mismatch');
+    const mode = state.mode === 'test' || state.mode === 'live' ? state.mode : state.mode;
+    return {
+        ok: issues.length === 0,
+        mode,
+        issues,
+        resultUrl,
+        returnUrl,
+        resultHost,
+        returnHost,
+        resultPath: (result === null || result === void 0 ? void 0 : result.pathname) || '',
+        returnPath: (returning === null || returning === void 0 ? void 0 : returning.pathname) || ''
+    };
+}
+/** A checkout stamped test or live can be completed only while the server is still in that mode. */
+function paynowModeMatchesSession(sessionMode, env = process.env) {
+    const stamped = String(sessionMode || '').trim().toLowerCase();
+    if (stamped !== 'test' && stamped !== 'live')
+        return true;
+    return paynowConfigurationState(env).mode === stamped;
+}
+/**
+ * Read-only explanation for a Paynow reference. This never authorises a write.
+ * Paynow reporting Paid is not evidence that this database holds the session.
+ */
+function explainUnreconciledPaynowSession(input) {
+    if (!input.found) {
+        return {
+            classification: 'absent',
+            writeAllowed: false,
+            reason: 'This database has no payment session for the reference. A Paynow Paid status does not prove the session was stored here, and no session should be created to match it.'
+        };
+    }
+    if (input.status === 'paid' || input.status === 'reconciled') {
+        return {
+            classification: 'reconciled',
+            writeAllowed: false,
+            reason: 'The session is already paid or reconciled. Diagnosis does not change it.'
+        };
+    }
+    if ((input.status === 'provider_created' || input.status === 'pending') && input.verifiedAuditCount === 0) {
+        return {
+            classification: 'unreconciled',
+            writeAllowed: false,
+            reason: 'The session is still waiting and has no payment.verified audit. The result notification was not applied on this database. Do not mark it paid from a Paynow status alone.'
+        };
+    }
+    return {
+        classification: 'closed',
+        writeAllowed: false,
+        reason: `The session status is ${input.status || 'unknown'}. Diagnosis does not change historical payment records.`
+    };
 }
 function paynowConfigurationState(env = process.env) {
     const configured = Boolean(String(env.PAYNOW_INTEGRATION_ID || '').trim() && String(env.PAYNOW_INTEGRATION_KEY || '').trim());
