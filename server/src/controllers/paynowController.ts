@@ -122,6 +122,17 @@ function safePaynowError(value: unknown): string {
 		.slice(0, 180);
 }
 
+function safeInitiationDiag(fields: Record<string, string> | undefined, gatewayError: unknown) {
+	const expected = String(gatewayError || '').match(/start with:\s*([0-9A-Fa-f]{6})/i);
+	return {
+		hashPrefix: fields?.hash ? String(fields.hash).slice(0, 6) : undefined,
+		gatewayHashPrefix: expected ? expected[1].toUpperCase() : undefined,
+		amountSent: fields?.amount,
+		descriptionLength: fields?.additionalinfo ? fields.additionalinfo.length : 0,
+		fieldOrder: fields ? Object.keys(fields).filter((name) => name.toLowerCase() !== 'hash') : undefined
+	};
+}
+
 function paynowLog(level: 'info' | 'warn', event: string, fields: Record<string, unknown>) {
 	logger[level](event, fields);
 }
@@ -231,6 +242,7 @@ export async function initiatePaynowCheckout(req: Request, input: {
 	const paynow = getPaynowForRequest(req);
 	const payment = paynow.createPayment(ref, email || '');
 	payment.add(input.description || `Mantis ${plan} ${cycle} subscription`, priced);
+	const initiation = typeof paynow.build === 'function' ? paynow.build(payment) as Record<string, string> : undefined;
 	let response: { success?: boolean; redirectUrl?: string; pollUrl?: string; error?: string };
 	try {
 		response = await paynow.send(payment);
@@ -240,7 +252,8 @@ export async function initiatePaynowCheckout(req: Request, input: {
 			reference: ref,
 			paymentSessionId: String(session._id),
 			code: 'PAYNOW_CHECKOUT_FAILED',
-			paynowError: safePaynowError(error?.message)
+			paynowError: safePaynowError(error?.message),
+			...safeInitiationDiag(initiation, error?.message)
 		});
 		await recordAuditEvent({
 			userId: session.userId ? String(session.userId) : undefined,
@@ -268,7 +281,8 @@ export async function initiatePaynowCheckout(req: Request, input: {
 			reference: ref,
 			paymentSessionId: String(session._id),
 			code: 'PAYNOW_CHECKOUT_FAILED',
-			paynowError: safePaynowError(response?.error)
+			paynowError: safePaynowError(response?.error),
+			...safeInitiationDiag(initiation, response?.error)
 		});
 		const error = httpError(String(response?.error || 'Failed to create Paynow payment'), 502, 'PAYNOW_CHECKOUT_FAILED');
 		throw error;
@@ -459,9 +473,12 @@ export function getStatus(_req: Request, res: Response) {
 		const deployment = deploymentForRequest(_req);
 		return res.json({
 			status: state.configured ? 'ok' : 'disabled',
+			build: String(process.env.GIT_SHA || '').slice(0, 12) || null,
 			mode: state.mode,
+			integrationId: env.INTEGRATION_ID || null,
 			hasIntegrationId: Boolean(env.INTEGRATION_ID),
 			hasIntegrationKey: Boolean(env.INTEGRATION_KEY),
+			integrationKeyLength: env.INTEGRATION_KEY ? env.INTEGRATION_KEY.length : 0,
 			resultHost: deployment.resultHost || null,
 			resultPath: deployment.resultPath || null,
 			returnHost: deployment.returnHost || null,

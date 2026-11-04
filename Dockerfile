@@ -63,10 +63,12 @@ RUN apt-get update \
        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+ARG GIT_SHA=unknown
 ENV NODE_ENV=production \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    PORT=8080
+    PORT=8080 \
+    GIT_SHA=${GIT_SHA}
 
 WORKDIR /app
 

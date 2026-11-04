@@ -129,7 +129,7 @@ jobs:
         env:
           IMAGE_REPO: ${{ steps.compute_repo.outputs.image_repo }}
         run: |
-          docker build -t "$IMAGE_REPO:${{ github.sha }}" .
+          docker build --build-arg GIT_SHA=${{ github.sha }} -t "$IMAGE_REPO:${{ github.sha }}" .
           docker tag "$IMAGE_REPO:${{ github.sha }}" "$IMAGE_REPO:latest"
 
       - name: ACR login (OIDC)
