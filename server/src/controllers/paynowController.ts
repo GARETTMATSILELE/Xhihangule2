@@ -24,6 +24,7 @@ import { recordAuditEvent } from '../services/auditService';
 import { logger } from '../utils/logger';
 import { classifyOperationalFailure } from '../services/operationalFailure';
 import { processVerifiedPaynowEvent } from '../services/paynowCallbackService';
+import { installCorrectPaynowHashing, normalizePaynowCredential, shouldLoadLocalPaynowConfig } from '../services/paynowHash';
 
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -47,7 +48,8 @@ function readEnv(): PaynowEnv {
 	};
 	// Local development can keep keys in server/config/local.paynow.json.
 	// Automated tests set PAYNOW_DISABLE_LOCAL_CONFIG so they cannot pick up merchant keys.
-	if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && process.env.NODE_ENV !== 'production' && process.env.PAYNOW_DISABLE_LOCAL_CONFIG !== '1') {
+	// Production never reads that file, including when Azure has not set the variables.
+	if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && shouldLoadLocalPaynowConfig()) {
 		try {
 			const cfgPath = path.resolve(__dirname, '..', '..', 'config', 'local.paynow.json');
 			if (fs.existsSync(cfgPath)) {
@@ -63,6 +65,8 @@ function readEnv(): PaynowEnv {
 			// ignore
 		}
 	}
+	env.INTEGRATION_ID = normalizePaynowCredential(env.INTEGRATION_ID);
+	env.INTEGRATION_KEY = normalizePaynowCredential(env.INTEGRATION_KEY);
 	return env;
 }
 
@@ -108,7 +112,14 @@ function getPaynowForRequest(req: Request) {
 	const paynow = new Paynow(env.INTEGRATION_ID, env.INTEGRATION_KEY);
 	paynow.resultUrl = decision.resultUrl;
 	paynow.returnUrl = decision.returnUrl;
+	installCorrectPaynowHashing(paynow);
 	return paynow;
+}
+
+function safePaynowError(value: unknown): string {
+	return String(value || '')
+		.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, '[redacted]')
+		.slice(0, 180);
 }
 
 function paynowLog(level: 'info' | 'warn', event: string, fields: Record<string, unknown>) {
@@ -228,7 +239,8 @@ export async function initiatePaynowCheckout(req: Request, input: {
 			correlationId: ref,
 			reference: ref,
 			paymentSessionId: String(session._id),
-			code: 'PAYNOW_CHECKOUT_FAILED'
+			code: 'PAYNOW_CHECKOUT_FAILED',
+			paynowError: safePaynowError(error?.message)
 		});
 		await recordAuditEvent({
 			userId: session.userId ? String(session.userId) : undefined,
@@ -255,7 +267,8 @@ export async function initiatePaynowCheckout(req: Request, input: {
 			correlationId: ref,
 			reference: ref,
 			paymentSessionId: String(session._id),
-			code: 'PAYNOW_CHECKOUT_FAILED'
+			code: 'PAYNOW_CHECKOUT_FAILED',
+			paynowError: safePaynowError(response?.error)
 		});
 		const error = httpError(String(response?.error || 'Failed to create Paynow payment'), 502, 'PAYNOW_CHECKOUT_FAILED');
 		throw error;

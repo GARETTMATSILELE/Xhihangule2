@@ -162,7 +162,10 @@ export function isAllowedPaynowPollUrl(url: string): boolean {
   }
 }
 
-/** Same concatenation order as the Paynow SDK: every field except hash, then the integration key. */
+/**
+ * Paynow hash: raw field values in message order, excluding hash, then the integration key unchanged.
+ * UTF-8 SHA512, uppercase hex. Values are not URL-encoded and the key is not lowercased.
+ */
 export function paynowPayloadHash(values: Record<string, unknown>, integrationKey: string): string {
   const sha512 = require('js-sha512').sha512 as (value: string) => string;
   let material = '';
@@ -170,7 +173,7 @@ export function paynowPayloadHash(values: Record<string, unknown>, integrationKe
     if (key.toLowerCase() === 'hash') continue;
     material += values[key] == null ? '' : String(values[key]);
   }
-  material += String(integrationKey || '').toLowerCase();
+  material += String(integrationKey || '');
   return sha512(material).toUpperCase();
 }
 

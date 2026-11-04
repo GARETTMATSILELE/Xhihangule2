@@ -49,6 +49,7 @@
     "test:cosmos-lock-compatibility": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runCosmosLockCompatibilityTests.ts",
     "test:expense-sync": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runExpenseSyncTests.ts",
     "test:financial-recovery": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runFinancialRecoveryTests.ts",
+    "test:paynow-hash": "cross-env NODE_ENV=development PAYNOW_DISABLE_LOCAL_CONFIG=1 ts-node --transpile-only src/scripts/runPaynowHashTests.ts",
     "test:paynow-callback": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runPaynowCallbackTests.ts",
     "test:paynow-lifecycle": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/runPaynowLifecycleTests.ts",
     "paynow:preflight": "cross-env NODE_ENV=development ts-node --transpile-only src/scripts/paynowConfigPreflight.ts",
