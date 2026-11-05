@@ -62,6 +62,21 @@ export type AccountingActualSnapshot = {
     deposit?: string;
   };
   duplicates?: Partial<Record<AccountingComponent, number>>;
+  /**
+   * A posted journal in this company uses the same receipt reference and a different payment id.
+   * It is evidence for manual review. It is not this payment's journal.
+   */
+  journalReferenceCollision?: {
+    reference: string;
+    otherPaymentId: string;
+    journalId?: string;
+  };
+  /** Same receipt reference posted for another company. It is not used. */
+  journalOtherCompanyReference?: {
+    reference: string;
+    companyId: string;
+    journalId?: string;
+  };
 };
 
 export type AccountingReconciliationStatus = 'complete' | 'incomplete' | 'failed' | 'not_applicable';
@@ -338,6 +353,21 @@ export function evaluateAccountingReconciliation(input: {
     if (compared.status === 'MISSING') missing.push(check.component);
     if (compared.status === 'MISMATCHED') mismatched.push(check.component);
     if (compared.issue) issues.push(compared.issue);
+  }
+
+  if (expected.journal && actual.journalReferenceCollision) {
+    const missingIndex = missing.indexOf('journal');
+    if (missingIndex >= 0) missing.splice(missingIndex, 1);
+    if (!mismatched.includes('journal')) mismatched.push('journal');
+    componentStatus.journal = 'MISMATCHED';
+    issues.push({
+      component: 'journal',
+      expected: paymentId,
+      actual: actual.journalReferenceCollision.otherPaymentId,
+      difference: 'receipt reference belongs to another payment',
+      status: 'MISMATCHED',
+      paymentId
+    });
   }
 
   const anyExpected = expected.ownerIncome

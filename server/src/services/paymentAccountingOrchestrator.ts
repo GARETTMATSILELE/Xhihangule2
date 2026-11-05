@@ -272,11 +272,23 @@ export async function postPaymentAccounting(
         journalSeams.add(journalSeamKey);
         throw new Error('PHASE26_FAIL_JOURNAL');
       }
-      await accountingIntegrationService.syncPaymentReceived(payment as any, { createdBy: opts?.createdBy });
-      artifacts.journal = 'posted';
+      const journalResult = await accountingIntegrationService.syncPaymentReceived(payment as any, { createdBy: opts?.createdBy });
+      if (journalResult.receiptJournal === 'posted') {
+        artifacts.journal = 'posted';
+      } else if (journalResult.reason === 'zero_amount') {
+        artifacts.journal = 'skipped';
+      } else {
+        artifacts.journal = 'failed';
+        errors.push(`journal: ${journalResult.reason || 'receipt journal was not posted'}`);
+        await accountingIntegrationService.recordReceiptJournalFailure(
+          payment as any,
+          new Error(journalResult.reason || 'receipt journal was not posted')
+        );
+      }
     } catch (e: any) {
       artifacts.journal = 'failed';
       errors.push(`journal: ${e?.message || e}`);
+      await accountingIntegrationService.recordReceiptJournalFailure(payment as any, e);
       if (!isPermanentAccountingFailure(e)) {
         try {
           await ledgerEventService.enqueueEvent('journal', paymentId);

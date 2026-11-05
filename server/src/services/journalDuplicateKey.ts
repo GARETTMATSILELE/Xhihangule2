@@ -73,6 +73,20 @@ export function matchingJournalIdentity(
   return null;
 }
 
+/**
+ * The receipt reference already belongs to a different payment in this company.
+ * The existing journal is not reassigned and is not treated as this payment's journal.
+ */
+export class JournalReferenceCollisionError extends Error {
+  readonly code = 'JOURNAL_REFERENCE_COLLISION';
+  readonly statusCode = 409;
+
+  constructor(reference: string, otherPaymentId: string) {
+    super(`Receipt reference ${reference} already belongs to payment ${otherPaymentId}. It was not reassigned.`);
+    this.name = 'JournalReferenceCollisionError';
+  }
+}
+
 export function persistedJournalMatchesIdentity(
   journal: { companyId?: unknown; sourceModule?: unknown; sourceId?: unknown } | null | undefined,
   identity: JournalOperationIdentity

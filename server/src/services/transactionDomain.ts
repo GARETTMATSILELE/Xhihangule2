@@ -135,7 +135,8 @@ export function isPermanentAccountingFailure(error: unknown): boolean {
   return (
     code === 'OWNER_INCOME_AMOUNT_MISSING' ||
     code === 'PAYMENT_DOMAIN_MISSING' ||
-    code === 'ACCOUNTING_CLASSIFICATION_CONFLICT'
+    code === 'ACCOUNTING_CLASSIFICATION_CONFLICT' ||
+    code === 'JOURNAL_REFERENCE_COLLISION'
   );
 }
 

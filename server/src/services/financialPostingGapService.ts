@@ -98,9 +98,20 @@ async function inspectFinancialPostingGaps(companyId: string, limit = 200): Prom
     const reversalJournal = journalBySource.get(`${paymentId}:reversal`);
 
     if (policy.allowed && !policy.skipJournal && money(payment.amount) > 0 && !journal) {
-      findings.push(gap(payment, 'accounting journal', payment.accountingComplete === true
-        ? 'ACCOUNTING_COMPLETE_WITHOUT_JOURNAL'
-        : 'MISSING_JOURNAL'));
+      const reference = `PAY-${String(payment.referenceNumber || paymentId)}`;
+      const otherPaymentJournal = await JournalEntry.findOne({
+        companyId: companyObjectId,
+        reference,
+        status: 'posted',
+        sourceId: { $ne: paymentId }
+      }).select('sourceId companyId').lean();
+      findings.push(gap(
+        payment,
+        otherPaymentJournal ? 'receipt journal belongs to another payment' : 'accounting journal',
+        otherPaymentJournal
+          ? 'JOURNAL_REFERENCE_COLLISION'
+          : (payment.accountingComplete === true ? 'ACCOUNTING_COMPLETE_WITHOUT_JOURNAL' : 'MISSING_JOURNAL')
+      ));
     }
     if (vat > 0 && !vatByPayment.get(paymentId) && activeObligations.length > 0) {
       findings.push(gap(payment, 'VAT collection record', 'VAT_COLLECTION_WITHOUT_RECORD'));

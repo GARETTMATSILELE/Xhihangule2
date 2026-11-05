@@ -29,6 +29,16 @@ import { computeOwnerIncomeAmount } from './paymentAccountingCompleteness';
 import { completedPaymentRequiresFinalizedCommission } from './accountingPostingPolicy';
 import { commissionVatSnapshotGap } from './vatPolicyService';
 import { idsEqual, roundMoney } from '../utils/money';
+import { findPeriodForDate } from './accountingPeriodService';
+import {
+  assessControlledRecovery,
+  canonicalReceiptJournalBalance,
+  classifyReceiptJournals,
+  paymentIsReversed,
+  receiptJournalReference,
+  receiptJournalSourceModule,
+  type ControlledRecoveryAssessment
+} from './journalRecoveryAssessment';
 
 function asObjectId(paymentId: string): mongoose.Types.ObjectId | null {
   return mongoose.Types.ObjectId.isValid(paymentId) ? new mongoose.Types.ObjectId(paymentId) : null;
@@ -70,12 +80,26 @@ export async function loadAccountingActualSnapshot(payment: any): Promise<Accoun
   };
   const oid = asObjectId(paymentId);
   if (!oid) return empty;
+  const companyId = payment?.companyId;
+  const companyObjectId = companyId && mongoose.Types.ObjectId.isValid(String(companyId))
+    ? new mongoose.Types.ObjectId(String(companyId))
+    : null;
+  const receiptReference = receiptJournalReference(payment);
+  const receiptModule = receiptJournalSourceModule(payment);
+  const journalFilter: Record<string, unknown>[] = [];
+  if (companyObjectId && receiptModule) {
+    journalFilter.push({ companyId: companyObjectId, sourceModule: receiptModule, sourceId: paymentId, status: 'posted' });
+  }
+  if (companyObjectId) {
+    journalFilter.push({ companyId: companyObjectId, reference: receiptReference, status: 'posted' });
+  }
+  journalFilter.push({ reference: receiptReference, status: 'posted' });
 
   const [
     propertyAccount,
     agentAccounts,
     companyAccount,
-    journalHit,
+    journalCandidates,
     vatHit,
     deposits
   ] = await Promise.all([
@@ -100,20 +124,35 @@ export async function loadAccountingActualSnapshot(payment: any): Promise<Accoun
       }
     }).select('transactions.type transactions.status transactions.amount transactions.paymentId').lean(),
     CompanyAccount.findOne({
+      ...(companyObjectId ? { companyId: companyObjectId } : {}),
       transactions: {
         $elemMatch: {
           paymentId: oid,
           isArchived: { $ne: true }
         }
       }
-    }).select('transactions.paymentId transactions.amount transactions.isArchived').lean(),
-    JournalEntry.findOne({
-      sourceId: paymentId,
-      status: 'posted'
-    }).select('_id sourceId').lean(),
-    VatRecord.findOne({ transactionId: paymentId }).select('_id transactionId vatCollected').lean(),
-    RentalDeposit.find({ paymentId: oid, type: 'payment' }).select('_id paymentId depositAmount').lean()
+    }).select('companyId transactions.paymentId transactions.amount transactions.isArchived').lean(),
+    journalFilter.length
+      ? JournalEntry.find({ $or: journalFilter }).select('_id companyId sourceId sourceModule reference status').lean()
+      : Promise.resolve([]),
+    VatRecord.findOne({
+      ...(companyObjectId ? { companyId: companyObjectId } : {}),
+      transactionId: paymentId
+    }).select('_id companyId transactionId vatCollected').lean(),
+    RentalDeposit.find({
+      ...(companyObjectId ? { companyId: companyObjectId } : {}),
+      paymentId: oid,
+      type: 'payment'
+    }).select('_id companyId paymentId depositAmount').lean()
   ]);
+  const journalClass = classifyReceiptJournals({
+    paymentId,
+    companyId: companyObjectId ? String(companyObjectId) : '',
+    reference: receiptReference,
+    sourceModule: receiptModule,
+    journals: journalCandidates as any[]
+  });
+  const journalHit = journalClass.ownJournal;
 
   const incomeTxs = ((propertyAccount as any)?.transactions || []).filter((tx: any) =>
     String(tx?.type || '') === 'income'
@@ -173,7 +212,9 @@ export async function loadAccountingActualSnapshot(payment: any): Promise<Accoun
       ownerIncome: incomeTxs.length || undefined,
       companyCommission: companyTxs.length || undefined,
       deposit: (deposits as any[]).length || undefined
-    }
+    },
+    journalReferenceCollision: journalClass.referenceCollision || undefined,
+    journalOtherCompanyReference: journalClass.otherCompanyReference || undefined
   };
 }
 
@@ -503,7 +544,43 @@ export type RepairPaymentAccountingResult = {
   componentsCreated: AccountingComponent[];
   componentsSkipped: AccountingComponent[];
   requiresManualReview: AccountingComponent[];
+  recoveryAssessment: ControlledRecoveryAssessment;
 };
+
+async function recoveryAssessmentForPayment(
+  payment: any,
+  recon: AccountingReconciliationResult
+): Promise<ControlledRecoveryAssessment> {
+  const companyId = payment?.companyId ? String(payment.companyId) : '';
+  let periodStatus: ControlledRecoveryAssessment['checks']['periodStatus'] = 'UNMANAGED';
+  if (companyId && payment?.paymentDate) {
+    const period = await findPeriodForDate(companyId, new Date(payment.paymentDate));
+    if (period?.status === 'OPEN' || period?.status === 'CLOSED' || period?.status === 'SOFT_CLOSED') {
+      periodStatus = period.status;
+    }
+  }
+  const balance = payment ? canonicalReceiptJournalBalance(payment) : { balanced: false, debit: 0, credit: 0 };
+  return assessControlledRecovery({
+    missingJournal: recon.missing.includes('journal'),
+    journalPresent: Boolean(recon.actual.journal),
+    referenceCollision: Boolean(recon.actual.journalReferenceCollision),
+    otherCompanyReference: Boolean(recon.actual.journalOtherCompanyReference),
+    reversed: paymentIsReversed(payment),
+    companyMatches: Boolean(companyId),
+    periodStatus,
+    journalBalanced: balance.balanced,
+    otherMismatches: (recon.mismatched || []).filter((item) => item !== 'journal')
+  });
+}
+
+function postingBlocked(assessment: ControlledRecoveryAssessment, missingJournal: boolean): boolean {
+  return assessment.checks.reversed
+    || !assessment.checks.companyMatches
+    || assessment.checks.duplicateReceiptReference
+    || assessment.checks.periodStatus === 'CLOSED'
+    || assessment.checks.periodStatus === 'SOFT_CLOSED'
+    || (missingJournal && !assessment.checks.journalBalanced);
+}
 
 /**
  * Explicit, targeted, payment-scoped repair. Never called by the integrity job.
@@ -526,8 +603,9 @@ export async function repairPaymentAccounting(
   }
   const reconBefore = await reconcilePayment(paymentId);
   const plan = buildAccountingRepairPlan(reconBefore);
-  const payment = await Payment.findById(paymentId).select('companyId').lean();
+  const payment = await Payment.findById(paymentId);
   const companyId = payment?.companyId ? String((payment as any).companyId) : undefined;
+  const recoveryAssessment = await recoveryAssessmentForPayment(payment, reconBefore);
 
   if (dryRun) {
     await writeRepairAudit({
@@ -554,7 +632,38 @@ export async function repairPaymentAccounting(
       accountingStatus: diagnosticStatusFromRecon(reconBefore),
       componentsCreated: [],
       componentsSkipped: plan.wouldNotModify,
-      requiresManualReview: plan.requiresManualReview
+      requiresManualReview: plan.requiresManualReview,
+      recoveryAssessment
+    };
+  }
+
+  if (postingBlocked(recoveryAssessment, reconBefore.missing.includes('journal'))) {
+    await writeRepairAudit({
+      paymentId,
+      companyId,
+      userId: opts?.userId,
+      reason,
+      dryRun: false,
+      previousStatus: reconBefore.status,
+      previousComplete: reconBefore.accountingComplete,
+      detectedIssues: reconBefore.issues,
+      componentsDetectedMissing: reconBefore.missing,
+      componentsMismatched: reconBefore.mismatched,
+      componentsCreated: [],
+      componentsSkipped: plan.wouldNotModify,
+      result: 'manual_review',
+      finalRecon: reconBefore
+    });
+    return {
+      dryRun: false,
+      recon: reconBefore,
+      plan,
+      accountingComplete: reconBefore.accountingComplete,
+      accountingStatus: diagnosticStatusFromRecon(reconBefore),
+      componentsCreated: [],
+      componentsSkipped: plan.wouldNotModify,
+      requiresManualReview: plan.requiresManualReview,
+      recoveryAssessment
     };
   }
 
@@ -618,7 +727,8 @@ export async function repairPaymentAccounting(
     accountingStatus: persisted.accountingStatus,
     componentsCreated: created,
     componentsSkipped: plan.wouldNotModify,
-    requiresManualReview: finalPlan.requiresManualReview
+    requiresManualReview: finalPlan.requiresManualReview,
+    recoveryAssessment
   };
 }
 

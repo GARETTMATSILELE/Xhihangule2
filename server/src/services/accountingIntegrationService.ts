@@ -6,6 +6,7 @@ import { Payment } from '../models/Payment';
 import { CompanyAccount } from '../models/CompanyAccount';
 import { VatRecord } from '../models/VatRecord';
 import {
+  evaluatePermanentAccountingPolicy,
   shouldPostCompanyCommission,
   shouldPostJournal
 } from './accountingPostingPolicy';
@@ -24,6 +25,7 @@ import { classifyOperationalFailure, ExpenseSyncError } from './operationalFailu
 import { resolveFinancialReview, upsertFinancialReview } from './financialOperationVisibility';
 import {
   JournalOperationIdentity,
+  JournalReferenceCollisionError,
   matchingJournalIdentity,
   persistedJournalMatchesIdentity
 } from './journalDuplicateKey';
@@ -77,6 +79,27 @@ async function ensureJournal(
     const raced = await findJournalForIdentity(identity);
     if (!persistedJournalMatchesIdentity(raced, identity)) throw error;
   }
+}
+
+export type ReceiptJournalPostResult = {
+  receiptJournal: 'posted' | 'skipped';
+  reason?: string;
+};
+
+async function assertReceiptReferenceOwnedByPayment(
+  companyId: mongoose.Types.ObjectId,
+  reference: string,
+  paymentId: string
+): Promise<void> {
+  const existing = await JournalEntry.findOne({
+    companyId,
+    reference,
+    status: 'posted'
+  }).select('companyId sourceId reference status').lean();
+  if (!existing) return;
+  const sourceId = String((existing as any).sourceId || '');
+  if (sourceId === paymentId || sourceId.startsWith(`${paymentId}:`)) return;
+  throw new JournalReferenceCollisionError(reference, sourceId || 'unknown');
 }
 
 class AccountingIntegrationService {
@@ -239,14 +262,51 @@ class AccountingIntegrationService {
     );
   }
 
-  async syncPaymentReceived(payment: IPayment, opts?: { createdBy?: string }): Promise<void> {
+  async recordReceiptJournalFailure(payment: IPayment, error: unknown): Promise<void> {
+    const companyId = String(payment.companyId || '');
+    const paymentId = String(payment._id || '');
+    if (!mongoose.Types.ObjectId.isValid(companyId) || !paymentId) return;
+    const failure = error as { message?: string; code?: string; journalFailureRecorded?: boolean };
+    if (failure?.journalFailureRecorded) return;
+    try {
+      await AccountingEventLog.create({
+        companyId: new mongoose.Types.ObjectId(companyId),
+        eventType: 'payment_sync_failed',
+        sourceModule: String(payment.paymentType || '') === 'sale' ? 'sale' : 'payment',
+        sourceId: paymentId,
+        success: false,
+        message: failure?.message || 'Failed to sync payment to accounting',
+        metadata: {
+          paymentReference: payment.referenceNumber,
+          code: failure?.code || 'JOURNAL_POST_FAILED'
+        }
+      });
+      if (failure && typeof failure === 'object') failure.journalFailureRecorded = true;
+    } catch (logError: any) {
+      logger.warn('payment_accounting_sync_failed_not_logged', {
+        paymentId,
+        companyId,
+        error: logError?.message || logError
+      });
+    }
+  }
+
+  async syncPaymentReceived(payment: IPayment, opts?: { createdBy?: string }): Promise<ReceiptJournalPostResult> {
     const companyId = String(payment.companyId);
     const paymentId = String(payment._id);
     try {
-      if (!shouldPostJournal(payment)) return;
-      // Reversal entries are handled by syncPaymentReversed.
-      if ((payment as any)?.reversalOfPaymentId) return;
-      if (Number(payment.amount || 0) < 0) return;
+      if (!shouldPostJournal(payment)) {
+        return { receiptJournal: 'skipped', reason: evaluatePermanentAccountingPolicy(payment).reason || 'policy_skip' };
+      }
+      if ((payment as any)?.reversalOfPaymentId) {
+        return { receiptJournal: 'skipped', reason: 'reversal_row' };
+      }
+      if (Number(payment.amount || 0) < 0) {
+        return { receiptJournal: 'skipped', reason: 'negative_amount' };
+      }
+      if (Number(payment.amount || 0) === 0) {
+        return { receiptJournal: 'skipped', reason: 'zero_amount' };
+      }
       const amount = toMoney(payment.amount || 0);
       const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
       const paymentVat = toMoney((payment as any)?.vatAmount || 0);
@@ -282,17 +342,24 @@ class AccountingIntegrationService {
 
       const sourceModule = journalPaymentType(payment) === 'sale' ? 'sale' : 'payment';
       const companyObjectId = new mongoose.Types.ObjectId(companyId);
+      const receiptReference = `PAY-${payment.referenceNumber || paymentId}`;
+      if (!receiptJournal.lines.length || !receiptJournal.balanced) {
+        const debit = toMoney(receiptJournal.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0));
+        const credit = toMoney(receiptJournal.lines.reduce((sum, line) => sum + Number(line.credit || 0), 0));
+        throw new Error(`Journal is unbalanced. debit=${debit}, credit=${credit}`);
+      }
+      await assertReceiptReferenceOwnedByPayment(companyObjectId, receiptReference, paymentId);
       if (amount > 0 && receiptJournal.lines.length > 0) {
         await ensureJournal(
           {
             companyId: companyObjectId,
             sourceModule,
             sourceId: paymentId,
-            reference: `PAY-${payment.referenceNumber || paymentId}`
+            reference: receiptReference
           },
           () => accountingService.postTransaction({
             companyId,
-            reference: `PAY-${payment.referenceNumber || paymentId}`,
+            reference: receiptReference,
             description: `Agent collection ${payment.referenceNumber || paymentId} (commission as company revenue; principal funds as client liability)`,
             sourceModule,
             sourceId: paymentId,
@@ -321,16 +388,18 @@ class AccountingIntegrationService {
 
       const agentShare = toMoney((payment.commissionDetails as any)?.agentShare || 0);
       if (agentShare > 0) {
+        const commissionReference = `COM-${payment.referenceNumber || paymentId}`;
+        await assertReceiptReferenceOwnedByPayment(companyObjectId, commissionReference, paymentId);
         await ensureJournal(
           {
             companyId: companyObjectId,
             sourceModule: 'commission',
             sourceId: `${paymentId}:commission`,
-            reference: `COM-${payment.referenceNumber || paymentId}`
+            reference: commissionReference
           },
           () => accountingService.postTransaction({
             companyId,
-            reference: `COM-${payment.referenceNumber || paymentId}`,
+            reference: commissionReference,
             description: `Auto-post commission payable for ${payment.referenceNumber || paymentId}`,
             sourceModule: 'commission',
             sourceId: `${paymentId}:commission`,
@@ -347,6 +416,7 @@ class AccountingIntegrationService {
           })
         );
       }
+      return { receiptJournal: 'posted' };
     } catch (error: any) {
       const failureClass = classifyOperationalFailure(error);
       logger.warn('payment_accounting_sync_failed', {
@@ -356,15 +426,7 @@ class AccountingIntegrationService {
         failureClass,
         code: error?.code
       });
-      await AccountingEventLog.create({
-        companyId: new mongoose.Types.ObjectId(companyId),
-        eventType: 'payment_sync_failed',
-        sourceModule: journalPaymentType(payment) === 'sale' ? 'sale' : 'payment',
-        sourceId: paymentId,
-        success: false,
-        message: error?.message || 'Failed to sync payment to accounting',
-        metadata: { paymentReference: payment.referenceNumber, failureClass }
-      });
+      await this.recordReceiptJournalFailure(payment, error);
       throw error;
     }
   }
